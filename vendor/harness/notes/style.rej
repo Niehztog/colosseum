@@ -1,0 +1,286 @@
+--- g_save.c
++++ g_save.c
+@@ -32,25 +32,25 @@
+ } save_field_t;
+ 
+ #ifdef _DEBUG
+-#define _FA(type,name,size) {type,#name,_OFS(name),size}
++#define _FA(type, name, size) { type, #name, _OFS(name), size }
+ #else
+-#define _FA(type,name,size) {type,_OFS(name),size}
++#define _FA(type, name, size) { type, _OFS(name), size }
+ #endif
+-#define _F(type,name) _FA(type,name,1)
+-#define SZ(name,size) _FA(F_ZSTRING,name,size)
+-#define BA(name,size) _FA(F_BYTE,name,size)
+-#define B(name) BA(name,1)
+-#define SA(name,size) _FA(F_SHORT,name,size)
+-#define S(name) SA(name,1)
+-#define IA(name,size) _FA(F_INT,name,size)
+-#define I(name) IA(name,1)
+-#define FA(name,size) _FA(F_FLOAT,name,size)
+-#define F(name) FA(name,1)
+-#define L(name) _F(F_LSTRING,name)
+-#define V(name) _F(F_VECTOR,name)
+-#define T(name) _F(F_ITEM,name)
+-#define E(name) _F(F_EDICT,name)
+-#define P(name,type) _FA(F_POINTER,name,type)
++#define _F(type, name) _FA(type, name, 1)
++#define SZ(name, size) _FA(F_ZSTRING, name, size)
++#define BA(name, size) _FA(F_BYTE, name, size)
++#define B(name) BA(name, 1)
++#define SA(name, size) _FA(F_SHORT, name, size)
++#define S(name) SA(name, 1)
++#define IA(name, size) _FA(F_INT, name, size)
++#define I(name) IA(name, 1)
++#define FA(name, size) _FA(F_FLOAT, name, size)
++#define F(name) FA(name, 1)
++#define L(name) _F(F_LSTRING, name)
++#define V(name) _F(F_VECTOR, name)
++#define T(name) _F(F_ITEM, name)
++#define E(name) _F(F_EDICT, name)
++#define P(name, type) _FA(F_POINTER, name, type)
+ 
+ static const save_field_t entityfields[] = {
+ #define _OFS FOFS
+--- g_spawn.c
++++ g_spawn.c
+@@ -688,141 +688,141 @@
+ #endif
+ 
+ static const char single_statusbar[] =
+-        "yb -24 "
++"yb -24 "
+ 
+ // health
+-        "xv 0 "
+-        "hnum "
+-        "xv 50 "
+-        "pic 0 "
++"xv 0 "
++"hnum "
++"xv 50 "
++"pic 0 "
+ 
+ // ammo
+-        "if 2 "
+-        "   xv  100 "
+-        "   anum "
+-        "   xv  150 "
+-        "   pic 2 "
+-        "endif "
++"if 2 "
++"   xv  100 "
++"   anum "
++"   xv  150 "
++"   pic 2 "
++"endif "
+ 
+ // armor
+-        "if 4 "
+-        "   xv  200 "
+-        "   rnum "
+-        "   xv  250 "
+-        "   pic 4 "
+-        "endif "
++"if 4 "
++"   xv  200 "
++"   rnum "
++"   xv  250 "
++"   pic 4 "
++"endif "
+ 
+ // selected item
+-        "if 6 "
+-        "   xv  296 "
+-        "   pic 6 "
+-        "endif "
++"if 6 "
++"   xv  296 "
++"   pic 6 "
++"endif "
+ 
+-        "yb -50 "
++"yb -50 "
+ 
+ // picked up item
+-        "if 7 "
+-        "   xv  0 "
+-        "   pic 7 "
+-        "   xv  26 "
+-        "   yb  -42 "
+-        "   stat_string 8 "
+-        "   yb  -50 "
+-        "endif "
++"if 7 "
++"   xv  0 "
++"   pic 7 "
++"   xv  26 "
++"   yb  -42 "
++"   stat_string 8 "
++"   yb  -50 "
++"endif "
+ 
+ // timer
+-        "if 9 "
+-        "   xv  262 "
+-        "   num 2   10 "
+-        "   xv  296 "
+-        "   pic 9 "
+-        "endif "
++"if 9 "
++"   xv  262 "
++"   num 2   10 "
++"   xv  296 "
++"   pic 9 "
++"endif "
+ 
+ //  help / weapon icon
+-        "if 11 "
+-        "   xv  148 "
+-        "   pic 11 "
+-        "endif "
+-        ;
++"if 11 "
++"   xv  148 "
++"   pic 11 "
++"endif "
++;
+ 
+ static const char dm_statusbar[] =
+-    "yb -24 "
++"yb -24 "
+ 
+ // health
+-    "xv 0 "
+-    "hnum "
+-    "xv 50 "
+-    "pic 0 "
++"xv 0 "
++"hnum "
++"xv 50 "
++"pic 0 "
+ 
+ // ammo
+-    "if 2 "
+-    "   xv  100 "
+-    "   anum "
+-    "   xv  150 "
+-    "   pic 2 "
+-    "endif "
++"if 2 "
++"   xv  100 "
++"   anum "
++"   xv  150 "
++"   pic 2 "
++"endif "
+ 
+ // armor
+-    "if 4 "
+-    "   xv  200 "
+-    "   rnum "
+-    "   xv  250 "
+-    "   pic 4 "
+-    "endif "
++"if 4 "
++"   xv  200 "
++"   rnum "
++"   xv  250 "
++"   pic 4 "
++"endif "
+ 
+ // selected item
+-    "if 6 "
+-    "   xv  296 "
+-    "   pic 6 "
+-    "endif "
++"if 6 "
++"   xv  296 "
++"   pic 6 "
++"endif "
+ 
+-    "yb -50 "
++"yb -50 "
+ 
+ // picked up item
+-    "if 7 "
+-    "   xv  0 "
+-    "   pic 7 "
+-    "   xv  26 "
+-    "   yb  -42 "
+-    "   stat_string 8 "
+-    "   yb  -50 "
+-    "endif "
++"if 7 "
++"   xv  0 "
++"   pic 7 "
++"   xv  26 "
++"   yb  -42 "
++"   stat_string 8 "
++"   yb  -50 "
++"endif "
+ 
+ // timer
+-    "if 9 "
+-    "   xv  246 "
+-    "   num 2   10 "
+-    "   xv  296 "
+-    "   pic 9 "
+-    "endif "
++"if 9 "
++"   xv  246 "
++"   num 2   10 "
++"   xv  296 "
++"   pic 9 "
++"endif "
+ 
+ //  help / weapon icon
+-    "if 11 "
+-    "   xv  148 "
+-    "   pic 11 "
+-    "endif "
++"if 11 "
++"   xv  148 "
++"   pic 11 "
++"endif "
+ 
+ //  frags
+-    "xr -50 "
+-    "yt 2 "
+-    "num 3 14 "
++"xr -50 "
++"yt 2 "
++"num 3 14 "
+ 
+ // spectator
+-    "if 17 "
+-    "xv 0 "
+-    "yb -58 "
+-    "string2 \"SPECTATOR MODE\" "
+-    "endif "
++"if 17 "
++"xv 0 "
++"yb -58 "
++"string2 \"SPECTATOR MODE\" "
++"endif "
+ 
+ // chase camera
+-    "if 16 "
+-    "xv 0 "
+-    "yb -68 "
+-    "string \"Chasing\" "
+-    "xv 64 "
+-    "stat_string 16 "
+-    "endif "
+-    ;
++"if 16 "
++"xv 0 "
++"yb -68 "
++"string \"Chasing\" "
++"xv 64 "
++"stat_string 16 "
++"endif "
++;
+ 
+ 
+ /*QUAKED worldspawn (0 0 0) ?

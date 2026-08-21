@@ -1,0 +1,34 @@
+# "instamaps.txt"
+# ----------
+# Maps for insta-gib railgun only.
+#
+# Format:
+# <map name> [min # of players] [max # of players]
+#
+# The map queuer will only load a map if its min/max active player counts on the current
+# level are within its bounds.  Otherwise, the map will NOT be loaded.
+#
+# If you dont want player limits on each map, just specify the map with no min/max
+# values on each line.
+#
+# Use a min of 0 for maps that should be rotated through when there is nobody
+# on and playing.  Probably should use popular maps for quick pickup games when
+# people connect initially.
+q2dm1 00 14
+q2dm2 03 16
+q2dm3 00 12
+q2dm4 05 20
+q2dm5 04 20
+q2dm6 03 18
+q2dm7 03 12
+q2dm8 08 24
+#match1 03 14
+city1 06 25
+boss2 00 14
+boss1 02 14
+ware1 04 18
+ware2 05 19
+power1 03 16
+power2 03 16
+biggun 02 12
+fact3 04 16

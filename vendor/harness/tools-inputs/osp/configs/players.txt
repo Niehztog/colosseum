@@ -1,0 +1,84 @@
+################ Players allow/deny file (default name = "players.txt")
+################ for OSP Tourney DM (16 Jun 1999).
+################
+################ Comments in this file are lines that BEGIN with 16 "#"
+################ characters.
+################
+################ Format is as follows:
+################	- IF player_ban is set to "0":
+################		o A line with only a playername will cause Tourney
+################		  to REJECT any player connecting with that name.
+################
+################		o A line with a playername and either (or both) a
+################		  password or IP address after it will ONLY accept
+################		  a connecting player with that name who has
+################		  either the correct password (which is set in
+################		  their startup config) or is connecting from the
+################		  specified IP address.  Note, the player's name
+################		  and extra info *MUST* be seperated with TAB
+################		  characters.
+################		Fomat: <name> <tab> <password> <tab> <address>
+################			----> If no password BUT an address is
+################				specified, use either "none" or
+################				a blank (2 tabs in a row) in the
+################				<password> field.
+################
+################ e.g.
+################		JoeBlow
+################		SaneJane	none	192.195.6.145
+################		RichyRich	his_special_passwd
+################		TonyTiger	MMMDelicious	204.189.68
+################
+################		----> JoeBlow is ALWAYS rejected
+################		----> SaneJane is ONLY accepted if connecting
+################			from address 192.195.6.145, no password
+################		----> RichyRich is ONLY accepted if he has
+################			"set password his_special_passwd" in his
+################			startup config.
+################		----> TonyTiger is accepted if either connecting
+################			from an address that BEGINS WITH 204.189.68
+################			(a sort of lazy-man's IP subnet mask, not
+################			 real pretty, but works for most cases),
+################			or if the client has "MMMDelicious" set
+################			in their password variable.
+################
+################ - IF player_ban is set to "1":
+################		o A line with only a playername will cause Tourney
+################		  to ACCEPT only a player connecting with that name.
+################		  All other playernames will be rejected.
+################
+################		o A line with additional information as specified
+################		  above works in the EXACT same manner, accepting
+################		  only players with both the correct playername
+################		  and additional information specified.
+################
+################
+################ Dummy players, use as reference (without the prepended
+################ "################" comment line):
+################========================================================
+################JoeBlow
+################SaneJane	none	192.195.6.145
+################RichyRich	his_special_passwd
+################TonyTiger	MMMDelicious	204.189.68
+################JoJoBean		204.189
+################
+################
+################In the example listing above:
+################  1. The name "JoeBlow" is ALWAYS denied.
+################  2. "SaneJane" is only accepted if connecting from
+################     IP address 192.195.6.145
+################  3. "RichyRich" is only accepted if he has his "password"
+################     variable set to "his_special_passwd".
+################  4. "TonyTiger" is accepted if either his "password" is
+################     set to "MMMDelicious", or is connecting from an
+################     address that begins with "204.189.68".
+################  5. "JoJoBean" is only accepted if connecting from an
+################     address that begins with "204.189".  (Note the
+################     additional TAB in the line to specify no password
+################     protect for the name).
+################
+################ ---> The above also assumes that "player_ban" is set to "0".
+################
+################
+################
+################ *** REMEMBER TO USE TABS!!!!!!! ***

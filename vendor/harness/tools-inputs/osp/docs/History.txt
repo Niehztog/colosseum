@@ -1,0 +1,1613 @@
+1999 Jul 01: 2.18-2.5
+=====================
+- Note: Version bumped to 2.5 in preparation for official release.
+- Change: Allow observers to vote at any time EXCEPT when a 1v1/teamplay
+  match is in progress.
+- Fix: Highscores bug that can cause a server crash
+- Fix: Bogus renames and disconnects in ngLog
+- Fix: Rotation on map queue when not using the random option
+- Fix: Stop demos if countdown aborted or match is terminated
+- Fix: Grenade pickups RIGHT after picking up a weapon would cause
+  grenades to be selected as a weapon (if previously holding the
+  blaster).
+- Fix: Proper logging of all per-player weapon statistics (accuracy
+  and damage) for ngLog.
+- Fix: Long config file names on menu voting of alternate configs.
+- Fix: Various random # stuff.
+- Fix: Weird auto-launching of ngStats browser after demoplays
+- Removed: ".cfg" suffix requirement for names of alternate config
+  files.  Only requirement now is that the specified config filename
+  must be at least 2 characters long (and also exist).
+- Add: Per-weapon damage given and received logging, BFG included.
+- Add: Power armor settings (regular DM only):
+	power_armor_screen <val>  <val> is the amount of damage saved per
+					  cell in a player's inventory
+					  (default = 1.0).
+	power_armor_shield <val>  <val> is the amount of damage saved per
+					  cell in a player's inventory
+					  (default = 2.0).
+- Add: Item respawn times based on player counts (regular DM only):
+	fast_respawn <ratio>  <ratio> is the percentage of an item's
+				    normal respawn time based on maximum
+				    player counts (default = 1.0).
+	fast_minpbound <value>  Specifies the minimum # to use when
+					figuring an item's respawn time.  Either
+					the current player count or this value
+					will be used, whichever is greater
+					(default = 1).
+	fast_maxpbound <value>  Specifies the maximum # to use when
+					figuring an item's respawn time.  Either
+					the current player count or this value
+					will be used, whichever is lower.  This
+					value is also used as the base for the
+					item respawn time ratio (default = 20).
+
+	---> item respawn times are based on the following formula:
+
+		item_respawn_time = normal_respawn_time *
+					  (1.0 - (1.0 - fast_respawn)* (A / B))
+
+		- A = fast_minpbound or player count, whichever is greater
+		- B = fast_maxpbound or player count, whichever is lower
+- Updated all documentation
+- Updated all config files
+- Added new TourneyCE 2.51 to distribution
+- Added new ngStats 1.1 to distribution
+
+1999 Jun 24: 2.17
+=================
+- Fix: Several copy operations were a bit hosed =)  Fixed the problems
+  and found a couple more copy tweaks.  2.16 can crash rather easily,
+  STRONGLY suggest moving up to a later revision (like this one).
+
+1999 Jun 23: 2.16
+=================
+- Fix: High scores may not be updated if the player with a qualifying
+  high score is in a certain position in the internal player structure.
+  Worst case was this happening 10% of the time.
+- Change: A FPH high score will NOT be counted unless the player was
+  within 90% of the fraglimit.
+- Add: New Gladiator updates to handle missing .aas files (no more
+  server crashes if an associated map's .aas file is not present) and
+  various array boundary checks.
+- Fix: Team join bugs under match_latejoin 3 (common symptom is the
+  server saying that a team is full, when in fact it is not).
+- Fix: Teamscore updates if a bot makes a score.
+- Fix: Team captain assignment updates and fixes.
+- Fix: No map change if dmflags has DF_SAME_LEVEL set and auto-rotation
+  of default configs now works properly.
+- Fix: Default teamname assignments updated to real clients.
+
+1999 Jun 22: 2.15
+=================
+- Fix: Problem when the server allows for client reconnects and
+  reconnecting clients are set up with skin male/grunt.
+- Enhance: Rune distribution.  Runes should now be scattered around
+  levels quite nicely rather than clumping on spawn points.
+- Enhance: Bot detection.  More tweaks to detecting real bots and
+  better avoidance of false detects.  Better removal of client-side
+  bots as well.
+- Fix: Forgot to mention it in 2.14, but I also fixed the passwords
+  that are to be used in reserving playernames on the server
+  (hiya Aslan =] ).  All should now work as documented.
+- Note: The vote_config_default and vote_config_defaultname variables
+  should ONLY be set in the base server .cfg file that is used to start
+  up your server.  These variables should NOT be specified (at all) in
+  the alternate config files that you make available for client-voting.
+
+1999 Jun 21: 2.11-2.14
+======================
+- Change: Versioning back to old system :)
+- Fix: "sv" commands now properly echo back to the console.
+- Add: "sv playerlist" server command to load in playername lists.
+  "sv playerlist <cfg_file>" is also an option to load an alternate
+  playername list.
+- Change: The "players" command now properly shows clients in the
+  process of connecting.
+- Add: Chat macro to announce which rune is being held by the player
+  using the macro.  Use "%r" or "%t" to show the current rune held.
+- Add: Zero out "Score_A|B" on public server info if the mode has
+  been changed from a teamplay to an alternate mode through a
+  config vote.
+- Add: Option to turn off mega-teleport sound at the start of a match.
+  	set match_startsound 0  Disable sound at match start.
+				   1  Enable sound at match start (default).
+- Fix: Corner case where a player in a 1v1 could retain his/her frags
+  from a previous game.
+- Fix: Wont use bot counts in determining next map to load.
+- Fix: Map cycling has been broken for a LONG time.  I think its
+  fixed now =)
+- Add: No map change option if dmflags has the DF_SAME_LEVEL option
+  set.  That is, when a match is over and after the scoreboard has been
+  displayed, the map will NOT reload and clients can play the next match
+  immediately.
+- Change: Voted config loading is now handled differently to allow for
+  proper setting of latched server variables (like maxclients).
+- Fix: Voting with no bots in the game.  Also fixed it so an observer
+  can vote if there is nobody else on the server.
+- Add: Default config auto-loading.  This option is primarily for
+  servers that allow for clients to vote on alternate configs.
+  This default config will be loaded if there are no active clients
+  on a server for an entire map (timelimit on FFA modes, or 1 hour
+  on teamplay/1v1).
+	set vote_config_default 0  Disable default loading (default)
+					1  Enable default loading.
+	set vote_config_defaultname <cfg_name>
+			<cfg_name> must be a valid config file that exists.
+			If not, default config cycling WILL be disabled.
+- Add: A pause before automatically loading in bots that is based on
+  active player counts.  It waits approximately 15 seconds before a
+  bot is brought in to avoid connecting clients from a previous level.
+- Fix:  The "client_highscores" variable name has been updated internally.
+  Bug on my part.. it was different internally than what was documented.
+- Fix: Hook and falling damage.  There were ways to get around any kind
+  of falling damage if you knew how to use the hook in a particularly
+  interesting way =)
+- Add: Verification that alternate config files that can be voted in do,
+  in fact, exist.  Configs that dont exist wont be added to the list of
+  votable configs for clients.
+
+1999 Jun 16: 2.1.0
+==================
+- Fix: Better implementation of rate control (client_maxrate)
+- Fix: ngStats logging fix if nglog_ngstats_exec was not set to 1
+  and nglog_logstyle is set to 4.
+- Fix: Quad sound wasn't sounding ;)
+- Tweak: A couple tweaks to the anti-bot code
+- Add: Respawn protection.  This has some severe restrictions,
+  however.  To enable it: set client_protect <seconds>
+  The respawn protect shell will disappear/not show up under the
+  following conditions:
+	- Client weapon/power-up/MegaHealth/power shild pick-up.
+	- Client respawns with anything other than a blaster.
+	- Client shoots their blaster.
+	- Client used their hook, if available.
+	- Active in regular DM only (match_mode 0).
+- Tweak: Reduction in size of some public server_info variables.
+- Add: Rune value status logged.
+- Add: Client respawn portection value logged.
+- Add: Alternate config file limit raised from 32 to 50 config
+  files total.
+- Fix: Unix permissions on auto-generated directories/files for
+  high-score tables.
+- Add: Client FramePerSecond capping:
+	set client_maxfps <value>  If set to 0, this option is disabled
+					   (the default).
+- Add: Client min/max ping filters
+	set client_minping <value>
+	set client_maxping <value>
+	----> Client pings are sampled over approximately 45 second
+		intervals.  If a <value> specified above is set to 0,
+		that particular option is disabled (default for both
+		filters).
+- Add: Automatic removal of clients from 1v1/Teamplay games if
+  inactive for a given period of time while in warmup mode.
+  The idea here is to automatically handle players who join a
+  1v1/team server, enter the game, then leave their computer.
+  Before, if this happened, the server was locked for an extended
+  amount of time before a server admin showed up.  Now, clients
+  can be automatically forced to observer mode.
+	set client_nomove <seconds>  Default = 90.
+	 ----> Note, this ONLY affects 1v1/teamplay modes and ONLY
+		 when a match is in warmup mode.
+- Add: Playername reservation lists/banning.  This options allows
+  server admins to "protect" certain player names with either
+  passwords or client IP addresses.  Good for server admins who
+  keep local stats (i.e. with ngStats) and want to protect the
+  "regular" players from having their stats damaged by an imposter
+  who likes swimming in lava a whole lot.  Check the "players.txt"
+  file in the same directory for complete info on how to set up
+  and use this new playername reservation system.
+
+1999 Jun 11: 2.0.2
+==================
+- Uhm, did I meantion that release-day is a pain in the arse?!?!?
+  Fixed bug where client's name is not displayed when they leave
+  the server.
+
+1999 Jun 11: 2.0.1
+==================
+- DOH!! Found (small) crash bug.  2.0.1 is what you want. yea baby!
+  [all architectures]
+
+
+1999 Jun 11: 2.0
+================
+
+*** OFFICIAL 2.0 RELEASE!! ***
+
+- FreeBSD-x86
+- Linux-Alpha
+- Linux-x86-glibc
+- Linux-x86-libc5
+- Solaris-Sparc
+- Solaris-x86
+- Win32-x86
+
+--> (If you got a 2.0 release before 23:00 (11:00pm) CST 10 Jun 99,
+	redownload the current version available).
+
+----> Sorry for the mutiple 2.0 releases.  In the span of 12 hours,
+	3 crash bugs managed to surface.  The strange part is that these
+	bugs have been there for a LOOOONNNGG time!
+	[Note to self:  Weird shit will always happen whenever you try
+	 to put out a full release. 8) ]
+
+1999 Jun 08: 1.87-1.99
+=====================
+Tweaks: Minor tweaks to logfile buffering.  Also applied buffering
+  options to ngWS logs (the same ones specified for normal ngLog
+  loSgging).
+- Add: More default config tweaks (log buffering).
+- Fix: Crashes on maps with no real player spawn points.
+- Add: Automatic pausing of the game when the listen server operator
+  chooses to view ngStats while remaining in the game.
+- Add: Option to do hard video restarts upon return from external
+  ngStats viewing that has been invoked within the game:
+
+   nglog_ngstats_vidrestart:
+	* 0 = Do not do a hard refresh on the display when Quake2 is refocussed
+		after viewing ngStats information.
+	  1 = Perform hard rest on video after returning to Quake2.  Note, this
+		has a potential for crashing the server.
+
+- Change: Default nglog_flush is now 2 (system default flushing)
+- Change: Default nglog_logstyle is now 4 (unique naming for ngStats
+  processing)
+- Change: Default bots_botfile is now "botcfg/bots.cfg"
+- Disable: In-game and end-game external calling of ngStats on non-Win32
+  platforms (ngStatsQ2T.exe doesn't exist for Unix platforms right now).
+
+1999 Jun 08: 1.87
+=================
+- Fix: Process call change to in-game stat viewing.
+- Change: nglog_ngstats_logs is now nglog_ngstats_logdir
+- Change: New mode under nglog_logstyle:
+	  4 = Create uniquely named logs for every map played.
+		This setting is required to automatically process
+		logs through ngStats while Tourney is running.
+- Remove: nglog_ngstats variable.  It was too confusing with the
+  nglog_logstyle variable settings.
+- Remove: nglog_logmiscpickup  This option is now ALWAYS on in logging.
+  If you want ALL item pickups, use the nglog_logallpickups variable.
+- Add: More documentation fixes for 2.0 release.
+- Add: Changes to all default configs.
+
+1999 Jun 07: 1.85-1.86
+======================
+- Add: Ability to automatically launch ngStats-processed HTML containing
+  all up-to-date frag/player data information in the server admin's
+  default browser after a server has been shutdown.  This is ideal mainly
+  for people who are playing single player on a listen server:
+	nglog_ngstats_browser 0  Do NOT launch a browser after a server
+					 has been shut down (default for dedicated
+					 servers)
+				    1  Automatically launch a browser with
+					 latest ngStats info (default for listen
+					 servers)
+- Add: Ability to log ALL pickups in a game.  While interesting, this
+  can cause performance hits, especially if there are a lot of players
+  in the game:
+	nglog_logallpickups 0  Do not log every pickup  (default)
+				  1  Log EVERY pickup
+- Add: Ability for players to vote on kicking a particular player.
+	---> Command-prompt format:  vote kick <player_name|player_ID>
+			(can also be done through the menuing vote system)
+	---> Config option:
+		 vote_enable_kick 0  Players cannot kick vote another
+					1  Players CAN kick vote another (default)
+- Add: Ability to view ngStats while in the game.  This option is
+  ONLY available to the server admin who is running a LISTEN server.
+  The option appears on the main menu of either 1v1/Teamplay or FFA.
+- Fix: Removed rune status if a player goes to observer mode while
+  holding a rune.
+- Fix: Possible crash again related to the hook (null clients)
+- Fix: Vote pass/fail is now also evaluated when a player leaves.
+
+1999 Jun 05: 1.84
+=================
+- Fix: Vampire rune ratios
+- Fix: Command-line override for default browser viewing of ngStats
+  after a match.
+- Fix: Possible solution to rocket-jump aliases triggering new anti-bot
+  code.
+- Fix: Removal of some debug messages for public release.
+- Add: Outstanding Tourney Config Editor by Luis Toscano in the main
+  distribution.  Thanks Luis!  Of course, all bug reports for this
+  editor go to Luis :)
+- Add: All necessary utilites for using ngStats for local log parsing.
+  This is some really good stuff man!  Watch out GibStats!!
+- Add: Freshen default configs for all these great new options :)
+- Add: Updated all documentation for full release.
+
+1999 Jun 03: 1.83
+=================
+- Add: Even MORE rune settings :)
+	runes_perplayer <val>  Ratio of runes to active player counts
+				     (default = 0.6).
+	runes_min <val>  Minimum # of runes on a level, regardless of
+			     rune-to-player percentage.
+	runes_max <val>  Maximum # of runes on a level, regardless of
+			     rune-to-player percentage.
+	runes_enable <val>  Now specifies WHICH runes should be enabled:
+		 0 = No runes active
+		 1 = Resist Rune
+		 2 = Strength Rune
+		 4 = Haste Rune
+		 8 = Regeneration Rune
+		16 = Vampire Rune
+	----> This is a bitwise sum setting.  So, to enable ALL runes,
+		set runes_enable to 31 (or higher) [1+2+4+8+16 = 31].
+- Add: Additional ngStats log processing capabilites.  It is now possible
+  invoke the ngStats log parsing utilities from within Tourney to
+  automatically update player database information after each map is
+  finished:
+	set nglog_ngstats [0|1]  Disables|Enables ngStats-format logging.
+					 This option is required to be set to 1
+					 To activate the following settings
+					 listed below (default = 0).
+
+	set nglog_ngstats_exec [0|1]  Disables|Enables automatic ngStats
+						backend processing after each map
+						is played (default = 1).
+	set nglog_ngstats_cfg <name>  Specifies the ngStats configuration
+						file to use in processing the server's
+						logs.  This config name MUST be
+						relative to the
+							NetGamesUSA.com/ngStats
+						directory under your Quake2/ directory
+						(default = "ngStatsQ2T.cfg").
+	set nglog_ngstats_logs <name> Specifies where to write ngStats-
+						format logfiles.  Again, this name
+						MUST be relative to the
+							NetGamesUSA.com/ngStats
+						directory under your Quake2/ directory
+						(default = "logs").
+	----> The idea here on the last two settings listed above is to allow
+		for server operators with more than one server running on their
+		machine to have seperate databases maintained for each server.
+		By placing the logs in different directories and using different
+		ngStats config files, each servers logs will be guaranteed to
+		be seperate (unless, of course, you use the same log directory
+		and the same .cfg file :) )
+
+1999 Jun 02: 1.82
+=================
+- Fix: Turn off runes held on clients' HUD at end of level.
+- Fix: Check for soft limits on megahealth pickup for regen/vampire
+  runes.
+- Fix: Log accuracy info on hard kill of a server.
+- Fix: Match stops in Qualifier/Team/1v1 with new log header. Also
+  zeros out accuracy information.
+- Fix: End of match info alignment.
+- Add: More rune configuration options:
+	runes_resist <val>  The amount to divide by on damage
+				  a player receives (default = 2.0).
+	runes_strength <val>  The amount to multiply by on damage
+				    a player inflicts (default = 2.0).
+	runes_regen_hmax <val>  Maximum health a player can regen
+					up to (default = 200).
+	runes_regen_amax <val>  Maximum armor a player can regen
+					up to (default = 100).
+	runes_vampire <val>  Percentage of damage added to a player's
+				   health (default = 0.5).
+	runes_vampire_max <val>  Maximum health a player can "vampire"
+					 up to (default = 200).
+
+1999 Jun 02: 1.81
+=================
+- Fix: ngLog logging was broken if only ngWorldStats was enabled.
+- Add: More player initializtion optimizations.
+- Add: More rune performance optimizations.
+- Fix: Grenade/Grenade Launcher selection bug.
+
+1999 Jun 01: 1.80
+=================
+- Fix: Rewrote the ClientUerInfoChanged routine in Q2.  The current
+  format of this function (found in the vanilla DM code) sets client
+  RELIABLE broadcasts on the order of the number of deaths within the
+  game.  As client name/skin changes are rare for the most part, this
+  puts an unnessary burden on both the CPU, but most importantly, on
+  the amount of information that must be acknowledged from the client.
+  The end result is that the new function is MUCH cleaner in both
+  additional CPU processing when clients die, as well as the amount
+  of network traffic that is exchanged at this specific points.  Bottom
+  line: less client overflows when someone dies (which is not uncommon).
+  The performance enhancements here wont be seen on something like a
+  1v1, rather, on big open FFA's that have a lot of clients and a lot
+  of killing :)  Overall, this makes Quake2 (and Tourney specifically)
+  scale better with more clients.
+- Fix: Removal of potential wobble in chasecam modes.
+- Fix: "team_lockskin" was reall team_lockskins internally.  This
+  variable should now work as documented.  It has also been applied
+  for 1v1 mode skin settings.
+- Fix: Small tweaks to oversights on default configs.
+- Fix: Small tweak to respawn portions for a player.
+
+1999 May 31: 1.79
+=================
+- Fix: Runes surviving across level loads
+- Add: Official 0.95 Gladiator library and pak7.pak file added.
+
+1999 May 28: 1.74-1.78
+======================
+- Fix: Possible protection against 1v1 crashes on client reconnect
+- Update: Client-side bot-proxy protection
+- Fix: Client IP address logging fixes
+- Add: New log format for ngLog: ngStats format
+	set nglog_ngstats 0  Disable ngStats-format logging (default)
+				1  Enable ngStats logging.  Note, this setting
+				   overrides any setting in the nglog_style.
+- Fix: Server crashes on in-map (.bsp) explosions.
+- Add: Total ngStats integration for external calls to the ngStats
+  log parsing facility.
+- Add: Lithum-style runes!  Tourney now has the capability to allow
+  default runes on map load or for runes to be voted in.  These runes
+  are the exact same style as those found in Lithium: Resist, Strength,
+  Haste, Regeneration, and Vampire (follows same color scheme as well).
+	set runes_enable 0  Disable runes on map start (default)
+			     1  Enable runes on map start.
+	set runes_flash 0  No player shell flashin when a rune is used.
+			    1  Flashes a colored shell around the player when
+				 they use a rune.  The color of the shell is the
+				 same color as the rune they are holding (default).
+	set runes_model <model_name>  Sets the model to use for all runes.
+				Default is John Carmack's head :)  For lithium-style
+				runes, use "models/items/keys/pyramid/tris.md2".
+	set vote_enable_runes 0  Disables rune voting (default)
+				    1  Enables rune voting.
+- Add: "match_features" list to server_info variables so clients can see
+  what additional things are enabled on a server (right now, will display
+  either "None", "Hook", "Runes", or "Hook, Runes").
+- Add: Bot integration with runes.
+- Fix: Random loading of bots (missing var init).
+- Tweak: Rune code runs much smoother
+- Add: All documentation and default .cfgs revised with latest Tourney
+  options.
+	---> Full 1.78 release on beta site.
+
+1999 May 23: 1.73
+=================
+***** NOTE:  As of 1.72, the Gladiator Library has been upgraded to 0.94.
+***** This means that all of your .aas map files that you have built from
+***** official 1.68 release are "less optimized".  You will need to re-aas
+***** and recompute all of your maps if you want the bots to move in the
+***** most efficient manner.  Older .aas's of maps WILL still work, but it
+***** is NOT recommended to do so.  Please, if you have a problem map,
+***** reconvert it with the LATEST winbspc or bspc tool found in the
+***** 1.72 distribution.
+
+- Fix: Game window defocus when server was run as listen server and
+  ngWorldStats is enabled.  As a result, when a log is sent out, the
+  main q2 server window was defocussed and could not be retrieved. Note,
+  this appeared to occur if the server was run in accelerated graphics
+  mode (i.e., vood, tnt, etc) and did not occur if run in windowed software
+  mode.  This applies ONLY to LISTEN servers, not dedicated servers.
+- Fix: Accuracy logging for players who leave or switch to spectator mode
+  during a synced match (teamplay/1v1).  It was logging everybody's scores,
+  not just the leaving party's.
+- Fix: Bot detection specifications were reversed from normal.  As a result,
+  if a server admin SPECIFIED to detect client-side bots, the deteection,
+  in fact, was disabled.  Also tweaked some of the detection to be a bit
+  more robust.
+
+1999 May 21: 1.72
+=================
+- Fix: Small worldstats tweaks to get things going.
+- Update: Full 1.72 distribution up for Win/Linux-x86.  Note the new dir
+  structure under the main tourney/ directory.  You can use the old method,
+  but the new format should keep the root tourney/ directory from growing
+  large with stuff like log files.
+	---> Full 1.72 distribution up on main site w/Gladiator 0.94 libs.
+
+1999 May 10-20: 1.69-1.71
+=========================
+- Fix: Various ngLog logging fixes
+- Fix: Gladiator var init fixes
+- Tweak: Slight change to the bot auto-ready sequence
+- Change: WS format for logging and batching
+- Fix: Adjust autocam text for FFA mode
+- Change: demo_[referee|player] format change:
+	0 - No demos/screenshots
+	1 - Record demo only
+	2 - Record demo and take end-level screenshot
+- Fix: ngLog fix for aborted games
+- Add: log observer accuracy stats if they were in the game at some point
+- Add: Log player accuracy stats if they leave before the match ends
+- Fix: UNIX versions of ngWS
+- Add: Itemized some suicide types
+- Add: No weapon switching during a timeout
+- Add: Voting restrictions on spectators also applied for regular DM
+- Fix: Possible chasecam crash on particular HUD updates.
+- Fix: Connect/Observe ordering if ngWS is enabled.
+
+1999 May 10: 1.68
+=================
+- Change: Removed RL/GL/G no-ammo fire swap.  This changed the dynamics of
+  the game slightly and will not be used.
+- Change: Tweaks to score differential updates for FFA modes and also fixes
+  small obscure bug.  The skinny: slightly better performance.
+- Change: Set default map_* var settings as documented.
+- Fix: random bot adds weren't so random.
+- Update: Everything working now under 0.93 of Gladiator release.
+- Update: All documentation and config files.
+- 1.68-FULL released (Finally! :) ).
+
+1999 May 08: 1.67
+=================
+- Various small little tweaks (sl_log_logbots final chapter (heh), inits to
+  try to curb strange run-away Linux servers, etc.)
+- Change: Compiles now without any Gladiator dependencies (for architectures
+  that do not yet have the Gladiator library build).
+- Starting builds of release candidates for Solaris-Sparc (no bots),
+  Linux-x86, and Win32-x86.  These are not the finalized revs, just
+  ones that are very very close.  The last bits will be for the latest
+  (possible) builds of the Gladiator libraries for the various architectures
+  and updated bot configs in the pak7.pak.  These releases have the fully
+  updated documentation and server config files in them.
+
+1999 May 07: 1.66
+=================
+- Fix: Final chapter in the sl_log_logbots story.  Now real players
+  will show up when they connect/disconnect no matter what the
+  setting :)
+- Add: Ability to disable matchinfo at the start of a match:
+	set match_countinfo  0 - Do NOT display matchinfo during countdown
+				  *1 - Display matchinfo during countdown (default)
+- Add: Compile Linux versions with some crazy optimizations.  Let me know
+  if you have problems with this version.
+
+1999 May 07: 1.65
+=================
+- Fix: Strange timer bug when voting in new configs.
+- Fix: Strange countdown bug when voting in new configs.
+- Fix: Several more tweaks for config voting.
+- Add: Various bot teamplay controls (with new Gladiator library).
+- Add: Made highscores available for Qualifier DM as well.
+- Fix: sl_log_logbots fixed and added to player_enter/leave as well.
+- Fix: Reconnects for 1V1/Teamplay pauses didn't unpause properly.
+- Fix: sv addrandom [x] and bots_minplayers controls were kinda broke.
+- Change: bots_minplayers includes active_players-1 in the count, so
+  a single player entering wont force a bot to leave (i.e. for auto-
+  loading bots when you are playing by yourself).
+
+1999 May 06: 1.64
+=================
+- Change: "stdlog_logbots" changed to "sl_log_logbots" to maintain
+  consistancy.
+- Add: "Grappling Hook" death type to Standard Log logging.
+- Fix: Spelling fixes in some help texts.
+- Fix: Bots now properly show up in the "players" command.
+- Fix: ngLog handling for multiple quad/invul pickups for the same player.
+- Fix: Added Rocket Launcher, Grenade Launcher and Grenades for auto weapon
+  select if weapon-fire-out-of-ammo condition occurs for a player.  It
+  seems that vanilla Q2 forgot about these weapons :)
+- Fix: Auto select of grenades if they were already in a player's inventory
+  (from preseeding during respawn -- server configuration) when they are
+  picked up and the player is holding a blaster (like normal weapons).
+- Add: Gamename to ngWS batcher call.
+- Add: ngWS plug on scoreboard, if ngWS is enabled (all modes)
+- Change: Slight change to FFA scoreboard to accomodate ngWS plug.
+
+1999 May 03: 1.63
+=================
+- Change: Remove disconnect effects/sounds if the disconnecting player was
+  a spectator.
+- Fix: Mass bot remove even if only a single bot was voted to be removed.
+- Fix: Small tweaks to some voting messages.
+- Fix: Another tweak in an attempt to curb client overflows at the starting
+  countdown of a match.
+- Fix: More tweaks to bot auto-readys.. they were too aggressive before.
+- Fix: Item expires in ngLog.
+- Fix: Added player ID in team_join messages of ngLog.
+- Add: "say_team" (messagemode2) can now be used in FFA/1V1 to talk amongst
+  only spectators or only active players (depending on the state of the
+  player who initiates the "say_team" command).
+- Fix: No auto-rotate between highscores and scoreboard during the course
+  of a match.  The rotate is in at the end of the level.  To see high scores
+  during a match, use the "hiscores" command.
+- Fix: "hiscores" command now toggles high scores on/off.
+- Comment: Forgot to mention in the 1.62 update, player ID #s (as found in
+  the "players" command) can be used in the "accuracy" or "stats" command,
+  rather than having to type a player's full name.
+
+1999 Apr 30: 1.62
+=================
+- Add: Railgun damage to ngLog
+- Add: Damage stat output for "oldstats" command
+- Change: The way that the accuracy stats are handled internally for client
+  query.  With the old system, it was possible to get stats on wrong or older
+  player.  Now, bot the accuacy and previous accuracy info should now be
+  correct for players from the previous match.
+
+1999 Apr 29: 1.61
+=================
+- Add: Gladiator bot identification in the "players" command.
+- Fix: Whoops! Looks like I forgot to add the stuff in 1.60 in the Linux
+  builds. Sorry =)
+
+1999 Apr 29: 1.60
+=================
+- Add: Total damage given and received during the course of a match for
+  each player.  This is given at the end of a dump of a player's
+  accuracy statistics.  It should be noted that this is ONLY damage that
+  is given (or received) to(from) enemy players.  That is, it does NOT
+  count the damage a player does to him/herself.
+- Fix: Several false accuracy stats if a player hits a dead body.
+- Add: New gladiator library built for Linux-x86 libc5-based systems.  As
+  a result, the game has also been upgraded to 1.60 for these systems.
+
+1999 Apr 28: 1.59
+=================
+- FIX-OF-THE-CENTURY!!!  I have *finally* found my most-loved hook-related
+  bug.  I have been tracking this puppy since the beginning.  Finally
+  found it.  Finally squashed it.  The rest of this update is just
+  "window-dressing". :-)
+- Add: Support for removing bot-related entries in Standard-Log format
+  logs:
+	set stdlog_logbots 0  Do NOT log any bot-related kills or deaths
+				 1  Normal logging of bots as players (default)
+- Add: Ability for server admins to adjust whether a client's weapon
+  is dropped when they die.  This is really just a var for rail-only
+  insta-gib-like servers where there is unlimited ammo and only the
+  railgun.  Of course, it could be used in any server config:
+	set client_deathweapdrop 0  Clients don't drop the weapon they
+					    are holding when they die.
+					 1  Normal death weapon drop (default)
+- Add: Mapname included in the filename of automatic server-to-client
+  demo records.
+- Fix: "talkto" restricted so that spectators and active players cannot
+  exchange private information (cheating is possible otherwise).
+- Change: Teammate fratricides will not influence the death count of the
+  receiving (killed) teammate, which ultimately (and unfairly) affected
+  their overall efficiency rating.
+- Add: Match strict mode that does not allow clients to affect their
+  ready state once they enter the game.  This is mostly for tournament
+  environments where matches are much more controlled with referees and
+  admins:
+	set match_strictmode 0  Traditional "ready" style of play (default)
+				   1  Clients cannot affect their ready status
+					in any regard.
+
+1999 Apr 27: 1.57-1.58
+======================
+- Fix: Bots now handle teamskin changes correctly.
+- Change: Military-style (24hr) timestamps now used throughout.
+- Fix: Broken DF_SAME_LEVEL set and a map voted in.
+- Fix: Linux mapfile CR/LF bug.
+- Fix: "talkto" command didnt quite work as advertized.
+- Fix: Another attempt at prevent client overflows on a mass bot ready up.
+- Fix: Rails should now go through dead bodies and wont add to accuracy
+  hit ratios.
+- Add: Clients can now use "vote tl" and "vote fl" for voting for timelimit
+  and fraglimit values respectively.
+
+1999 Apr 26: 1.56
+=================
+- Fix: Bug in specific bot voting could cause crash.
+- Add: Various warning/error message enhancements (voting).
+- Add: Player ID facility available for client use in specifying players
+  for particular commands requiring a player's name (r_kick, invite,
+  talkto, etc.)  As a result, clients can now use the player's ID rather
+  than their name in specifying the player for a particular command.
+  ----> To find a player's ID #, use the "players" command.
+- Note: A new full release is close.  If server ops running these betas
+  could give me reports of server CRASHES, I would very much appreciate it.
+  Any additional info that is related to the crashes would be most helpful
+  as well.  Send reports to: rhea@ittc.ukans.edu ASAP!  Thanks!
+
+1999 Apr 26: 1.55
+=================
+- Change: Reduced size of timestamps on auto demo records.
+- Fix: Spectators not included in on %n macros.
+- Change: Change of the ngWorldStats client-side password var.  The new
+  variables is now "ngWorldStats_password".
+- Fix: Weird black hole syndrome of "dead spots" on a map should now be
+  fixed appropriately.
+- Fix: Another possible fix to bot ready ups that cause real client
+  overflows.
+- Add: Help info for autocam commands.
+- Fix: Autocam statusbar updates should now work correctly.
+- Fix: Slight optimization for observer statusbar updates.
+- Add: Ability for server admins to force bots to leave if there are no
+  real players on the server.  This is helpful for dedicated 1v1 servers.
+	set bot_noclients 0  Bots leave if no real clients are on (default).
+				1  Bots stay regardless of real client counts.
+- Add: Specific player talking facility.  With this command, you can now
+  talk to a specific player on the server without bothering other players:
+	talkto <player_name> <message>
+		---> This is also aliased with "talk" and "tell" commands.
+- Note: Experiencing weird random crashes with this server.  It seems to
+  happen some time during the end of a level.  If anyone finds something
+  consistant, let me know asap :)
+
+1999 Apr 23: 1.52-1.54
+======================
+- Fix: Maps now auto-rotate if only bots are on as well.
+- Fix: More autocam tom-foolary.  Switching to chasecam while auto-
+  camming a dead player would cause an immediate crash.
+- Fix: Expire powerup items now hnadled better in ngLog.
+- Add: Client voting for server configs!  This feature is much more
+  than just switch from teamplay to FFA.  It allows server ops to
+  have multiple configurations available for clients to choose.  For
+  instance, it is now possible for a single server to host site to
+  normal 1V1 DM, teamplay, rail-only FFA, regular DM with 10 bots, 
+  private clan server for practice, etc.  Whatever the admin wants
+  to allow for clients is now possible.  All the juicy server config
+  is given below:
+	set vote_enable_config 0  (do NOT allow client voting of alternate
+					   server configs [DEFAULT]).
+				     1  (Allow clients to vote on the alternate
+					   server config files listed in the file
+					   named in "vote_config_list")
+	set vote_config_list <filename>
+			This file contains a single column of available
+			alternate server config files that clients can vote
+			upon.  (default = "serverconfigs.txt")
+
+	----> The format of these alternate config files should be
+		nearly identical to those used to start a Tourney
+		server.  The *only* requirement is to remove any
+		"map <mapname>" entries from the file so as to
+		prevent a double-map load when a new config file is
+		voted in.  Even if you forget, the worst that can
+		happen is that clients will have to wait for 2 back-to-
+		back loads of a map before they can begin play.
+
+1999 Apr 22: 1.50-1.51
+======================
+- Add: Added date/timestamps to auto-recorded clientside demos.
+- Add: Ability for referees to terminate a match in progress.  The
+  new ref command is "r_stopmatch".. type "r_help" for info.
+- Fix: "kickplayer" on a bot caused weird things to happen.
+- Fix: If server was passworded, voted in bots couldn't join.
+- Fix: Probable fix to weird status bar goings-ons when u toggle
+  between autocam and chasecam.
+- Fix: Various small bot teamplay tweaks and crash fixes.
+- Add: High scores for Regular DM FFA mode!  This system is an auto-
+  configuring setup that will create directories and score histories
+  as needed.  When first enabled, it will create a highscores/ dir
+  under your main tourney/ directory.  It then creates new directories
+  based on the port # of the server running the high scores.  Below
+  this, each map will have its own unique high score history file.
+  Ranking is based on the setup of the server:
+	- Finite fraglimit:  Ranking based on FPH (Frags Per Hour)
+	- No fraglimit, finite timelimit: Ranking based on Frag count.
+	- No fraglimit, no timelimit: No high scores kept.
+  Also, only the WINNER of the current round is eligable to be placed
+  in the high scores list, if they rank high enough.  Thus, this
+  high scores list is really a WINNER's high score list.. hmm, maybe I
+  should rename it :)
+
+  --> Server var:  client_highscores 0  (do NOT keep high scores)
+						 1  (keep high scores [DEFAULT])
+  --> client command: highscores
+
+  ======>  High scores will automatically show up approximately 9 sec
+	     after viewing the scoreboard.  After 9 sec of viewing
+	     highscores, it will go back to normal scoreboard.  It will
+	     continue to cycle in this fashion.  So, as a note to server
+	     admins, setting nextlevel_click and nextlevel_default vars
+	     to something greater than 20 sec will allow clients to get
+	     a full view of both the scoreboard and the current high score
+	     list for the given map, when a match is complete (i.e., end-
+	     of-level scoreboard viewing).
+  =======> Also, if the timelimit/fraglimit of the server changes, the
+	     high score lists WILL be reset to reflect the currect server
+	     parameter's player rankings.
+  =======> Remember, this ONLY works for regdm play (match_mode = 0).
+           It does NOT work in any other mode of play.
+
+1999 Apr 19: 1.49
+=================
+- Fix: SEVERAL nasty bugs related to voting that were introduced
+  with adjusting for bots in the game. Everything should be normal
+  now :)
+- Prep: Last bits of changes for the Linux-glibc port for the bots.
+  Should have something for Linux with bots here quite soon now.
+
+1999 Apr 18: 1.48
+=================
+- Fix: Auto-readies of the bots sometimes caused overflows.  This
+  should now be fixed.
+- Change: Voting. If in anything beside Regular DM mode, observers
+  can NEVER vote or participate in a vote UNLESS everyone connected
+  is also in observer mode.  That is, if nobody has joined the game,
+  then observers can initiate and partake in the voting process,
+  otherwise they can't vote (or be counted) in any new proposals.
+- Fix: Some boundary conditions for referees when changing time/frag
+  limits to prevent weird things from happening.
+
+1999 Apr 17: 1.47
+=================
+- Fix: Vote percentage info displayed if bots were in the game.
+  BTW, bots dont vote for or against any vote in progress, and
+  are not considered in the overall vote count.
+- Tweak: Small menuing tweaks.
+- Add: Ability to now vote for specific bots in the Gladiator
+  menu.  Kind of handy feature :-)
+
+1999 Apr 16: 1.46
+=================
+- Fix: Autocam sometimes gave some "Cant find pic:" error msgs for
+  tracked dead players.  This has been fixed.
+- Fix: Chasecam and autocam now more efficient in updating only
+  those who need to be updated.
+- Fix: Bots will NOT auto-ready up if bots_warmuptime is set to 0
+  and the last non-bot player leaves the server.  The bots, when
+  bots_warmuptime is equal to 0, will ONLY ready up if their is
+  at least one real client on the server.  To hold bot-only matches,
+  set bots_warmuptime to something other than 0 (like 60, to let
+  all bots load in).
+- Fix: Bringing in voted bots when bots_minplayers is set and
+  bots_autoload > 1.  Now, bots_minplayers only specifies the
+  number of bots to load and maintain from the start of a match.
+  Voted in bots are not bound by this limit and are counted
+  seperately in seeing which bots need to be added/removed when
+  new real players connect/leave.
+- Add: Correct logging of bots under ngLog and ngWorldStats logs.
+- Note: will add 1.46 .zip and auxillary gladiator stuff shortly
+  to the beta site.  I need to run some last-minute tests :-)
+
+1999 Apr 15: 1.43-1.45
+======================
+- Fix: Autocam wouldnt let go sometimes :)
+- Fix: Dead bodies showing up at start of 1v1/teamplay matches.
+- Change: If running a listen server, double-obituaries won't
+  show up anymore for the player running the server.
+- Fix: Autocam wont activate if no players in the game, and will
+  put the autocammer into observe mode if all active players
+  leave.
+- Add: If a referee votes, the vote in progress will pass or fail
+  based on the referee's vote.
+- Add: Full support for Galdiator bots v0.92.  It is now primetime
+  for Quake2's best server-side bot!  These bots can be used in any
+  of Tourney's 4 modes.  You will need most of the files found with
+  the official Gladiator distribution.  This distribution can be
+  found at: http://www.botepidemic.com/gladiator
+  However, I have included an auxillary .zip that contains most of
+  the Gladiator distribution, plus a few extras.  There are several
+  new server-side variables that need to be tweaked to get them
+  running with Tourney:
+	set bots_autoload 0  Bots are not automatically loaded into
+				   the server at any time. Bots can only
+				   be brought in through a vote. (default)
+				1  Automatically loads ALL of the bots
+				   specified in the <bots_botfile> config
+				   file.
+				2  Automatically loads <bots_minplayers>
+				   bots at the start of each level. As
+				   more real players enter, more bots
+				   start to leave.  In 1v1 mode, however,
+				   no bots may be automatically loaded at
+				   the start of a map under this option.
+				3  Same as option 2 (above), without the
+				   restrictions of the 1v1 mode.
+	set bots_botfile <filename>  The config file that specifies
+				all possible bots to load from either
+				autoloading or random bot votes.  This file
+				is *necessary* to use Gladiator bots under
+				Tourney (default name = "bots.cfg").
+	set bots_warmuptime <time>  Specifies the amount of time
+				before a bot will "ready up" in qualifier,
+				teamplay, or 1v1 modes.  If the <time>
+				value is set to 0, then a bot will auto-
+				matically "ready" itself when all other
+				real clients have moved to "ready" status.
+				Note that a bot must be in the game for 10
+				seconds before it performs its auto-ready
+				function.
+	set bots_minplayers <value>  Specified the maximum # of bots
+				plus real players that can be on the server
+				at a time.  If the sum of the players + bots
+				is greater than this <value> then the appro-
+				priate # of bots will leave until the sum is
+				equal to <value>.  If there are more real
+				players then <value>, then no bots will be
+				allowed on the server.  Hence, the maximum
+				number of bots that can be on the server at
+				at time with bots_autoload set to 2 or 3 will
+				be <value> bots.
+	set vote_enable_bots 0  Doesn't allow bots to be voted in or out
+					(default).
+				   1  Allows clients to vote bots in or out.
+					---> This is the only way that bots
+					     can be allowed to be voted into a
+					     server by clients.
+	set vote_bots_max <value>  Specifies the maximum number of bots
+					   that can be voted in by clients
+					   (Default value = 8).
+
+	Client commands:
+	================
+		vote addbots <# of bots> -- Propose vote to add bots.
+		vote rembots <# of bots> -- Propose vote to remove bots.
+		---> Same functions can be used through the menu voting
+		     facility as well.
+
+	*NOTE*:  If you dont want to use Gladiator bots at all, you
+		   NOT need any of the items found with the Gladiator
+		   archive (gladiator.dll, q2dm?.aas, bots.cfg, etc.).
+
+1999 Apr 13: 1.38-1.41
+======================
+- Add: Client IP address logging for ngLog
+- Fix: Rework start-of-match gib clearing to reduce overflows.
+- Tweak: More hook junk.
+- Change: 7 (or greater) players in teamplay mode now force a
+  reduced scoreboard to be displayed.
+- Add: Paul Jordan's AutoCam (with some slight tweaks).  This camera
+  follows where the action is taking place, rather than giving a static
+  over-the-shoulder look.  There are options for this camera,, and will
+  update this at a later date.  Suffice it to say that it is nearly
+  identical to the Eraser and BattleGround AutoCam command set.  To
+  use it, either type:
+	autocam
+  at the console, or hit the FIRE button while in observer mode.
+- Update: More tweaks on autocam (1.41)
+
+1999 Apr 10: 1.34-1.37
+======================
+- Add: Pop-up menu for client that is invited during a teamplay match.
+- Rework: Internal ID system (for logging)
+- Rework: Accuracy stats tracking (internal)
+- Fix: Reconnects during teamplay match where the disconnected client's
+  position in the team does not allow the reconnecting client to
+  automatically join the match (as it previously did).
+- Fix: Better handling of reconnects (more consistent now).
+- Fix: Oops, player_ban and player_file where mistyped in the source.
+  This feature should now work as expected.
+- Added: In chasecam during teamplay, chased target's score and teamname
+  are given, along with the chased player's name.
+- Fix: Tweak a bit on the jump to switch players, to prevent inadvertant
+  rapid switching of players.
+- Added: Console timestamps.  This allows operators who use the
+  console.log additional information on relative times matches are played.
+  As a result, there is a new server var:
+	console_timestamp <value>
+		--> <value> specifies the number of maps that are played
+		    between console timestamps.  Setting <value> to 0 disables
+		    this feature.  Default timestamp interval is 10.
+
+1999 Apr 08: 1.33
+=================
+- Fix: Overflow protection on mass "readys" for entire teams or players
+  on the server.
+- Fix: Rapid scoreboard requests are handled better to prevent overflows
+- Fix: More tweaks on reconnects.  Players shouldnt be able to reconnect
+  from previous levels now.  Still have weird transients on legitimate
+  reconnects, however.
+- Fix: Can now join teams in a called time-out puase of the match.
+- Fix: Tweaks to the 1v1 menus (various).
+- Add: Console logging of IP address of connecting client.
+- Add: Different scoreboards on larger teamplay matches.  This will allow
+  for more players to be displayed on a team's roster, and should also
+  address the overflows at the end of a level that seem to be popping
+  up more frequently now.  Let me know what you think on the layout.
+
+1999 Apr 01: 1.32
+=================
+- Fix: Scoreboards on 1v1 were sometimes screwy with the wrong pics/info
+  in the dogtags (i.e. players were swapped on the dogtags vs. their text
+  stat info).
+- Fix: Cannot vote while match is paused for any reason.  This sometimes
+  caused the server to remain in pause mode indefinitely.
+- Fix: Sometimes the auto select for team/1v1 teams in the menu chose the
+  wrong team.  This has been a nag for some time :)
+- Update: All docs and .cfg files for 1.32 release.
+- Release: Full release of Tourney version 1.32
+
+1999 Mar 30: 1.31
+=================
+- Fix: Client pressing ESC while in a menu will desync the menu status
+  for the client, requiring two keystrokes to get back to a menu.
+  Everything should now work as expected.
+- Added: Team-based map/player/entity-sensitive messages, as found in CTF.
+  This was basically a straight rip from the CTF source, so this should
+  work as expected (except identifying those silly flags of course :) ).
+  For those not familiar with these types of messages, Tourney now has the
+  ability for a player to give location/status-based messages to other team
+  members.  All that is needed is to put special character sequences in
+  their team-specific messages:
+	- %l/%L : Gives speaking player's location on map.
+	- %a/%A : Tells the amount of armor the speaking player's currently
+		    possesses.
+	- %h/%H : Tells the amount of health the speaking player's currently
+		    possesses.
+	- %w/%W : Tells the current weapon the speaking player is currently
+		    holding.
+	- %n/%N : Tells the closest player to the speaking player.
+  This info is only given if the player uses the above-mentioned sequences
+  with the "say_team" or "steam" commands.
+
+1999 Mar 29: 1.30 ports
+=======================
+- Ported OSP Tourney DM to the Solaris (Sparc) architecture.  I compiled
+  it on a Solaris 2.6 system, let me know if this causes any problems.
+- Ported OSP Tourney DM to the Linux Alpha architecture.  This is only
+  a glibc port (are there any libc5 systems out there?)
+- 1.30 appears to be solid.  Will be doing another full release here with
+  updated documentation within the week.
+
+1999 Mar 28: 1.28-1.30
+======================
+- Added: Ability for players to view player stats from previous match.
+	oldstats - Gives listing of playernames that had stats from
+		   previous round.
+	oldstats <playername> - Gives stats of player from previous round.
+- Added: Team join codes.  These are a bit different than traditional join
+  codes as they are not automatically assigned to a team.  There are two
+  ways to set joincodes:
+	1.  A client can set a local variable, named: default_joincode, with
+	    a string of up to 15 characters to use as the join code.  This
+	    string is ONLY used if it is preset before connecting and the
+	    player joins a team captain.
+	2.  The captain of a team sets the joincode manually with:
+		joincode <new_joincode_string>
+  Players on the team can view the team's joincode by typing "joincode" by
+  itself (this also applies to team captains).  For an observer to use a
+  team's joincode to join the team, all they need to do is simply type:
+	joincode <team_joincode_string>
+  If the string is correct, Tourney will automatically place them on the
+  team with the joincode specified.  Thus, the client will not need to
+  issue a manual "team" or "join" command after entering the proper joincode.
+- Added: Accuracy logging to ngLog logging.  When ngWorldStats comes online,
+  players will be able to view their cumulative weapon accuracy statistics
+  over all games.
+- Updated: Help menus for oldscores, oldstats, and joincode commands.
+- Fix: Proper logging in ngLog for item expires for Invulnerabilty.
+- Tweak: In team/1v1 modes, Team_A will ALWAYS be displayed on top in the
+  scoreboard, even if they are losing.  This keeps the scoreboard consistant
+  for people who like to look at the scoreboard frequently in team/1v1
+  matches.  I have no idea why they do it (the HUD has all relevant info),
+  but people were complaining, so it is now so!
+- Tweak: Bot detection was just a little TOO sensitive.  I've relaxed it a
+  bit, but it is still quite reliable in detecting true bots.  Sorry for all
+  those false accusations :-)
+
+1999 Mar 26: 1.27
+=================
+- Fix: Team player counts when there were 2 or fewer active players on the
+  server.
+- Fix: Startup score for the player's team.
+- Small tweaks to teamplay scoreboard to fit 4 players for each team
+- Added: Shorter timer on voted/referee map changes during the course
+  of a game in either FFA/teamplay/1v1.
+
+1999 Mar 25: 1.26
+=================
+- Fix: Renames after every kill in ngLog and Standard Logs
+- Fix: Handling of DF_SAME_LEVEL dmflag setting to allow map to stay on end
+  of level UNLESS a new map is voted in or changed by a referee.  This was a
+  small small small bug to fix (hi wise :) )
+- Fix: Small fixes to player recovery that could cause problems during
+  teamplay/1v1 and sometimes in regular dm modes.
+- Added: New variable to enable/disable auto-player recovery:
+	set client_recover 0  (disable auto-recovery (default))
+				 1  (enable auto-recovery)
+	---> note, you will need to have this set if you also enable the
+	     team_duelrecover and team_recovertime variables.
+- Added: Viewing of scores from previous match.  Clients can view results from
+  the previous match by typing: oldscores   This old scoreboard can then be
+  turned off by hitting the normal scoreboard bind (i.e. F1).
+
+1999 Mar 22: 1.23a-1.25
+=======================
+- Change: Complete rework (again) of mode cycling for players.  FIRE will cycle
+  you between OBSERVE, CHASE, and IN-EYES.  While in CHASE/IN-EYES, the jump
+  button will let you switch players.  In OBSERVE, the jump/croutch work as
+  normal.  Note, on initial connect, the jump button in OBSERVE will bring up
+  a menu if the server is in Teamplay or 1V1 modes, and a match has not started.
+- Fix: OMG! The item banning on item cycle spawns was broken for several
+  versions.  Its incredible nobody pointed this out on dm8 with power armor
+  disabled. ;)
+- Fix: When a match is in countdown mode before starting, the parameter screen
+  is no longer persistant.  It will stay onscreen for about 10 sec or until
+  a player looks at the scoreboard, at which time it will be turned off.
+- Fix: Disabled chat flood protection during match pauses.
+- Fix: No end of level stats dump for observers.
+- Fix: Possibility of a match remaining in indefinate pause mode if conditions
+  are just right.
+- Fix: Referee in-eyes cycling.
+- Fix: Sticking scoreboards when match is just about to start.
+- Fix: Some reports that Tourney under Win95 needs additional libraries
+  that come by default with Win98/NT, thanks Micro$oft (i.e. ws2_32.dll).
+  I have recompiled 1.25 with some different, older libraries and hope this
+  will fix some of the problems with running Tourney on a Win95 box.
+- Added: OVERFLOW RECOVERY!  This has been added in many flavors:
+   - Regular DM: Reconnects from clients who leave unexpectantly will
+     log back in with all of their stats intact, so long as the map has
+     not cycled or in intermission period.
+   - Teamplay: If not a 1v1, reconnecting clients will be placed back in
+     the game immediately with all stats intact.
+   - 1v1/Teamplay(1v1): Configurable way to handle this.  Normally, if a
+     client disconnects for any reason, the match is immediately terminated
+     (since there are no players on one of the "teams").  With the new overflow
+     recovery stuff, admins can make Tourney force a pause on matches to allow
+     clients time to reconnect.  To enable this, there are 2 new server variables:
+
+	set team_duelrecover 0	* (disable auto-pause)
+				   1    (allow auto-pausing of matches)
+	set team_recovertime <time in sec>  (default = 0)
+
+	----> Both of these values need to be non-zero for the auto-pausing feature
+		to work as described above.
+- Added: Player allow/deny ban lists.  This was brought in for large tournament
+  play and scheduling, but may be useful for private servers on the net:
+	set player_ban 0 * (all clients are allowed, except those specified)
+			   1   (all players are rejected, except those specified)
+	set player_file <filename>  (default = players.txt)
+			A straight text file with names of players (1 per line) that
+			are to be either allowed or denied access to the server.
+	---> It should also be noted that when player_ban is set to 1, there is
+	     also a further restriction in that no two players may have the same
+	     name while connected to the server.
+- Info: I would like to say that OSP Tourney DM was used exclusively down at
+  Extreme Annihilation with no problems whatsoever.  There were approximately
+  70 matches played with Tourney, and there was not a single overflow or server crash.
+  Of course, many of these matches were 1v1, but the FFA qualifier with 20+ people
+  ran as smooth as any of the 1v1 matches.  Demos/stats/etc. at:
+
+	http://www.netgamesusa.com
+
+- Info: Look for Solaris and Alpha ports soon.  I've conquered alot of the basic stuff
+  that has been nagging me for a while.  Also, more concentration on Gladiator bot
+  interfacing will also be done.  It's there now, just pitifully implemented for casual
+  use.  
+
+1999 Mar 09: 1.23
+=================
+- Fix: In-menu voting due to silly timer debouncers.
+- Fix: Small possibility of sudden-death overtime NOT
+  ending on first kill, if both players die in same server frame.
+- Relased: 1.23 full (did ya guess that 1.22 WASN'T officially released?)
+- Now *extremely* paranoid.
+
+1999 Mar 07: 1.20a-1.22
+=======================
+- No release of 1.20 cuz of crashes :)
+- Fix: Absolute final, never again to be seen problems with persistant grapples
+  sticking to players when stange conditions arise (at least I think so).
+- Fix: Changes to messages when in Observer/Chasecam/In-Eyes modes
+- Fix: In-Eyes looks better, woo-hoo!  Its still not perfect, but looks much
+  better unless the chased player looks down at an extreme angle.
+- Added: Command timer debouncer to prevent client command flooding for CPU/network
+  intensive commands.
+- Added: More protection of crash prevention in weird states.. kind of a secondary
+  exception facility for handling otherwise impossible states that may occur (i.e.
+  observers dying, chasers taking damage, etc.), but shouldn't.
+- Change: FIRE to pull up menu in regular/qualifier DM now automatically places a player
+  in the game (i.e. no initial pop-up menu).  This seems to have been a nit for a lot
+  of people :)
+- Change: "join" or "team" command with no params shows the player's current team.
+- Change: "Ready" reminder in warmup moved from 60 to 90 seconds.
+- Change: Made several more client commands available at level intermission time.
+- Official release of 1.22!  *ducks* (again, no bots enabled yet.. soon tho, promise!)
+
+1999 Mar 05: 1.20
+=================
+- Fix small vote bug that could cause crash.
+- Small adjustments for hook for official 1.20 release.
+- Updates tourney-commands.txt and readme.txt for 1.20 release.
+- Released 1.20 update (with bots NOT enabled).
+
+1999 Mar 05: 1.19a-1.19b
+========================
+- Changes to the format of button clicks for mode switching and menu popups
+  when in observer/chasecam mode:
+	- FIRE will always bring up a menu, mo matter which mode.
+	- JUMP/CROUCH will toggle between chasecam and in-eyes mode (observer
+	  mode has been taken out of the loop in this change for mode toggles).
+
+1999 Mar 04: 1.18a-1.19
+=======================
+- Fix: Grapple sticking + suicide = spiderwebs :)
+- Change: "team" command is now aliased to join command for compatability with
+  those "other" teamplay DM mods ;)
+- Fix: Allow accuracy/stats commands at end of level.  Can also talk in the
+  console at end of match.
+- Fixes: Small tinkerings with the Gladiator bot code
+- Fix: (NULL) weapons on kill entries in both ngLog and StdLog.  I did this
+  completely different and it seems to work.  I will keep on it and see if
+  I made any new issues show up.
+- Change: Jump/Couch does not pull up menu in "observe" mode.  It still works
+  as expected in chase modes, however.  Use <inven> key or "menu" (in the
+  console) to pull up a menu while in observer mode.  A consequence of this
+  (intended) is to allow the use of jump/crouch movements to move straight
+  up/down without bringing up the menu.  This makes it easier for precise
+  placement of the observer cam in certain areas.
+- Change: Players ACTIVE in the game during a team/1v1 match can now vote.
+  Observers/chasers cannot initiate nor vote on proposals while a match is
+  in progress.
+- Add: address logging/bot connecting info for ngLog on newly connected clients.
+- Change: Observer mode now moves at approximately double the rate of normal
+  player movement.
+- Add: Can now configure warmup health/ammo:
+	set warmup_health x	(default = 150)
+	set warmup_armor y	(default = 200)
+- Add: Can now configure countdown timer before match starts:
+	set match_countdown x	(default = 30, must be >= 11)
+- Add: Match prestart condition.  This is a percentage of clients who are
+  ready, but is (usually) less than the full percentage requirements for clients
+  who must be ready for a match to start.  In this mode, weapons are removed
+  from players to "encourage" them to ready-up:
+	set match_prestartpercent x		(default = 50)
+
+1999 Feb 26: 1.17c-1.18
+=======================
+- Fix: Qualifier mode suddenly dropping out at various times when players
+  enter/leave during a match (i.e. moving to chasecam mode, etc.)
+- Fix: Crash if someone is chasing another during qualifier mode and the
+  scoreboard is displayed for anybody.
+- Fix: "notready" will not stop a coundown if match_readypercent is still
+  satisfied even after the player moves back to notready status.
+- Added: Weapon accuracy information
+	accuracy/stats - Displays weapon stats for the client for the
+			   current (or previous, if in warmup) match.
+	accuracy/stats <player_name> - Same as above, except views
+			   stats for the client under <player_name>.
+
+1999 Feb 20: 1.17b
+==================
+- Major bug hunt, killed 4 or 5 crash-enabling bugs.
+
+1999 Feb 19: 1.17a
+==================
+- Small adjustments to hook to help with slingshots
+- Better clearing of gibs at match startup
+- Small fixes to match startup that appeared to be causing strange crashes
+
+1999 Feb 19: 1.16-1.17
+======================
+- Added: Gladiator server-side bots!  However, because of some
+  anticipated updates from the bot author (Mr Elusive) and some further
+  integration for teamplay/1v1, I have disabled bots in this release.
+  Big thanks to Mr Elusive for all the support and help he has provided
+  in getting the Gladiator bots together for Tourney.
+- Added: Complete item voting abilities for clients.  You can now vote
+  for things such as bfg/quad/invul/power armor availabilities as well
+  as quad drop, weapons stay, hurt self, hurt team settings.
+- Added: match_latejoin 3 to relax all team-locking restrictions for
+  late joiners from entering a teamplay match.  Most teamplay servers
+  should still be run at match_latejoin 2 setting to ensure complete
+  uninterrupted teamplay matches.  This option was added at the request
+  inclusion of RA/CTF-style playing modes.
+- Added: teamplay serverinfo variables for remotely viewing matches from gamespy.
+- Change: Default direction for unknown commands in a teamplay match
+  will be as team messages.
+- Fix: nglog filenaming on manual map changes
+- Fix: Nasty invite bug that gives either weird information or crashes
+  server.
+- Fix: Nasty server crash if players try to invoke referee status when
+  certain conditions are present on the server.
+- Overhall: The entire voting system layout.  It should be much more
+  convenient and less clumsy to navigate thorugh the vote menuing
+  subsystem.
+
+1999 Feb 15: 1.15b-1.15e
+========================
+- Fix: Player ID bug introduced in 1.15a
+- Fix: Startup crashes if no .cfg was used (match_mode not initialized
+  properly).  This should now allow people to run demos from the
+  tourney directory as well as startup tourney without any specific
+  config files.
+- Fix: HUD info for people joining a teamplay match in progess.  This
+  also was a cleanup for people making mode switches while a teamplay
+  match was in progress (HUD-wise).
+- Added: An input debouncer to limit the input a client gives while:
+	- In chasecam (switching players)
+	- In menu and making selections quickly
+	- Switching between observe/chase/in-eyes quickly
+  Bottom line for all of this is to limit client input that can result
+  in unnecessary overflows while in any of these modes.
+- Tweak: Various aspects of the menus (window-dressing, as wiseguy
+  calls it :-) ) for better, more logical layout.
+
+1999 Feb 11: 1.15a
+==================
+- Added a new feature to allow clients to change the HUD layout for
+  the on-screen timer.  This was at the request of several people who
+  use a viewsize < 100 and had overwrite problems on the countdown
+  timer.
+	Client command:  hud	   (toggles timer location)
+	Server variable: client_hud  (0 = right-side, 1 = middle-bottom)
+	---> Also accessible by the client menu
+- Tweaked timer a bit to improve network efficiency. Requires 10% less
+  bandwidth (over time) to update timer.
+- Tweaked client ID to use less bandwidth as well through some client-
+  side caching.
+
+1999 Feb 09: 1.14l-1.15
+=======================
+- Added more commands to help menus
+- Cleanup of some internal structure
+- Cleaned up some client messages for 1.15 release
+- Updated Readme.txt and tourney-commands.txt
+- Cleaned up all distribution .cfg files
+- Released official 1.15 distribution of OSP Tourney DM
+
+1999 Feb 08: 1.14j-1.14k
+========================
+- Added the ability to call timeouts during a teamplay or 1V1 match.
+  Captains are the only members that are allowed to call timeouts for
+  a team.  The command(s) to do this are:
+	time/matchpause/timein
+  This command is a toggle.  That is, the same command is used to call
+  both a timeout and the subsequent timein.
+
+  Two server admin variables are also provided with this feature:
+	match_pausetime <value> - <value> specifies the duration of a
+					  time-out in seconds (default = 60.0).
+	match_timeouts <value> - Specifies <value> timeouts available
+					 for each team/player for an entire
+					 match (default = 3 timeouts).
+  Note that referees CANNOT call timeouts unless they are also a captain
+  of a team.  They can, however, call time-ins if a match has been paused.
+  If a referee needs to pause a match, (s)he can always use the referee
+  command "r_mpause" to pause a match.
+- Fixed the occasional bobbing effects on players when they hook walls
+  or ceilings.  This may also help modem (or lagged) players who
+  have been experiencing sling-shot and weird velocity effects when
+  reeling all the way in on a hook.  I will keep an eye on this on the
+  servers.
+- Client-side BOT detection is now fully implemented again.  Note that
+  this is a new method that should be able to detect more than just
+  ZBOT clients (if any other legitimate ones exist).  Of course, there
+  is a new server variable associated with this feature:
+	client_botdetect <0|1>
+				  0 - Disable bot detection
+				* 1 - Enable bot detection (default)
+  Many thanks go out to Riviera for helping me out with this feature!!
+- Updated tourney-commands.txt file to reflect new server vars and client
+  commands (tourney-1_14k-commands.txt).
+
+1999 Feb 07: tourney-commands-1_14i.txt
+=======================================
+- Current revision of the tourney-commands.txt file that is found
+  in the main distribution.  This has all server variables documented
+  that are current with v1.14i of OSP Tourney DM.
+
+1999 Feb 07: 1.14h-1.14i
+========================
+- Various matchinfo updates
+- More fixes and handling of hook
+- Enhancements to team locking mechanism
+- Better handling of client init upon connect/reconnect
+- Fix to client count if a player overflows on map changes
+- More aliasing of common commands
+- Many teamplay enhancements, with addition of power for captain
+  player.  The following are commands available for the captain:
+	readyteam/teamready - Readies all players on team.
+	unreadyteam/notreadyteam - Unreadies all team members.
+	captain <player_name> - Allows captain to give up captain
+					status to <player_name>.  Note,
+					"captain" by itself gives info on
+					the team's current captain.
+	kickplayer/remove <player_name> - Removes <player_name> from
+						    the captain's team.
+
+	-----> Note, these commands are also available to any referee.
+		 The format of the commands for the referee are exactly
+		 the same, save for an additional parameter <team_name>
+		 that is to be inserted after the command and before any
+		 <player_name> parameters, if needed.
+		 (e.g. captain <team_name> <player_name> for ref version
+		 of reassigning team captains.)
+
+1999 Feb 05: 1.14e-1.14g
+========================
+- Looks like have finally tracked down the crash bug.
+- Slight changes to client id tagging for observers.
+- Various ngWorldStats logging fixes/updates.
+- Initial implementation of team captains.  They have no power
+  right now, but hey, people can be captains :-)
+- Some adjustments to level start gib clearing.  Dead bodies are
+  completely removed than just being relocated (some maps have
+  their coords set up really wacky).
+
+1999 Feb 04: 1.14c-1.14d
+========================
+- Possible fix for occasional end of level crashes.  Lets keep our
+  fingers crossed on this one!
+- Referee commands now available for clients already in the game.
+	referee <password>
+		<password> is either the referee_password setting or
+		the rcon_password setting.  If both of these passwords
+		is either NULL or "none" then this option is not
+		available to clients.  Please refer to the
+		tourney-commands.txt file accompanied with the
+		main distribution for a rundown on all referee
+		commands available.
+- Added "chasecam" and "observer" mode selections to the main menus
+  for both teamplay, 1v1, and regular DM modes.
+
+1999 Feb 04: 1.14b
+==================
+- Fixed the id tagging facility so that players cannot see other
+  players through water unless some part of the other player's body
+  is visible (i.e. head sticking out of the water).  This also goes
+  the other way so that players in water cannot see out.  However,
+  players in the water can see other players in the water (obviously).
+- Added fast weapon-switching support (like RA2/Lithium):
+	set client_fastweap [0|1]
+		* 0: Disable fast weapon switching for clients.
+		  1: Enable fast weapon switching for clients.
+
+1999 Feb 03: 1.12a - 1.14a
+==========================
+- Various ngLog/StdLog fixes
+- Added individual score on HUD during teamplay
+- Addition of several items in ngLog
+- Removed chat flood protection for team chats
+- Removed gibs/bodies that accumulate during warmup when a qualifier/
+  team/1v1 match begins.
+- And a fix for an embarrassing bug for observers/chasers that was
+  introduced when allowing people to switch to observer/chasecam mode.
+  I won't comment on it any further :-)
+
+1999 Feb 02: 1.12
+=================
+- Loosened restrictions on entering/leaving chase or observe modes
+  during a match.
+- Teamlock/Unlock features now available:
+	lockteam/teamlock/lock: locks a team's player count.
+				Additional players can join only if
+				they are "invite"d.
+	unlockteam/teamunlock/unlock: unlocks a team's player count
+- Fixed a couple of small bugs for ready/notready status in warmup
+  mode.
+
+1999 Feb 01: 1.10c-1.11a
+=========================
+- Removed current z-bot protection.  It was causing too many wierd
+  thibngs to happen (like couldn't pick up grenades).  Well, now
+  will write my own, no more freebies :-P
+- Added: Ability for admin-locked teamskins (1v1 or teamplay)
+	set team_lockskin [0|1]
+		* 0: Clients can change teamskins
+		  1: Players cannot change default teamskins.
+- Added: Unique teammate id tagging
+	set team_idteam [0|1]
+		  0: No special "teammate" id tagging
+		* 1: Differentiate teammates on `id' vieiwng
+  --> Note, you can enable this option and disable allow_id variable
+      to allow players to "id" their teammates, but not any member
+      of the opposing team.  Looks really nice, I must say :)
+- Several significant code optimizations to help with overflows and
+  general playability over the net.  In other words, less stuff is
+  sent to clients each frame.
+- Configurable server->client rate settings now available.
+	set client_maxrate <value>
+		Default <value> is 8000.  Setting <value> to 0 allows
+		for any client rate setting (i.e. disables this option).
+
+1999 Jan 29: 1.10b
+==================
+- Fixed: Standard Log formatting.  You can now safely use Standard Log
+  under OSP Tourney DM to get expected results in things like GibStats.
+  Boy I loused this one up :-)
+- Added a space " " as another illegal character for client-side demo
+  record filenames.
+
+1999 Jan 28: 1.08-1.10a
+=======================
+- Fixed: Possible server crashes at end of level.
+- Fixed: Possibility of players dropping items during warmup modes.
+- "vote yes|no" now works as expected.
+- Implementation of chat flood protection.  3 new server vars (ripped
+  from the id 3.20 release):
+	flood_msgs <value> : # of messages allowed in a time interval
+	flood_persecond <sec> : Time interval (in sec) for flood_msgs
+	flood_waitdelay <sec> : Amount of time a player is muzzled
+				if they are flood chatting
+- Fixed: hooks possibly showing up at level intermission.
+- Added: Z-Bot protection
+- Added ability to carry over player-voted values.  Before, all
+  voted values would revert back to original server defaults between
+  level (map) changes:	vote_carryover <0|1> 0 = keep server defaults
+			     		     1 = carry over voted values
+- Added ability to ignore player counts in map rotation logic:
+	map_nocount <0|1> 0 = Use player counts when deciding on next
+			      map
+			  1 = Ignore map player counts
+- Fixed client-side auto-records in naming conventions.  Some player
+  names would create invalid filenames for the demo.  Consequence
+  was that the demo would not be recorded.  Now, illegal characters
+  are stripped before the demo file is created.
+- Fixed: Standard Log logging.  It should work now as expected
+- Added in complete support for ngWorldStats.  However, log file upload
+  mechanism is not quite finished completely (for reliability reasons).
+  The abilities are in the server, just disabled for the time being.
+  Will keep everyone advised and the pieces needed to enable
+  ngStats/ngWorldStats (ngWS) later.
+
+1999 Jan 25: v1.06j-1.07a
+=========================
+- Fixed hang bug with hook that would allow you to stay connected to
+  the hook if you got stuck on something during the reel-in.
+- Fixed really nasty nasty bug that would cause server crashes if a
+  player sent a CTF-based message (i.e. "I am at %s with %d" would
+  lock a tourney server up tight :-/).
+- Slight code optimizations to improve performance.  This is only the
+  beginning :-)
+- Officially registered with the CLQ.  Frag away on a tourney server
+  without worry of lost time on the 'Q :-)
+- Overall tourney seems now to be MUCH more stable and run a little
+  smoother.
+
+1999 Jan 12: v1.06g-i
+=====================
+- Fixed problems with log file handling that would crash Linux
+  systems after one or two map changes.
+- Fixed small possibility of an observer coming into the game with
+  -100 frags.
+- Small server_info variable update changes (internal).
+- Logging fixes.
+
+1999 Jan 10: v1.06d-f
+=====================
+- Fixed long-standing bug where server would crash if a client
+  entered chasecam/observe mode right after death and just before
+  respawning back into play.
+- Fixed case where an observer/chaser could issue "kill" and cause
+  a server crash.
+- Fixed overflow problems when clients enter chase mode after being
+  in the game.  Sometimes an old menu would pop up and be immediately
+  cleared on next server frame.  More of a cause for confusion to the
+  player than anything else.  This would also happen periodically when
+  a "menu" would precede a player's deathmatch scoreboard after a
+  death.
+- Last one related to chase mode changes: if player entered chase
+  right after death, the chased target would be viewed as if the
+  chasee was in his death view the entire time (i.e. lying on
+  "something" and looking up and to the right to some degree).
+
+1999 Jan 09: v1.06c
+===================
+- Initial release of Linux and FreeBSD versions of tourney.
+- Allow for option where latecomers can join in on a game
+  already in progress for teamplay matches.
+- "invite" command enhancements and fixes
+- Various scoreboard fixes for all match types
+- Overhaul of real-time ranking information
+- Various tweaks on periodic warmup messages
+- Chasecam/Observer fixes for external server queries
+  (like gamespy info on chasers/observers)
+- Misc. teamplay fixes/enhancements- Fixes to chasecam (not all done)
+- Fix of time/frag limits on menu voting
+- "observe" invokes true observer mode, not chasecam
+- Several manual "join" bugs fixed
+- Auto-cycling of maps in teamplay/1v1 modes to prevent stale maps on
+ servers that have not been visited for some time.
+- Fixes to chasers/observers time when they enter the game.
+- Fixes to team scoreboard of if match is aborted (i.e.  somebody leaves).
+- Added starting armor amount and type config options
+- Allow enable/disable of self-damage in regular FFA modes.
+- Can now enable/disable packs
+- Revamp of hook to allow for specifying hooks of any color
+- Various command additions to allow people accustomed to similar types
+  of mods the same command set for similar functionality.
+- HUD updates in warmup mode.
+- Fix bug where multiple hooks could be deployed.
+- Team-specific colored hooks.
+- Change scoreboard if a map is voted on for change.
+- Reduced end-of-level timers if a map is voted on to change level.
+- In teamplay/1v1 leader's dogtag will always be on top.  Same is true
+  for end of level console dump of match stats.
+- Revamp of Standard Log facility to allow portability to other architectures.
+- Allow private team chat messages with "say_team" or messagemode2.
+- Allow for definable percentage of players who must be ready before a match
+  starts (i.e. can configure so that only 75% of players in the game must be
+  ready before a match begins).
+- Added in configurable delay between hook deployments.
+- Fixed "invite" to work with both menu and console-based join commands.
+- Some small fixes to menus suddenly popping up while in chase/observe modes.
+
+1998 Dec - 1999 Jan v1.00a - v1.06c:
+====================================
+- Internal enhancements and patches
+	Limited Distribution
+
+1998 Dec 23: v1.00
+==================
+- Initial Release

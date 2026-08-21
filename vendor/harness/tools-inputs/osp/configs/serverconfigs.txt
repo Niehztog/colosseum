@@ -1,0 +1,5 @@
+my_1v1.cfg
+my_team.cfg
+my_dmonly.cfg
+my_instadm.cfg
+my_lithium.cfg

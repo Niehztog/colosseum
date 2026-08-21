@@ -1,0 +1,25 @@
+# Build output.  R-BUILD-4: no generated file is committed except g_ptrs.c.
+/debug/
+/release/
+/debug-linux32/
+/release-linux32/
+/debug-linux64/
+/release-linux64/
+/debug-win32/
+/release-win32/
+/debug-win64/
+/release-win64/
+*.o
+*.so
+*.dll
+*.a
+
+# Derived from vendor/replay/ by tools/divergence.py and tools/coverage.py.
+# The bundles are the durable provenance (R-PROV-6); this is just a cache.
+/build/
+
+# genptr.py scratch (tools/audit.py and the Makefile's check-ptrs target)
+src/.g_ptrs.gen
+
+__pycache__/
+*.pyc

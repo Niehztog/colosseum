@@ -1,0 +1,752 @@
+--- a/g_main.c
++++ b/g_main.c
+@@ -129,8 +129,8 @@
+ 
+     // latched vars
+     sv_cheats = gi.cvar("cheats", "0", CVAR_SERVERINFO | CVAR_LATCH);
+-    gi.cvar("gamename", GAMEVERSION, CVAR_SERVERINFO | CVAR_LATCH);
+-    gi.cvar("gamedate", __DATE__, CVAR_SERVERINFO | CVAR_LATCH);
++    gi.cvar("gamename", GAMEVERSION , CVAR_SERVERINFO | CVAR_LATCH);
++    gi.cvar("gamedate", __DATE__ , CVAR_SERVERINFO | CVAR_LATCH);
+ 
+     maxclients = gi.cvar("maxclients", "4", CVAR_SERVERINFO | CVAR_LATCH);
+     maxspectators = gi.cvar("maxspectators", "4", CVAR_SERVERINFO);
+--- a/g_save.c
++++ b/g_save.c
+@@ -32,25 +32,25 @@
+ } save_field_t;
+ 
+ #ifdef _DEBUG
+-#define _FA(type,name,size) {type,#name,_OFS(name),size}
++#define _FA(type, name, size) { type, #name, _OFS(name), size }
+ #else
+-#define _FA(type,name,size) {type,_OFS(name),size}
++#define _FA(type, name, size) { type, _OFS(name), size }
+ #endif
+-#define _F(type,name) _FA(type,name,1)
+-#define SZ(name,size) _FA(F_ZSTRING,name,size)
+-#define BA(name,size) _FA(F_BYTE,name,size)
+-#define B(name) BA(name,1)
+-#define SA(name,size) _FA(F_SHORT,name,size)
+-#define S(name) SA(name,1)
+-#define IA(name,size) _FA(F_INT,name,size)
+-#define I(name) IA(name,1)
+-#define FA(name,size) _FA(F_FLOAT,name,size)
+-#define F(name) FA(name,1)
+-#define L(name) _F(F_LSTRING,name)
+-#define V(name) _F(F_VECTOR,name)
+-#define T(name) _F(F_ITEM,name)
+-#define E(name) _F(F_EDICT,name)
+-#define P(name,type) _FA(F_POINTER,name,type)
++#define _F(type, name) _FA(type, name, 1)
++#define SZ(name, size) _FA(F_ZSTRING, name, size)
++#define BA(name, size) _FA(F_BYTE, name, size)
++#define B(name) BA(name, 1)
++#define SA(name, size) _FA(F_SHORT, name, size)
++#define S(name) SA(name, 1)
++#define IA(name, size) _FA(F_INT, name, size)
++#define I(name) IA(name, 1)
++#define FA(name, size) _FA(F_FLOAT, name, size)
++#define F(name) FA(name, 1)
++#define L(name) _F(F_LSTRING, name)
++#define V(name) _F(F_VECTOR, name)
++#define T(name) _F(F_ITEM, name)
++#define E(name) _F(F_EDICT, name)
++#define P(name, type) _FA(F_POINTER, name, type)
+ 
+ static const save_field_t entityfields[] = {
+ #define _OFS FOFS
+--- a/g_spawn.c
++++ b/g_spawn.c
+@@ -688,141 +688,141 @@
+ #endif
+ 
+ static const char single_statusbar[] =
+-        "yb -24 "
++"yb -24 "
+ 
+ // health
+-        "xv 0 "
+-        "hnum "
+-        "xv 50 "
+-        "pic 0 "
++"xv 0 "
++"hnum "
++"xv 50 "
++"pic 0 "
+ 
+ // ammo
+-        "if 2 "
+-        "   xv  100 "
+-        "   anum "
+-        "   xv  150 "
+-        "   pic 2 "
+-        "endif "
++"if 2 "
++"   xv  100 "
++"   anum "
++"   xv  150 "
++"   pic 2 "
++"endif "
+ 
+ // armor
+-        "if 4 "
+-        "   xv  200 "
+-        "   rnum "
+-        "   xv  250 "
+-        "   pic 4 "
+-        "endif "
++"if 4 "
++"   xv  200 "
++"   rnum "
++"   xv  250 "
++"   pic 4 "
++"endif "
+ 
+ // selected item
+-        "if 6 "
+-        "   xv  296 "
+-        "   pic 6 "
+-        "endif "
++"if 6 "
++"   xv  296 "
++"   pic 6 "
++"endif "
+ 
+-        "yb -50 "
++"yb -50 "
+ 
+ // picked up item
+-        "if 7 "
+-        "   xv  0 "
+-        "   pic 7 "
+-        "   xv  26 "
+-        "   yb  -42 "
+-        "   stat_string 8 "
+-        "   yb  -50 "
+-        "endif "
++"if 7 "
++"   xv  0 "
++"   pic 7 "
++"   xv  26 "
++"   yb  -42 "
++"   stat_string 8 "
++"   yb  -50 "
++"endif "
+ 
+ // timer
+-        "if 9 "
+-        "   xv  262 "
+-        "   num 2   10 "
+-        "   xv  296 "
+-        "   pic 9 "
+-        "endif "
++"if 9 "
++"   xv  262 "
++"   num 2   10 "
++"   xv  296 "
++"   pic 9 "
++"endif "
+ 
+ //  help / weapon icon
+-        "if 11 "
+-        "   xv  148 "
+-        "   pic 11 "
+-        "endif "
+-        ;
++"if 11 "
++"   xv  148 "
++"   pic 11 "
++"endif "
++;
+ 
+ static const char dm_statusbar[] =
+-    "yb -24 "
++"yb -24 "
+ 
+ // health
+-    "xv 0 "
+-    "hnum "
+-    "xv 50 "
+-    "pic 0 "
++"xv 0 "
++"hnum "
++"xv 50 "
++"pic 0 "
+ 
+ // ammo
+-    "if 2 "
+-    "   xv  100 "
+-    "   anum "
+-    "   xv  150 "
+-    "   pic 2 "
+-    "endif "
++"if 2 "
++"   xv  100 "
++"   anum "
++"   xv  150 "
++"   pic 2 "
++"endif "
+ 
+ // armor
+-    "if 4 "
+-    "   xv  200 "
+-    "   rnum "
+-    "   xv  250 "
+-    "   pic 4 "
+-    "endif "
++"if 4 "
++"   xv  200 "
++"   rnum "
++"   xv  250 "
++"   pic 4 "
++"endif "
+ 
+ // selected item
+-    "if 6 "
+-    "   xv  296 "
+-    "   pic 6 "
+-    "endif "
++"if 6 "
++"   xv  296 "
++"   pic 6 "
++"endif "
+ 
+-    "yb -50 "
++"yb -50 "
+ 
+ // picked up item
+-    "if 7 "
+-    "   xv  0 "
+-    "   pic 7 "
+-    "   xv  26 "
+-    "   yb  -42 "
+-    "   stat_string 8 "
+-    "   yb  -50 "
+-    "endif "
++"if 7 "
++"   xv  0 "
++"   pic 7 "
++"   xv  26 "
++"   yb  -42 "
++"   stat_string 8 "
++"   yb  -50 "
++"endif "
+ 
+ // timer
+-    "if 9 "
+-    "   xv  246 "
+-    "   num 2   10 "
+-    "   xv  296 "
+-    "   pic 9 "
+-    "endif "
++"if 9 "
++"   xv  246 "
++"   num 2   10 "
++"   xv  296 "
++"   pic 9 "
++"endif "
+ 
+ //  help / weapon icon
+-    "if 11 "
+-    "   xv  148 "
+-    "   pic 11 "
+-    "endif "
++"if 11 "
++"   xv  148 "
++"   pic 11 "
++"endif "
+ 
+ //  frags
+-    "xr -50 "
+-    "yt 2 "
+-    "num 3 14 "
++"xr -50 "
++"yt 2 "
++"num 3 14 "
+ 
+ // spectator
+-    "if 17 "
+-    "xv 0 "
+-    "yb -58 "
+-    "string2 \"SPECTATOR MODE\" "
+-    "endif "
++"if 17 "
++"xv 0 "
++"yb -58 "
++"string2 \"SPECTATOR MODE\" "
++"endif "
+ 
+ // chase camera
+-    "if 16 "
+-    "xv 0 "
+-    "yb -68 "
+-    "string \"Chasing\" "
+-    "xv 64 "
+-    "stat_string 16 "
+-    "endif "
+-    ;
++"if 16 "
++"xv 0 "
++"yb -68 "
++"string \"Chasing\" "
++"xv 64 "
++"stat_string 16 "
++"endif "
++;
+ 
+ 
+ /*QUAKED worldspawn (0 0 0) ?
+--- a/m_boss31.c
++++ b/m_boss31.c
+@@ -386,7 +386,8 @@
+         else {
+             self->s.sound = 0;
+             self->monsterinfo.currentmove = &jorg_move_end_attack1;
+-        } else {
++        }
++    else {
+         self->s.sound = 0;
+         self->monsterinfo.currentmove = &jorg_move_end_attack1;
+     }
+--- a/m_brain.c
++++ b/m_brain.c
+@@ -228,11 +228,9 @@
+         };
+         mmove_t brain_move_walk2 = {FRAME_walk201, FRAME_walk240, brain_frames_walk2, NULL};
+     }
+-}
+ #endif
+ 
+-void brain_walk(edict_t *self)
+-{
++void brain_walk(edict_t *self) {
+ //  if (random() <= 0.5)
+     self->monsterinfo.currentmove = &brain_move_walk1;
+ //  else
+@@ -241,7 +239,8 @@
+ 
+ 
+ 
+-mframe_t brain_frames_defense [] = {
++mframe_t brain_frames_defense [] =
++{
+     { ai_move,    0,  NULL },
+     { ai_move,    0,  NULL },
+     { ai_move,    0,  NULL },
+@@ -254,7 +253,8 @@
+ };
+ mmove_t brain_move_defense = {FRAME_defens01, FRAME_defens08, brain_frames_defense, NULL};
+ 
+-mframe_t brain_frames_pain3 [] = {
++mframe_t brain_frames_pain3 [] =
++{
+     { ai_move,    -2, NULL },
+     { ai_move,    2,  NULL },
+     { ai_move,    1,  NULL },
+@@ -264,7 +264,8 @@
+ };
+ mmove_t brain_move_pain3 = {FRAME_pain301, FRAME_pain306, brain_frames_pain3, brain_run};
+ 
+-mframe_t brain_frames_pain2 [] = {
++mframe_t brain_frames_pain2 [] =
++{
+     { ai_move,    -2, NULL },
+     { ai_move,    0,  NULL },
+     { ai_move,    0,  NULL },
+@@ -276,7 +277,8 @@
+ };
+ mmove_t brain_move_pain2 = {FRAME_pain201, FRAME_pain208, brain_frames_pain2, brain_run};
+ 
+-mframe_t brain_frames_pain1 [] = {
++mframe_t brain_frames_pain1 [] =
++{
+     { ai_move,    -6, NULL },
+     { ai_move,    -2, NULL },
+     { ai_move,    -6, NULL },
+@@ -306,8 +308,7 @@
+ // DUCK
+ //
+ 
+-void brain_duck_down(edict_t *self)
+-{
++void brain_duck_down(edict_t *self) {
+     if (self->monsterinfo.aiflags & AI_DUCKED)
+         return;
+     self->monsterinfo.aiflags |= AI_DUCKED;
+@@ -316,23 +317,22 @@
+     gi.linkentity(self);
+ }
+ 
+-void brain_duck_hold(edict_t *self)
+-{
++void brain_duck_hold(edict_t *self) {
+     if (level.time >= self->monsterinfo.pausetime)
+         self->monsterinfo.aiflags &= ~AI_HOLD_FRAME;
+     else
+         self->monsterinfo.aiflags |= AI_HOLD_FRAME;
+ }
+ 
+-void brain_duck_up(edict_t *self)
+-{
++void brain_duck_up(edict_t *self) {
+     self->monsterinfo.aiflags &= ~AI_DUCKED;
+     self->maxs[2] += 32;
+     self->takedamage = DAMAGE_AIM;
+     gi.linkentity(self);
+ }
+ 
+-mframe_t brain_frames_duck [] = {
++mframe_t brain_frames_duck [] =
++{
+     { ai_move,    0,  NULL },
+     { ai_move,    -2, brain_duck_down },
+     { ai_move,    17, brain_duck_hold },
+@@ -344,8 +344,7 @@
+ };
+ mmove_t brain_move_duck = {FRAME_duck01, FRAME_duck08, brain_frames_duck, brain_run};
+ 
+-void brain_dodge(edict_t *self, edict_t *attacker, float eta)
+-{
++void brain_dodge(edict_t *self, edict_t *attacker, float eta) {
+     if (random() > 0.25)
+         return;
+ 
+@@ -357,7 +356,8 @@
+ }
+ 
+ 
+-mframe_t brain_frames_death2 [] = {
++mframe_t brain_frames_death2 [] =
++{
+     { ai_move,    0,  NULL },
+     { ai_move,    0,  NULL },
+     { ai_move,    0,  NULL },
+@@ -366,7 +366,8 @@
+ };
+ mmove_t brain_move_death2 = {FRAME_death201, FRAME_death205, brain_frames_death2, brain_dead};
+ 
+-mframe_t brain_frames_death1 [] = {
++mframe_t brain_frames_death1 [] =
++{
+     { ai_move,    0,  NULL },
+     { ai_move,    0,  NULL },
+     { ai_move,    -2, NULL },
+@@ -393,13 +394,11 @@
+ // MELEE
+ //
+ 
+-void brain_swing_right(edict_t *self)
+-{
++void brain_swing_right(edict_t *self) {
+     gi.sound(self, CHAN_BODY, sound_melee1, 1, ATTN_NORM, 0);
+ }
+ 
+-void brain_hit_right(edict_t *self)
+-{
++void brain_hit_right(edict_t *self) {
+     vec3_t  aim;
+ 
+     VectorSet(aim, MELEE_DISTANCE, self->maxs[0], 8);
+@@ -407,13 +406,11 @@
+         gi.sound(self, CHAN_WEAPON, sound_melee3, 1, ATTN_NORM, 0);
+ }
+ 
+-void brain_swing_left(edict_t *self)
+-{
++void brain_swing_left(edict_t *self) {
+     gi.sound(self, CHAN_BODY, sound_melee2, 1, ATTN_NORM, 0);
+ }
+ 
+-void brain_hit_left(edict_t *self)
+-{
++void brain_hit_left(edict_t *self) {
+     vec3_t  aim;
+ 
+     VectorSet(aim, MELEE_DISTANCE, self->mins[0], 8);
+@@ -421,7 +418,8 @@
+         gi.sound(self, CHAN_WEAPON, sound_melee3, 1, ATTN_NORM, 0);
+ }
+ 
+-mframe_t brain_frames_attack1 [] = {
++mframe_t brain_frames_attack1 [] =
++{
+     { ai_charge,  8,  NULL },
+     { ai_charge,  3,  NULL },
+     { ai_charge,  5,  NULL },
+@@ -443,15 +441,13 @@
+ };
+ mmove_t brain_move_attack1 = {FRAME_attak101, FRAME_attak118, brain_frames_attack1, brain_run};
+ 
+-void brain_chest_open(edict_t *self)
+-{
++void brain_chest_open(edict_t *self) {
+     self->spawnflags &= ~65536;
+     self->monsterinfo.power_armor_type = POWER_ARMOR_NONE;
+     gi.sound(self, CHAN_BODY, sound_chest_open, 1, ATTN_NORM, 0);
+ }
+ 
+-void brain_tentacle_attack(edict_t *self)
+-{
++void brain_tentacle_attack(edict_t *self) {
+     vec3_t  aim;
+ 
+     VectorSet(aim, MELEE_DISTANCE, 0, 8);
+@@ -460,8 +456,7 @@
+     gi.sound(self, CHAN_WEAPON, sound_tentacles_retract, 1, ATTN_NORM, 0);
+ }
+ 
+-void brain_chest_closed(edict_t *self)
+-{
++void brain_chest_closed(edict_t *self) {
+     self->monsterinfo.power_armor_type = POWER_ARMOR_SCREEN;
+     if (self->spawnflags & 65536) {
+         self->spawnflags &= ~65536;
+@@ -469,7 +464,8 @@
+     }
+ }
+ 
+-mframe_t brain_frames_attack2 [] = {
++mframe_t brain_frames_attack2 [] =
++{
+     { ai_charge,  5,  NULL },
+     { ai_charge,  -4, NULL },
+     { ai_charge,  -4, NULL },
+@@ -490,8 +486,7 @@
+ };
+ mmove_t brain_move_attack2 = {FRAME_attak201, FRAME_attak217, brain_frames_attack2, brain_run};
+ 
+-void brain_melee(edict_t *self)
+-{
++void brain_melee(edict_t *self) {
+     if (random() <= 0.5)
+         self->monsterinfo.currentmove = &brain_move_attack1;
+     else
+@@ -503,7 +498,8 @@
+ // RUN
+ //
+ 
+-mframe_t brain_frames_run [] = {
++mframe_t brain_frames_run [] =
++{
+     { ai_run, 9,  NULL },
+     { ai_run, 2,  NULL },
+     { ai_run, 3,  NULL },
+@@ -518,8 +514,7 @@
+ };
+ mmove_t brain_move_run = {FRAME_walk101, FRAME_walk111, brain_frames_run, NULL};
+ 
+-void brain_run(edict_t *self)
+-{
++void brain_run(edict_t *self) {
+     self->monsterinfo.power_armor_type = POWER_ARMOR_SCREEN;
+     if (self->monsterinfo.aiflags & AI_STAND_GROUND)
+         self->monsterinfo.currentmove = &brain_move_stand;
+@@ -528,8 +523,7 @@
+ }
+ 
+ 
+-void brain_pain(edict_t *self, edict_t *other, float kick, int damage)
+-{
++void brain_pain(edict_t *self, edict_t *other, float kick, int damage) {
+     float   r;
+ 
+     if (self->health < (self->max_health / 2))
+@@ -555,8 +549,7 @@
+     }
+ }
+ 
+-void brain_dead(edict_t *self)
+-{
++void brain_dead(edict_t *self) {
+     VectorSet(self->mins, -16, -16, -24);
+     VectorSet(self->maxs, 16, 16, -8);
+     self->movetype = MOVETYPE_TOSS;
+@@ -567,8 +560,7 @@
+ 
+ 
+ 
+-void brain_die(edict_t *self, edict_t *inflictor, edict_t *attacker, int damage, vec3_t point)
+-{
++void brain_die(edict_t *self, edict_t *inflictor, edict_t *attacker, int damage, vec3_t point) {
+     int     n;
+ 
+     self->s.effects = 0;
+@@ -601,8 +593,7 @@
+ 
+ /*QUAKED monster_brain (1 .5 0) (-16 -16 -24) (16 16 32) Ambush Trigger_Spawn Sight
+ */
+-void SP_monster_brain(edict_t *self)
+-{
++void SP_monster_brain(edict_t *self) {
+     if (deathmatch->value) {
+         G_FreeEdict(self);
+         return;
+--- a/p_client.c
++++ b/p_client.c
+@@ -1056,7 +1056,7 @@
+ */
+ void PutClientInServer(edict_t *ent)
+ {
+-    vec3_t  mins = {-16, -16, -24};
++    vec3_t  mins = { -16, -16, -24};
+     vec3_t  maxs = {16, 16, 32};
+     int     index;
+     vec3_t  spawn_origin, spawn_angles;
+--- a/g_local.h
++++ b/g_local.h
+@@ -233,10 +233,10 @@
+ 
+ typedef struct gitem_s {
+     char        *classname; // spawning name
+-    qboolean(*pickup)(struct edict_s *ent, struct edict_s *other);
+-    void (*use)(struct edict_s *ent, struct gitem_s *item);
+-    void (*drop)(struct edict_s *ent, struct gitem_s *item);
+-    void (*weaponthink)(struct edict_s *ent);
++    qboolean    (*pickup)(struct edict_s *ent, struct edict_s *other);
++    void        (*use)(struct edict_s *ent, struct gitem_s *item);
++    void        (*drop)(struct edict_s *ent, struct gitem_s *item);
++    void        (*weaponthink)(struct edict_s *ent);
+     char        *pickup_sound;
+     char        *world_model;
+     int         world_model_flags;
+@@ -245,7 +245,7 @@
+     // client side info
+     char        *icon;
+     char        *pickup_name;   // for printing on pickup
+-    int         count_width;        // number of digits to display by icon
++    int         count_width;    // number of digits to display by icon
+ 
+     int         quantity;       // for ammo how much, for weapons how much is used per shot
+     char        *ammo;          // for weapons
+@@ -270,7 +270,7 @@
+     char        helpmessage1[512];
+     char        helpmessage2[512];
+     int         helpchanged;    // flash F1 icon if non 0, play sound
+-    // and increment only if 1, 2, or 3
++                                // and increment only if 1, 2, or 3
+ 
+     gclient_t   *clients;       // [maxclients]
+ 
+@@ -389,21 +389,21 @@
+     float       next_speed;
+     float       remaining_distance;
+     float       decel_distance;
+-    void (*endfunc)(edict_t *);
++    void        (*endfunc)(edict_t *);
+ } moveinfo_t;
+ 
+ 
+ typedef struct {
+-    void (*aifunc)(edict_t *self, float dist);
++    void    (*aifunc)(edict_t *self, float dist);
+     float   dist;
+-    void (*thinkfunc)(edict_t *self);
++    void    (*thinkfunc)(edict_t *self);
+ } mframe_t;
+ 
+ typedef struct {
+     int         firstframe;
+     int         lastframe;
+     mframe_t    *frame;
+-    void (*endfunc)(edict_t *self);
++    void        (*endfunc)(edict_t *self);
+ } mmove_t;
+ 
+ typedef struct {
+@@ -412,16 +412,16 @@
+     int         nextframe;
+     float       scale;
+ 
+-    void (*stand)(edict_t *self);
+-    void (*idle)(edict_t *self);
+-    void (*search)(edict_t *self);
+-    void (*walk)(edict_t *self);
+-    void (*run)(edict_t *self);
+-    void (*dodge)(edict_t *self, edict_t *other, float eta);
+-    void (*attack)(edict_t *self);
+-    void (*melee)(edict_t *self);
+-    void (*sight)(edict_t *self, edict_t *other);
+-    qboolean(*checkattack)(edict_t *self);
++    void        (*stand)(edict_t *self);
++    void        (*idle)(edict_t *self);
++    void        (*search)(edict_t *self);
++    void        (*walk)(edict_t *self);
++    void        (*run)(edict_t *self);
++    void        (*dodge)(edict_t *self, edict_t *other, float eta);
++    void        (*attack)(edict_t *self);
++    void        (*melee)(edict_t *self);
++    void        (*sight)(edict_t *self, edict_t *other);
++    qboolean    (*checkattack)(edict_t *self);
+ 
+     float       pausetime;
+     float       attack_finished;
+@@ -818,8 +818,8 @@
+     char        netname[16];
+     int         hand;
+ 
+-    qboolean    connected;          // a loadgame will leave valid entities that
+-    // just don't have a connection yet
++    qboolean    connected;  // a loadgame will leave valid entities that
++                            // just don't have a connection yet
+ 
+     // values saved and restored from edicts when changing levels
+     int         health;
+@@ -948,9 +948,9 @@
+ struct edict_s {
+     entity_state_t  s;
+     struct gclient_s    *client;    // NULL if not a player
+-    // the server expects the first part
+-    // of gclient_s to be a player_state_t
+-    // but the rest of it is opaque
++                                    // the server expects the first part
++                                    // of gclient_s to be a player_state_t
++                                    // but the rest of it is opaque
+ 
+     qboolean    inuse;
+     int         linkcount;
+@@ -1011,7 +1011,7 @@
+     int         mass;
+     float       air_finished;
+     float       gravity;        // per entity gravity multiplier (1.0 is normal)
+-    // use for lowgrav artifact, flares
++                                // use for lowgrav artifact, flares
+ 
+     edict_t     *goalentity;
+     edict_t     *movetarget;
+@@ -1019,18 +1019,18 @@
+     float       ideal_yaw;
+ 
+     float       nextthink;
+-    void (*prethink)(edict_t *ent);
+-    void (*think)(edict_t *self);
+-    void (*blocked)(edict_t *self, edict_t *other);         //move to moveinfo?
+-    void (*touch)(edict_t *self, edict_t *other, cplane_t *plane, csurface_t *surf);
+-    void (*use)(edict_t *self, edict_t *other, edict_t *activator);
+-    void (*pain)(edict_t *self, edict_t *other, float kick, int damage);
+-    void (*die)(edict_t *self, edict_t *inflictor, edict_t *attacker, int damage, vec3_t point);
++    void        (*prethink)(edict_t *ent);
++    void        (*think)(edict_t *self);
++    void        (*blocked)(edict_t *self, edict_t *other);         // move to moveinfo?
++    void        (*touch)(edict_t *self, edict_t *other, cplane_t *plane, csurface_t *surf);
++    void        (*use)(edict_t *self, edict_t *other, edict_t *activator);
++    void        (*pain)(edict_t *self, edict_t *other, float kick, int damage);
++    void        (*die)(edict_t *self, edict_t *inflictor, edict_t *attacker, int damage, vec3_t point);
+ 
+     float       touch_debounce_time;        // are all these legit?  do we need more/less of them?
+     float       pain_debounce_time;
+     float       damage_debounce_time;
+-    float       fly_sound_debounce_time;    //move to clientinfo
++    float       fly_sound_debounce_time;    // move to clientinfo
+     float       last_move_time;
+ 
+     int         health;
+@@ -1048,7 +1048,7 @@
+     int         dmg;
+     int         radius_dmg;
+     float       dmg_radius;
+-    int         sounds;         //make this a spawntemp var?
++    int         sounds;         // make this a spawntemp var?
+     int         count;
+ 
+     edict_t     *chain;

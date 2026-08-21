@@ -1,0 +1,14 @@
+# Vendored provenance must round-trip byte-for-byte.
+#
+# R-PROV-2a verified the harness archive byte-identical by recursive md5, and the
+# rr-cache is content-addressed by conflict hash -- git normalising CRLF to LF in
+# a preimage would silently stop the cache matching. The OSP config inputs are
+# CRLF as shipped in 1999 and are an input to mkosp.py. So: no text conversion,
+# no filtering, anywhere under vendor/.
+vendor/** -text -diff
+vendor/**/*.bundle binary
+
+# The engine headers and game sources are vendored verbatim from q2pro
+# (R-CORE-9, R-CORE-5) and must stay byte-identical to the pin.
+inc/** -text
+src/** -text

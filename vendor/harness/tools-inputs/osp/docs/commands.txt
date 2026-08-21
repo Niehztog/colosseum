@@ -1,0 +1,328 @@
+// OSP Tourney DM Client/Server Command Listing
+// ============================================
+// rhea@ittc.ukans.edu
+// 01 Jul 1999
+//
+// Version(2.5)
+//
+
+Server commands:
+----------------
+	sv allready - Forces all clients to "ready" status.
+	sv allnotready - Forces all clients to "not ready" status.
+	sv mpause - A toggle that pauses/unpauses a match.
+	sv playerlist - Reloads the current specified playername list.
+		--> If a filename is specified with this command, the
+		    player list will be loaded from the specified file.
+
+Gladiator Bot control:
+	sv addbot <bot's_name> <skin> <charfile> <charname> - Adds specified bot
+	sv removebot [bot's_name] - Removes specified bot.  If no name specified,
+					    then first found bot will be removed.
+	sv addrandom [number] - Adds a random bot to the game.  If a numeric
+					[number] is included, it will add [number]
+					random bots.
+	----> For other Gladiator bot-related commands, please refer to the
+		Gladiator documentation found in the "gladiator/" directory
+		or visit http://www.botepidemic.com/gladiator.
+
+IP banning (same interface as vanilla 3.20 DM):
+	sv addip <ip-mask>  - adds an ip to the ban list
+	sv listip <ip-mask> - removes an ip from the ban list
+	sv removeip <ip-mask> - remove an ip from the list
+	sv writeip - writes the ban list to <gamedir>/listip.cfg.
+	  --> You can exec this .cfg on a server load to load the list
+		on subsequent server runs:
+			quake2 +set dedicated 1 +exec listip.cfg
+	Note:  The <ip-mask> is a simple mask system.  Adding 192.168 to
+		 the list would block out everyone in the 192.168.*.* net
+		 block.  Currently, you have up to 1024 banned subnets.
+
+A new cvar is also supported called 'filterban'.  It defaults to
+"1" which means "allow everyone to connect _except_ those
+matching in the ban list."  If you set it to "0", the meaning
+reverses to: "Don't allow anyone to connect unless they are in
+the list."
+
+Client commands:
+----------------
+	motd - bings up current Message Of The Day.
+	id - enables/disables player identification, if allowed by server.
+	ready - puts client in "ready" status if in match mode.
+	notready - puts client in "not ready" status if in match mode and
+		   if the match has not already begun.
+	menu - Pulls up client menu (just like hitting inven key).
+	matchinfo - if the server is not in deathmatch-only mode, then the
+		    client will be shown the parameters of the current match.
+
+	players - Lists all active players in the game.  It gives the clients'
+		    ID #, name, and [BOT] if they are a Gladiator server-side bot.
+
+	chasecam - Takes client out of game and puts them into "chasecam" mode.
+		   This option is not allowed if a qualifier/team/1v1 match is
+		   in progress.  It is also used as a toggle to leave chasecam
+		   mode and return to play.
+	chase - Same as "chasecam".
+
+	observe - Takes a client out of the game and puts them into "observer"
+		  mode.  This option is not allowed if a qualifier/team/1v1
+		  match is in progress.
+	observer - Same as "observe".
+
+	autocam - Takes client out of game and puts them into "autocam" mode.
+		    Can also be used to toggle out of autocam mode and return
+		    to a game in progress (if allowed).  [Subcommands for the
+		    autocam can be found further below.]
+
+	hook/+hook/+grapple - Activates the hook (if enabled).
+	unhook/-hook/-grapple - Dectivates the hook (if enabled).
+
+	droprune/drop rune - If runes are enabled, allows the client to drop
+				   the rune they are holding.
+
+	join/joingame - In FFA play (Regular/Qualifier DM), allows client to join
+			    a game in progess.
+
+	accuracy/stats - Shows player's current hit/attempt statistics for all
+			 weapons that have been used by the player within the
+			 game, except the BFG10K.  I figure that I would spare people
+			 the possible embarrassment of having an accuracy of LESS than
+			 100% with this silly weapon :)
+
+	oldstats - If used by itself, shows the players whose stats are available
+		     from the previous round.  If used with a correct playername,
+		     displays their stats from the previous round.
+
+	oldscores - Displays the scoreboard from the last match played.
+
+	highscores/hiscore - Displays the high scores for a given map, if in FFA mode.
+
+	talkto/tell/talk <player_name|ID> - Sends a message to a specific player.
+
+	hud - Allows client to toggle positioning of countdown timer from right
+	      side to bottom-middle.  Can also be done from menus.
+
+	referee/admin/ref - Allows a player to have access to the referee commands
+				 (listed below).  This command requires the player to
+				 include either the referee_password or rcon_password
+				 to gain this status.
+
+	vote -  Allows client to propose changes to the current match.  These
+		changes, if passed, will be good only for the current round of
+		play.  Loading of the next map will force default values to be
+		reset.  The following things are available for voting:
+			      map:  Player can choose from any map in the queue.
+		   timelimit/tl:  Change current timelimit
+		   fraglimit/fl:  Change current fraglimit
+			     hook:  Enable/disable hook in match.
+			     quad:  Enable/disable quad damage in match.
+			      bfg:  Enable/disable BFG10K in match.
+			  toggles:  Bitwise (OR) setting of particular items.
+				      (See below for these settings).
+			  addbots:  Propose to add <#> bots.
+			  rembots:  Propose to remove <#> bots.
+			   config:  Selects new server config.
+			    runes:  Enable/disable Lithium-style runes.
+			     kick:  Kicks a particular player from the server.
+			      yes:  Votes "yea" for current proposal.
+			       no:  Votes "nay" for current proposal.
+		Issuing a "vote" by itself will give information on the current
+		proposed change in progress.  If there is no proposal, then the
+		client will be given a list of options to choose from.  This is
+		the same if issuing a "vote <option>", with more specific infor-
+		mation on the <option> in question.  A threshold must be reached
+		by all clients in the game to approve or deny a vote proposal.
+		It should be noted that all of these settings can be done through
+		the menu interface as well.
+	yes - If a vote is in progress, allows the client to approve the vote.
+	no - If a vote is in progress, allows the client to deny the vote.
+
+	[ TOGGLE vote item settings (setting value means to enable): ]
+		ALLOW_QUAD       :    1
+		ALLOW_INVUL      :    2
+		ALLOW_QUADDROP   :    4
+		ALLOW_BFG        :    8
+		ALLOW_POWERARMOR :   16
+		ALLOW_WEAPONSTAY :   32
+		ALLOW_SELFDAMAGE :   64
+		ALLOW_TEAMDAMAGE :  128
+
+Additional Autocam commands:
+----------------------------
+The following commands can be used with the "autocam" command to
+adjust the camera's characteristics:
+		follow = Follows the current player, and does not switch.
+		normal = Normal tracking of clients for approximately 15 seconds,
+			   before switching to another player.
+		min_xy = Differential behind player correction rate (movement along
+			   the XY-plane).
+		min_z = Differentail height correction rate (movement vertically
+			  up or down from player's view hight).
+		min_angle = Differentail YAW correction rate (rotate on XY-plane).
+				Consider this as the "panning" rate of the camera as
+				it focusses on the currently tracked player.
+
+Teamplay/1V1 (where applicable) commands
+----------------------------------------
+	teamname - If in team match mode, allows player to view or change
+		   his/her team's name.
+	teamskin - If in team match mode, allows player to view or set his/her
+		   team's skin.
+	say_team/steam - Sends messages ONLY to members on your team.  CTF-based
+			     "%" messages are also available to give player info,
+			     location, sightings.
+	join/team - If in team match mode, allows player to join a specified team.
+		    If no arguments are given, this command shows the player's
+		    current team, if he/she is in the game.
+	joincode - Allows observers to join a match in progress.  For players
+		     already in the game, gives them the team's joincode.  The
+		     captain also has the option to set the joincode manually.
+	switchteam - Allows a client to switch teams if he/she is already on
+		      the opposing team.  Players can also switch during a match,
+		      but they must first be "invited" by an opposing team's
+		      player.
+	invite - If in team match mode, allows a player to "invite" another
+		  player (in observer mode) to join his/her team if a match is
+		  already in progress.
+	pick/pickplayer - Same as the "invite" command, listed above.
+	lockteam/teamlock/lock - "Locks" the team's current player count.  No
+				 other players will be allowed to join the team
+				 unless they are "invite"d.
+	unlockteam/teamunlock/unlock - "Unlocks" a team's player count to allow
+				       anyone to join the team.
+	readyteam/teamready - Readies the entire team (Captain-use only)
+	unreadyteam/notreadyteam - Unreadies entire team (Captain-use only)
+	captain <player_name> - By itself, lists current team captain.
+				The captain can also add the <player_name>
+				parameter to give captain-ship to <player_name>
+	kickplayer/remove <player_name|player_ID> - Removes <player_name>
+				(or player_ID) from team (Captain-use only).
+	time/matchpause/timein - Calls a time-out/time-in, depending on current
+					 match paused status (Captain-use only).
+	checkpoint <string>: Notifies teammate bots of location of checkpoint
+				   labeled as <string>.
+
+
+REFEREE-CLIENT COMMANDS:
+========================
+	r_help - Displays usage info on all referee-specific commands.
+	r_kick - Kicks a specified player.
+	r_mpause - Pauses/unpauses a match in progress.
+	r_map - Allows for selection of any map in the map queue.
+	r_timelimit - Sets server's timelimit.
+	r_fraglimit - Sets server's fraglimit.
+	r_stopmatch - Stops a match that is currently in progress.
+	r_allready - Sets all clients to ready status, if in a synced match.
+	r_allnotready - Sets all clients to notready status.
+	lockteam/teamlock/lock <teamname> - "Locks" <teamname>'s current player
+				 count.  No other players will be allowed to join the
+				 team unless they are "invite"d.
+	unlockteam/teamunlock/unlock <teamname> - "Unlocks" <teamname>'s player count
+				       to allow anyone to join the team.
+	readyteam/teamready <teamname> - Readies all players on <teamname>
+	unreadyteam/notreadyteam - Unreadies all players on <teamname>
+	captain <teamname> <player_name> - With only the <teamname> parameter, lists
+				 current <teamname>'s captain.  Adding the <player_name>
+				 parameter transfers the <teamname>'s captain-ship to
+				 <player_name>.
+	kickplayer/remove <teamname> <player_name> - Removes <player_name> that is a
+						     member of <teamname>.
+	time/matchpause/timein - Allows referee to unpause a match that has been
+				 put into "time-out" mode.  Referees cannot use
+				 this command to call a timeout if they are not
+				 also a team captain.  If the match needs to be
+				 paused, the referee should use the "r_mpause"
+				 command.
+
+
+
+Client Variables:
+-----------------
+ngWorldStats from NetGames USA (http://www.netgamesusa.com) is a new
+Internet-wide logging system that is used to track ALL events related
+to a player when they play on an ngWorldStats-enabled server.  However,
+to keep track of unique individuals, a requirement is needed from the
+client to uniquely identify them from the rest of the game-playing world.
+ 
+To ensure that a client's stats are not added into another player's stats
+when one or more players are using the same name, the client can put the
+following line in their autoexec.cfg file (or any startup script):
+
+		set ngWorldStats_password my_special_password_string
+
+The "my_special_password_string" is any sequence of characters and can be any
+length in size.  It is *highly* recommended to use a string of at least eight
+characters, but this is not a requirement.  ngWorldStats identifiers are based
+on both the player's name and ngWorldStats_password string.  Thus, if a client
+changes either their name or ngWorldStats_password string, then they will have
+a different unique player within the ngWorldStats database.  Visit:
+
+	http://Quake2.ngWorldStats.com/
+
+for more information on ngWorldStats for Quake2.
+
+Players can determine if a server is ngWorldStats-enabled by looking at the
+severinfo variable "ngWorldStats_Status" on game browser utilities such as
+GameSpy.  If the value of this variable is "*** ENABLED ***", then all events
+will be sent to the main ngWorldStats collector sites.  A value of
+"<<< Disabled >>>" means that no player stat information is being recorded to
+the global ngWorldStats system.
+
+
+There are two variables that have been set up that allow for clients to
+automatically set their team preferences when they connect.  Note that this
+is *only* in the team-play mode.  Also, both of the below variables must be
+set in order for the client's preferences to be valid (and subsequently
+used).
+
+	default_teamname:
+		Specifies the desired teamname to use.  If there is one team
+		that is empty when a player enters the game from observer mode,
+		the player will be added to that (empty) team and the teamname
+		and teamskin will be chaged to the client's personal default
+		values.  If there is already a team set up with the same name
+		as the client's default_teamname, then the client will be added
+		to that team when he/she enters the game.  Useful for rejoining
+		teammates across level loads.
+
+	default_teamskin:
+		Specifies the default teamskin when starting a new team.
+
+	default_joincode:
+		Specifies the default joincode that is to be used for the team
+		that the player is joining, if they join as captain.
+
+It should be further noted that the client will have these variables
+automatically set by the server if one of the three following conditions
+occur:
+	1. A client does NOT have these default_* values set when he/she joins
+	   a team.
+	2. The teamname of the team that the client is a member of is changed.
+	3. The teamskin of the team that the client is a member of is changed. 
+
+	Note: the default_joincode is *not* automatically sent to the client.
+
+To allow a client to _join_ as a REFEREE in a match (any type), the client
+must set the following variables before connecting to the server:
+
+	ref_status:
+		0 - Do NOT attempt to become a referee.
+		1 - Client is attempting to be a referee.
+
+	ref_passwd:
+		Password set on the server for all referees.
+
+Here, it is *required* that both of the above variables are set correctly
+before connecting.  If successful, the client will have all referee commands
+available (in addition to regualr client commands).  However, the referee is
+NEVER allowed to enter the match (i.e. play and kill people) at any point in
+time.  If the referee wants to play, he/she must reconnect with ref_status
+set to 0.
+
+Note that this status is a bit different than when clients enable referee
+status while playing.  The above-described format was designed primarily
+for referees at a LAN tournament, where they must ref several (many) matches
+throughout the tourney.  Rather than having to log in to each server and
+setting up parameters, they can do it all in their autoexec.cfg before
+connecting to a server.  It also gives them a safeguard from accidentally
+entering a match and affecting gameplay. 

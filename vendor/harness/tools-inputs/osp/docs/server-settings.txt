@@ -1,0 +1,1093 @@
+// OSP Tourney DM Server Configuration File
+// ========================================
+// rhea@ittc.ukans.edu
+// 01 Jul 1999
+//
+// Version(2.5)
+//
+//
+// * WARNING * WARNING * WARNING *
+// -------------------------------
+// This file should *NOT* be used as a template for creating your own
+// server .cfg file.  This file is _much_ too large for Quake II to
+// handle as a set of server commands.  It is recommended that you
+// use some of the sample .cfg scripts contained in the distribution
+// to use as templates for your custom configurations.  If you *MUST*
+// use this file as a template, you will need to remove ALL comments
+// contained herein (denoted with "//" at the start of the line).
+// -------------------------------
+// * WARNING * WARNING * WARNING *
+//
+//
+// "dmflags" settings:
+//
+//        DF_NO_HEALTH            1
+//        DF_NO_ITEMS             2
+//        DF_WEAPONS_STAY         4
+//        DF_NO_FALLING           8
+//        DF_INSTANT_ITEMS        16
+//        DF_SAME_LEVEL           32
+//        DF_SKINTEAMS            64
+//        DF_MODELTEAMS           128
+//        DF_NO_FRIENDLY_FIRE     256
+//        DF_SPAWN_FARTHEST       512
+//        DF_FORCE_RESPAWN        1024
+//        DF_NO_ARMOR             2048
+//        DF_ALLOW_EXIT           4096
+//        DF_INFINITE_AMMO        8192
+//        DF_QUAD_DROP            16384
+//        DF_FIXED_FOV            32768
+//
+//
+set hostname "OSP Tourney DM"
+//set rcon_password none
+
+set public 0
+//setmaster q2master.planetquake.com 206.222.86.244
+
+set dmflags 17428
+set deathmatch 1
+
+set maxclients 12
+set fraglimit 0
+set timelimit 10
+
+
+// ###################################
+//      VARIOUS SERVER PARAMETERS
+// ###################################
+//
+// camera_depth:
+//	Specifies the default "depth" the camera is positioned behind a
+//	a chased player when a client enters chasecam mode.  Only positive
+//	floating point values accepted.  Default = 60.0.  This value is
+//	changeable by client with forward/reverse keys.
+//
+// camera_pitch:
+//	Defines the pitch (up/down) angle the camera is positioned when
+//	viewing the chased player.  Ranges for this can be from 0.0 to 45.0.
+//	Default = 15.0.  This value is fixed and cannot be changed by clients.
+//
+// numgibs:
+//	Specifies the number of gibs thrown from player's who *really* die.
+//	Increasing this number can make for some spectacular deaths, but can
+//	potentially increase lag.  Make this number small to make for smoother
+//	(but more boring) play.  Default number of thrown gibs is 4 (plus the
+//	player's head).  In qualifier rounds, recommend this value to be low
+//	to decrease server lag (set to 0 if a LOT of people.. then only heads
+//	will roll, err, gib).
+//
+// nextlevel_click:
+//	Amount of time before a client can click to load next level
+//	(default = 15.0).
+//
+// nextlevel_default:
+//	Amount of time before the next level loads automatically (usually
+//	larger than nextlevel_click) (default = 45.0).
+//
+// 	---> You can use floating point values, which are on the scale of
+//	     seconds.  A value of "0" means that that either a user cannot
+//	     click to load next level (nextlevel_click), or the next level
+//	     will not load automatically (nextlevel_default).  A value of
+//	     "0" will halt the next level load indefinately (same effect as
+//	     setting map_halt to 1).
+//
+// allow_id:
+//	Specify opponent ID tagging for client:
+//	   0 = ID tagging OFF by default, but can be changed by client
+//	 * 1 = ID tagging ON by default, but can be changed by client
+//	   2 = ID tagging OFF, and cannot be changed by client
+//	   3 = ID tagging ON, and cannot be changed by client
+//
+// respawn_delay:
+//	Specify an allowable delay (in seconds) between player respawns when
+//	the forced respawn DM flag is enabled.  A value of 0 (default) means
+//	to force a respawn immediately (the standard action in regular DM).
+//
+// referee_enable:
+//	* 0 = Disable CONNECTING referee clients.
+//	  1 = Allow clients (with proper passwords) to join as referees.
+//
+// referee_password:
+//	The password required from clients who are attempting to connect as
+//	referees (default = NULL).
+//
+// ffa_hurtself:
+//	  0 = Players cannot hurt themselves in Regular/Qualifier DM modes.
+//	* 1 = Players CAN hurt themselves in Regular/Qualifier DM modes.
+//
+// motd_file:
+//	Specifies the Message Of The Day text file to display to players
+//	during the match.
+//	   ---> Default is "motd.txt".  The maximum size of this text
+//		  is 9 rows of text with up to 32 characters in each row.
+//
+// fast_respawn <value>:
+//	Item respawn timing based on player counts (regular DM only).
+//	<value> is the percentage of an item's normal respawn time based
+//	on maximum player counts (default = 1.0).
+//
+// fast_minpbound <value>:
+//	Specifies the minimum # to use when figuring an item's respawn
+//	time.  Either the current player count or this value will be
+//	used, whichever is greater (default = 1).
+//
+// fast_maxpbound <value>:
+//	Specifies the maximum # to use when figuring an item's respawn
+//	time.  Either the current player count or this value will be
+//	used, whichever is lower.  This value is also used as the base
+//	for the item respawn time ratio (default = 20).
+//
+//	---> item respawn times are based on the following formula:
+//
+//		item_respawn_time = normal_respawn_time *
+//					  (1.0 - (1.0 - fast_respawn)* (A / B))
+//
+//		- A = fast_minpbound or player count, whichever is greater
+//		- B = fast_maxpbound or player count, whichever is lower
+//
+//	*** NOTE: If you want to just have a constant decrease in item
+//		    respawn times regardless of player counts, just set
+//		    fast_respawn to something less than 1.0 and make
+//		    fast_minpbound and fast_maxpbound set to the same value.
+//
+// flood_msgs <value>:
+//	# of messages allowed in a time interval defined in flood_persecond
+//	(default = 4).
+//
+// flood_persecond <sec>:
+//	Time interval (in sec) for flood_msgs messages to be sent by a
+//	client before they are muzzled (default = 4).
+//
+// flood_waitdelay <sec>:
+//	Amount of time a player is muzzled if they are flooding
+//	messages (default = 10).
+//
+// console_timestamp <value>:
+//	Gives local server info in the console every <value> map changes.
+//	Setting <value> to 0 disables this feature (default = 10).
+//
+// player_ban:
+//	* 0 = All players listed in the player_file file will NOT be
+//		allowed to connect to the server.
+//	  1 = ONLY the players listed in the player_file file will be
+//		allowed to connect to the server.
+//
+// player_file:
+//	Specifies the file from which to read player names for allow/deny
+//	access to the server (default = "players.txt").
+//
+// bots_autoload:
+//	* 0 = Bots are not automatically loaded into the server at any time.
+//		Bots can only be brought in through a vote.
+//	  1 = Automatically loads *ALL* of the bots specified in the
+//		<bots_botfile> config file, regardless of whatever setting you
+//		have in the <bots_minplayers> variable.
+//	  2 = Automatically loads <bots_minplayers> bots at the start of each
+//		level.  As more real players enter, more bots start to leave.
+//		In 1v1 mode, however, no bots may be automatically loaded at the
+//		start of a map under this option.
+//	  3 = Same as option 2 (above), without the restrictions of the 1v1 mode.
+//
+// bots_botfile <filename>:
+//	The config file that specifies all possible bots to load from either
+//	autoloading or random bot votes.  This file is *necessary* to use
+//	Gladiator bots under Tourney (default name = "botcfg/bots.cfg").
+//
+// bots_minplayers <value>:
+//	Specifies the maximum # of bots plus real players that can be on the
+//	server at a time.  If the sum of the (players+1) + bots is greater than
+//	this <value> then the appropriate # of bots will leave until the sum is
+//	equal to <value>.  If there are more (real players+1) then <value>, then
+//	no bots will be allowed on the server, unless they are manually voted in
+//	by clients.  Hence, the maximum number of bots that can be automatically
+//	active on the server at a time with bots_autoload set to 2 or 3 will be
+//	<value> bots (default = 4).  It should be noted here that a single player
+//	entering the game will not force a bot to leave.  This allows users to
+//	have bots automatically load up without a vote command and without having
+//	to specify <value>+1 bots_minplayers.... ideal for running locally, where
+//	other real players will probably not be joining.
+//
+// bots_noclients:
+//	* 0 = Bots leave if no real clients are connected.
+//	  1 = Bots stay regardless of real client counts.
+//
+// bots_warmuptime <time>:
+//	Specifies the amount of time before a bot will "ready up" in qualifier,
+//	teamplay, or 1v1 modes.  If the <time> value is set to 0, then a bot
+//	will automatically "ready" itself when all other real clients have moved
+//	to "ready" status (default = 0).
+//
+//  ---> Also, you *must* remember to have an .aas file for every corresponding
+//	   map you have in your map rotation, if you wish to have bots play on
+//	   these maps.  Failure to have a corresponding .aas will result in
+//	   a hard server crash telling you that you DO need the .aas for the map.
+//
+set camera_depth 60.0
+set camera_pitch 15.0
+set numgibs 4
+set nextlevel_click 15.0
+set nextlevel_default 45.0
+set allow_id 1
+set respawn_delay 3
+set referee_enable 0
+set referee_password none
+set ffa_hurtself 1
+set motd_file "motd.txt"
+set fast_respawn 1.0
+set fast_minpbound 1
+set fast_maxpbound 20
+set flood_msgs 4
+set flood_persecond 4
+set flood_waitdelay 10
+set player_ban 0
+set player_file "players.txt"
+set bots_autoload 0
+set bots_botfile "bots.cfg"
+set bots_minplayers 4
+set bots_noclients 0
+set bots_warmuptime 0
+
+
+// ########################################
+//      VARIOUS CLIENT CONTROL SETTINGS
+// ########################################
+// client_botdetect:
+//	  0 = Disables client-side bot detection.
+//	* 1 = Enables client-side bot detection.
+//
+// client_deathweapdrop:
+//	  0 = Players don't drop the weapon they are holding when they die.
+//	* 1 = Normal death weapon drop.
+//
+// client_fastweap:
+//	* 0 = Disable fast weapon switching for clients.
+//	  1 = Enable fast weapon switching for clients.
+//
+// client_highscores:
+//	  0 = Disables highscore tracking for FFA modes.
+//	* 1 = Enables highscore tracking for FFA modes.
+//
+// client_hud:
+//	* 0 = Place match timer on middle right-hand side of client's HUD.
+//	  1 = Place match timer on bottom middle of client's HUD.
+//
+// client_maxrate <value>:
+//	Default <value> is 0.  Setting <value> to 0 allows for any client
+//	rate setting (i.e. disables this option).
+//
+// client_maxfps <value>:
+//	Specifies the maximum allowable client "cl_maxfps" setting.  A
+//	setting of <value> to 0 disables this check (the default).
+//
+// client_minping <value>:
+//	Specified the minimum (lowest) allowable ping.  A setting of 0
+//	disables this check (the default).  Note, pings are sampled over
+//	approximately 1 min intervals.
+//
+// client_maxping <value>:
+//	Specified the maximum (highest) allowable ping.  A setting of 0
+//	disables this check (the default).  Note, pings are sampled over
+//	approximately 1 min intervals.
+//
+// client_nomove <value>:
+//	Specifies the number of seconds a client can remain completely
+//	still before being removed from the game and placed in observer
+//	mode (default = 90).  This setting is only used for teamplay/1v1
+//	mode servers.
+//
+// client_protect <value>:
+//	Specifies the time (in seconds) that a player will have a "protect"
+//	shell after respawning that is impervious to attack (default = 0).
+//	This option is only available under regular DM mode.  Clients will
+//	lose their "shell" before <value> seconds have expired if:
+//		- Client weapon/power-up/MegaHealth/PowerShield pick-up.
+//		- Client respawns with anything other than a blaster.
+//		- Client shoots their blaster.
+//		- Client used their hook, if available.
+//		- Active in regular DM only (match_mode 0).
+// 
+// client_recover:
+//	* 0 = Disables client recovery from sudden disconnects during
+//		a match (FFA/Team/1v1).
+//	  1 = Allows clients to rejoin a match after a disconnect with
+//		all relevant info intact (frags, deaths, etc.).  This
+//		option MUST be set to enable the team_duelrecover option,
+//		found below.
+//
+set client_botdetect 1
+set client_deathweapdrop 1
+set client_fastweap 0
+set client_highscores 1
+set client_hud 0
+set client_maxrate 0
+set client_maxfps 0
+set client_minping 0
+set client_maxping 0
+set client_nomove 90
+set client_protect 0
+set client_recover 0
+
+
+// ############################
+//      LOGGING PARAMETERS
+// ############################
+//
+// nglog_logstyle: [NetGames USA Event Log logging]
+//      0 = Do not record ngLog logfile
+//	  1 = Append to exisiting log file
+//	  2 = Create/overwrite existing log file
+//	  3 = Create/Rotate through logfile name.
+//	* 4 = Create uniquely named logs for every map played.
+//		This setting is required to automatically process
+//		logs through ngStats while Tourney is running.
+//
+//	[ *** Note: If you enable ngLog logging, then any Standard
+//	 	    Logging options you enable below will be ignored.
+//		    That is, you can only have one logging facility
+//		    running at a time, with ngLog taking precedence. ]
+//
+// nglog_logname:
+//	Name of ngLog logfile to record (default = "nglog.log").  This
+//	setting is disregarded if <nglog_logstyle> is set to 4.
+//
+// nglog_flush:
+//      0 = Flush every write
+//	  1 = Flush after "nglog_buffer" entries
+//	* 2 = Flush using system default
+//
+// nglog_buffer:
+//	Number of lines to buffer before write (if buffered writes enabled)
+//	(default = 5).
+//
+// nglog_logchat:
+//    * 0 = Do not log chat messages
+//	  1 = Log chat messages
+//
+// nglog_logallpickups:
+//	* 0 = Disable logging of non-critical item picups.
+//	  1 = Log every single item that is picked up in the game
+//		(potential performance problem).
+//
+// nglog_worldstats:
+//	  0 = Disable ngWorldStats logging.
+//	* 1 = Enable ngWorldStats logging.
+//
+// The below settings are for the ngStats log processing system that can
+// be invoked within OSP Tourney DM.  This system will automatically update
+// player database information after each map is finished for subsequent
+// HTML viewing.  The descriptions below describe what is needed to configure
+// this option.  Note, these options are valid only if <nglog_logstyle> is
+// set to "4":
+//
+// nglog_ngstats_exec:
+//	  0 = Disable automatic ngStats backend processing after each map.
+//	* 1 = Automatically perform ngStats processing after each map.
+//		----> This option gives flexibility to server admins who may be
+//			running a server on a platform that is not currently
+//			supported by ngStats processing utilities, but would like
+//			to process logs at a later time on an ngStats-capable
+//			platform.
+//
+// nglog_ngstats_browser:
+//	  0 = Do NOT launch a browser after the server has been shut down
+//		(default for dedicated servers).
+//	* 1 = Launch the local default web browser with ngStats-processed
+//		information after Quake2 has been shut down (default for
+//		listen servers).
+//
+// nglog_ngstats_cfg:
+//	Specifies the ngStats configuration file to use in processing the
+//	server's logs.  This config name MUST be relative to the
+//	"NetGamesUSA.com/ngStats" directory under the main Quake2/ directory
+//	(default = "ngStatsQ2T.cfg").
+//
+// nglog_ngstats_logdir:
+//	Specifies where to write ngStats-format logfiles.  Again, this name
+//	MUST be relative to the	"NetGamesUSA.com/ngStats" directory under
+//	the main Quake2/ directory (default = "logs").
+//
+//	----> The idea here on the last two settings listed above is to allow
+//		for server operators with more than one server running on their
+//		machine to have seperate databases maintained for each server.
+//		By placing the logs in different directories and using different
+//		ngStats config files, each servers logs will be guaranteed to
+//		be seperate (unless, of course, you use the same log directory
+//		and the same .cfg file :) )
+//
+// nglog_ngstats_vidrestart:
+//	* 0 = Do not do a hard refresh on the display when Quake2 is refocussed
+//		after viewing ngStats information.
+//	  1 = Perform hard rest on video after returning to Quake2.  Note, this
+//		has a potential for crashing the server.
+//
+// -------------------------------------------------------------------------------
+//
+// sl_log_method:  (Standard Log)
+//	* 0 = Do not record a log
+//	  1 = Record events to local file
+//	  2 = Send events via UDP to a log collector
+//	  4 = Send events via TCP to a log collector
+//	---> This is a bitmask variable to allow for multiple configurations.
+//	     (i.e. a value of 5 would record local file as well as send all
+//		   events via TCP to a log collector.)
+//
+// sl_filename:
+//	Name of log file if recording to local file.  Note that this filename
+//	is relative to your base QuakeII directory, so you must add directory
+//	paths if you want to put logs under your base directory.
+//
+// sl_log_style:
+//	* 0 =  Standard Logging v1.2  (only available option)
+//
+// sl_log_flush:
+//	  0 = Flush only when system buffer fills (1024 bytes?)
+//	  1 = Flush when system buffer fills or there is a map change.
+//	* 2 = Flush after every log entry.
+//
+// sl_log_logbots:
+//	  0 = Do NOT log any bot-related kills or deaths.
+//	* 1 = Normal logging of bots as players.
+//
+// Other socket-based parameters for Standard Logging which may appear in other
+// mods utilizing the Standard Log are not supported in OSP Tourney DM.
+//
+set nglog_logstyle 4
+set nglog_logname "tourney/nglog.log"
+set nglog_flush 0
+set nglog_buffer 5
+set nglog_logchat 0
+set nglog_logallpickups 0
+set nglog_worldstats 1
+set nglog_ngstats_exec 1
+set nglog_ngstats_browser 0
+set nglog_ngstats_cfg "ngStatsQ2T.cfg"
+set nglog_ngstats_logdir "logs"
+set nglog_ngstats_vidrestart 0
+
+set sl_log_method 0
+set sl_filename "tourney/frags.log"
+set sl_log_style 0
+set sl_log_flush 2
+set sl_log_logbots 1
+
+
+// ##################################
+//         MATCH Parameters
+// ##################################
+//
+// match_mode:
+//	Specify the mode of play
+//	 * 0 = Run like normal DM, just join the frey and play.
+//	   1 = Qualifier DM: All players need to type "ready" before a DM
+//	       match begins.
+//	   2 = Team-play
+//	   3 = 1v1 match mode
+//
+// match_latejoin:
+//	Allow clients to join after a "synced" match has already begun.
+//	  0 = late-connecting clients can NOT join.
+//	  1 = tardy clients can connect but observe only.
+//	* 2 = tardy clients can connect but may only enter a match if they are
+//	      "invited" or a team is unlocked (i.e. teams are auto-locked at the
+//	      start of a match).
+//	  3 = late comers can join any team at any point in the match.
+//	[ NOTE: This option is not used if match_mode = 0 (i.e. normal DM) ]
+//
+// match_prestartpercent:
+//	Percentage of players that are ready to force weapons to disappear.  This
+//	gives the hint to everyone else to ready up (default = 50).
+//
+// match_readypercent:
+//	Percentage of players that must be ready before a match begins
+//	(default = 100).
+//
+// match_countdown:
+//	Specifies the amount of time (in seconds) to countdown between all players
+//	being ready and the match commencing (default = 30).
+//
+// match_countinfo:
+//	  0 = Do NOT show match info when in countdown mode for a match start.
+//	* 1 = Display match info when countdown to match commences.
+//
+// match_timeouts:
+//	Specifies the number of timeouts a team or individual (in 1V1 mode)
+//	starts with at the beginning of a match (default = 3).
+//
+// match_pausetime:
+//	Specifies the amount of time a timeout will last (default = 60.0 sec).
+//
+// match_startsound:
+//	  0 = Disable large kickoff sound at the start of a match.
+//	* 1 = Enable large kickoff sound at the start of a match.
+//
+// match_strictmode:
+//	* 0 = Traditional "ready" style of play.
+//	  1 = Clients cannot affect their ready status in any regard.  To get
+//		a match in progress, a referee or server admin must manually
+//		"ready-up" the players.
+//
+// match_endinfo:
+//	Small, one-liner given at the end of the level to inform clients on
+//	where to go next.
+//
+// warmup_health:
+//	Specifies amount of health a player spaawns with in warmup mode
+//	(default = 150).
+//
+// warmup_armor:
+//	Specifies the amount of body (red) armor a player spawns with in warmup
+//	mode (default = 200).
+//
+set match_mode 0
+set match_latejoin 2
+set match_prestartpercent 50
+set match_readypercent 100
+set match_countdown 30
+set match_countinfo 1
+set match_timeouts 3
+set match_pausetime 60.0
+set match_startsound 1
+set match_strictmode 0
+//set match_endinfo "Go to http://lanparty/tourney for results"
+set warmup_health 150
+set warmup_armor 200
+
+
+// ###################################
+//        QUALIFIER Parameters
+// ###################################
+//
+// qualifier_forceskins:
+// 	If we are playing a Qualifier DM (match_mode = 1), then we may also
+//	want to force everyone to have the same skin:
+//	  0 = Everyone plays with their own skin
+//	* 1 = Force people to the skin specified in "qualifier_skinname"
+//
+// qualifier_skinname:
+//	Name of forced skin to use.  HIGHLY recommend using a baseq2 skin as
+//	everyone definately has these skins :)  The default is male/grunt.
+//
+// qualifier_numspots:
+//	Specifies the number of slots available for clients to qualify.
+//	That is, if the client's rank is equal to or better than the value
+//	specified here, then they will "qualify" (you can see this in the
+//	scoreboard by noting the players who have a "*" on the left of their
+//	rank/name).  A value of 1 means only the top fragger will qualify.
+//	A value of 0 means essentially just a deathmatch.  This value is not
+//	used for regular deathmatch play.
+//
+set qualifier_forceskins 1
+set qualifier_skinname "male/grunt"
+set qualifier_numspots 3
+
+
+// #################################
+//      TEAMPLAY/1v1 Parameters
+// #################################
+//
+// [ Note: "*" here means either "a" or "b" ]
+//
+// team_*_name:
+//	Sets team name to specified string.
+//
+// team_*_skin:
+//	Sets team skin to specified string (preferably a base Q2 skin).
+//
+// team_*_hookcolor:
+//	Sets the team's hook color.
+//
+// team_maxplayers:
+//	Specifies the max # of players allowed for each team.
+//
+// team_hurtteam:
+//	  0 = Players cannot hurt their teammates.
+//	* 1 = Players CAN hurt their teammates.
+//
+// team_hurtself:
+//	  0 = Players cannot hurt themselves.
+//	* 1 = Players CAN hurt themselves.
+//
+// team_overtime_mode:
+//	  0 = No overtime.  Matches can end in a tie.
+//	* 1 = Sudden Death overtime.  First death (kill or suicide) will
+//	      determine the winner.
+//	  2 = Timed overtime round.  The length of the overtime round is
+//	      specified in team_overtime_time.  Note, this allows for
+//	      possibly an unending number of overtimes, if it is always
+//	      tied at the end of the roun.
+//
+// team_overtime_time:
+//	<value> = # of minutes for an overtime round.  The lowest overtime
+//		  round is a minimum of 1 minute.  This option is only used
+//		  if team_overtime_mode == 2.
+//
+// team_lockskin:
+//	* 0 = Clients can change teamskins (teamplay/1v1).
+//	  1 = Players cannot change default teamskins (teamplay/1v1).
+//
+// team_idteam:
+//	  0 = No special "teammate" id tagging
+//	* 1 = Differentiate teammates on id viewing
+//	---> Note, you can enable this option and disable the allow_id
+//	     for general client id tagging.  This allows for players to
+//	     view their own teammates and not view enemy team members.
+//	     Highly recommend to set up teamplay servers in this fashion.
+//	     (i.e. allow_id = 2 and team_idteam = 1).
+//
+// team_duelrecover:
+//	* 0 = If a client leaves, resulting in his/her team having 0
+//		players (teamplay or 1v1), then the match is automatically
+//		terminated.
+//	  1 = If a client gets disconnected (overflow) during the course
+//		of a match that results in his/her team having 0 players,
+//		the match will pause until that client reconnects for up
+//		to team_recovertime seconds.  Once the client successfully
+//		reconnects, the match will start where it left off (i.e.
+//		unpuase).
+//
+// team_recovertime:
+//	If 0 (the default setting), the team_duelrecover will be disabled.
+//	Any other value specifies the amount of time (in seconds) to wait
+//	for a disconnected player to reconnect.
+//
+set team_a_name "Hometeam"
+set team_a_skin "female/athena"
+set team_a_hookcolor "0xf2f2f2f2"
+set team_b_name "Visitors"
+set team_b_skin "male/grunt"
+set team_b_hookcolor "0xd1d1d1d1"
+set team_maxplayers 4
+set team_hurtteam 1
+set team_hurtself 1
+set team_overtime_mode 1
+set team_overtime_time 1
+set team_lockskin 0
+set team_idteam 1
+set team_duelrecover 0
+set team_recovertime 0
+
+
+// ################
+//      VOTING
+// ################
+//
+// vote_enable:
+//	  0 - Clients cannot vote.
+//	* 1 - Clients can vote on (limited) server parameters.
+//
+// vote_enable_[map|time|frag|hook|bots|config|runes|kick]:
+//	  0 - Clients can NOT select this item for voting change.
+//	* 1 - Clients CAN select this item for voting change.
+//
+//	---> Player "kick" voting works as follows:
+//		1. If in regular DM or a match mode that is in progress,
+//		   everyone gets a single vote, as expected.
+//		2. If in warmup mode for a match (1v1/Team/Qualifier),
+//		   then the vote intiator gets 2 votes (automatic). This
+//		   is to boot people who are idle on a server and will
+//		   not participate in a match, but are taking a slot on
+//		   a team or 1v1 position.
+//
+// vote_bots_max <value>:
+//	Specifies the maximum number of bots that can be voted in by
+//	clients (default = 8).
+//
+// vote_config_default:
+//	* 0  Disable default server config loading
+//	  1  Enable default server config loading.
+//
+// vote_config_defaultname <cfg_name>:
+//	<cfg_name> must be a valid config file that exists.  If it does
+//	not, default config cycling WILL be disabled (default = "none").
+//
+//	---> The above two options are the settings to handle "default
+//	     config" auto-loading.  This option is primarily for servers
+//	     that allow for clients to vote on alternate configs.  This
+//	     default config (if specified) will be loaded if there are
+//	     no active clients on a server for an entire map (timelimit
+//	     on FFA modes, or 1 hour on teamplay/1v1).
+//
+// vote_config_list <filename>:
+//	This file contains a single column of available alternate server
+//	config files that clients can vote upon (default = "serverconfigs.txt")
+//
+// vote_time:
+//	Amount of time an unresolved vote proposal lasts before it will
+//	expire and be cancelled (default = 45).
+//
+// vote_threshold:
+//	The percentage of yea/nay votes among all connected clients to
+//	make a decision as to whether the vote proposal is allowed or
+//	denied (default = 51).
+//
+// vote_carryover:
+//	  0 = Revert back to server defaults on nexxt map load.
+//	* 1 = Carry over voted values between map loads.
+//
+// menu_maxtime:
+//	Maximum selectable timelimit vote value (default = 120).
+//
+// menu_timestep:
+//	Timelimit increments when selecting timelimit in voting menu
+//	(default = 5).
+//
+// menu_maxfrag:
+//	Maximum selectable fraglimit vote value (default = 100).
+//
+// menu_fragstep:
+//	Fraglimit increments when selecting fraglimit in voting menu
+//	(default = 5).
+//
+set vote_enable 1
+set vote_enable_map 1
+set vote_enable_time 1
+set vote_enable_frag 1
+set vote_enable_hook 1
+set vote_enable_toggles 1
+set vote_enable_bots 1
+set vote_enable_config 0
+set vote_enable_runes 0
+set vote_bots_max 8
+set vote_config_default 0
+set vote_config_defaultname "none"
+set vote_config_list "serverconfigs.txt"
+set vote_time 45
+set vote_threshold 51
+set vote_carryover 1
+set menu_maxtime 120
+set menu_timestep 5
+set menu_maxfrag 100
+set menu_fragstep 5
+
+
+// ##############
+//      HOOK
+// ##############
+//
+// hook_enable:
+//	* 0 - The hook is not allowed in play.
+//	  1 - The hook is available for use by clients.
+//
+// hook_color:
+//	"0x--------"  Specifies the inner/outer coloring of
+//	the hook on its viewable segment.  (See color chart
+//	below for a few coloring examples).
+//
+// hook_speed:
+//	Specifies the speed at which the "hook" is sent out
+//	(default = 1600).
+//
+// hook_pullspeed:
+//	Specifies the speed at which the player is pulled along
+//	the hook's path (default = 1000).
+//
+// hook_initdamage:
+//	Specifies the amount of damage caused by a player when
+//	his/her hook hits another player.  If set to 0, a player's
+//	hook will not "stick" to another player (default = 20).
+//
+// hook_incdamage:
+//	Amount of continued damage that will be inflicted on a
+//	"hooked" player after initial damage is applied
+//	(default = 1).
+//
+// hook_maxdamage:
+//	Maximum damage that can be inflicted by the hook
+//	(default = 30).
+//
+// hook_holdtime:
+//	Specifies the length (in seconds) a player can stay hooked
+//	to a surface before the hook is automatically released.
+//
+// hook_sky:
+//	* 0 = Players CANNOT hook the sky portions of a map.
+//	  1 = Players CAN hook the sky portions of a map.
+//
+// hook_wait:
+//	Amount of time (in seconds) that a player must wait
+//	between successive hook deployments (default = 0.5).
+//
+//
+// HOOK COLORING REFERENCE (thx to Maj. Bitch for pounding these out):
+// -------------------------------------------------------------------
+// 0xf2f2f0f0 (bright red)	0xd0d1d2d3 (bright green)
+// 0xf3f3f1f1 (bright blue)	0xdcdddedf (bright yellow)
+// 0xe0e1e2e3 (yellow strobe)	0x80818283 (dark purple)
+// 0x70717273 (light blue)	0x90919293 (different green)
+// 0xb0b1b2b3 (purple)		0x40414243 (different red)
+// 0xe2e5e3e6 (orange)		0xd0f1d3f3 (mixture)
+// 0xf2f3f0f1 (inner = red, outer = blue)
+// 0xf3f2f1f0 (inner = blue, outer = red)
+// 0xdad0dcd2 (inner = green, outer = yellow)
+// 0xd0dad2dc (inner = yellow, outer = green)
+//
+set hook_enable 0
+set hook_color "0xd1d1d1d1"
+set hook_speed 1650
+set hook_pullspeed 975
+set hook_initdamage 10
+set hook_incdamage 1
+set hook_maxdamage 20
+set hook_holdtime 7.5
+set hook_sky 0
+set hook_wait 0.5
+
+
+// ########################
+//      DEMO RECORDING
+// ########################
+//
+// demo_referee:
+//	* 0 = No server-forced recording for referees.
+//	  1 = Referees are forced to record demos.
+//	  2 = Referees are forced to record demos and take end-of-level
+//	      screenshots.
+//
+// demo_player:
+//	* 0 = No server-forced recording for players.
+//	  1 = Players are forced to record demos.
+//	  2 = Players are forced to record demos and take end-of-level
+//	      screenshots.
+//
+// demo_tag <text_tag>:
+//	The forced demo file will be appended with the unique
+//	identifier as specified in <text_tag>.
+//
+set demo_referee 0
+set demo_player 0
+set demo_tag "tourney_tag"
+
+
+// ############
+//     RUNES
+// ############
+//
+// runes_enable:
+//	Bit-wise descriptor that enables specific runes:
+//		 0 = No runes active (default)
+//		 1 = Resist Rune
+//		 2 = Strength Rune
+//		 4 = Haste Rune
+//		 8 = Regeneration Rune
+//		16 = Vampire Rune
+//	----> This is a bitwise sum setting.  So, to enable ALL runes,
+//		set runes_enable to 31 (or higher) [1+2+4+8+16 = 31].
+//		Default setting is 0.
+//
+// runes_flash:
+//	  0 = Clients do not flash when they use their rune.
+//	* 1 = Clients will flash the color of their rune when it is used.
+//
+// runes_model <model_name>:
+//	Specifies the model to use for all runes.  The default is John Carmack's
+//	head! ("models/items/c_head/tris.md2").  For Lithium-style rune models,
+//	use "models/items/keys/pyramid/tris.md2".
+//
+// runes_perplayer:
+//	Ratio of runes to active player counts (default = 0.6).
+//
+// runes_min:
+//	Minimum # of runes on a level, regardless of rune-to-player percentage
+//	(default = 3).
+//
+// runes_max:
+//	Maximum # of runes on a level, regardless of rune-to-player percentage
+//	(default = 12).
+//
+// runes_resist:
+//	The amount to divide by on damage a player receives (default = 2.0).
+//
+// runes_strength:
+//	The amount to multiply by on damage a player inflicts (default = 2.0).
+//
+// runes_regen_hmax:
+//	Maximum health a player can regen up to (default = 200).
+//
+// runes_regen_amax:
+//	Maximum armor a player can regen up to (default = 100).
+//
+// runes_vampire:
+//	Percentage of damage added to a player's health (default = 0.5).
+//
+// runes_vampire_max:
+//	Maximum health a player can "vampire" up to (default = 200).
+//
+set runes_enable 0
+set runes_flash 1
+set runes_model "models/items/c_head/tris.md2"
+set runes_perplayer 0.6
+set runes_min 3
+set runes_max 12
+set runes_resist 2.0
+set runes_strength 2.0
+set runes_regen_hmax 200
+set runes_regen_amax 100
+set runes_vampire 0.5
+set runes_vampire_max 200
+
+
+// ######################
+//      MAP ROTATION
+// ######################
+//
+// map_file:
+//	Specifies which maplist to use (default = "maps.txt").
+//
+// map_queue:
+//	  0 = Use info found in current map to cycle to the next map.
+//	* 1 =	Allows utilizing the maps as specified in the map_file.
+//
+// map_random:
+//	  0 = Run through the map queue in sequential order.
+//	* 1 = Randomly cycle through the maps found in the mapfile.
+//
+// map_once:
+//	  0 = Allow maps to be reused at any time.
+//	* 1 =	Use each map exactly one time before recycling through the
+//		map queue again.
+//
+// map_halt:
+//	* 0 = Do not do any special halts on the server at match end.
+//	  1 =	Halts the progress of the game at the end of a level
+//		indefinately.
+//	----> Note:	This feature is useful in cases where it is *critical*
+//			that an endgame screenshot of the scoreboard *must* be
+//			taken.  When this option is set, you will either need
+//			to restart the server or respecify the nextlevel_*
+//			parameters by hand, as specified above.
+// map_nocount:
+//	* 0 = Use player counts when deciding on next map.
+//	  1 = Ignore map player counts when determining next map to load.
+//
+// Note, maps will be auto-rotated on server if no clients are connected
+// for an entire hour.  Maps defined with a minimum of 1 player will be
+// selected for the "next map" in this case.  Thus, it is HIGHLY advisable
+// to have at least ONE map with a min value of "1".
+//
+set map_file "maps.txt"
+set map_queue 1
+set map_random 1
+set map_once 1
+set map_halt 0
+set map_nocount 0
+
+
+// ##############################
+//      ITEM/WEAPON HANDLING
+// ##############################
+//
+// allow_*:
+//	  0 = Weapon/Ammo/Item disabled
+//	* 1 = Weapon/Ammo/Item enabled
+//
+// damage_* <value>:
+//	Sets specified weapon damage to <value>
+//	(Only railgun damage is an option).
+//
+// power_armor_screen <value>:
+//	<value> is the amount of damage saved per cell when a player is
+//	protected using the power screen (default = 1.0).
+//
+// power_armor_shield <value>:
+//	<value> is the amount of damage saved per cell when a player is
+//	protected using the power shield (default = 2.0).
+//
+// (All weapons/ammo/items enabled by default)
+//
+set allow_shotgun 1
+set allow_supershotgun 1
+set allow_machinegun 1
+set allow_chaingun 1
+set allow_grenadelauncher 1
+set allow_rocketlauncher 1
+set allow_hyperblaster 1
+set allow_railgun 1
+set allow_bfg 1
+set allow_ammo_cells 1
+set allow_ammo_grenades 1
+set allow_item_powerscreen 1
+set allow_item_powershield 1
+set allow_item_quad 1
+set allow_item_invul 1
+set allow_item_pack 1
+
+set damage_railgun 100
+set power_armor_screen 1.0
+set power_armor_shield 2.0
+
+
+// #############################
+//      CLIENT WEAPON INITS
+// #############################
+//
+// weapon_initial:
+//	Specifies which weapon a client will start with in-hand.
+//	(bitmask -> single)
+//
+// weapon_have:
+//	Specifies which weapons are in a client's inventory whenever
+//	they respawn into the game.  (bitmask -> multiple)
+//
+// Weapon bitmask:
+//	* 0 - Blaster
+//	  1 - Shotgun
+//	  2 - Supershotgun
+//	  4 - Machinegun
+//	  8 - Chaingun
+//	 16 - Grenade
+//	 32 - Grenade Launcher
+//	 64 - Rocket Launcher
+//	128 - Hyper Blaster
+//	256 - Railgun
+//	512 - BFG10K
+//
+// statrt_armor:
+//	Amount of armor a client respawns with (default = 0).
+//
+// start_armortype:
+//    * 0 - Jacket Armor (Grey Armor)
+//	  1 - Combat Armor (Yellow Armor)
+//	  2 - Body Armor (Red Armor)
+//
+// max_*:
+//	Maximum inventory of each ammo type for a client
+//	(default = regular Quake 2 defaults).
+//
+// pack_*:
+//	Max inventory size for each ammo type after a client has
+//	picked up a pack (default = regular Quake 2 defaults).
+//
+set weapon_initial 0
+set weapon_have 0
+
+set start_shells 0
+set start_bullets 0
+set start_cells 0
+set start_grenades 0
+set start_rockets 0
+set start_slugs 0
+set start_health 100
+set start_armor 0
+set start_armortype 0
+
+set max_shells 100
+set max_bullets 200
+set max_cells 200
+set max_grenades 50
+set max_rockets 50
+set max_slugs 50
+set max_health 100
+
+set pack_shells 200
+set pack_bullets 300
+set pack_cells 300
+set pack_grenades 100
+set pack_rockets 100
+set pack_slugs 100
+set pack_health 100
+
+
+
+// Need to specify a starting map
+map q2dm1

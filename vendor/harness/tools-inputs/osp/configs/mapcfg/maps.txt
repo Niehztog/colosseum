@@ -1,0 +1,28 @@
+# "maps.txt"
+# ----------
+# Example of the format of the text file used for specifying maps under OSP Tourney DM.
+#
+# Format:
+# <map name> [min # of players] [max # of players]
+#
+# The map queuer will only load a map if its min/max active player counts on the current
+# level are within its bounds.  Otherwise, the map will NOT be loaded.
+#
+# If you dont want player limits on each map, just specify the map with no min/max
+# values on each line.
+#
+# Use a min of 0 for maps that should be rotated through when there is nobody
+# on and playing.  Probably should use popular maps for quick pickup games when
+# people connect initially.
+q2dm1 00 14
+q2dm2 03 16
+q2dm3 00 12
+q2dm4 05 24
+q2dm5 04 24
+q2dm6 03 18
+q2dm7 03 12
+q2dm8 06 24	# Load the map if there are between 6 and 24 players
+#city1 10 25	# Load the map if there are between 10 and 25 players
+#boss2 01 14
+#boss1 02 14
+#match1 03 14
