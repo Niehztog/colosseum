@@ -326,7 +326,7 @@ static void mutant_jump_takeoff(edict_t *self)
     self->velocity[2] = 250;
     self->groundentity = NULL;
     self->monsterinfo.aiflags |= AI_DUCKED;
-    self->monsterinfo.attack_finished = level.framenum + 3 * BASE_FRAMERATE;
+    self->monsterinfo.attack_finished = level.time + 3;
     self->touch = mutant_jump_touch;
 }
 
@@ -339,7 +339,7 @@ static void mutant_check_landing(edict_t *self)
         return;
     }
 
-    if (level.framenum > self->monsterinfo.attack_finished)
+    if (level.time > self->monsterinfo.attack_finished)
         self->monsterinfo.nextframe = FRAME_attack02;
     else
         self->monsterinfo.nextframe = FRAME_attack05;
@@ -555,6 +555,83 @@ void mutant_die(edict_t *self, edict_t *inflictor, edict_t *attacker, int damage
         self->monsterinfo.currentmove = &mutant_move_death2;
 }
 
+//================
+//ROGUE
+static void mutant_jump_down(edict_t *self)
+{
+    vec3_t  forward, up;
+
+    AngleVectors(self->s.angles, forward, NULL, up);
+    VectorMA(self->velocity, 100, forward, self->velocity);
+    VectorMA(self->velocity, 300, up, self->velocity);
+}
+
+static void mutant_jump_up(edict_t *self)
+{
+    vec3_t  forward, up;
+
+    AngleVectors(self->s.angles, forward, NULL, up);
+    VectorMA(self->velocity, 200, forward, self->velocity);
+    VectorMA(self->velocity, 450, up, self->velocity);
+}
+
+static void mutant_jump_wait_land(edict_t *self)
+{
+    if (self->groundentity == NULL)
+        self->monsterinfo.nextframe = self->s.frame;
+    else
+        self->monsterinfo.nextframe = self->s.frame + 1;
+}
+
+static const mframe_t mutant_frames_jump_up[] = {
+    { ai_move, -8, NULL },
+    { ai_move, -8, mutant_jump_up },
+    { ai_move, 0, mutant_jump_wait_land },
+    { ai_move, 0, NULL },
+    { ai_move, 0, NULL }
+};
+const mmove_t mutant_move_jump_up = { FRAME_jump01, FRAME_jump05, mutant_frames_jump_up, mutant_run };
+
+static const mframe_t mutant_frames_jump_down[] = {
+    { ai_move, 0, NULL },
+    { ai_move, 0, mutant_jump_down },
+    { ai_move, 0, mutant_jump_wait_land },
+    { ai_move, 0, NULL },
+    { ai_move, 0, NULL }
+};
+const mmove_t mutant_move_jump_down = { FRAME_jump01, FRAME_jump05, mutant_frames_jump_down, mutant_run };
+
+static void mutant_jump_updown(edict_t *self)
+{
+    if (!self->enemy)
+        return;
+
+    if (self->enemy->s.origin[2] > self->s.origin[2])
+        self->monsterinfo.currentmove = &mutant_move_jump_up;
+    else
+        self->monsterinfo.currentmove = &mutant_move_jump_down;
+}
+
+/*
+===
+Blocked
+===
+*/
+bool mutant_blocked(edict_t *self, float dist)
+{
+    if (blocked_checkjump(self, dist, 256, 68)) {
+        mutant_jump_updown(self);
+        return true;
+    }
+
+    if (blocked_checkplat(self, dist))
+        return true;
+
+    return false;
+}
+//ROGUE
+//================
+
 //
 // SPAWN
 //
@@ -613,6 +690,7 @@ void SP_monster_mutant(edict_t *self)
     self->monsterinfo.search = mutant_search;
     self->monsterinfo.idle = mutant_idle;
     self->monsterinfo.checkattack = mutant_checkattack;
+    self->monsterinfo.blocked = mutant_blocked;         // PGM
 
     gi.linkentity(self);
 

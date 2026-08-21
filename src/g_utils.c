@@ -26,6 +26,13 @@ void G_ProjectSource(const vec3_t point, const vec3_t distance, const vec3_t for
     result[2] = point[2] + forward[2] * distance[0] + right[2] * distance[1] + distance[2];
 }
 
+void G_ProjectSource2(const vec3_t point, const vec3_t distance, const vec3_t forward, const vec3_t right, const vec3_t up, vec3_t result)
+{
+    result[0] = point[0] + forward[0] * distance[0] + right[0] * distance[1] + up[0] * distance[2];
+    result[1] = point[1] + forward[1] * distance[0] + right[1] * distance[1] + up[1] * distance[2];
+    result[2] = point[2] + forward[2] * distance[0] + right[2] * distance[1] + up[2] * distance[2];
+}
+
 /*
 =============
 G_Find
@@ -86,6 +93,48 @@ edict_t *findradius(edict_t *from, vec3_t org, float rad)
         VectorAvg(from->mins, from->maxs, mid);
         VectorAdd(from->s.origin, mid, eorg);
         if (Distance(eorg, org) > rad)
+            continue;
+        return from;
+    }
+
+    return NULL;
+}
+
+/*
+=================
+findradius2
+
+Returns entities that have origins within a spherical area
+
+ROGUE - tweaks for performance for tesla specific code
+only returns entities that can be damaged
+only returns entities that are SVF_DAMAGEABLE
+
+findradius2 (origin, radius)
+=================
+*/
+edict_t *findradius2(edict_t *from, vec3_t org, float rad)
+{
+    // rad must be positive
+    vec3_t  eorg;
+    int     j;
+
+    if (!from)
+        from = g_edicts;
+    else
+        from++;
+    for (; from < &g_edicts[globals.num_edicts]; from++) {
+        if (!from->inuse)
+            continue;
+        if (from->solid == SOLID_NOT)
+            continue;
+        if (!from->takedamage)
+            continue;
+        if (!(from->svflags & SVF_DAMAGEABLE))
+            continue;
+        for (j = 0; j < 3; j++)
+            eorg[j] = org[j] - (from->s.origin[j] + (from->mins[j] + from->maxs[j]) * 0.5f);
+        if (VectorLength(eorg) > rad)
             continue;
         return from;
     }
@@ -160,6 +209,8 @@ match (string)self.target and call their .use function
 void G_UseTargets(edict_t *ent, edict_t *activator)
 {
     edict_t     *t;
+    edict_t     *master;
+    bool    done = false;
 
 //
 // check for a delay
@@ -196,6 +247,30 @@ void G_UseTargets(edict_t *ent, edict_t *activator)
     if (ent->killtarget) {
         t = NULL;
         while ((t = G_Find(t, FOFS(targetname), ent->killtarget))) {
+            // PMM - if this entity is part of a train, cleanly remove it
+            if (t->flags & FL_TEAMSLAVE) {
+//              if ((g_showlogic) && (g_showlogic->value))
+//                  gi.dprintf ("Removing %s from train!\n", t->classname);
+
+                if (t->teammaster) {
+                    master = t->teammaster;
+                    while (!done) {
+                        if (master->teamchain == t) {
+                            master->teamchain = t->teamchain;
+                            done = true;
+                        }
+                        master = master->teamchain;
+                        if (!master) {
+//                          if ((g_showlogic) && (g_showlogic->value))
+//                              gi.dprintf ("Couldn't find myself in master's chain, ignoring!\n");
+                        }
+                    }
+                } else {
+//                  if ((g_showlogic) && (g_showlogic->value))
+//                      gi.dprintf ("No master to free myself from, ignoring!\n");
+                }
+            }
+            // PMM
             G_FreeEdict(t);
             if (!ent->inuse) {
                 gi.dprintf("entity was removed while using killtargets\n");
@@ -229,10 +304,10 @@ void G_UseTargets(edict_t *ent, edict_t *activator)
     }
 }
 
-static const vec3_t VEC_UP       = { 0, -1,  0 };
-static const vec3_t MOVEDIR_UP   = { 0,  0,  1 };
-static const vec3_t VEC_DOWN     = { 0, -2,  0 };
-static const vec3_t MOVEDIR_DOWN = { 0,  0, -1 };
+static const vec3_t VEC_UP       = {0, -1, 0};
+static const vec3_t MOVEDIR_UP   = {0, 0, 1};
+static const vec3_t VEC_DOWN     = {0, -2, 0};
+static const vec3_t MOVEDIR_DOWN = {0, 0, -1};
 
 void G_SetMovedir(vec3_t angles, vec3_t movedir)
 {
@@ -250,14 +325,37 @@ float vectoyaw(vec3_t vec)
 {
     float   yaw;
 
-    if (/*vec[YAW] == 0 &&*/ vec[PITCH] == 0) {
-        yaw = 0;
-        if (vec[YAW] > 0)
+    // PMM - fixed to correct for pitch of 0
+    if (/*vec[YAW] == 0 &&*/ vec[PITCH] == 0)
+        if (vec[YAW] == 0)
+            yaw = 0;
+        else if (vec[YAW] > 0)
             yaw = 90;
-        else if (vec[YAW] < 0)
-            yaw = -90;
-    } else {
+        else
+            yaw = 270;
+    else {
         yaw = (int)RAD2DEG(atan2f(vec[YAW], vec[PITCH]));
+        if (yaw < 0)
+            yaw += 360;
+    }
+
+    return yaw;
+}
+
+float vectoyaw2(vec3_t vec)
+{
+    float   yaw;
+
+    // PMM - fixed to correct for pitch of 0
+    if (/*vec[YAW] == 0 &&*/ vec[PITCH] == 0)
+        if (vec[YAW] == 0)
+            yaw = 0;
+        else if (vec[YAW] > 0)
+            yaw = 90;
+        else
+            yaw = 270;
+    else {
+        yaw = RAD2DEG(atan2f(vec[YAW], vec[PITCH]));
         if (yaw < 0)
             yaw += 360;
     }
@@ -277,17 +375,52 @@ void vectoangles(vec3_t value1, vec3_t angles)
         else
             pitch = 270;
     } else {
+        // PMM - fixed to correct for pitch of 0
         if (value1[0])
             yaw = (int)RAD2DEG(atan2f(value1[1], value1[0]));
         else if (value1[1] > 0)
             yaw = 90;
         else
-            yaw = -90;
+            yaw = 270;
         if (yaw < 0)
             yaw += 360;
 
         forward = sqrtf(value1[0] * value1[0] + value1[1] * value1[1]);
         pitch = (int)RAD2DEG(atan2f(value1[2], forward));
+        if (pitch < 0)
+            pitch += 360;
+    }
+
+    angles[PITCH] = -pitch;
+    angles[YAW] = yaw;
+    angles[ROLL] = 0;
+}
+
+void vectoangles2(const vec3_t value1, vec3_t angles)
+{
+    float   forward;
+    float   yaw, pitch;
+
+    if (value1[1] == 0 && value1[0] == 0) {
+        yaw = 0;
+        if (value1[2] > 0)
+            pitch = 90;
+        else
+            pitch = 270;
+    } else {
+        // PMM - fixed to correct for pitch of 0
+        if (value1[0])
+            yaw = RAD2DEG(atan2f(value1[1], value1[0]));
+        else if (value1[1] > 0)
+            yaw = 90;
+        else
+            yaw = 270;
+
+        if (yaw < 0)
+            yaw += 360;
+
+        forward = sqrtf(value1[0] * value1[0] + value1[1] * value1[1]);
+        pitch = RAD2DEG(atan2f(value1[2], forward));
         if (pitch < 0)
             pitch += 360;
     }
@@ -308,10 +441,30 @@ char *G_CopyString(char *in)
 
 void G_InitEdict(edict_t *e)
 {
+    // ROGUE
+    // FIXME -
+    //   this fixes a bug somewhere that is settling "nextthink" for an entity that has
+    //   already been released.  nextthink is being set to FRAMETIME after level.time,
+    //   since freetime = nextthink - 0.1
+    if (e->nextthink) {
+//      if ((g_showlogic) && (g_showlogic->value))
+//          gi.dprintf ("G_SPAWN:  Fixed bad nextthink time\n");
+        e->nextthink = 0;
+    }
+    // ROGUE
+
     e->inuse = true;
     e->classname = "noclass";
     e->gravity = 1.0f;
     e->s.number = e - g_edicts;
+
+//PGM - do this before calling the spawn function so it can be overridden.
+#ifdef ROGUE_GRAVITY
+    e->gravityVector[0] =  0.0f;
+    e->gravityVector[1] =  0.0f;
+    e->gravityVector[2] = -1.0f;
+#endif
+//PGM
 }
 
 /*
@@ -376,7 +529,7 @@ G_TouchTriggers
 
 ============
 */
-void G_TouchTriggers(edict_t *ent)
+void    G_TouchTriggers(edict_t *ent)
 {
     int         i, num;
     edict_t     *touch[MAX_EDICTS_OLD], *hit;
@@ -400,6 +553,7 @@ void G_TouchTriggers(edict_t *ent)
 }
 
 /*
+
 ==============================================================================
 
 Kill box

@@ -310,6 +310,21 @@ void gladiator_die(edict_t *self, edict_t *inflictor, edict_t *attacker, int dam
     self->monsterinfo.currentmove = &gladiator_move_death;
 }
 
+//===========
+//PGM
+bool gladiator_blocked(edict_t *self, float dist)
+{
+    if (blocked_checkshot(self, 0.25f + (0.05f * skill->value)))
+        return true;
+
+    if (blocked_checkplat(self, dist))
+        return true;
+
+    return false;
+}
+//PGM
+//===========
+
 static void gladiator_precache(void)
 {
     sound_pain1 = gi.soundindex("gladiator/pain.wav");
@@ -360,6 +375,7 @@ void SP_monster_gladiator(edict_t *self)
     self->monsterinfo.sight = gladiator_sight;
     self->monsterinfo.idle = gladiator_idle;
     self->monsterinfo.search = gladiator_search;
+    self->monsterinfo.blocked = gladiator_blocked;      // PGM
 
     gi.linkentity(self);
     self->monsterinfo.currentmove = &gladiator_move_stand;

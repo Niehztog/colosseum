@@ -292,6 +292,10 @@ void tank_pain(edict_t *self, edict_t *other, float kick, int damage)
     if (skill->value == 3)
         return;     // no pain anims in nightmare
 
+    // PMM - blindfire cleanup
+    self->monsterinfo.aiflags &= ~AI_MANUAL_STEERING;
+    // pmm
+
     if (damage <= 30)
         self->monsterinfo.currentmove = &tank_move_pain1;
     else if (damage <= 60)
@@ -311,6 +315,9 @@ static void TankBlaster(edict_t *self)
     vec3_t  end;
     vec3_t  dir;
     int     flash_number;
+
+    if (!self->enemy || !self->enemy->inuse)    //PGM
+        return;                                 //PGM
 
     if (self->s.frame == FRAME_attak110)
         flash_number = MZ2_TANK_BLASTER_1;
@@ -341,6 +348,20 @@ static void TankRocket(edict_t *self)
     vec3_t  dir;
     vec3_t  vec;
     int     flash_number;
+    trace_t trace;              // PGM
+    int     rocketSpeed;        // PGM
+    // pmm - blindfire support
+    vec3_t  target;
+    bool blindfire = false;
+
+    if (!self->enemy || !self->enemy->inuse)    //PGM
+        return;                                 //PGM
+
+    // pmm - blindfire check
+    if (self->monsterinfo.aiflags & AI_MANUAL_STEERING)
+        blindfire = true;
+    else
+        blindfire = false;
 
     if (self->s.frame == FRAME_attak324)
         flash_number = MZ2_TANK_ROCKET_1;
@@ -352,12 +373,103 @@ static void TankRocket(edict_t *self)
     AngleVectors(self->s.angles, forward, right, NULL);
     G_ProjectSource(self->s.origin, monster_flash_offset[flash_number], forward, right, start);
 
-    VectorCopy(self->enemy->s.origin, vec);
-    vec[2] += self->enemy->viewheight;
-    VectorSubtract(vec, start, dir);
+    rocketSpeed = 500 + (100 * skill->value);   // PGM rock & roll.... :)
+
+    // PMM
+    if (blindfire)
+        VectorCopy(self->monsterinfo.blind_fire_target, target);
+    else
+        VectorCopy(self->enemy->s.origin, target);
+    // pmm
+
+//  VectorCopy (self->enemy->s.origin, vec);
+//  vec[2] += self->enemy->viewheight;
+//  VectorSubtract (vec, start, dir);
+
+//PGM
+    // PMM - blindfire shooting
+    if (blindfire) {
+        VectorCopy(target, vec);
+        VectorSubtract(vec, start, dir);
+    }
+    // pmm
+    // don't shoot at feet if they're above me.
+    else if (random() < 0.66f || (start[2] < self->enemy->absmin[2])) {
+//      gi.dprintf("normal shot\n");
+        VectorCopy(self->enemy->s.origin, vec);
+        vec[2] += self->enemy->viewheight;
+        VectorSubtract(vec, start, dir);
+    } else {
+//      gi.dprintf("shooting at feet!\n");
+        VectorCopy(self->enemy->s.origin, vec);
+        vec[2] = self->enemy->absmin[2];
+        VectorSubtract(vec, start, dir);
+    }
+//PGM
+
+//======
+//PMM - lead target  (not when blindfiring)
+    // 20, 35, 50, 65 chance of leading
+    if ((!blindfire) && ((random() < (0.2f + ((3 - skill->value) * 0.15f))))) {
+        float   dist;
+        float   time;
+
+//      gi.dprintf ("leading target\n");
+        dist = VectorLength(dir);
+        time = dist / rocketSpeed;
+        VectorMA(vec, time, self->enemy->velocity, vec);
+        VectorSubtract(vec, start, dir);
+    }
+//PMM - lead target
+//======
+
     VectorNormalize(dir);
 
-    monster_fire_rocket(self, start, dir, 50, 550, flash_number);
+//          gi.WriteByte (svc_temp_entity);
+//          gi.WriteByte (TE_DEBUGTRAIL);
+//          gi.WritePosition (start);
+//          gi.WritePosition (vec);
+//          gi.multicast (start, MULTICAST_ALL);
+
+    // pmm blindfire doesn't check target (done in checkattack)
+    // paranoia, make sure we're not shooting a target right next to us
+    trace = gi.trace(start, vec3_origin, vec3_origin, vec, self, MASK_SHOT);
+    if (blindfire) {
+        // blindfire has different fail criteria for the trace
+        if (!(trace.startsolid || trace.allsolid || (trace.fraction < 0.5f)))
+            monster_fire_rocket(self, start, dir, 50, rocketSpeed, flash_number);
+        else {
+            // try shifting the target to the left a little (to help counter large offset)
+            VectorCopy(target, vec);
+            VectorMA(vec, -20, right, vec);
+            VectorSubtract(vec, start, dir);
+            VectorNormalize(dir);
+            trace = gi.trace(start, vec3_origin, vec3_origin, vec, self, MASK_SHOT);
+            if (!(trace.startsolid || trace.allsolid || (trace.fraction < 0.5f)))
+                monster_fire_rocket(self, start, dir, 50, rocketSpeed, flash_number);
+            else {
+                // ok, that failed.  try to the right
+                VectorCopy(target, vec);
+                VectorMA(vec, 20, right, vec);
+                VectorSubtract(vec, start, dir);
+                VectorNormalize(dir);
+                trace = gi.trace(start, vec3_origin, vec3_origin, vec, self, MASK_SHOT);
+                if (!(trace.startsolid || trace.allsolid || (trace.fraction < 0.5f)))
+                    monster_fire_rocket(self, start, dir, 50, rocketSpeed, flash_number);
+                else if ((g_showlogic) && (g_showlogic->value))
+                    // ok, I give up
+                    gi.dprintf("tank avoiding blindfire shot\n");
+            }
+        }
+    } else {
+        trace = gi.trace(start, vec3_origin, vec3_origin, vec, self, MASK_SHOT);
+        if (trace.ent == self->enemy || trace.ent == world) {
+            if (trace.fraction > 0.5f || (trace.ent && trace.ent->client))
+                monster_fire_rocket(self, start, dir, 50, rocketSpeed, MZ2_CHICK_ROCKET_1);
+            //      else
+            //          gi.dprintf("didn't make it halfway to target...aborting\n");
+        }
+    }
 }
 
 static void TankMachineGun(edict_t *self)
@@ -367,6 +479,9 @@ static void TankMachineGun(edict_t *self)
     vec3_t  start;
     vec3_t  forward, right;
     int     flash_number;
+
+    if (!self->enemy || !self->enemy->inuse)    //PGM
+        return;                                 //PGM
 
     flash_number = MZ2_TANK_MACHINEGUN_1 + (self->s.frame - FRAME_attak406);
 
@@ -597,6 +712,14 @@ const mmove_t tank_move_attack_chain = {FRAME_attak401, FRAME_attak429, tank_fra
 
 static void tank_refire_rocket(edict_t *self)
 {
+    // PMM - blindfire cleanup
+    if (self->monsterinfo.aiflags & AI_MANUAL_STEERING) {
+        self->monsterinfo.aiflags &= ~AI_MANUAL_STEERING;
+        self->monsterinfo.currentmove = &tank_move_attack_post_rocket;
+        return;
+    }
+    // pmm
+
     // Only on hard or nightmare
     if (skill->value >= 2)
         if (self->enemy->health > 0)
@@ -618,12 +741,52 @@ void tank_attack(edict_t *self)
     vec3_t  vec;
     float   range;
     float   r;
+    // PMM
+    float   chance = 0;
+
+    // PMM
+    if (!self->enemy || !self->enemy->inuse)
+        return;
 
     if (self->enemy->health < 0) {
         self->monsterinfo.currentmove = &tank_move_attack_strike;
         self->monsterinfo.aiflags &= ~AI_BRUTAL;
         return;
     }
+
+    // PMM
+    if (self->monsterinfo.attack_state == AS_BLIND) {
+        // setup shot probabilities
+        if (self->monsterinfo.blind_fire_delay < 1.0f)
+            chance = 1.0f;
+        else if (self->monsterinfo.blind_fire_delay < 7.5f)
+            chance = 0.4f;
+        else
+            chance = 0.1f;
+
+        r = random();
+
+        self->monsterinfo.blind_fire_delay += 3.2f + 2.0f + random() * 3.0f;
+
+        // don't shoot at the origin
+        if (VectorCompare(self->monsterinfo.blind_fire_target, vec3_origin))
+            return;
+
+        // don't shoot if the dice say not to
+        if (r > chance) {
+//          if ((g_showlogic) && (g_showlogic->value))
+//              gi.dprintf ("blindfire - NO SHOT\n");
+            return;
+        }
+
+        // turn on manual steering to signal both manual steering and blindfire
+        self->monsterinfo.aiflags |= AI_MANUAL_STEERING;
+        self->monsterinfo.currentmove = &tank_move_attack_fire_rocket;
+        self->monsterinfo.attack_finished = level.time + 3.0f + 2 * random();
+        self->pain_debounce_framenum = level.framenum + 5.0f * BASE_FRAMERATE;    // no pain for a while
+        return;
+    }
+    // pmm
 
     VectorSubtract(self->enemy->s.origin, self->s.origin, vec);
     range = VectorLength(vec);
@@ -645,7 +808,7 @@ void tank_attack(edict_t *self)
             self->monsterinfo.currentmove = &tank_move_attack_chain;
         else if (r < 0.66f) {
             self->monsterinfo.currentmove = &tank_move_attack_pre_rocket;
-            self->pain_debounce_framenum = level.framenum + 5.0f * BASE_FRAMERATE;  // no pain for a while
+            self->pain_debounce_framenum = level.framenum + 5.0f * BASE_FRAMERATE;    // no pain for a while
         } else
             self->monsterinfo.currentmove = &tank_move_attack_blast;
     }
@@ -730,6 +893,21 @@ void tank_die(edict_t *self, edict_t *inflictor, edict_t *attacker, int damage, 
 
 }
 
+//===========
+//PGM
+bool tank_blocked(edict_t *self, float dist)
+{
+    if (blocked_checkshot(self, 0.25f + (0.05f * skill->value)))
+        return true;
+
+    if (blocked_checkplat(self, dist))
+        return true;
+
+    return false;
+}
+//PGM
+//===========
+
 //
 // monster_tank
 //
@@ -796,6 +974,7 @@ void SP_monster_tank(edict_t *self)
     self->monsterinfo.melee = NULL;
     self->monsterinfo.sight = tank_sight;
     self->monsterinfo.idle = tank_idle;
+    self->monsterinfo.blocked = tank_blocked;       // PGM
 
     gi.linkentity(self);
 
@@ -804,6 +983,10 @@ void SP_monster_tank(edict_t *self)
 
     walkmonster_start(self);
 
+    // PMM
+    self->monsterinfo.aiflags |= AI_IGNORE_SHOTS;
+    self->monsterinfo.blindfire = true;
+    //pmm
     if (strcmp(self->classname, "monster_tank_commander") == 0)
         self->s.skinnum = 2;
 }

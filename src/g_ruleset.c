@@ -292,6 +292,8 @@ bool G_LayerEnabled(content_layer_t l)
 void G_Svcmd_Ruleset_f(void)
 {
     int monsters = 0, corpses = 0, gibs = 0, clients = 0, inuse = 0;
+    int flav_x = 0, flav_r = 0;
+    int evade_rogue = 0, evade_bq2 = 0;
 
     for (int i = 0; i < globals.num_edicts; i++) {
         edict_t *e = &g_edicts[i];
@@ -316,6 +318,16 @@ void G_Svcmd_Ruleset_f(void)
                 gibs++;
             else
                 monsters++;
+            if (e->content_flavour & CONTENT_XATRIX)
+                flav_x++;
+            if (e->content_flavour & CONTENT_ROGUE)
+                flav_r++;
+            // R-CORE-11's gate, observed rather than asserted: which evasion
+            // set did this monster actually get installed at spawn?
+            if (e->monsterinfo.dodge == M_MonsterDodge)
+                evade_rogue++;
+            else if (e->monsterinfo.dodge)
+                evade_bq2++;
         }
     }
 
@@ -325,6 +337,10 @@ void G_Svcmd_Ruleset_f(void)
                "modifiers    teamplay=%d hook=%d runes=%d bots=%d\n"
                "predicates   monsters=%d campaign=%d teamplay=%d bots=%d saves=%d\n"
                "legacy       deathmatch=%d coop=%d\n"
+               "flavour      %d monster(s) latched xatrix, %d rogue "
+               "(R-CORE-11a)\n"
+               "evasion      %d monster(s) on Ground Zero's dodge, %d on "
+               "baseq2's (R-CORE-11)\n"
                "world        %d edicts in use, %d clients, "
                "%d live monsters, %d corpses, %d gibs\n",
                G_RulesetName(G_Ruleset()),
@@ -334,6 +350,7 @@ void G_Svcmd_Ruleset_f(void)
                G_MonstersAllowed(), G_IsCampaign(), G_TeamplayEnabled(),
                G_BotsAllowed(), G_SavegamesAllowed(),
                (int)deathmatch->value, (int)coop->value,
+               flav_x, flav_r, evade_rogue, evade_bq2,
                inuse, clients, monsters, corpses, gibs);
 
     // A live monster in a ruleset that forbids them is a contradiction, and the

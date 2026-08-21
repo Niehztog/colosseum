@@ -19,6 +19,8 @@ with this program; if not, write to the Free Software Foundation, Inc.,
 
 #include "g_local.h"
 
+extern void M_WorldEffects(edict_t *ent);
+
 /*QUAKED func_group (0 0 0) ?
 Used to group brushes together just for editor convenience.
 */
@@ -63,7 +65,7 @@ static void VelocityForDamage(int damage, vec3_t v)
         VectorScale(v, 1.2f, v);
 }
 
-static void ClipGibVelocity(edict_t *ent)
+void ClipGibVelocity(edict_t *ent)
 {
     ent->velocity[0] = Q_clipf(ent->velocity[0], -300, 300);
     ent->velocity[1] = Q_clipf(ent->velocity[1], -300, 300);
@@ -110,6 +112,38 @@ void gib_touch(edict_t *self, edict_t *other, cplane_t *plane, csurface_t *surf)
     }
 }
 
+// RAFAEL 24-APR-98
+// removed acid damage
+#if 0
+// RAFAEL
+void gib_touchacid(edict_t *self, edict_t *other, cplane_t *plane, csurface_t *surf)
+{
+    vec3_t normal_angles, right;
+
+    if (other->takedamage) {
+        T_Damage(other, self, self, vec3_origin, other->s.origin, vec3_origin, self->dmg, 1, 0, MOD_CRUSH);
+        G_FreeEdict(self);
+    }
+
+    if (!self->groundentity)
+        return;
+
+    if (plane) {
+        gi.sound(self, CHAN_VOICE, gi.soundindex("misc/fhit3.wav"), 1, ATTN_NORM, 0);
+
+        vectoangles(plane->normal, normal_angles);
+        AngleVectors(normal_angles, NULL, right, NULL);
+        vectoangles(right, self->s.angles);
+
+        if (self->s.modelindex == sm_meat_index) {
+            self->s.frame++;
+            self->think = gib_think;
+            self->nextthink = level.time + FRAMETIME;
+        }
+    }
+}
+#endif
+
 void gib_die(edict_t *self, edict_t *inflictor, edict_t *attacker, int damage, vec3_t point)
 {
     G_FreeEdict(self);
@@ -155,6 +189,10 @@ void ThrowGib(edict_t *self, char *gibname, int damage, int type)
     gib->think = G_FreeEdict;
     gib->nextthink = level.framenum + (10 + random() * 10) * BASE_FRAMERATE;
 
+//PGM
+    gib->s.renderfx |= RF_IR_VISIBLE;
+//PGM
+
     gi.linkentity(gib);
 }
 
@@ -196,6 +234,111 @@ void ThrowHead(edict_t *self, char *gibname, int damage, int type)
 
     self->think = G_FreeEdict;
     self->nextthink = level.framenum + (10 + random() * 10) * BASE_FRAMERATE;
+
+    gi.linkentity(self);
+}
+
+// RAFAEL
+void ThrowGibACID(edict_t *self, char *gibname, int damage, int type)
+{
+    edict_t *gib;
+    vec3_t vd;
+    vec3_t origin;
+    vec3_t size;
+    float vscale;
+
+    gib = G_Spawn();
+
+    VectorScale(self->size, 0.5, size);
+    VectorAdd(self->absmin, size, origin);
+    gib->s.origin[0] = origin[0] + crandom() * size[0];
+    gib->s.origin[1] = origin[1] + crandom() * size[1];
+    gib->s.origin[2] = origin[2] + crandom() * size[2];
+
+    // gi.setmodel (gib, gibname);
+    gib->s.modelindex = gi.modelindex(gibname);
+
+    gib->clipmask = MASK_SHOT;
+    gib->solid = SOLID_BBOX;
+
+    gib->s.effects |= EF_GREENGIB;
+    // note to self check this
+    gib->s.renderfx |= RF_FULLBRIGHT;
+    gib->flags |= FL_NO_KNOCKBACK;
+    gib->takedamage = DAMAGE_YES;
+    gib->die = gib_die;
+    gib->dmg = 2;
+
+    if (type == GIB_ORGANIC) {
+        gib->movetype = MOVETYPE_TOSS;
+        // RAFAEL 24-APR-98
+        // removed acid damage
+        //gib->touch = gib_touchacid;
+        vscale = 3.0;
+    } else {
+        gib->movetype = MOVETYPE_BOUNCE;
+        vscale = 1.0;
+    }
+
+    VelocityForDamage(damage, vd);
+    VectorMA(self->velocity, vscale, vd, gib->velocity);
+    ClipGibVelocity(gib);
+    gib->avelocity[0] = random() * 600;
+    gib->avelocity[1] = random() * 600;
+    gib->avelocity[2] = random() * 600;
+
+    gib->think = G_FreeEdict;
+    gib->nextthink = level.time + 10 + random() * 10;
+
+    gi.linkentity(gib);
+}
+
+// RAFAEL
+void ThrowHeadACID(edict_t *self, char *gibname, int damage, int type)
+{
+    vec3_t vd;
+    float vscale;
+
+    self->s.skinnum = 0;
+    self->s.frame = 0;
+    VectorClear(self->mins);
+    VectorClear(self->maxs);
+
+    self->s.modelindex2 = 0;
+    gi.setmodel(self, gibname);
+
+    self->clipmask = MASK_SHOT;
+    self->solid = SOLID_BBOX;
+
+    self->s.effects |= EF_GREENGIB;
+    self->s.effects &= ~EF_FLIES;
+    self->s.effects |= RF_FULLBRIGHT;
+    self->s.sound = 0;
+    self->flags |= FL_NO_KNOCKBACK;
+    self->svflags &= ~SVF_MONSTER;
+    self->takedamage = DAMAGE_YES;
+    self->die = gib_die;
+    self->dmg = 2;
+
+    if (type == GIB_ORGANIC) {
+        self->movetype = MOVETYPE_TOSS;
+        // RAFAEL 24-APR-98
+        // removed acid damage
+        // self->touch = gib_touchacid;
+        vscale = 0.5;
+    } else {
+        self->movetype = MOVETYPE_BOUNCE;
+        vscale = 1.0;
+    }
+
+    VelocityForDamage(damage, vd);
+    VectorMA(self->velocity, vscale, vd, self->velocity);
+    ClipGibVelocity(self);
+
+    self->avelocity[YAW] = crandom() * 600;
+
+    self->think = G_FreeEdict;
+    self->nextthink = level.time + 10 + random() * 10;
 
     gi.linkentity(self);
 }
@@ -346,7 +489,7 @@ void path_corner_touch(edict_t *self, edict_t *other, cplane_t *plane, csurface_
     }
 
     if (!other->movetarget) {
-        other->monsterinfo.pause_framenum = INT_MAX;
+        other->monsterinfo.pause_framenum = level.framenum + 100000000 * BASE_FRAMERATE;
         other->monsterinfo.stand(other);
     } else {
         VectorSubtract(other->goalentity->s.origin, other->s.origin, v);
@@ -391,7 +534,7 @@ void point_combat_touch(edict_t *self, edict_t *other, cplane_t *plane, csurface
         }
         self->target = NULL;
     } else if ((self->spawnflags & 1) && !(other->flags & (FL_SWIM | FL_FLY))) {
-        other->monsterinfo.pause_framenum = INT_MAX;
+        other->monsterinfo.pause_framenum = level.framenum + 100000000 * BASE_FRAMERATE;
         other->monsterinfo.aiflags |= AI_STAND_GROUND;
         other->monsterinfo.stand(other);
     }
@@ -655,12 +798,15 @@ void SP_func_object(edict_t *self)
     gi.linkentity(self);
 }
 
-/*QUAKED func_explosive (0 .5 .8) ? Trigger_Spawn ANIMATED ANIMATED_FAST
+/*QUAKED func_explosive (0 .5 .8) ? Trigger_Spawn ANIMATED ANIMATED_FAST INACTIVE
 Any brush that you want to explode or break apart.  If you want an
 ex0plosion, set dmg and it will do a radius explosion of that amount
 at the center of the bursh.
 
 If targeted it will not be shootable.
+
+INACTIVE - specifies that the entity is not explodable until triggered. If you use this you must
+target the entity you want to trigger it. This is the only entity approved to activate it.
 
 health defaults to 100.
 
@@ -675,6 +821,8 @@ void func_explosive_explode(edict_t *self, edict_t *inflictor, edict_t *attacker
     vec3_t  size;
     int     count;
     int     mass;
+    edict_t *master;
+    bool    done = false;
 
     // bmodel origins are (0 0 0), we need to adjust that here
     VectorScale(self->size, 0.5f, size);
@@ -717,6 +865,32 @@ void func_explosive_explode(edict_t *self, edict_t *inflictor, edict_t *attacker
         ThrowDebris(self, "models/objects/debris2/tris.md2", 2, chunkorigin);
     }
 
+    // PMM - if we're part of a train, clean ourselves out of it
+    if (self->flags & FL_TEAMSLAVE) {
+//      if ((g_showlogic) && (g_showlogic->value))
+//          gi.dprintf ("Removing func_explosive from train!\n");
+
+        if (self->teammaster) {
+            master = self->teammaster;
+            if (master && master->inuse) {  // because mappers (other than jim (usually)) are stupid....
+                while (!done) {
+                    if (master->teamchain == self) {
+                        master->teamchain = self->teamchain;
+                        done = true;
+                    }
+                    master = master->teamchain;
+                    if (!master) {
+//                      if ((g_showlogic) && (g_showlogic->value))
+//                          gi.dprintf ("Couldn't find myself in master's chain, ignoring!\n");
+                    }
+                }
+            }
+        } else {
+//          if ((g_showlogic) && (g_showlogic->value))
+//              gi.dprintf ("No master to free myself from, ignoring!\n");
+        }
+    }
+
     G_UseTargets(self, attacker);
 
     if (self->dmg)
@@ -729,6 +903,42 @@ void func_explosive_use(edict_t *self, edict_t *other, edict_t *activator)
 {
     func_explosive_explode(self, self, activator, self->health, self->s.origin);
 }
+
+//PGM
+void func_explosive_activate(edict_t *self, edict_t *other, edict_t *activator)
+{
+    int approved;
+
+    approved = 0;
+    // PMM - looked like target and targetname were flipped here
+    if (other != NULL && other->target) {
+        if (!strcmp(other->target, self->targetname))
+            approved = 1;
+    }
+    if (!approved && activator != NULL && activator->target) {
+        if (!strcmp(activator->target, self->targetname))
+            approved = 1;
+    }
+
+    if (!approved) {
+//      gi.dprintf("func_explosive_activate: incorrect activator\n");
+        return;
+    }
+
+    // PMM - according to mappers, they don't need separate cases for blowupable and triggerable
+//  if (self->target)
+//  {
+    self->use = func_explosive_use;
+//  }
+//  else
+//  {
+    if (!self->health)
+        self->health = 100;
+    self->die = func_explosive_explode;
+    self->takedamage = DAMAGE_YES;
+//  }
+}
+//PGM
 
 void func_explosive_spawn(edict_t *self, edict_t *other, edict_t *activator)
 {
@@ -758,7 +968,15 @@ void SP_func_explosive(edict_t *self)
         self->svflags |= SVF_NOCLIENT;
         self->solid = SOLID_NOT;
         self->use = func_explosive_spawn;
-    } else {
+    }
+//PGM
+    else if (self->spawnflags & 8) {
+        self->solid = SOLID_BSP;
+        if (self->targetname)
+            self->use = func_explosive_activate;
+    }
+//PGM
+    else {
         self->solid = SOLID_BSP;
         if (self->targetname)
             self->use = func_explosive_use;
@@ -769,7 +987,10 @@ void SP_func_explosive(edict_t *self)
     if (self->spawnflags & 4)
         self->s.effects |= EF_ANIM_ALLFAST;
 
-    if (self->use != func_explosive_use) {
+//PGM
+    if ((self->use != func_explosive_use) && (self->use != func_explosive_activate))
+//PGM
+    {
         if (!self->health)
             self->health = 100;
         self->die = func_explosive_explode;
@@ -854,6 +1075,29 @@ void barrel_delay(edict_t *self, edict_t *inflictor, edict_t *attacker, int dama
     self->activator = attacker;
 }
 
+//=========
+//PGM  - change so barrels will think and hence, blow up
+void barrel_think(edict_t *self)
+{
+    // the think needs to be first since later stuff may override.
+    self->think = barrel_think;
+    self->nextthink = level.framenum + 1;
+
+    M_CatagorizePosition(self);
+    self->flags |= FL_IMMUNE_SLIME;
+    self->air_finished_framenum = level.framenum + 100 * BASE_FRAMERATE;
+    M_WorldEffects(self);
+}
+
+void barrel_start(edict_t *self)
+{
+    M_droptofloor(self);
+    self->think = barrel_think;
+    self->nextthink = level.framenum + 1;
+}
+//PGM
+//=========
+
 void SP_misc_explobox(edict_t *self)
 {
     if (deathmatch->value) {
@@ -887,8 +1131,10 @@ void SP_misc_explobox(edict_t *self)
 
     self->touch = barrel_touch;
 
-    self->think = M_droptofloor;
+//PGM - change so barrels will think and hence, blow up
+    self->think = barrel_start;
     self->nextthink = level.framenum + 2;
+//PGM
 
     gi.linkentity(self);
 }
@@ -1093,7 +1339,8 @@ void misc_deadsoldier_die(edict_t *self, edict_t *inflictor, edict_t *attacker, 
 {
     int     n;
 
-    if (self->health > -80)
+//  if (self->health > -80)
+    if (self->health > -30)
         return;
 
     gi.sound(self, CHAN_BODY, gi.soundindex("misc/udeath.wav"), 1, ATTN_NORM, 0);
@@ -1176,6 +1423,35 @@ void SP_misc_viper(edict_t *ent)
 
     ent->think = func_train_find;
     ent->nextthink = level.framenum + 1;
+    ent->use = misc_viper_use;
+    ent->svflags |= SVF_NOCLIENT;
+    ent->moveinfo.accel = ent->moveinfo.decel = ent->moveinfo.speed = ent->speed;
+
+    gi.linkentity(ent);
+}
+
+/*QUAKED misc_crashviper (1 .5 0) (-176 -120 -24) (176 120 72)
+This is a large viper about to crash
+*/
+void SP_misc_crashviper(edict_t *ent)
+{
+    if (!ent->target) {
+        gi.dprintf("misc_viper without a target at %s\n", vtos(ent->absmin));
+        G_FreeEdict(ent);
+        return;
+    }
+
+    if (!ent->speed)
+        ent->speed = 300;
+
+    ent->movetype = MOVETYPE_PUSH;
+    ent->solid = SOLID_NOT;
+    ent->s.modelindex = gi.modelindex("models/ships/bigviper/tris.md2");
+    VectorSet(ent->mins, -16, -16, 0);
+    VectorSet(ent->maxs, 16, 16, 32);
+
+    ent->think = func_train_find;
+    ent->nextthink = level.time + FRAMETIME;
     ent->use = misc_viper_use;
     ent->svflags |= SVF_NOCLIENT;
     ent->moveinfo.accel = ent->moveinfo.decel = ent->moveinfo.speed = ent->speed;
@@ -1266,6 +1542,54 @@ void SP_misc_viper_bomb(edict_t *self)
     gi.linkentity(self);
 }
 
+// RAFAEL
+/*QUAKED misc_viper_missile (1 0 0) (-8 -8 -8) (8 8 8)
+"dmg"   how much boom should the bomb make? the default value is 250
+*/
+
+void misc_viper_missile_use(edict_t *self, edict_t *other, edict_t *activator)
+{
+
+    vec3_t  forward, right, up;
+    vec3_t  start, dir;
+    vec3_t  vec;
+
+    AngleVectors(self->s.angles, forward, right, up);
+
+    self->enemy = G_Find(NULL, FOFS(targetname), self->target);
+
+    VectorCopy(self->enemy->s.origin, vec);
+    vec[2] += 16;
+
+    VectorCopy(self->s.origin, start);
+    VectorSubtract(vec, start, dir);
+    VectorNormalize(dir);
+
+    monster_fire_rocket(self, start, dir, self->dmg, 500, MZ2_CHICK_ROCKET_1);
+
+    self->nextthink = level.time + 0.1;
+    self->think = G_FreeEdict;
+
+}
+
+void SP_misc_viper_missile(edict_t *self)
+{
+    self->movetype = MOVETYPE_NONE;
+    self->solid = SOLID_NOT;
+    VectorSet(self->mins, -8, -8, -8);
+    VectorSet(self->maxs, 8, 8, 8);
+
+    if (!self->dmg)
+        self->dmg = 250;
+
+    self->s.modelindex = gi.modelindex("models/objects/bomb/tris.md2");
+
+    self->use = misc_viper_missile_use;
+    self->svflags |= SVF_NOCLIENT;
+
+    gi.linkentity(self);
+}
+
 /*QUAKED misc_strogg_ship (1 .5 0) (-16 -16 0) (16 16 32)
 This is a Storgg ship for the flybys.
 It is trigger_spawned, so you must have something use it for it to show up.
@@ -1309,6 +1633,43 @@ void SP_misc_strogg_ship(edict_t *ent)
 
     gi.linkentity(ent);
 }
+
+// RAFAEL 17-APR-98
+/*QUAKED misc_transport (1 0 0) (-8 -8 -8) (8 8 8) TRIGGER_SPAWN
+Maxx's transport at end of game
+*/
+void SP_misc_transport(edict_t *ent)
+{
+
+    if (!ent->target) {
+        gi.dprintf("%s without a target at %s\n", ent->classname, vtos(ent->absmin));
+        G_FreeEdict(ent);
+        return;
+    }
+
+    if (!ent->speed)
+        ent->speed = 300;
+
+    ent->movetype = MOVETYPE_PUSH;
+    ent->solid = SOLID_NOT;
+    ent->s.modelindex = gi.modelindex("models/objects/ship/tris.md2");
+
+    VectorSet(ent->mins, -16, -16, 0);
+    VectorSet(ent->maxs, 16, 16, 32);
+
+    ent->think = func_train_find;
+    ent->nextthink = level.time + FRAMETIME;
+    ent->use = misc_strogg_ship_use;
+    ent->svflags |= SVF_NOCLIENT;
+    ent->moveinfo.accel = ent->moveinfo.decel = ent->moveinfo.speed = ent->speed;
+
+    if (!(ent->spawnflags & 1)) {
+        ent->spawnflags |= 1;
+    }
+
+    gi.linkentity(ent);
+}
+// END 17-APR-98
 
 /*QUAKED misc_satellite_dish (1 .5 0) (-64 -64 0) (64 64 128)
 */
@@ -1645,9 +2006,8 @@ void teleporter_touch(edict_t *self, edict_t *other, cplane_t *plane, csurface_t
     other->s.event = EV_PLAYER_TELEPORT;
 
     // set angles
-    for (i = 0; i < 3; i++) {
+    for (i = 0; i < 3; i++)
         other->client->ps.pmove.delta_angles[i] = ANGLE2SHORT(dest->s.angles[i] - other->client->resp.cmd_angles[i]);
-    }
 
     VectorCopy(dest->s.angles, other->s.angles);
     VectorCopy(dest->s.angles, other->client->ps.viewangles);
@@ -1709,3 +2069,74 @@ void SP_misc_teleporter_dest(edict_t *ent)
     VectorSet(ent->maxs, 32, 32, -16);
     gi.linkentity(ent);
 }
+
+/*QUAKED misc_amb4 (1 0 0) (-16 -16 -16) (16 16 16)
+Mal's amb4 loop entity
+*/
+static int amb4sound;
+
+void amb4_think(edict_t *ent)
+{
+    ent->nextthink = level.time + 2.7;
+    gi.sound(ent, CHAN_VOICE, amb4sound, 1, ATTN_NONE, 0);
+}
+
+static void amb4_precache(void)
+{
+    amb4sound = gi.soundindex("world/amb4.wav");
+}
+
+void SP_misc_amb4(edict_t *ent)
+{
+    ent->think = amb4_think;
+    ent->nextthink = level.time + 1;
+    G_AddPrecache(amb4_precache);
+    gi.linkentity(ent);
+}
+
+/*QUAKED misc_nuke (1 0 0) (-16 -16 -16) (16 16 16)
+*/
+
+void use_nuke(edict_t *self, edict_t *other, edict_t *activator)
+{
+    edict_t *from = g_edicts;
+
+    for (; from < &g_edicts[globals.num_edicts]; from++) {
+        if (from == self)
+            continue;
+        if (from->client) {
+            T_Damage(from, self, self, vec3_origin, from->s.origin, vec3_origin, 100000, 1, 0, MOD_TRAP);
+        } else if (from->svflags & SVF_MONSTER) {
+            G_FreeEdict(from);
+        }
+    }
+
+    self->use = NULL;
+}
+
+void SP_misc_nuke(edict_t *ent)
+{
+    ent->use = use_nuke;
+}
+//======================
+//ROGUE
+void misc_nuke_core_use(edict_t *self, edict_t *other, edict_t *activator)
+{
+    if (self->svflags & SVF_NOCLIENT)
+        self->svflags &= ~SVF_NOCLIENT;
+    else
+        self->svflags |= SVF_NOCLIENT;
+}
+
+/*QUAKED misc_nuke_core (1 0 0) (-16 -16 -16) (16 16 16)
+toggles visible/not visible. starts visible.
+*/
+void SP_misc_nuke_core(edict_t *ent)
+{
+    gi.setmodel(ent, "models/objects/core/tris.md2");
+    gi.linkentity(ent);
+
+    ent->use = misc_nuke_core_use;
+}
+//ROGUE
+//======================

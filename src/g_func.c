@@ -52,6 +52,20 @@ with this program; if not, write to the Free Software Foundation, Inc.,
 
 #define PLAT_LOW_TRIGGER    1
 
+//====
+//PGM
+#define PLAT2_TOGGLE            2
+#define PLAT2_TOP               4
+#define PLAT2_TRIGGER_TOP       8
+#define PLAT2_TRIGGER_BOTTOM    16
+#define PLAT2_BOX_LIFT          32
+
+void plat2_spawn_danger_area(edict_t *ent);
+void plat2_kill_danger_area(edict_t *ent);
+
+//PGM
+//====
+
 #define STATE_TOP           0
 #define STATE_BOTTOM        1
 #define STATE_UP            2
@@ -64,6 +78,12 @@ with this program; if not, write to the Free Software Foundation, Inc.,
 #define DOOR_TOGGLE         32
 #define DOOR_X_AXIS         64
 #define DOOR_Y_AXIS         128
+// !easy                    256
+// !med                     512
+// !hard                    1024
+// !dm                      2048
+// !coop                    4096
+#define DOOR_INACTIVE       8192
 
 //
 // Support routines for movement (changes in origin using velocity)
@@ -105,7 +125,7 @@ void Move_Begin(edict_t *ent)
 
 void Think_AccelMove(edict_t *ent);
 
-static void Move_Calc(edict_t *ent, const vec3_t dest, void (*func)(edict_t *))
+void Move_Calc(edict_t *ent, const vec3_t dest, void (*func)(edict_t *))
 {
     VectorClear(ent->velocity);
     VectorSubtract(dest, ent->s.origin, ent->moveinfo.dir);
@@ -164,6 +184,14 @@ void AngleMove_Begin(edict_t *ent)
     float   traveltime;
     float   frames;
 
+//PGM       accelerate as needed
+    if (ent->moveinfo.speed < ent->speed) {
+        ent->moveinfo.speed += ent->accel;
+        if (ent->moveinfo.speed > ent->speed)
+            ent->moveinfo.speed = ent->speed;
+    }
+//PGM
+
     // set destdelta to the vector needed to move
     if (ent->moveinfo.state == STATE_UP)
         VectorSubtract(ent->moveinfo.end_angles, ent->s.angles, destdelta);
@@ -186,15 +214,30 @@ void AngleMove_Begin(edict_t *ent)
     // scale the destdelta vector by the time spent traveling to get velocity
     VectorScale(destdelta, 1.0f / traveltime, ent->avelocity);
 
-    // set nextthink to trigger a think when dest is reached
-    ent->nextthink = level.framenum + frames;
-    ent->think = AngleMove_Final;
+//PGM
+    // if we're done accelerating, act as a normal rotation
+    if (ent->moveinfo.speed >= ent->speed) {
+        // set nextthink to trigger a think when dest is reached
+        ent->nextthink = level.framenum + frames;
+        ent->think = AngleMove_Final;
+    } else {
+        ent->nextthink = level.framenum + 1;
+        ent->think = AngleMove_Begin;
+    }
+//PGM
 }
 
 static void AngleMove_Calc(edict_t *ent, void (*func)(edict_t *))
 {
     VectorClear(ent->avelocity);
     ent->moveinfo.endfunc = func;
+
+//PGM
+    // if we're supposed to accelerate, this will tell anglemove_begin to do so
+    if (ent->accel != ent->speed)
+        ent->moveinfo.speed = 0;
+//PGM
+
     if (level.current_entity == ((ent->flags & FL_TEAMSLAVE) ? ent->teammaster : ent)) {
         AngleMove_Begin(ent);
     } else {
@@ -309,8 +352,9 @@ void Think_AccelMove(edict_t *ent)
 {
     ent->moveinfo.remaining_distance -= ent->moveinfo.current_speed;
 
-    if (ent->moveinfo.current_speed == 0)       // starting or blocked
-        plat_CalcAcceleratedMove(&ent->moveinfo);
+    // PGM 04/21/98  - this should fix sthoms' sinking drop pod. Hopefully it wont break stuff.
+//  if (ent->moveinfo.current_speed == 0)       // starting or blocked
+    plat_CalcAcceleratedMove(&ent->moveinfo);
 
     plat_Accelerate(&ent->moveinfo);
 
@@ -348,6 +392,8 @@ void plat_hit_bottom(edict_t *ent)
         ent->s.sound = 0;
     }
     ent->moveinfo.state = STATE_BOTTOM;
+
+    plat2_kill_danger_area(ent);        // PGM
 }
 
 void plat_go_down(edict_t *ent)
@@ -370,6 +416,8 @@ static void plat_go_up(edict_t *ent)
     }
     ent->moveinfo.state = STATE_UP;
     Move_Calc(ent, ent->moveinfo.start_origin, plat_hit_top);
+
+    plat2_spawn_danger_area(ent);   // PGM
 }
 
 void plat_blocked(edict_t *self, edict_t *other)
@@ -378,10 +426,17 @@ void plat_blocked(edict_t *self, edict_t *other)
         // give it a chance to go away on it's own terms (like gibs)
         T_Damage(other, self, self, vec3_origin, other->s.origin, vec3_origin, 100000, 1, 0, MOD_CRUSH);
         // if it's still there, nuke it
-        if (other->inuse)
+        if (other && other->inuse)      // PGM
             BecomeExplosion1(other);
         return;
     }
+
+//PGM
+    // gib dead things
+    if (other->health < 1) {
+        T_Damage(other, self, self, vec3_origin, other->s.origin, vec3_origin, 100, 1, 0, MOD_CRUSH);
+    }
+//PGM
 
     T_Damage(other, self, self, vec3_origin, other->s.origin, vec3_origin, self->dmg, 1, 0, MOD_CRUSH);
 
@@ -393,6 +448,20 @@ void plat_blocked(edict_t *self, edict_t *other)
 
 void Use_Plat(edict_t *ent, edict_t *other, edict_t *activator)
 {
+//======
+//ROGUE
+    // if a monster is using us, then allow the activity when stopped.
+    if (other->svflags & SVF_MONSTER) {
+        if (ent->moveinfo.state == STATE_TOP)
+            plat_go_down(ent);
+        else if (ent->moveinfo.state == STATE_BOTTOM)
+            plat_go_up(ent);
+
+        return;
+    }
+//ROGUE
+//======
+
     if (ent->think)
         return;     // already down
     plat_go_down(ent);
@@ -410,10 +479,12 @@ void Touch_Plat_Center(edict_t *ent, edict_t *other, cplane_t *plane, csurface_t
     if (ent->moveinfo.state == STATE_BOTTOM)
         plat_go_up(ent);
     else if (ent->moveinfo.state == STATE_TOP)
-        ent->nextthink = level.framenum + 1 * BASE_FRAMERATE;   // the player is still on the plat, so delay going down
+        ent->nextthink = level.framenum + 1 * BASE_FRAMERATE;    // the player is still on the plat, so delay going down
 }
 
-static void plat_spawn_inside_trigger(edict_t *ent)
+// PGM - plat2's change the trigger field
+//void plat_spawn_inside_trigger (edict_t *ent)
+static edict_t *plat_spawn_inside_trigger(edict_t *ent)
 {
     edict_t *trigger;
     vec3_t  tmin, tmax;
@@ -453,6 +524,8 @@ static void plat_spawn_inside_trigger(edict_t *ent)
     VectorCopy(tmax, trigger->maxs);
 
     gi.linkentity(trigger);
+
+    return trigger;         // PGM 11/17/97
 }
 
 /*QUAKED func_plat (0 .5 .8) ? PLAT_LOW_TRIGGER
@@ -537,19 +610,440 @@ void SP_func_plat(edict_t *ent)
     ent->moveinfo.sound_end = gi.soundindex("plats/pt1_end.wav");
 }
 
+// ==========================================
+// PLAT 2
+// ==========================================
+#define PLAT2_CALLED        1
+#define PLAT2_MOVING        2
+#define PLAT2_WAITING       4
+
+void plat2_go_down(edict_t *ent);
+void plat2_go_up(edict_t *ent);
+
+void plat2_spawn_danger_area(edict_t *ent)
+{
+    vec3_t  mins, maxs;
+
+    VectorCopy(ent->mins, mins);
+    VectorCopy(ent->maxs, maxs);
+    maxs[2] = ent->mins[2] + 64;
+
+    SpawnBadArea(mins, maxs, 0, ent);
+}
+
+void plat2_kill_danger_area(edict_t *ent)
+{
+    edict_t *t;
+
+    t = NULL;
+    while ((t = G_Find(t, FOFS(classname), "bad_area"))) {
+        if (t->owner == ent)
+            G_FreeEdict(t);
+    }
+}
+
+void plat2_hit_top(edict_t *ent)
+{
+    if (!(ent->flags & FL_TEAMSLAVE)) {
+        if (ent->moveinfo.sound_end)
+            gi.sound(ent, CHAN_NO_PHS_ADD + CHAN_VOICE, ent->moveinfo.sound_end, 1, ATTN_STATIC, 0);
+        ent->s.sound = 0;
+    }
+    ent->moveinfo.state = STATE_TOP;
+
+    if (ent->plat2flags & PLAT2_CALLED) {
+        ent->plat2flags = PLAT2_WAITING;
+        if (!(ent->spawnflags & PLAT2_TOGGLE)) {
+            ent->think = plat2_go_down;
+            ent->nextthink = level.framenum + 5.0f * BASE_FRAMERATE;
+        }
+        if (deathmatch->value)
+            ent->last_move_framenum = level.framenum - 1.0f;
+        else
+            ent->last_move_framenum = level.framenum - 2.0f;
+    } else if (!(ent->spawnflags & PLAT2_TOP) && !(ent->spawnflags & PLAT2_TOGGLE)) {
+        ent->plat2flags = 0;
+        ent->think = plat2_go_down;
+        ent->nextthink = level.framenum + 2.0f * BASE_FRAMERATE;
+        ent->last_move_framenum = level.framenum;
+    } else {
+        ent->plat2flags = 0;
+        ent->last_move_framenum = level.framenum;
+    }
+
+    G_UseTargets(ent, ent);
+}
+
+void plat2_hit_bottom(edict_t *ent)
+{
+    if (!(ent->flags & FL_TEAMSLAVE)) {
+        if (ent->moveinfo.sound_end)
+            gi.sound(ent, CHAN_NO_PHS_ADD + CHAN_VOICE, ent->moveinfo.sound_end, 1, ATTN_STATIC, 0);
+        ent->s.sound = 0;
+    }
+    ent->moveinfo.state = STATE_BOTTOM;
+
+    if (ent->plat2flags & PLAT2_CALLED) {
+        ent->plat2flags = PLAT2_WAITING;
+        if (!(ent->spawnflags & PLAT2_TOGGLE)) {
+            ent->think = plat2_go_up;
+            ent->nextthink = level.framenum + 5.0f * BASE_FRAMERATE;
+        }
+        if (deathmatch->value)
+            ent->last_move_framenum = level.framenum - 1.0f;
+        else
+            ent->last_move_framenum = level.framenum - 2.0f;
+    } else if ((ent->spawnflags & PLAT2_TOP) && !(ent->spawnflags & PLAT2_TOGGLE)) {
+        ent->plat2flags = 0;
+        ent->think = plat2_go_up;
+        ent->nextthink = level.framenum + 2.0f * BASE_FRAMERATE;
+        ent->last_move_framenum = level.framenum;
+    } else {
+        ent->plat2flags = 0;
+        ent->last_move_framenum = level.framenum;
+    }
+
+    plat2_kill_danger_area(ent);
+    G_UseTargets(ent, ent);
+}
+
+void plat2_go_down(edict_t *ent)
+{
+    if (!(ent->flags & FL_TEAMSLAVE)) {
+        if (ent->moveinfo.sound_start)
+            gi.sound(ent, CHAN_NO_PHS_ADD + CHAN_VOICE, ent->moveinfo.sound_start, 1, ATTN_STATIC, 0);
+        ent->s.sound = ent->moveinfo.sound_middle;
+    }
+    ent->moveinfo.state = STATE_DOWN;
+    ent->plat2flags |= PLAT2_MOVING;
+
+    Move_Calc(ent, ent->moveinfo.end_origin, plat2_hit_bottom);
+}
+
+void plat2_go_up(edict_t *ent)
+{
+    if (!(ent->flags & FL_TEAMSLAVE)) {
+        if (ent->moveinfo.sound_start)
+            gi.sound(ent, CHAN_NO_PHS_ADD + CHAN_VOICE, ent->moveinfo.sound_start, 1, ATTN_STATIC, 0);
+        ent->s.sound = ent->moveinfo.sound_middle;
+    }
+    ent->moveinfo.state = STATE_UP;
+    ent->plat2flags |= PLAT2_MOVING;
+
+    plat2_spawn_danger_area(ent);
+
+    Move_Calc(ent, ent->moveinfo.start_origin, plat2_hit_top);
+}
+
+void plat2_operate(edict_t *ent, edict_t *other)
+{
+    int     otherState;
+    float   pauseTime;
+    float   platCenter;
+    edict_t *trigger;
+
+    trigger = ent;
+    ent = ent->enemy;   // now point at the plat, not the trigger
+
+    if (ent->plat2flags & PLAT2_MOVING)
+        return;
+
+    if ((ent->last_move_framenum + 2) > level.time)
+        return;
+
+    platCenter = (trigger->absmin[2] + trigger->absmax[2]) / 2;
+
+    if (ent->moveinfo.state == STATE_TOP) {
+        otherState = STATE_TOP;
+        if (ent->spawnflags & PLAT2_BOX_LIFT) {
+            if (platCenter > other->s.origin[2])
+                otherState = STATE_BOTTOM;
+        } else {
+            if (trigger->absmax[2] > other->s.origin[2])
+                otherState = STATE_BOTTOM;
+        }
+    } else {
+        otherState = STATE_BOTTOM;
+        if (other->s.origin[2] > platCenter)
+            otherState = STATE_TOP;
+    }
+
+    ent->plat2flags = PLAT2_MOVING;
+
+    if (deathmatch->value)
+        pauseTime = 0.3f;
+    else
+        pauseTime = 0.5f;
+
+    if (ent->moveinfo.state != otherState) {
+        ent->plat2flags |= PLAT2_CALLED;
+        pauseTime = 0.1f;
+    }
+
+    ent->last_move_framenum = level.framenum;
+
+    if (ent->moveinfo.state == STATE_BOTTOM) {
+        ent->think = plat2_go_up;
+        ent->nextthink = level.framenum + pauseTime * BASE_FRAMERATE;
+    } else {
+        ent->think = plat2_go_down;
+        ent->nextthink = level.framenum + pauseTime * BASE_FRAMERATE;
+    }
+}
+
+void Touch_Plat_Center2(edict_t *ent, edict_t *other, cplane_t *plane, csurface_t *surf)
+{
+    // this requires monsters to actively trigger plats, not just step on them.
+
+    //FIXME - commented out for E3
+    //if (!other->client)
+    //  return;
+
+    if (other->health <= 0)
+        return;
+
+    // PMM - don't let non-monsters activate plat2s
+    if ((!(other->svflags & SVF_MONSTER)) && (!other->client))
+        return;
+
+    plat2_operate(ent, other);
+}
+
+void plat2_blocked(edict_t *self, edict_t *other)
+{
+    if (!(other->svflags & SVF_MONSTER) && (!other->client)) {
+        // give it a chance to go away on it's own terms (like gibs)
+        T_Damage(other, self, self, vec3_origin, other->s.origin, vec3_origin, 100000, 1, 0, MOD_CRUSH);
+        // if it's still there, nuke it
+        if (other && other->inuse)
+            BecomeExplosion1(other);
+        return;
+    }
+
+    // gib dead things
+    if (other->health < 1) {
+        T_Damage(other, self, self, vec3_origin, other->s.origin, vec3_origin, 100, 1, 0, MOD_CRUSH);
+    }
+
+    T_Damage(other, self, self, vec3_origin, other->s.origin, vec3_origin, self->dmg, 1, 0, MOD_CRUSH);
+
+    if (self->moveinfo.state == STATE_UP)
+        plat2_go_down(self);
+    else if (self->moveinfo.state == STATE_DOWN)
+        plat2_go_up(self);
+}
+
+void Use_Plat2(edict_t *ent, edict_t *other, edict_t *activator)
+{
+    edict_t     *trigger;
+    int         i;
+
+    if (ent->moveinfo.state > STATE_BOTTOM)
+        return;
+    if ((ent->last_move_framenum + 2) > level.time)
+        return;
+
+    for (i = 1, trigger = g_edicts + 1; i < globals.num_edicts; i++, trigger++) {
+        if (!trigger->inuse)
+            continue;
+        if (trigger->touch == Touch_Plat_Center2) {
+            if (trigger->enemy == ent) {
+//              Touch_Plat_Center2 (trigger, activator, NULL, NULL);
+                plat2_operate(trigger, activator);
+                return;
+            }
+        }
+    }
+}
+
+void plat2_activate(edict_t *ent, edict_t *other, edict_t *activator)
+{
+    edict_t *trigger;
+
+//  if(ent->targetname)
+//      ent->targetname[0] = 0;
+
+    ent->use = Use_Plat2;
+
+    trigger = plat_spawn_inside_trigger(ent);   // the "start moving" trigger
+
+    trigger->maxs[0] += 10;
+    trigger->maxs[1] += 10;
+    trigger->mins[0] -= 10;
+    trigger->mins[1] -= 10;
+
+    gi.linkentity(trigger);
+
+    trigger->touch = Touch_Plat_Center2;        // Override trigger touch function
+
+    plat2_go_down(ent);
+}
+
+/*QUAKED func_plat2 (0 .5 .8) ? PLAT_LOW_TRIGGER PLAT2_TOGGLE PLAT2_TOP PLAT2_TRIGGER_TOP PLAT2_TRIGGER_BOTTOM BOX_LIFT
+speed   default 150
+
+PLAT_LOW_TRIGGER - creates a short trigger field at the bottom
+PLAT2_TOGGLE - plat will not return to default position.
+PLAT2_TOP - plat's default position will the the top.
+PLAT2_TRIGGER_TOP - plat will trigger it's targets each time it hits top
+PLAT2_TRIGGER_BOTTOM - plat will trigger it's targets each time it hits bottom
+BOX_LIFT - this indicates that the lift is a box, rather than just a platform
+
+Plats are always drawn in the extended position, so they will light correctly.
+
+If the plat is the target of another trigger or button, it will start out disabled in the extended position until it is trigger, when it will lower and become a normal plat.
+
+"speed" overrides default 200.
+"accel" overrides default 500
+"lip"   no default
+
+If the "height" key is set, that will determine the amount the plat moves, instead of being implicitly determoveinfoned by the model's height.
+
+*/
+void SP_func_plat2(edict_t *ent)
+{
+    edict_t *trigger;
+
+    VectorClear(ent->s.angles);
+    ent->solid = SOLID_BSP;
+    ent->movetype = MOVETYPE_PUSH;
+
+    gi.setmodel(ent, ent->model);
+
+    ent->blocked = plat2_blocked;
+
+    if (!ent->speed)
+        ent->speed = 20;
+    else
+        ent->speed *= 0.1f;
+
+    if (!ent->accel)
+        ent->accel = 5;
+    else
+        ent->accel *= 0.1f;
+
+    if (!ent->decel)
+        ent->decel = 5;
+    else
+        ent->decel *= 0.1f;
+
+    if (deathmatch->value) {
+        ent->speed *= 2;
+        ent->accel *= 2;
+        ent->decel *= 2;
+    }
+
+    //PMM Added to kill things it's being blocked by
+    if (!ent->dmg)
+        ent->dmg = 2;
+
+//  if (!st.lip)
+//      st.lip = 8;
+
+    // pos1 is the top position, pos2 is the bottom
+    VectorCopy(ent->s.origin, ent->pos1);
+    VectorCopy(ent->s.origin, ent->pos2);
+
+    if (st.height)
+        ent->pos2[2] -= (st.height - st.lip);
+    else
+        ent->pos2[2] -= (ent->maxs[2] - ent->mins[2]) - st.lip;
+
+    ent->moveinfo.state = STATE_TOP;
+
+    if (ent->targetname) {
+        ent->use = plat2_activate;
+    } else {
+        ent->use = Use_Plat2;
+
+        trigger = plat_spawn_inside_trigger(ent);   // the "start moving" trigger
+
+        // PGM - debugging??
+        trigger->maxs[0] += 10;
+        trigger->maxs[1] += 10;
+        trigger->mins[0] -= 10;
+        trigger->mins[1] -= 10;
+
+        gi.linkentity(trigger);
+
+        trigger->touch = Touch_Plat_Center2;        // Override trigger touch function
+
+        if (!(ent->spawnflags & PLAT2_TOP)) {
+            VectorCopy(ent->pos2, ent->s.origin);
+            ent->moveinfo.state = STATE_BOTTOM;
+        }
+    }
+
+    gi.linkentity(ent);
+
+    ent->moveinfo.speed = ent->speed;
+    ent->moveinfo.accel = ent->accel;
+    ent->moveinfo.decel = ent->decel;
+    ent->moveinfo.wait = ent->wait;
+    VectorCopy(ent->pos1, ent->moveinfo.start_origin);
+    VectorCopy(ent->s.angles, ent->moveinfo.start_angles);
+    VectorCopy(ent->pos2, ent->moveinfo.end_origin);
+    VectorCopy(ent->s.angles, ent->moveinfo.end_angles);
+
+    ent->moveinfo.sound_start = gi.soundindex("plats/pt1_strt.wav");
+    ent->moveinfo.sound_middle = gi.soundindex("plats/pt1_mid.wav");
+    ent->moveinfo.sound_end = gi.soundindex("plats/pt1_end.wav");
+}
+
 //====================================================================
 
-/*QUAKED func_rotating (0 .5 .8) ? START_ON REVERSE X_AXIS Y_AXIS TOUCH_PAIN STOP ANIMATED ANIMATED_FAST
+/*QUAKED func_rotating (0 .5 .8) ? START_ON REVERSE X_AXIS Y_AXIS TOUCH_PAIN STOP ANIMATED ANIMATED_FAST EAST MED HARD DM COOP ACCEL
 You need to have an origin brush as part of this entity.  The center of that brush will be
 the point around which it is rotated. It will rotate around the Z axis by default.  You can
 check either the X_AXIS or Y_AXIS box to change that.
 
+func_rotating will use it's targets when it stops and starts.
+
 "speed" determines how fast it moves; default value is 100.
 "dmg"   damage to inflict when blocked (2 default)
+"accel" if specified, is how much the rotation speed will increase per .1sec.
 
 REVERSE will cause the it to rotate in the opposite direction.
 STOP mean it will stop moving instead of pushing entities
+ACCEL means it will accelerate to it's final speed and decelerate when shutting down.
 */
+
+//============
+//PGM
+void rotating_accel(edict_t *self)
+{
+    float   current_speed;
+
+    current_speed = VectorLength(self->avelocity);
+    if (current_speed >= (self->speed - self->accel)) {     // done
+        VectorScale(self->movedir, self->speed, self->avelocity);
+        G_UseTargets(self, self);
+    } else {
+        current_speed += self->accel;
+        VectorScale(self->movedir, current_speed, self->avelocity);
+        self->think = rotating_accel;
+        self->nextthink = level.framenum + 1;
+    }
+}
+
+void rotating_decel(edict_t *self)
+{
+    float   current_speed;
+
+    current_speed = VectorLength(self->avelocity);
+    if (current_speed <= self->decel) {     // done
+        VectorClear(self->avelocity);
+        G_UseTargets(self, self);
+        self->touch = NULL;
+    } else {
+        current_speed -= self->decel;
+        VectorScale(self->movedir, current_speed, self->avelocity);
+        self->think = rotating_decel;
+        self->nextthink = level.framenum + 1;
+    }
+}
+//PGM
+//============
 
 void rotating_blocked(edict_t *self, edict_t *other)
 {
@@ -566,13 +1060,27 @@ void rotating_use(edict_t *self, edict_t *other, edict_t *activator)
 {
     if (!VectorEmpty(self->avelocity)) {
         self->s.sound = 0;
-        VectorClear(self->avelocity);
-        self->touch = NULL;
+//PGM
+        if (self->spawnflags & 8192) // Decelerate
+            rotating_decel(self);
+        else {
+            VectorClear(self->avelocity);
+            G_UseTargets(self, self);
+            self->touch = NULL;
+        }
+//PGM
     } else {
         self->s.sound = self->moveinfo.sound_middle;
-        VectorScale(self->movedir, self->speed, self->avelocity);
+//PGM
+        if (self->spawnflags & 8192) // accelerate
+            rotating_accel(self);
+        else {
+            VectorScale(self->movedir, self->speed, self->avelocity);
+            G_UseTargets(self, self);
+        }
         if (self->spawnflags & 16)
             self->touch = rotating_touch;
+//PGM
     }
 }
 
@@ -615,6 +1123,20 @@ void SP_func_rotating(edict_t *ent)
         ent->s.effects |= EF_ANIM_ALL;
     if (ent->spawnflags & 128)
         ent->s.effects |= EF_ANIM_ALLFAST;
+
+//PGM
+    if (ent->spawnflags & 8192) { // Accelerate / Decelerate
+        if (!ent->accel)
+            ent->accel = 1;
+        else if (ent->accel > ent->speed)
+            ent->accel = ent->speed;
+
+        if (!ent->decel)
+            ent->decel = 1;
+        else if (ent->decel > ent->speed)
+            ent->decel = ent->speed;
+    }
+//PGM
 
     gi.setmodel(ent, ent->model);
     gi.linkentity(ent);
@@ -891,9 +1413,92 @@ static void door_go_up(edict_t *self, edict_t *activator)
     door_use_areaportals(self, true);
 }
 
+//======
+//PGM
+void smart_water_go_up(edict_t *self)
+{
+    float       distance;
+    edict_t     *lowestPlayer;
+    edict_t     *ent;
+    float       lowestPlayerPt;
+    int         i;
+
+    if (self->moveinfo.state == STATE_TOP) {
+        // reset top wait time
+        if (self->moveinfo.wait >= 0)
+            self->nextthink = level.framenum + self->moveinfo.wait * BASE_FRAMERATE;
+        return;
+    }
+
+    if (self->health) {
+        if (self->absmax[2] >= self->health) {
+            VectorClear(self->velocity);
+            self->nextthink = 0;
+            self->moveinfo.state = STATE_TOP;
+            return;
+        }
+    }
+
+    if (!(self->flags & FL_TEAMSLAVE)) {
+        if (self->moveinfo.sound_start)
+            gi.sound(self, CHAN_NO_PHS_ADD + CHAN_VOICE, self->moveinfo.sound_start, 1, ATTN_STATIC, 0);
+        self->s.sound = self->moveinfo.sound_middle;
+    }
+
+    // find the lowest player point.
+    lowestPlayerPt = 999999;
+    lowestPlayer = NULL;
+    for (i = 0; i < game.maxclients; i++) {
+        ent = &g_edicts[1 + i];
+
+        // don't count dead or unused player slots
+        if ((ent->inuse) && (ent->health > 0)) {
+            if (ent->absmin[2] < lowestPlayerPt) {
+                lowestPlayerPt = ent->absmin[2];
+                lowestPlayer = ent;
+            }
+        }
+    }
+
+    if (!lowestPlayer) {
+        return;
+    }
+
+    distance = lowestPlayerPt - self->absmax[2];
+
+    // for the calculations, make sure we intend to go up at least a little.
+    if (distance < self->accel) {
+        distance = 100;
+        self->moveinfo.speed = 5;
+    } else
+        self->moveinfo.speed = distance / self->accel;
+
+    if (self->moveinfo.speed < 5)
+        self->moveinfo.speed = 5;
+    else if (self->moveinfo.speed > self->speed)
+        self->moveinfo.speed = self->speed;
+
+    // FIXME - should this allow any movement other than straight up?
+    VectorSet(self->moveinfo.dir, 0, 0, 1);
+    VectorScale(self->moveinfo.dir, self->moveinfo.speed, self->velocity);
+    self->moveinfo.remaining_distance = distance;
+
+    if (self->moveinfo.state != STATE_UP) {
+        G_UseTargets(self, lowestPlayer);
+        door_use_areaportals(self, true);
+        self->moveinfo.state = STATE_UP;
+    }
+
+    self->think = smart_water_go_up;
+    self->nextthink = level.framenum + 1;
+}
+//PGM
+//======
+
 void door_use(edict_t *self, edict_t *other, edict_t *activator)
 {
     edict_t *ent;
+    vec3_t  center;         //PGM
 
     if (self->flags & FL_TEAMSLAVE)
         return;
@@ -909,6 +1514,19 @@ void door_use(edict_t *self, edict_t *other, edict_t *activator)
             return;
         }
     }
+
+//PGM
+    // smart water is different
+    VectorAdd(self->mins, self->maxs, center);
+    VectorScale(center, 0.5f, center);
+    if ((gi.pointcontents(center) & MASK_WATER) && self->spawnflags & 2) {
+        self->message = NULL;
+        self->touch = NULL;
+        self->enemy = activator;
+        smart_water_go_up(self);
+        return;
+    }
+//PGM
 
     // trigger all paired doors
     for (ent = self; ent; ent = ent->teamchain) {
@@ -1019,7 +1637,7 @@ void door_blocked(edict_t *self, edict_t *other)
         // give it a chance to go away on it's own terms (like gibs)
         T_Damage(other, self, self, vec3_origin, other->s.origin, vec3_origin, 100000, 1, 0, MOD_CRUSH);
         // if it's still there, nuke it
-        if (other->inuse)
+        if (other && other->inuse)
             BecomeExplosion1(other);
         return;
     }
@@ -1154,7 +1772,27 @@ void SP_func_door(edict_t *ent)
         ent->think = Think_SpawnDoorTrigger;
 }
 
-/*QUAKED func_door_rotating (0 .5 .8) ? START_OPEN REVERSE CRUSHER NOMONSTER ANIMATED TOGGLE X_AXIS Y_AXIS
+//PGM
+void Door_Activate(edict_t *self, edict_t *other, edict_t *activator)
+{
+    self->use = NULL;
+
+    if (self->health) {
+        self->takedamage = DAMAGE_YES;
+        self->die = door_killed;
+        self->max_health = self->health;
+    }
+
+    if (self->health)
+        self->think = Think_CalcMoveSpeed;
+    else
+        self->think = Think_SpawnDoorTrigger;
+    self->nextthink = level.framenum + 1;
+
+}
+//PGM
+
+/*QUAKED func_door_rotating (0 .5 .8) ? START_OPEN REVERSE CRUSHER NOMONSTER ANIMATED TOGGLE X_AXIS Y_AXIS EASY MED HARD DM COOP INACTIVE
 TOGGLE causes the door to wait in both the start and end states for a trigger event.
 
 START_OPEN  the door to moves to its destination when spawned, and operate in reverse.  It is used to temporarily or permanently close off an area when triggered (not useful for touch or takedamage doors).
@@ -1166,8 +1804,10 @@ check either the X_AXIS or Y_AXIS box to change that.
 
 "distance" is how many degrees the door will be rotated.
 "speed" determines how fast the door moves; default value is 100.
+"accel" if specified,is how much the rotation speed will increase each .1 sec. (default: no accel)
 
 REVERSE will cause the door to rotate in the opposite direction.
+INACTIVE will cause the door to be inactive until triggered.
 
 "message"   is printed when the door is touched if it is a trigger door and it hasn't been fired yet
 "angle"     determines the opening direction
@@ -1277,13 +1917,42 @@ void SP_func_door_rotating(edict_t *ent)
         ent->think = Think_CalcMoveSpeed;
     else
         ent->think = Think_SpawnDoorTrigger;
+
+//PGM
+    if (ent->spawnflags & DOOR_INACTIVE) {
+        ent->takedamage = DAMAGE_NO;
+        ent->die = NULL;
+        ent->think = NULL;
+        ent->nextthink = 0;
+        ent->use = Door_Activate;
+    }
+//PGM
 }
 
-/*QUAKED func_water (0 .5 .8) ? START_OPEN
+void smart_water_blocked(edict_t *self, edict_t *other)
+{
+    if (!(other->svflags & SVF_MONSTER) && (!other->client)) {
+        // give it a chance to go away on it's own terms (like gibs)
+        T_Damage(other, self, self, vec3_origin, other->s.origin, vec3_origin, 100000, 1, 0, MOD_LAVA);
+        // if it's still there, nuke it
+        if (other && other->inuse)      // PGM
+            BecomeExplosion1(other);
+        return;
+    }
+
+    T_Damage(other, self, self, vec3_origin, other->s.origin, vec3_origin, 100, 1, 0, MOD_LAVA);
+}
+
+/*QUAKED func_water (0 .5 .8) ? START_OPEN SMART
 func_water is a moveable water brush.  It must be targeted to operate.  Use a non-water texture at your own risk.
 
 START_OPEN causes the water to move to its destination when spawned and operate in reverse.
 
+SMART causes the water to adjust its speed depending on distance to player.
+(speed = distance/accel, min 5, max self->speed)
+"accel"     for smart water, the divisor to determine water speed. default 20 (smaller = faster)
+
+"health"    maximum height of this water brush
 "angle"     determines the opening direction (up or down only)
 "speed"     movement speed (25 default)
 "wait"      wait before returning (-1 default, -1 = TOGGLE)
@@ -1344,6 +2013,14 @@ void SP_func_water(edict_t *self)
         self->speed = 25;
     self->moveinfo.accel = self->moveinfo.decel = self->moveinfo.speed = self->speed;
 
+    if (self->spawnflags & 2) { // smart water
+        // this is actually the divisor of the lowest player's distance to determine speed.
+        // self->speed then becomes the cap of the speed.
+        if (!self->accel)
+            self->accel = 20;
+        self->blocked = smart_water_blocked;
+    }
+
     if (!self->wait)
         self->wait = -1;
     self->moveinfo.wait = self->wait;
@@ -1371,6 +2048,7 @@ speed   default 100
 dmg     default 2
 noise   looping sound to play when the train is in motion
 
+To have other entities move with the train, set all the piece's team value to the same thing. They will move in unison.
 */
 void train_next(edict_t *self);
 
@@ -1380,7 +2058,7 @@ void train_blocked(edict_t *self, edict_t *other)
         // give it a chance to go away on it's own terms (like gibs)
         T_Damage(other, self, self, vec3_origin, other->s.origin, vec3_origin, 100000, 1, 0, MOD_CRUSH);
         // if it's still there, nuke it
-        if (other->inuse)
+        if (other && other->inuse)
             BecomeExplosion1(other);
         return;
     }
@@ -1416,7 +2094,10 @@ void train_wait(edict_t *self)
             self->nextthink = level.framenum + self->moveinfo.wait * BASE_FRAMERATE;
             self->think = train_next;
         } else if (self->spawnflags & TRAIN_TOGGLE) { // && wait < 0
-            train_next(self);
+            // PMM - clear target_ent, let train_next get called when we get used
+//          train_next (self);
+            self->target_ent = NULL;
+            // pmm
             self->spawnflags &= ~TRAIN_START_ON;
             VectorClear(self->velocity);
             self->nextthink = 0;
@@ -1432,6 +2113,12 @@ void train_wait(edict_t *self)
     }
 
 }
+
+//PGM
+void train_piece_wait(edict_t *self)
+{
+}
+//PGM
 
 void train_next(edict_t *self)
 {
@@ -1468,6 +2155,22 @@ again:
         goto again;
     }
 
+//PGM
+    if (ent->speed) {
+        self->speed = ent->speed;
+        self->moveinfo.speed = ent->speed;
+        if (ent->accel)
+            self->moveinfo.accel = ent->accel;
+        else
+            self->moveinfo.accel = ent->speed;
+        if (ent->decel)
+            self->moveinfo.decel = ent->decel;
+        else
+            self->moveinfo.decel = ent->speed;
+        self->moveinfo.current_speed = 0;
+    }
+//PGM
+
     self->moveinfo.wait = ent->wait;
     self->target_ent = ent;
 
@@ -1483,6 +2186,29 @@ again:
     VectorCopy(dest, self->moveinfo.end_origin);
     Move_Calc(self, dest, train_wait);
     self->spawnflags |= TRAIN_START_ON;
+
+//PGM
+    if (self->team) {
+        edict_t *e;
+        vec3_t  dir, dst;
+
+        VectorSubtract(dest, self->s.origin, dir);
+        for (e = self->teamchain; e; e = e->teamchain) {
+            VectorAdd(dir, e->s.origin, dst);
+            VectorCopy(e->s.origin, e->moveinfo.start_origin);
+            VectorCopy(dst, e->moveinfo.end_origin);
+
+            e->moveinfo.state = STATE_TOP;
+            e->speed = self->speed;
+            e->moveinfo.speed = self->moveinfo.speed;
+            e->moveinfo.accel = self->moveinfo.accel;
+            e->moveinfo.decel = self->moveinfo.decel;
+            e->movetype = MOVETYPE_PUSH;
+            Move_Calc(e, dst, train_piece_wait);
+        }
+
+    }
+//PGM
 }
 
 static void train_resume(edict_t *self)
@@ -1819,7 +2545,7 @@ void door_secret_blocked(edict_t *self, edict_t *other)
         // give it a chance to go away on it's own terms (like gibs)
         T_Damage(other, self, self, vec3_origin, other->s.origin, vec3_origin, 100000, 1, 0, MOD_CRUSH);
         // if it's still there, nuke it
-        if (other->inuse)
+        if (other && other->inuse)
             BecomeExplosion1(other);
         return;
     }
@@ -1911,4 +2637,172 @@ void SP_func_killbox(edict_t *ent)
     gi.setmodel(ent, ent->model);
     ent->use = use_killbox;
     ent->svflags = SVF_NOCLIENT;
+}
+
+/*QUAKED rotating_light (0 .5 .8) (-8 -8 -8) (8 8 8) START_OFF ALARM
+"health"    if set, the light may be killed.
+*/
+
+// RAFAEL
+// note to self
+// the lights will take damage from explosions
+// this could leave a player in total darkness very bad
+
+#define START_OFF   1
+
+void rotating_light_alarm(edict_t *self)
+{
+    if (self->spawnflags & START_OFF) {
+        self->think = NULL;
+        self->nextthink = 0;
+    } else {
+        gi.sound(self, CHAN_NO_PHS_ADD + CHAN_VOICE, self->moveinfo.sound_start, 1, ATTN_STATIC, 0);
+        self->nextthink = level.time + 1;
+    }
+}
+
+void rotating_light_killed(edict_t *self, edict_t *inflictor, edict_t *attacker, int damage, vec3_t point)
+{
+
+    gi.WriteByte(svc_temp_entity);
+    gi.WriteByte(TE_WELDING_SPARKS);
+    gi.WriteByte(30);
+    gi.WritePosition(self->s.origin);
+    gi.WriteDir(vec3_origin);
+    gi.WriteByte(0xe0 + (Q_rand() & 7));
+    gi.multicast(self->s.origin, MULTICAST_PVS);
+
+    self->s.effects &= ~EF_SPINNINGLIGHTS;
+    self->use = NULL;
+
+    self->think = G_FreeEdict;
+    self->nextthink = level.time + 0.1;
+
+}
+
+void rotating_light_use(edict_t *self, edict_t *other, edict_t *activator)
+{
+    if (self->spawnflags & START_OFF) {
+        self->spawnflags &= ~START_OFF;
+        self->s.effects |= EF_SPINNINGLIGHTS;
+
+        if (self->spawnflags & 2) {
+            self->think = rotating_light_alarm;
+            self->nextthink = level.time + 0.1;
+        }
+    } else {
+        self->spawnflags |= START_OFF;
+        self->s.effects &= ~EF_SPINNINGLIGHTS;
+    }
+}
+
+void SP_rotating_light(edict_t *self)
+{
+
+    self->movetype = MOVETYPE_STOP;
+    self->solid = SOLID_BBOX;
+
+    self->s.modelindex = gi.modelindex("models/objects/light/tris.md2");
+
+    self->s.frame = 0;
+
+    self->use = rotating_light_use;
+
+    if (self->spawnflags & START_OFF)
+        self->s.effects &= ~EF_SPINNINGLIGHTS;
+    else {
+        self->s.effects |= EF_SPINNINGLIGHTS;
+    }
+
+    if (!self->speed)
+        self->speed = 32;
+    // this is a real cheap way
+    // to set the radius of the light
+    // self->s.frame = self->speed;
+
+    if (!self->health) {
+        self->health = 10;
+        self->max_health = self->health;
+        self->die = rotating_light_killed;
+        self->takedamage = DAMAGE_YES;
+    } else {
+        self->max_health = self->health;
+        self->die = rotating_light_killed;
+        self->takedamage = DAMAGE_YES;
+    }
+
+    if (self->spawnflags & 2) {
+        self->moveinfo.sound_start = gi.soundindex("misc/alarm.wav");
+    }
+
+    gi.linkentity(self);
+
+}
+
+/*QUAKED func_object_repair (1 .5 0) (-8 -8 -8) (8 8 8)
+object to be repaired.
+The default delay is 1 second
+"delay" the delay in seconds for spark to occur
+*/
+
+void object_repair_fx(edict_t *ent)
+{
+
+    ent->nextthink = level.time + ent->delay;
+
+    if (ent->health <= 100)
+        ent->health++;
+    else {
+        gi.WriteByte(svc_temp_entity);
+        gi.WriteByte(TE_WELDING_SPARKS);
+        gi.WriteByte(10);
+        gi.WritePosition(ent->s.origin);
+        gi.WriteDir(vec3_origin);
+        gi.WriteByte(0xe0 + (Q_rand() & 7));
+        gi.multicast(ent->s.origin, MULTICAST_PVS);
+    }
+
+}
+
+void object_repair_dead(edict_t *ent)
+{
+    G_UseTargets(ent, ent);
+    ent->nextthink = level.time + 0.1;
+    ent->think = object_repair_fx;
+}
+
+void object_repair_sparks(edict_t *ent)
+{
+
+    if (ent->health < 0) {
+        ent->nextthink = level.time + 0.1;
+        ent->think = object_repair_dead;
+        return;
+    }
+
+    ent->nextthink = level.time + ent->delay;
+
+    gi.WriteByte(svc_temp_entity);
+    gi.WriteByte(TE_WELDING_SPARKS);
+    gi.WriteByte(10);
+    gi.WritePosition(ent->s.origin);
+    gi.WriteDir(vec3_origin);
+    gi.WriteByte(0xe0 + (Q_rand() & 7));
+    gi.multicast(ent->s.origin, MULTICAST_PVS);
+
+}
+
+void SP_object_repair(edict_t *ent)
+{
+    ent->movetype = MOVETYPE_NONE;
+    ent->solid = SOLID_BBOX;
+    ent->classname = "object_repair";
+    VectorSet(ent->mins, -8, -8, 8);
+    VectorSet(ent->maxs, 8, 8, 8);
+    ent->think = object_repair_sparks;
+    ent->nextthink = level.time + 1.0;
+    ent->health = 100;
+    if (!ent->delay)
+        ent->delay = 1.0;
+
 }

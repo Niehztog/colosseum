@@ -660,7 +660,7 @@ bool Makron_CheckAttack(edict_t *self)
 {
     vec3_t  spot1, spot2;
     vec3_t  temp;
-    float   chance;
+    float   chance = 0;
     trace_t tr;
     int         enemy_range;
     float       enemy_yaw;
@@ -698,7 +698,7 @@ bool Makron_CheckAttack(edict_t *self)
     if (!self->monsterinfo.attack)
         return false;
 
-    if (level.framenum < self->monsterinfo.attack_finished)
+    if (level.time < self->monsterinfo.attack_finished)
         return false;
 
     if (enemy_range == RANGE_FAR)
@@ -718,7 +718,7 @@ bool Makron_CheckAttack(edict_t *self)
 
     if (random() < chance) {
         self->monsterinfo.attack_state = AS_MISSILE;
-        self->monsterinfo.attack_finished = level.framenum + 2 * random() * BASE_FRAMERATE;
+        self->monsterinfo.attack_finished = level.time + 2 * random();
         return true;
     }
 
@@ -798,6 +798,10 @@ void SP_monster_makron(edict_t *self)
     self->monsterinfo.scale = MODEL_SCALE;
 
     walkmonster_start(self);
+
+    //PMM
+    self->monsterinfo.aiflags |= AI_IGNORE_SHOTS;
+    //pmm
 }
 
 /*

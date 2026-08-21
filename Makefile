@@ -195,7 +195,14 @@ GAME_SRC = \
 	m_gunner.c m_hover.c m_infantry.c m_insane.c m_medic.c m_move.c \
 	m_mutant.c m_parasite.c m_soldier.c m_supertank.c m_tank.c \
 	p_client.c p_hud.c p_trail.c p_view.c p_weapon.c \
-	shared/m_flash.c shared/shared.c
+	shared/m_flash.c shared/shared.c \
+	\
+	xatrix/m_boss5.c xatrix/m_fixbot.c xatrix/m_gekk.c xatrix/m_gladb.c \
+	\
+	rogue/dm_ball.c rogue/dm_tag.c rogue/g_newai.c rogue/g_newdm.c \
+	rogue/g_newfnc.c rogue/g_newtarg.c rogue/g_newtrig.c rogue/g_newweap.c \
+	rogue/g_sphere.c rogue/m_carrier.c rogue/m_stalker.c rogue/m_turret.c \
+	rogue/m_widow.c rogue/m_widow2.c
 
 # Every .c that genptr.py must scan.  The generated g_ptrs.c is not an input to
 # itself.
@@ -252,7 +259,8 @@ everything: native linux64 linux32 win32 win64
 # R-TOOL-3: the audits run in the build, not on request, and a finding fails it
 # the way a warning does.  They run once per invocation, before compiling.
 _build: check
-	@mkdir -p $(BUILDDIR)/shared
+	@mkdir -p $(BUILDDIR)/shared $(BUILDDIR)/xatrix $(BUILDDIR)/rogue \
+		$(BUILDDIR)/ctf $(BUILDDIR)/arena $(BUILDDIR)/tourney $(BUILDDIR)/bot
 	$(MAKE) $(TARGET) BUILDDIR=$(BUILDDIR) CC=$(CC) CPU=$(CPU) \
 		SHLIBEXT=$(SHLIBEXT) CFLAGS="$(CFLAGS)" KIND=$(KIND)
 

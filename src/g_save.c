@@ -64,6 +64,50 @@ typedef struct {
 
 static const save_field_t entityfields[] = {
 #define _OFS FOFS
+    // R-SAVE-3.  content_flavour is latched at monster_start and decides which
+    // frame tables a monster uses (R-CORE-11/11a), so it MUST persist: a monster
+    // reloaded without it would silently change flavour mid-game, which is the
+    // class of defect R-SAVE-3a exists to catch.  Type is int, macro is I().
+    I(content_flavour),
+    // R-SAVE-3: descriptors for every field the mission-pack merge added to a
+    // persistent struct.  Found by tools/dsweep.py, which brace-matches the
+    // struct bodies and self-tests -- auditsave.py misattributed spawn_temp_t
+    // members to monsterinfo_t and would have sent this list wrong.
+    //
+    // gravityVector and the blindfire set below are R-SAVE-3a's named cases:
+    // the mission-pack port lost exactly these to missing rows.
+    I(orders),                          // XATRIX
+    I(plat2flags),                      // ROGUE
+    V(offset),                          // ROGUE
+    V(gravityVector),                   // ROGUE -- R-SAVE-3a's named case
+    I(hint_chain_id),                   // ROGUE
+    F(lastMoveTime),                    // ROGUE
+    E(bad_area),                        // ROGUE
+    E(hint_chain),                      // ROGUE
+    E(monster_hint_chain),              // ROGUE
+    E(target_hint_chain),               // ROGUE
+    // Entity references, all Ground Zero's.  dsweep classes these as
+    // "pointer-only" on the grounds that id's savegame dumped pointers as raw
+    // bit patterns so they never survived a reload anyway -- true, and not a
+    // reason to leave them out: Q2PRO's F_EDICT machinery exists to relocate
+    // them properly, so a descriptor is a strict improvement over the original.
+    // Without them a reloaded game orphans the player's sphere and severs every
+    // spawned monster from the carrier or widow that made it.
+    E(monsterinfo.goal_hint),           // ROGUE
+    E(monsterinfo.healer),              // ROGUE
+    E(monsterinfo.last_player_enemy),   // ROGUE
+    E(monsterinfo.commander),           // ROGUE
+    I(monsterinfo.last_hint_framenum),  // ROGUE
+    I(monsterinfo.medicTries),          // ROGUE
+    F(monsterinfo.base_height),         // ROGUE
+    I(monsterinfo.next_duck_framenum),  // ROGUE
+    I(monsterinfo.duck_wait_framenum),  // ROGUE
+    O(monsterinfo.blindfire),           // ROGUE -- R-SAVE-3a's named set
+    F(monsterinfo.blind_fire_delay),    // ROGUE -- ditto
+    V(monsterinfo.blind_fire_target),   // ROGUE -- ditto
+    I(monsterinfo.monster_slots),       // ROGUE
+    I(monsterinfo.monster_used),        // ROGUE
+    I(monsterinfo.double_framenum),     // ROGUE
     V(s.origin),
     V(s.angles),
     V(s.old_origin),
@@ -103,6 +147,24 @@ static const save_field_t entityfields[] = {
 
     I(timestamp),
 
+    // ROGUE
+    E(bad_area),
+    // while the hint_path stuff could be reassembled on the fly, no reason to be different
+    E(hint_chain),
+    E(monster_hint_chain),
+    E(target_hint_chain),
+    //
+    E(monsterinfo.goal_hint),
+    E(monsterinfo.badMedic1),
+    E(monsterinfo.badMedic2),
+    E(monsterinfo.last_player_enemy),
+    E(monsterinfo.commander),
+    P(monsterinfo.blocked, P_monsterinfo_blocked),
+    P(monsterinfo.duck, P_monsterinfo_duck),
+    P(monsterinfo.unduck, P_monsterinfo_unduck),
+    P(monsterinfo.sidestep, P_monsterinfo_sidestep),
+    // ROGUE
+
     L(target),
     L(targetname),
     L(killtarget),
@@ -125,6 +187,9 @@ static const save_field_t entityfields[] = {
     I(air_finished_framenum),
     F(gravity),
 
+    // ROGUE
+    // ROGUE
+
     E(goalentity),
     E(movetarget),
     F(yaw_speed),
@@ -138,6 +203,8 @@ static const save_field_t entityfields[] = {
     P(use, P_use),
     P(pain, P_pain),
     P(die, P_die),
+    // ROGUE
+    // ROGUE
 
     I(touch_debounce_framenum),
     I(pain_debounce_framenum),
@@ -149,7 +216,7 @@ static const save_field_t entityfields[] = {
     I(max_health),
     I(gib_health),
     I(deadflag),
-    I(show_hostile),
+    F(show_hostile),
 
     I(powerarmor_framenum),
 
@@ -225,6 +292,7 @@ static const save_field_t entityfields[] = {
 
     P(monsterinfo.currentmove, P_monsterinfo_currentmove),
     I(monsterinfo.aiflags),
+    I(monsterinfo.double_framenum),   // ROGUE
     I(monsterinfo.nextframe),
     F(monsterinfo.scale),
 
@@ -239,16 +307,16 @@ static const save_field_t entityfields[] = {
     P(monsterinfo.sight, P_monsterinfo_sight),
     P(monsterinfo.checkattack, P_monsterinfo_checkattack),
 
-    I(monsterinfo.pause_framenum),
-    I(monsterinfo.attack_finished),
+    F(monsterinfo.pause_framenum),
+    F(monsterinfo.attack_finished),
 
     V(monsterinfo.saved_goal),
-    I(monsterinfo.search_framenum),
-    I(monsterinfo.trail_framenum),
+    F(monsterinfo.search_framenum),
+    F(monsterinfo.trail_framenum),
     V(monsterinfo.last_sighting),
     I(monsterinfo.attack_state),
     I(monsterinfo.lefty),
-    I(monsterinfo.idle_framenum),
+    F(monsterinfo.idle_framenum),
     I(monsterinfo.linkcount),
 
     I(monsterinfo.power_armor_type),
@@ -260,6 +328,8 @@ static const save_field_t entityfields[] = {
 
 static const save_field_t levelfields[] = {
 #define _OFS LLOFS
+    E(disguise_violator),               // ROGUE
+    I(disguise_violation_framenum),     // ROGUE
     I(framenum),
     F(time),
 
@@ -297,7 +367,10 @@ static const save_field_t levelfields[] = {
 
     I(power_cubes),
 
+    E(disguise_violator),    // ROGUE
+
     {0}
+
 #undef _OFS
 };
 
@@ -355,6 +428,9 @@ static const save_field_t clientfields[] = {
     I(pers.max_grenades),
     I(pers.max_cells),
     I(pers.max_slugs),
+    // RAFAEL
+    I(pers.max_magslug),
+    I(pers.max_trap),
 
     T(pers.weapon),
     T(pers.lastweapon),
@@ -414,18 +490,41 @@ static const save_field_t clientfields[] = {
 
     // powerup timers
     I(quad_framenum),
+    // ROGUE - powerup timers Ground Zero never described to the savegame code
+    I(double_framenum),
+    I(ir_framenum),
+    I(nuke_framenum),
+    I(tracker_pain_framenum),
     I(invincible_framenum),
     I(breather_framenum),
     I(enviro_framenum),
 
     O(grenade_blew_up),
+    // RAFAEL
+    E(owned_sphere),                    // ROGUE -- see the note in entityfields
+    F(trap_time),                       // XATRIX -- the merge brought
+                                        // quadfire_framenum and trap_blew_up
+                                        // but not this one
+    I(double_framenum),                 // ROGUE
+    I(ir_framenum),                     // ROGUE
+    I(nuke_framenum),                   // ROGUE
+    I(tracker_pain_framenum),           // ROGUE
+    I(pers.max_tesla),                  // ROGUE
+    I(pers.max_prox),                   // ROGUE
+    I(pers.max_mines),                  // ROGUE
+    I(pers.max_flechettes),             // ROGUE
+    I(quadfire_framenum),
+    O(trap_blew_up),
     I(grenade_framenum),
     I(silencer_shots),
     I(weapon_sound),
 
     I(pickup_msg_framenum),
 
+    E(owned_sphere),         // ROGUE
+
     {0}
+
 #undef _OFS
 };
 
@@ -781,7 +880,7 @@ static void read_field(gzFile f, const save_field_t *field, void *base)
         *(gclient_t **)p = read_index(f, sizeof(gclient_t), game.clients, game.maxclients - 1);
         break;
     case F_ITEM:
-        *(gitem_t **)p = read_index(f, sizeof(gitem_t), itemlist, game.num_items - 1);
+        *(const gitem_t **)p = read_index(f, sizeof(gitem_t), itemlist, game.num_items - 1);
         break;
 
     case F_POINTER:
@@ -890,7 +989,7 @@ void ReadGame(const char *filename)
     read_fields(f, gamefields, &game);
 
     // should agree with server's version
-    if (game.maxclients != (int)maxclients->value) {
+    if (game.maxclients != (int)game.maxclients) {
         gzclose(f);
         gi.error("Savegame has bad maxclients");
     }
@@ -953,7 +1052,7 @@ void WriteLevel(const char *filename)
 =================
 ReadLevel
 
-SpawnEntities will allready have been called on the
+SpawnEntities will already have been called on the
 level the same way it was when the level was saved.
 
 That is necessary to get the baselines
@@ -1025,6 +1124,10 @@ void ReadLevel(const char *filename)
     }
 
     gzclose(f);
+
+    // PMM - rebuild the hint path chains
+//  InitHintPaths();
+    // pmm
 
     // mark all clients as unconnected
     for (i = 0; i < game.maxclients; i++) {

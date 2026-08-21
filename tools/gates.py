@@ -74,6 +74,96 @@ MONSTER_INFRA = {
 }
 
 
+# R-KEY-1 / R-VER-14, mechanised.  `spawn_temp_t.pausetime` is the member behind
+# the `"pausetime"` map key, and Q2PRO's frame-number conversion renamed it to
+# `pause_framenum` when replayed tree-wide.  BOTH donor branches still carry that
+# rename, so every merge that touches g_func.c or g_spawn.c brings it back --
+# it has arrived three times in Phase 2 alone, from the g_local.h merge, the
+# xatrix merge and the rogue merge.
+#
+# Vigilance is clearly not working, so it is a check.  `monsterinfo.pause_framenum`
+# is the OTHER member and is correct; only the spawn_temp_t one is frozen.
+FROZEN_KEYS = {
+    # key text that must appear -> the member it must resolve to
+    'pausetime': 'pausetime',
+}
+STALE_SPAWNTEMP = re.compile(r'\bst\s*\.\s*pause_framenum\b')
+
+
+def frozen_key_violations(name, text):
+    out = []
+    for m in STALE_SPAWNTEMP.finditer(text):
+        out.append((name, text[:m.start()].count('\n') + 1,
+                    'st.pause_framenum -- the spawn_temp_t member is `pausetime`; '
+                    'the key text is frozen (R-KEY-1)'))
+    if name == 'g_spawn.c':
+        for key, member in FROZEN_KEYS.items():
+            if f'"{key}"' not in text:
+                out.append((name, 0, f'the frozen map key "{key}" is missing from '
+                                     f'the spawn tables (R-KEY-1)'))
+            bad = re.search(r'\{\s*"%s"\s*,\s*STOFS\((\w+)\)' % key, text)
+            if bad and bad.group(1) != member:
+                out.append((name, text[:bad.start()].count('\n') + 1,
+                            f'key "{key}" resolves to {bad.group(1)}, must be '
+                            f'{member} (R-KEY-1)'))
+    return out
+
+
+# R-CORE-11 / R-CORE-11b, mechanised.  Where baseq2's version of a monster table
+# or evasion function is kept alongside Ground Zero's under a `bq2_` prefix, the
+# gate is only real if EVERY assignment site chooses between them.  One
+# ungated site silently pins that animation to Ground Zero's version whatever
+# the content layer says -- and nothing at build or run time would show it.
+#
+# Also checks the shape: the gate must be an if/else with two literal
+# assignments, because genptr.py builds save_ptrs[] by scanning source text
+# (R-CORE-11b).  A ternary here compiles, runs, plays, and then fails to reload
+# a savegame.
+# The pairing signal must come from the DEFINITION, not from a `&bq2_X` use:
+# if it came from the use, deleting a gate would delete the evidence that the
+# table was ever paired, and the check would fall silent exactly when it
+# mattered.  Learned the hard way -- the first version of this check passed
+# its own negative control.
+GATED = re.compile(r'const\s+mmove_t\s+bq2_(\w+)\s*=')
+ASSIGN = re.compile(r'self->monsterinfo\.currentmove\s*=\s*&(\w+);')
+TERNARY = re.compile(r'currentmove\s*=\s*[^;\n]*\?[^;\n]*&')
+
+
+def gate_violations(name, text):
+    out = []
+    for m in TERNARY.finditer(text):
+        out.append((name, text[:m.start()].count('\n') + 1,
+                    'currentmove assigned through a ternary -- genptr.py cannot '
+                    'see the table, so the savegame will not reload '
+                    '(R-CORE-11b)'))
+    paired = set(GATED.findall(text))
+    if not paired:
+        return out
+    for m in ASSIGN.finditer(text):
+        tbl = m.group(1)
+        if tbl.startswith('bq2_') or tbl not in paired:
+            continue
+        # A site inside a FLAVOUR-SPECIFIC function needs no gate: reaching it
+        # already means that flavour's evasion was installed.  Ground Zero's
+        # X_duck/X_sidestep/X_blocked are installed only under CONTENT_ROGUE,
+        # and every bq2_* function only when it is absent.  Only a function
+        # reachable under both flavours -- X_attack, X_pain, X_run -- needs one.
+        fn = enclosing_function(text, m.start())
+        if fn.startswith('bq2_') or fn.endswith(('_duck', '_sidestep',
+                                                 '_blocked', '_duck_up')):
+            continue
+        # a gated site has the bq2_ alternative within a few lines
+        seg = text[m.end():m.end() + 240]
+        if f'&bq2_{tbl};' not in seg:
+            before = text[max(0, m.start() - 240):m.start()]
+            if f'&bq2_{tbl};' not in before:
+                out.append((name, text[:m.start()].count('\n') + 1,
+                            f'`{tbl}` has a bq2_ counterpart but this assignment '
+                            f'is ungated -- R-CORE-11 requires the latch to '
+                            f'select at every site'))
+    return out
+
+
 def is_monster_context(filename, fn):
     return (filename.startswith('m_')
             or 'monster' in fn.lower()
@@ -116,11 +206,24 @@ def sources(tree):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('--tree', default=os.path.join(REPO, 'src'))
-    ap.add_argument('--budget', type=int, default=110,   # measured at the end of Phase 1; a ratchet, not a target
+    # The ratchet.  It moves only with a recorded reason, and only for genuinely
+    # inherited sites.  History:
+    #   110  end of Phase 1 (baseq2, after 27 monster-gate conversions)
+    #   115  Phase 2, xatrix merged: +5, each checked individually and each a
+    #        real deathmatch rule rather than a ruleset question in disguise --
+    #        g_items.c's `deathmatch && DF_NO_HEALTH`, two weapon behaviours,
+    #        and one `coop || deathmatch` spawn test.
+    #   174  Phase 2, rogue merged: +59 across 12 files.  Ground Zero is 12,263
+    #        diff lines and carries its own deathmatch rules throughout -- the
+    #        DM ball and tag rulesets, the sphere and nuke DM behaviours, the
+    #        no-armour/no-items dmflags.  The five monster gates it brought
+    #        (kamikaze, carrier, stalker, turret, widow) were converted, which is
+    #        the check that matters; the rest are inherited deathmatch rules.
+    ap.add_argument('--budget', type=int, default=166,
                     help='ceiling on inherited deathmatch/coop test sites')
     a = ap.parse_args()
 
-    violations, legacy, idiom = [], {}, []
+    violations, legacy, idiom, frozen = [], {}, [], []
 
     for path in sources(os.path.abspath(a.tree)):
         name = os.path.basename(path)
@@ -141,6 +244,12 @@ def main():
             if n:
                 legacy[name] = n
 
+        for v in frozen_key_violations(name, text):
+            frozen.append(v)
+
+        for v in gate_violations(name, text):
+            frozen.append(v)
+
         for m in MONSTER_IDIOM.finditer(text):
             fn = enclosing_function(text, m.start())
             if not is_monster_context(name, fn):
@@ -156,6 +265,10 @@ def main():
         print(f'  !! {name}:{line}: `{snippet}` -- a ruleset cvar tested at a '
               f'call site (R-MODE-5). Use a predicate or a dispatch row.')
 
+    for name, line, msg in frozen:
+        where = f'{name}:{line}' if line else name
+        print(f'  !! {where}: {msg}')
+
     for name, line, fn in idiom:
         print(f'  !! {name}:{line} ({fn}): the monster-suppression idiom is '
               f'back. `deathmatch` is 1 under ctf, so this suppresses the '
@@ -166,7 +279,7 @@ def main():
               f'{a.budget}: new code must ask a named question, not test '
               f'`deathmatch`')
 
-    ok = not violations and not idiom and total <= a.budget
+    ok = not violations and not idiom and not frozen and total <= a.budget
     if ok:
         print('  every ruleset decision goes through the dispatch or a '
               'predicate')

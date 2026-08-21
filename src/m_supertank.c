@@ -462,6 +462,9 @@ static void supertankRocket(edict_t *self)
     vec3_t  vec;
     int     flash_number;
 
+    if (!self->enemy || !self->enemy->inuse)    //PGM
+        return;                                 //PGM
+
     if (self->s.frame == FRAME_attak2_8)
         flash_number = MZ2_SUPERTANK_ROCKET_1;
     else if (self->s.frame == FRAME_attak2_11)
@@ -487,6 +490,9 @@ static void supertankMachineGun(edict_t *self)
     vec3_t  start;
     vec3_t  forward, right;
     int     flash_number;
+
+    if (!self->enemy || !self->enemy->inuse)    //PGM
+        return;                                 //PGM
 
     flash_number = MZ2_SUPERTANK_MACHINEGUN_1 + (self->s.frame - FRAME_attak1_1);
 
@@ -600,7 +606,7 @@ void BossExplode(edict_t *self)
     gi.WritePosition(org);
     gi.multicast(self->s.origin, MULTICAST_PVS);
 
-    self->nextthink = level.framenum + 1;
+    self->nextthink = level.framenum + 0.1f * BASE_FRAMERATE;
 }
 
 void supertank_die(edict_t *self, edict_t *inflictor, edict_t *attacker, int damage, vec3_t point)
@@ -612,9 +618,26 @@ void supertank_die(edict_t *self, edict_t *inflictor, edict_t *attacker, int dam
     self->monsterinfo.currentmove = &supertank_move_death;
 }
 
+//===========
+//PGM
+bool supertank_blocked(edict_t *self, float dist)
+{
+    if (blocked_checkshot(self, 0.25f + (0.05f * skill->value)))
+        return true;
+
+    if (blocked_checkplat(self, dist))
+        return true;
+
+    return false;
+}
+//PGM
+//===========
+
 //
 // monster_supertank
 //
+
+// RAFAEL (Powershield)
 
 static void supertank_precache(void)
 {
@@ -627,7 +650,7 @@ static void supertank_precache(void)
     tread_sound = gi.soundindex("bosstank/btkengn1.wav");
 }
 
-/*QUAKED monster_supertank (1 .5 0) (-64 -64 0) (64 64 72) Ambush Trigger_Spawn Sight
+/*QUAKED monster_supertank (1 .5 0) (-64 -64 0) (64 64 72) Ambush Trigger_Spawn Sight Powershield
 */
 void SP_monster_supertank(edict_t *self)
 {
@@ -663,11 +686,20 @@ void SP_monster_supertank(edict_t *self)
     self->monsterinfo.search = supertank_search;
     self->monsterinfo.melee = NULL;
     self->monsterinfo.sight = NULL;
+    self->monsterinfo.blocked = supertank_blocked;      //PGM
 
     gi.linkentity(self);
 
     self->monsterinfo.currentmove = &supertank_move_stand;
     self->monsterinfo.scale = MODEL_SCALE;
 
+    if (self->spawnflags & 8) {
+        self->monsterinfo.power_armor_type = POWER_ARMOR_SHIELD;
+        self->monsterinfo.power_armor_power = 400;
+    }
     walkmonster_start(self);
+
+    //PMM
+    self->monsterinfo.aiflags |= AI_IGNORE_SHOTS;
+    //pmm
 }

@@ -347,7 +347,7 @@ void SP_target_splash(edict_t *self)
 
 //==========================================================
 
-/*QUAKED target_spawner (1 0 0) (-8 -8 -8) (8 8 8)
+/*QUAKED target_spawner (1 0 0) (-8 -8 -8) (8 8 8) 1 2 3 4 5 6
 Set target to the type of entity you want spawned.
 Useful for spawning monsters and gibs in the factory levels.
 
@@ -365,6 +365,7 @@ void use_target_spawner(edict_t *self, edict_t *other, edict_t *activator)
 
     ent = G_Spawn();
     ent->classname = self->target;
+    ent->flags = self->flags;
     VectorCopy(self->s.origin, ent->s.origin);
     VectorCopy(self->s.angles, ent->s.angles);
     ED_CallSpawn(ent);
@@ -373,6 +374,8 @@ void use_target_spawner(edict_t *self, edict_t *other, edict_t *activator)
     gi.linkentity(ent);
     if (self->speed)
         VectorCopy(self->movedir, ent->velocity);
+
+    ent->s.renderfx |= RF_IR_VISIBLE;       //PGM
 }
 
 void SP_target_spawner(edict_t *self)
@@ -468,10 +471,25 @@ void SP_target_crosslevel_target(edict_t *self)
 
 //==========================================================
 
-/*QUAKED target_laser (0 .5 .8) (-8 -8 -8) (8 8 8) START_ON RED GREEN BLUE YELLOW ORANGE FAT
+/*QUAKED target_laser (0 .5 .8) (-8 -8 -8) (8 8 8) START_ON RED GREEN BLUE YELLOW ORANGE FAT WINDOWSTOP
 When triggered, fires a laser.  You can either set a target
 or a direction.
+
+WINDOWSTOP - stops at CONTENTS_WINDOW
 */
+
+//======
+// PGM
+#define LASER_ON            0x0001
+#define LASER_RED           0x0002
+#define LASER_GREEN         0x0004
+#define LASER_BLUE          0x0008
+#define LASER_YELLOW        0x0010
+#define LASER_ORANGE        0x0020
+#define LASER_FAT           0x0040
+#define LASER_STOPWINDOW    0x0080
+// PGM
+//======
 
 void target_laser_think(edict_t *self)
 {
@@ -501,7 +519,14 @@ void target_laser_think(edict_t *self)
     VectorCopy(self->s.origin, start);
     VectorMA(start, 2048, self->movedir, end);
     while (1) {
-        tr = gi.trace(start, NULL, NULL, end, ignore, CONTENTS_SOLID | CONTENTS_MONSTER | CONTENTS_DEADMONSTER);
+//======
+// PGM
+        if (self->spawnflags & LASER_STOPWINDOW)
+            tr = gi.trace(start, NULL, NULL, end, ignore, MASK_SHOT);
+        else
+            tr = gi.trace(start, NULL, NULL, end, ignore, CONTENTS_SOLID | CONTENTS_MONSTER | CONTENTS_DEADMONSTER);
+// PGM
+//======
 
         if (!tr.ent)
             break;
@@ -511,7 +536,9 @@ void target_laser_think(edict_t *self)
             T_Damage(tr.ent, self, self->activator, self->movedir, tr.endpos, vec3_origin, self->dmg, 1, DAMAGE_ENERGY, MOD_TARGET_LASER);
 
         // if we hit something that's not a monster or player or is immune to lasers, we're done
-        if (!(tr.ent->svflags & SVF_MONSTER) && (!tr.ent->client)) {
+//      if (!(tr.ent->svflags & SVF_MONSTER) && (!tr.ent->client))
+        //PMM added SVF_DAMAGEABLE
+        if (!(tr.ent->svflags & SVF_MONSTER) && (!tr.ent->client) && !(tr.ent->svflags & SVF_DAMAGEABLE)) {
             if (self->spawnflags & 0x80000000) {
                 self->spawnflags &= ~0x80000000;
                 gi.WriteByte(svc_temp_entity);
@@ -619,6 +646,96 @@ void SP_target_laser(edict_t *self)
     self->nextthink = level.framenum + 1 * BASE_FRAMERATE;
 }
 
+// RAFAEL 15-APR-98
+/*QUAKED target_mal_laser (1 0 0) (-4 -4 -4) (4 4 4) START_ON RED GREEN BLUE YELLOW ORANGE FAT
+Mal's laser
+*/
+void target_mal_laser_on(edict_t *self)
+{
+    if (!self->activator)
+        self->activator = self;
+    self->spawnflags |= 0x80000001;
+    self->svflags &= ~SVF_NOCLIENT;
+    // target_laser_think (self);
+    self->nextthink = level.time + self->wait + self->delay;
+}
+
+void target_mal_laser_off(edict_t *self)
+{
+    self->spawnflags &= ~1;
+    self->svflags |= SVF_NOCLIENT;
+    self->nextthink = 0;
+}
+
+void target_mal_laser_use(edict_t *self, edict_t *other, edict_t *activator)
+{
+    self->activator = activator;
+    if (self->spawnflags & 1)
+        target_mal_laser_off(self);
+    else
+        target_mal_laser_on(self);
+}
+
+void mal_laser_think(edict_t *self)
+{
+    target_laser_think(self);
+    self->nextthink = level.time + self->wait + 0.1;
+    self->spawnflags |= 0x80000000;
+}
+
+void SP_target_mal_laser(edict_t *self)
+{
+    self->movetype = MOVETYPE_NONE;
+    self->solid = SOLID_NOT;
+    self->s.renderfx |= RF_BEAM | RF_TRANSLUCENT;
+    self->s.modelindex = 1;         // must be non-zero
+
+    // set the beam diameter
+    if (self->spawnflags & 64)
+        self->s.frame = 16;
+    else
+        self->s.frame = 4;
+
+    // set the color
+    if (self->spawnflags & 2)
+        self->s.skinnum = 0xf2f2f0f0;
+    else if (self->spawnflags & 4)
+        self->s.skinnum = 0xd0d1d2d3;
+    else if (self->spawnflags & 8)
+        self->s.skinnum = 0xf3f3f1f1;
+    else if (self->spawnflags & 16)
+        self->s.skinnum = 0xdcdddedf;
+    else if (self->spawnflags & 32)
+        self->s.skinnum = 0xe0e1e2e3;
+
+    G_SetMovedir(self->s.angles, self->movedir);
+
+    if (!self->delay)
+        self->delay = 0.1;
+
+    if (!self->wait)
+        self->wait = 0.1;
+
+    if (!self->dmg)
+        self->dmg = 5;
+
+    VectorSet(self->mins, -8, -8, -8);
+    VectorSet(self->maxs, 8, 8, 8);
+
+    self->nextthink = level.time + self->delay;
+    self->think = mal_laser_think;
+
+    self->use = target_mal_laser_use;
+
+    gi.linkentity(self);
+
+    if (self->spawnflags & 1)
+        target_mal_laser_on(self);
+    else
+        target_mal_laser_off(self);
+}
+// END  15-APR-98
+
 //==========================================================
 
 /*QUAKED target_lightramp (0 .5 .8) (-8 -8 -8) (8 8 8) TOGGLE
@@ -629,13 +746,12 @@ message     two letters; starting lightlevel and ending lightlevel
 void target_lightramp_think(edict_t *self)
 {
     char    style[2];
-    float   diff = (level.framenum - self->timestamp) * FRAMETIME;
 
-    style[0] = 'a' + self->movedir[0] + diff * self->movedir[2];
+    style[0] = 'a' + self->movedir[0] + (level.framenum - self->timestamp) * self->movedir[2];
     style[1] = 0;
     gi.configstring(game.csr.lights + self->enemy->style, style);
 
-    if (diff < self->speed) {
+    if ((level.framenum - self->timestamp) < self->speed * BASE_FRAMERATE) {
         self->nextthink = level.framenum + 1;
     } else if (self->spawnflags & 1) {
         SWAP(float, self->movedir[0], self->movedir[1]);
@@ -681,7 +797,8 @@ void SP_target_lightramp(edict_t *self)
         return;
     }
 
-    if (deathmatch->value) {
+    // R-MODE-7 / R-CORE-8: the ruleset decides, not `deathmatch` (see R-25).
+    if (!G_MonstersAllowed()) {
         G_FreeEdict(self);
         return;
     }
@@ -698,12 +815,12 @@ void SP_target_lightramp(edict_t *self)
 
     self->movedir[0] = self->message[0] - 'a';
     self->movedir[1] = self->message[1] - 'a';
-    self->movedir[2] = (self->movedir[1] - self->movedir[0]) / self->speed;
+    self->movedir[2] = (self->movedir[1] - self->movedir[0]) / (self->speed / FRAMETIME);
 }
 
 //==========================================================
 
-/*QUAKED target_earthquake (1 0 0) (-8 -8 -8) (8 8 8)
+/*QUAKED target_earthquake (1 0 0) (-8 -8 -8) (8 8 8) SILENT
 When triggered, this initiates a level-wide earthquake.
 All players and monsters are affected.
 "speed"     severity of the quake (default:200)
@@ -715,10 +832,13 @@ void target_earthquake_think(edict_t *self)
     int     i;
     edict_t *e;
 
-    if (self->last_move_framenum < level.framenum) {
-        gi.positioned_sound(self->s.origin, self, CHAN_AUTO, self->noise_index, 1.0f, ATTN_NONE, 0);
-        self->last_move_framenum = level.framenum + 0.5f * BASE_FRAMERATE;
-    }
+    if (!(self->spawnflags & 1)) {              // PGM
+        // PGM
+        if (self->last_move_framenum < level.framenum) {
+            gi.positioned_sound(self->s.origin, self, CHAN_AUTO, self->noise_index, 1.0f, ATTN_NONE, 0);
+            self->last_move_framenum = level.framenum + 0.5f * BASE_FRAMERATE;
+        }
+    }                                           // PGM
 
     for (i = 1, e = g_edicts + i; i <= game.maxclients; i++, e++) {
         if (!e->inuse)
@@ -740,6 +860,11 @@ void target_earthquake_think(edict_t *self)
 
 void target_earthquake_use(edict_t *self, edict_t *other, edict_t *activator)
 {
+    // PGM
+//  if(g_showlogic && g_showlogic->value)
+//      gi.dprintf("earthquake: %0.1f\n", self->speed);
+    // PGM
+
     self->timestamp = level.framenum + self->count * BASE_FRAMERATE;
     self->nextthink = level.framenum + 0.1f * BASE_FRAMERATE;
     self->activator = activator;
@@ -761,5 +886,6 @@ void SP_target_earthquake(edict_t *self)
     self->think = target_earthquake_think;
     self->use = target_earthquake_use;
 
-    self->noise_index = gi.soundindex("world/quake.wav");
+    if (!(self->spawnflags & 1))                                // PGM
+        self->noise_index = gi.soundindex("world/quake.wav");
 }

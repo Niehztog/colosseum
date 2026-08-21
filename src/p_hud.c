@@ -51,6 +51,17 @@ void MoveClientToIntermission(edict_t *ent)
     ent->client->grenade_blew_up = false;
     ent->client->grenade_framenum = 0;
 
+    // RAFAEL
+    ent->client->quadfire_framenum = 0;
+
+    // RAFAEL
+    ent->client->trap_blew_up = false;
+    ent->client->trap_time = 0;
+    ent->client->ps.rdflags &= ~RDF_IRGOGGLES;      // PGM
+    ent->client->ir_framenum = 0;                   // PGM
+    ent->client->nuke_framenum = 0;                 // PMM
+    ent->client->double_framenum = 0;               // PMM
+
     ent->watertype = 0;
     ent->waterlevel = 0;
     ent->viewheight = 0;
@@ -66,6 +77,8 @@ void MoveClientToIntermission(edict_t *ent)
     ent->solid = SOLID_NOT;
     ent->svflags = SVF_NOCLIENT;
     gi.unlinkentity(ent);
+
+    gi.linkentity(ent);
 
     // add the layout
 
@@ -215,6 +228,17 @@ void DeathmatchScoreboardMessage(edict_t *ent, edict_t *killer)
             tag = "tag2";
         else
             tag = NULL;
+
+//===============
+//ROGUE
+        // allow new DM games to override the tag picture
+        if (gamerules && gamerules->value) {
+            if (DMGame.DogTag)
+                DMGame.DogTag(cl_ent, killer, &tag);
+        }
+//ROGUE
+//===============
+
         if (tag) {
             Q_snprintf(entry, sizeof(entry),
                        "xv %i yv %i picn %s ", x + 32, y, tag);
@@ -420,18 +444,48 @@ void G_SetStats(edict_t *ent)
     }
 
     //
-    // timer 1 (quad, enviro, breather)
+    // timer 1 (quad, quadfire, double, enviro, breather)
     //
     if (ent->client->quad_framenum > level.framenum) {
         ent->client->ps.stats[STAT_TIMER_ICON] = gi.imageindex("p_quad");
         ent->client->ps.stats[STAT_TIMER] = (ent->client->quad_framenum - level.framenum) / 10;
+    }
+    // RAFAEL
+    else if (ent->client->quadfire_framenum > level.framenum) {
+        // note to self
+        // need to change imageindex
+        ent->client->ps.stats[STAT_TIMER_ICON] = gi.imageindex("p_quadfire");
+        ent->client->ps.stats[STAT_TIMER] = (ent->client->quadfire_framenum - level.framenum) / 10;
+    }
+    // ROGUE -- Double Damage
+    else if (ent->client->double_framenum > level.framenum) {
+        ent->client->ps.stats[STAT_TIMER_ICON] = gi.imageindex("p_double");
+        ent->client->ps.stats[STAT_TIMER] = (ent->client->double_framenum - level.framenum) / 10;
     } else if (ent->client->enviro_framenum > level.framenum) {
         ent->client->ps.stats[STAT_TIMER_ICON] = gi.imageindex("p_envirosuit");
         ent->client->ps.stats[STAT_TIMER] = (ent->client->enviro_framenum - level.framenum) / 10;
     } else if (ent->client->breather_framenum > level.framenum) {
         ent->client->ps.stats[STAT_TIMER_ICON] = gi.imageindex("p_rebreather");
         ent->client->ps.stats[STAT_TIMER] = (ent->client->breather_framenum - level.framenum) / 10;
-    } else {
+    }
+// PGM
+    else if (ent->client->owned_sphere) {
+        if (ent->client->owned_sphere->spawnflags == 1)         // defender
+            ent->client->ps.stats[STAT_TIMER_ICON] = gi.imageindex("p_defender");
+        else if (ent->client->owned_sphere->spawnflags == 2)    // hunter
+            ent->client->ps.stats[STAT_TIMER_ICON] = gi.imageindex("p_hunter");
+        else if (ent->client->owned_sphere->spawnflags == 4)    // vengeance
+            ent->client->ps.stats[STAT_TIMER_ICON] = gi.imageindex("p_vengeance");
+        else                                                    // error case
+            ent->client->ps.stats[STAT_TIMER_ICON] = gi.imageindex("i_fixme");
+
+        ent->client->ps.stats[STAT_TIMER] = (int)(ent->client->owned_sphere->wait - level.time);
+    } else if (ent->client->ir_framenum > level.framenum) {
+        ent->client->ps.stats[STAT_TIMER_ICON] = gi.imageindex("p_ir");
+        ent->client->ps.stats[STAT_TIMER] = (ent->client->ir_framenum - level.framenum) / 10;
+    }
+// PGM
+    else {
         ent->client->ps.stats[STAT_TIMER_ICON] = 0;
         ent->client->ps.stats[STAT_TIMER] = 0;
     }
@@ -538,9 +592,9 @@ void G_SetSpectatorStats(edict_t *ent)
     if (cl->showinventory && cl->pers.health > 0)
         cl->ps.stats[STAT_LAYOUTS] |= LAYOUTS_INVENTORY;
 
-    if (cl->chase_target && cl->chase_target->inuse)
+    if (cl->chase_target && cl->chase_target->inuse) {
         cl->ps.stats[STAT_CHASE] = game.csr.playerskins +
                                    (cl->chase_target - g_edicts) - 1;
-    else
+    } else
         cl->ps.stats[STAT_CHASE] = 0;
 }

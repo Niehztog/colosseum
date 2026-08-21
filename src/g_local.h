@@ -53,9 +53,21 @@ with this program; if not, write to the Free Software Foundation, Inc.,
 
 //==================================================================
 
+// min()/max() and isnan() now come from the engine headers
+
+//==================================================================
+
 // view pitching times
-#define DAMAGE_TIME     0.5f
-#define FALL_TIME       0.3f
+#define DAMAGE_TIME     0.5
+#define FALL_TIME       0.3
+
+// ROGUE.  Ground Zero's own `KILL_DISRUPTOR` switch -- id's note that they cut
+// the disruptor -- is resolved statically and removed.  It was #defined 1 in the
+// donor, so every branch it guarded was already decided; R-CORE-3 permits a
+// feature #ifdef only for platform portability and the two Q2PRO build
+// switches, so a live-but-constant one does not survive the merge.
+// Consequences, both taken: no AMMO_DISRUPTOR in ammo_t, and no `max_rounds` in
+// client_persistant_t.
 
 // edict->spawnflags
 // these are set with checkboxes on each entity in the map editor
@@ -79,9 +91,56 @@ with this program; if not, write to the Free Software Foundation, Inc.,
 #define FL_TEAMSLAVE            BIT(10)     // not the first on the team
 #define FL_NO_KNOCKBACK         BIT(11)
 #define FL_POWER_ARMOR          BIT(12)     // power armor (if any) is active
+// Ground Zero: game-private svflag, kept clear of the engine's bits 0..11
+#define SVF_DAMAGEABLE          BIT(16)
+
+// ROGUE.  Renumbered to BIT() for consistency with the block above; the values
+// are unchanged.
+#define FL_MECHANICAL           BIT(13)     // mechanical: sparks, not blood
+#define FL_SAM_RAIMI            BIT(14)     // in sam raimi cam mode
+#define FL_DISGUISED            BIT(15)     // monsters will not recognise it
+#define FL_NOGIB                BIT(16)     // vaporized by a nuke, drop no gibs
+
+// ---------------------------------------------------------------------------
+// R-CORE-14: entity flag bits are allocated ONCE, here, and this is the table.
+//
+// The requirement exists because the donors alias bits under several names, and
+// it counted four names on two bits.  Measured 2026-08-21 across baseq2, xatrix
+// and rogue, it is SIX names on those two bits, and Ground Zero holds both:
+//
+//   BIT(13) 0x2000   FL_MECHANICAL (rogue, above)
+//                    vs FL_BOT and FL_OSP_NOCMD, which R-CORE-14 assigns here
+//   BIT(16) 0x10000  FL_NOGIB (rogue, above)
+//                    vs FL_OBSERVER, FL_BOTCLIENT and FL_OSP_BOT, likewise
+//
+// Ground Zero arrives in Phase 2 and the bot layer in Phase 6, so Rogue is the
+// incumbent and the later names are the ones that move.  Allocating them now
+// rather than in Phase 6 is the whole point of R-CORE-14: a bot flag colliding
+// with "entity is mechanical" would make every bot bleed sparks, and one
+// colliding with "vaporized by a nuke" would make every bot dropless.  There
+// are 14 free bits, so nothing has to be squeezed.
+//
+// Reserved here, defined here, used when their phase lands.  A name with no
+// user yet costs nothing; a bit allocated twice costs a debugging session.
+#define FL_OBSERVER             BIT(17)     // Phase 5 -- Gladiator observer mode (R-EXTRA-6)
+#define FL_BOT                  BIT(18)     // Phase 6 -- this client is a bot (R-BOT-14)
+#define FL_BOTINPUT             BIT(19)     // Phase 6 -- inside BotExecuteInput (R-BOT-21)
+#define FL_OLDORGNOTSET         BIT(20)     // Phase 6 -- skip the old_origin copy (R-BOT-20)
+// FL_BOTCLIENT, FL_OSP_BOT and FL_OSP_NOCMD are NOT defined: R-CORE-14 says the
+// duplicate aliases are removed rather than kept as synonyms.  FL_BOT is the
+// one name for "is a bot", and osp_* code that said FL_OSP_BOT or FL_OSP_NOCMD
+// uses it.
+//
+// Free after this: BIT(21)..BIT(30).  BIT(31) is FL_RESPAWN.
+// ---------------------------------------------------------------------------
+
 #define FL_RESPAWN              BIT(31)     // used for item respawning
 
-#define FRAMETIME       0.1f
+// R-CORE-11a: the bits carried in edict_t.content_flavour.
+#define CONTENT_XATRIX          BIT(0)
+#define CONTENT_ROGUE           BIT(1)
+
+#define FRAMETIME       0.1
 
 // memory tags to allow dynamic memory to be cleaned up
 #define TAG_GAME    765     // clear when unloading the dll
@@ -110,7 +169,14 @@ typedef enum {
     AMMO_ROCKETS,
     AMMO_GRENADES,
     AMMO_CELLS,
-    AMMO_SLUGS
+    AMMO_SLUGS,
+    // XATRIX
+    AMMO_MAGSLUG,
+    AMMO_TRAP,
+    // ROGUE
+    AMMO_FLECHETTES,
+    AMMO_TESLA,
+    AMMO_PROX
 } ammo_t;
 
 //deadflag
@@ -146,11 +212,31 @@ typedef enum {
 #define AI_MEDIC                BIT(13)
 #define AI_RESURRECTING         BIT(14)
 
+//ROGUE
+#define AI_WALK_WALLS           0x00008000
+#define AI_MANUAL_STEERING      0x00010000
+#define AI_TARGET_ANGER         0x00020000
+#define AI_DODGING              0x00040000
+#define AI_CHARGING             0x00080000
+#define AI_HINT_PATH            0x00100000
+#define AI_IGNORE_SHOTS         0x00200000
+// PMM - FIXME - last second added for E3 .. there's probably a better way to do this, but
+// this works
+#define AI_DO_NOT_COUNT         0x00400000  // set for healed monsters
+#define AI_SPAWNED_CARRIER      0x00800000  // both do_not_count and spawned are set for spawned monsters
+#define AI_SPAWNED_MEDIC_C      0x01000000  // both do_not_count and spawned are set for spawned monsters
+#define AI_SPAWNED_WIDOW        0x02000000  // both do_not_count and spawned are set for spawned monsters
+#define AI_SPAWNED_MASK         0x03800000  // mask to catch all three flavors of spawned
+#define AI_BLOCKED              0x04000000  // used by blocked_checkattack: set to say I'm attacking while blocked
+// (prevents run-attacks)
+//ROGUE
+
 //monster attack state
 #define AS_STRAIGHT             1
 #define AS_SLIDING              2
 #define AS_MELEE                3
 #define AS_MISSILE              4
+#define AS_BLIND                5   // PMM - used by boss code to do nasty things even if it can't see you
 
 // armor types
 #define ARMOR_NONE              0
@@ -197,7 +283,9 @@ typedef enum {
     MOVETYPE_FLY,
     MOVETYPE_TOSS,          // gravity
     MOVETYPE_FLYMISSILE,    // extra size to monsters
-    MOVETYPE_BOUNCE
+    MOVETYPE_BOUNCE,
+    MOVETYPE_WALLBOUNCE,    // XATRIX
+    MOVETYPE_NEWTOSS        // ROGUE - for deathball
 } movetype_t;
 
 typedef struct {
@@ -216,6 +304,11 @@ typedef struct {
 #define IT_KEY          BIT(4)
 #define IT_POWERUP      BIT(5)
 
+// ROGUE
+#define IT_MELEE        BIT(6)
+#define IT_NOT_GIVEABLE BIT(7)      // item can not be given
+// ROGUE
+
 // gitem_t->weapmodel for weapons indicates model index
 #define WEAP_BLASTER            1
 #define WEAP_SHOTGUN            2
@@ -228,6 +321,14 @@ typedef struct {
 #define WEAP_HYPERBLASTER       9
 #define WEAP_RAILGUN            10
 #define WEAP_BFG                11
+#define WEAP_PHALANX            12
+#define WEAP_BOOMER             13
+
+#define WEAP_DISRUPTOR          12      // PGM
+#define WEAP_ETFRIFLE           13      // PGM
+#define WEAP_PLASMA             14      // PGM
+#define WEAP_PROXLAUNCH         15      // PGM
+#define WEAP_CHAINFIST          16      // PGM
 
 typedef struct gitem_s {
     char        *classname; // spawning name
@@ -317,7 +418,7 @@ typedef struct {
     char        nextmap[MAX_QPATH];     // go here when fraglimit is hit
 
     // intermission state
-    int         intermission_framenum;  // time the intermission was started
+    int       intermission_framenum;       // time the intermission was started
     char        *changemap;
     int         exitintermission;
     vec3_t      intermission_origin;
@@ -347,6 +448,11 @@ typedef struct {
     int         body_que;           // dead bodies
 
     int         power_cubes;        // ugly necessity for coop
+
+    // ROGUE
+    edict_t     *disguise_violator;
+    int         disguise_violation_framenum;
+    // ROGUE
 } level_locals_t;
 
 // spawn_temp_t is only used to hold entity field values that
@@ -364,6 +470,29 @@ typedef struct {
     int         distance;
     int         height;
     char        *noise;
+    // *** R-KEY-1, caught live. ***
+    //
+    // This member is `pausetime`, NOT `pause_framenum`, and the distinction is
+    // the entire content of R-KEY-1.  A .bsp names entity fields as literal
+    // strings matched against the key column of temp_fields[], so the member
+    // name IS the map contract: `func_timer` entities set `"pausetime"`.
+    //
+    // Q2PRO's "Convert monster timers to frame numbers." renamed the unrelated
+    // `monsterinfo_t.pausetime` to `pause_framenum`.  Replayed tree-wide it also
+    // renamed THIS member, and every map setting `pausetime` on a func_timer
+    // silently lost its initial pause -- ED_ParseEdict reported "pausetime is
+    // not a field" and banks of timers that should stagger fired in lockstep.
+    //
+    // Q2PRO has since fixed it: `q2pro/src/game/g_local.h` carries both
+    // `spawn_temp_t.pausetime` (float) and `monsterinfo_t.pause_framenum` (int)
+    // as the two separate things they always were.  **Both donor branches in
+    // the bundles still carry the broken rename**, so the three-way merge
+    // propagated it in, and only `g_func.c`'s surviving `st.pausetime` made the
+    // compiler catch it.  Had g_func.c come from a donor too it would have
+    // compiled clean and broken every func_timer in every map.
+    //
+    // §7 rule 1 decides it regardless: a donor renaming a shared member is not
+    // that donor's own feature, so Q2PRO wins.  R-VER-14 is the regression.
     float       pausetime;
     char        *item;
     char        *gravity;
@@ -417,37 +546,76 @@ typedef struct {
 } mmove_t;
 
 typedef struct {
-    const mmove_t   *currentmove;
-    int         aiflags;
+    const mmove_t     *currentmove;
+    unsigned int    aiflags;        // PGM - unsigned, since we're close to the max
     int         nextframe;
     float       scale;
 
-    void        (*stand)(edict_t *self);
-    void        (*idle)(edict_t *self);
-    void        (*search)(edict_t *self);
-    void        (*walk)(edict_t *self);
-    void        (*run)(edict_t *self);
-    void        (*dodge)(edict_t *self, edict_t *other, float eta);
-    void        (*attack)(edict_t *self);
-    void        (*melee)(edict_t *self);
-    void        (*sight)(edict_t *self, edict_t *other);
-    bool        (*checkattack)(edict_t *self);
+    void (*stand)(edict_t *self);
+    void (*idle)(edict_t *self);
+    void (*search)(edict_t *self);
+    void (*walk)(edict_t *self);
+    void (*run)(edict_t *self);
+    void (*dodge)(edict_t *self, edict_t *other, float eta, trace_t *tr);
+    void (*attack)(edict_t *self);
+    void (*melee)(edict_t *self);
+    void (*sight)(edict_t *self, edict_t *other);
+    bool(*checkattack)(edict_t *self);
 
-    int         pause_framenum;
-    int         attack_finished;
+    int       pause_framenum;
+    float       attack_finished;
 
     vec3_t      saved_goal;
-    int         search_framenum;
-    int         trail_framenum;
+    int       search_framenum;
+    int       trail_framenum;
     vec3_t      last_sighting;
     int         attack_state;
     int         lefty;
-    int         idle_framenum;
+    int       idle_framenum;
     int         linkcount;
 
     int         power_armor_type;
     int         power_armor_power;
+
+//ROGUE
+    bool(*blocked)(edict_t *self, float dist);
+//  edict_t     *last_hint;         // last hint_path the monster touched
+    int       last_hint_framenum;     // last time the monster checked for hintpaths.
+    edict_t     *goal_hint;         // which hint_path we're trying to get to
+    int         medicTries;
+    edict_t     *badMedic1, *badMedic2; // these medics have declared this monster "unhealable"
+    edict_t     *healer;    // this is who is healing this monster
+    void (*duck)(edict_t *self, float eta);
+    void (*unduck)(edict_t *self);
+    void (*sidestep)(edict_t *self);
+    //  while abort_duck would be nice, only monsters which duck but don't sidestep would use it .. only the brain
+    //  not really worth it.  sidestep is an implied abort_duck
+//  void        (*abort_duck)(edict_t *self);
+    float       base_height;
+    int       next_duck_framenum;
+    int       duck_wait_framenum;
+    edict_t     *last_player_enemy;
+    // blindfire stuff .. the boolean says whether the monster will do it, and blind_fire_time is the timing
+    // (set in the monster) of the next shot
+    bool    blindfire;      // will the monster blindfire?
+    float       blind_fire_delay;
+    vec3_t      blind_fire_target;
+    // used by the spawners to not spawn too much and keep track of #s of monsters spawned
+    int         monster_slots;
+    int         monster_used;
+    edict_t     *commander;
+    // powerup timers, used by widow, our friend
+    int         quad_framenum;
+    int         invincible_framenum;
+    int         double_framenum;
+//ROGUE
 } monsterinfo_t;
+
+// ROGUE
+// this determines how long to wait after a duck to duck again.  this needs to be longer than
+// the time after the monster_duck_up in all of the animation sequences
+#define DUCK_INTERVAL   0.5
+// ROGUE
 
 extern  game_locals_t   game;
 extern  level_locals_t  level;
@@ -496,7 +664,36 @@ extern  int sm_meat_index;
 #define MOD_TRIGGER_HURT    31
 #define MOD_HIT             32
 #define MOD_TARGET_BLASTER  33
+// RAFAEL 14-APR-98
+#define MOD_RIPPER              34
+#define MOD_PHALANX             35
+#define MOD_BRAINTENTACLE       36
+#define MOD_BLASTOFF            37
+#define MOD_GEKK                38
+#define MOD_TRAP                39
+// END 14-APR-98
 #define MOD_FRIENDLY_FIRE   BIT(31)
+
+//========
+//ROGUE
+#define MOD_CHAINFIST           40
+#define MOD_DISINTEGRATOR       41
+#define MOD_ETF_RIFLE           42
+#define MOD_BLASTER2            43
+#define MOD_HEATBEAM            44
+#define MOD_TESLA               45
+#define MOD_PROX                46
+#define MOD_NUKE                47
+#define MOD_VENGEANCE_SPHERE    48
+#define MOD_HUNTER_SPHERE       49
+#define MOD_DEFENDER_SPHERE     50
+#define MOD_TRACKER             51
+#define MOD_DBALL_CRUSH         52
+#define MOD_DOPPLE_EXPLODE      53
+#define MOD_DOPPLE_VENGEANCE    54
+#define MOD_DOPPLE_HUNTER       55
+//ROGUE
+//========
 
 extern  int meansOfDeath;
 
@@ -548,6 +745,20 @@ extern  cvar_t  *flood_persecond;
 extern  cvar_t  *flood_waitdelay;
 
 extern  cvar_t  *sv_maplist;
+
+extern  cvar_t  *sv_stopspeed;      // PGM - this was a define in g_phys.c
+
+//ROGUE
+extern  cvar_t  *g_showlogic;
+extern  cvar_t  *gamerules;
+extern  cvar_t  *huntercam;
+extern  cvar_t  *strong_mines;
+extern  cvar_t  *randomrespawn;
+
+// this is for the count of monsters
+#define ENT_SLOTS_LEFT      (ent->monsterinfo.monster_slots - ent->monsterinfo.monster_used)
+#define SELF_SLOTS_LEFT     (self->monsterinfo.monster_slots - self->monsterinfo.monster_used)
+//ROGUE
 
 extern  cvar_t  *sv_features;
 
@@ -637,6 +848,13 @@ char    *G_CopyString(char *in);
 float vectoyaw(vec3_t vec);
 void vectoangles(vec3_t vec, vec3_t angles);
 
+//ROGUE
+void    G_ProjectSource2(const vec3_t point, const vec3_t distance, const vec3_t forward, const vec3_t right, const vec3_t up, vec3_t result);
+float   vectoyaw2(vec3_t vec);
+void    vectoangles2(const vec3_t vec, vec3_t angles);
+edict_t *findradius2(edict_t *from, vec3_t org, float rad);
+//ROGUE
+
 //
 // g_combat.c
 //
@@ -645,6 +863,12 @@ bool CanDamage(edict_t *targ, edict_t *inflictor);
 void T_Damage(edict_t *targ, edict_t *inflictor, edict_t *attacker, const vec3_t dir, vec3_t point, const vec3_t normal, int damage, int knockback, int dflags, int mod);
 void T_RadiusDamage(edict_t *inflictor, edict_t *attacker, float damage, edict_t *ignore, float radius, int mod);
 
+//ROGUE
+void T_RadiusNukeDamage(edict_t *inflictor, edict_t *attacker, float damage, edict_t *ignore, float radius, int mod);
+void T_RadiusClassDamage(edict_t *inflictor, edict_t *attacker, float damage, char *ignoreClass, float radius, int mod);
+void cleanupHealTarget(edict_t *ent);
+//ROGUE
+
 // damage flags
 #define DAMAGE_RADIUS           BIT(0)  // damage was indirect
 #define DAMAGE_NO_ARMOR         BIT(1)  // armour does not protect from this damage
@@ -652,6 +876,11 @@ void T_RadiusDamage(edict_t *inflictor, edict_t *attacker, float damage, edict_t
 #define DAMAGE_NO_KNOCKBACK     BIT(3)  // do not affect velocity, just view angles
 #define DAMAGE_BULLET           BIT(4)  // damage is from a bullet (used for ricochets)
 #define DAMAGE_NO_PROTECTION    BIT(5)  // armor, shields, invulnerability, and godmode have no effect
+//ROGUE
+#define DAMAGE_DESTROY_ARMOR    0x00000040  // damage is done to armor and health.
+#define DAMAGE_NO_REG_ARMOR     0x00000080  // damage skips regular armor
+#define DAMAGE_NO_POWER_ARMOR   0x00000100  // damage skips power armor
+//ROGUE
 
 #define DEFAULT_BULLET_HSPREAD  300
 #define DEFAULT_BULLET_VSPREAD  500
@@ -671,6 +900,19 @@ void monster_fire_grenade(edict_t *self, vec3_t start, vec3_t aimdir, int damage
 void monster_fire_rocket(edict_t *self, vec3_t start, vec3_t dir, int damage, int speed, int flashtype);
 void monster_fire_railgun(edict_t *self, vec3_t start, vec3_t aimdir, int damage, int kick, int flashtype);
 void monster_fire_bfg(edict_t *self, vec3_t start, vec3_t aimdir, int damage, int speed, int kick, float damage_radius, int flashtype);
+// RAFAEL
+void monster_fire_ionripper(edict_t *self, vec3_t start, vec3_t dir, int damage, int speed, int flashtype, int effect);
+// §7 rule 4: two donors claim `fire_heat` and `monster_fire_heat` for different
+// weapons -- Xatrix's Phalanx heat-seeking projectile and Ground Zero's plasma
+// beam -- so both take their donor prefix.  Neither keeps the bare name: rule 4
+// gives it to "the primary ruleset's meaning", and a content layer is not a
+// ruleset, so there is no principled winner and an unprefixed `fire_heat` would
+// be ambiguous to every future reader.  R-CONV-2 had no mission-pack prefix at
+// all; `xatrix_`/`rogue_` are added there in spec 1.7.
+void xatrix_monster_fire_heat(edict_t *self, vec3_t start, vec3_t dir, int damage, int speed, int flashtype);
+void monster_dabeam(edict_t *self);
+void monster_fire_blueblaster(edict_t *self, vec3_t start, vec3_t dir, int damage, int speed, int flashtype, int effect);
+
 void M_droptofloor(edict_t *ent);
 void monster_think(edict_t *self);
 void walkmonster_start(edict_t *self);
@@ -682,6 +924,13 @@ void M_CatagorizePosition(edict_t *ent);
 bool M_CheckAttack(edict_t *self);
 void M_FlyCheck(edict_t *self);
 void M_CheckGround(edict_t *ent);
+//ROGUE
+void monster_fire_blaster2(edict_t *self, vec3_t start, vec3_t dir, int damage, int speed, int flashtype, int effect);
+void monster_fire_tracker(edict_t *self, vec3_t start, vec3_t dir, int damage, int speed, edict_t *enemy, int flashtype);
+void rogue_monster_fire_heat(edict_t *self, const vec3_t start, const vec3_t dir, const vec3_t offset, int damage, int kick, int flashtype);
+void stationarymonster_start(edict_t *self);
+void monster_done_dodge(edict_t *self);
+//ROGUE
 
 //
 // g_misc.c
@@ -690,6 +939,9 @@ void ThrowHead(edict_t *self, char *gibname, int damage, int type);
 void ThrowClientHead(edict_t *self, int damage);
 void ThrowGib(edict_t *self, char *gibname, int damage, int type);
 void BecomeExplosion1(edict_t *self);
+// RAFAEL
+void ThrowHeadACID(edict_t *self, char *gibname, int damage, int type);
+void ThrowGibACID(edict_t *self, char *gibname, int damage, int type);
 
 #define CLOCK_MESSAGE_SIZE  16
 void func_clock_think(edict_t *self);
@@ -727,6 +979,12 @@ void fire_grenade2(edict_t *self, vec3_t start, vec3_t aimdir, int damage, int s
 void fire_rocket(edict_t *self, vec3_t start, vec3_t dir, int damage, int speed, float damage_radius, int radius_damage);
 void fire_rail(edict_t *self, vec3_t start, vec3_t aimdir, int damage, int kick);
 void fire_bfg(edict_t *self, vec3_t start, vec3_t dir, int damage, int speed, float damage_radius);
+// RAFAEL
+void fire_ionripper(edict_t *self, vec3_t start, vec3_t aimdir, int damage, int speed, int effect);
+void xatrix_fire_heat(edict_t *self, vec3_t start, vec3_t dir, int damage, int speed, float damage_radius, int radius_damage);
+void fire_blueblaster(edict_t *self, vec3_t start, vec3_t aimdir, int damage, int speed, int effect);
+void fire_plasma(edict_t *self, vec3_t start, vec3_t dir, int damage, int speed, float damage_radius, int radius_damage);
+void fire_trap(edict_t *self, vec3_t start, vec3_t aimdir, int damage, int speed, float timer, float damage_radius, bool held);
 
 //
 // p_trail.c
@@ -809,9 +1067,94 @@ void ChaseNext(edict_t *ent);
 void ChasePrev(edict_t *ent);
 void GetChaseTarget(edict_t *ent);
 
+//====================
+// ROGUE PROTOTYPES
+//
+// g_newweap.c
+//
+//extern float nuke_framenum;
+
+void fire_flechette(edict_t *self, vec3_t start, vec3_t dir, int damage, int speed, int kick);
+void fire_prox(edict_t *self, vec3_t start, vec3_t aimdir, int damage, int speed);
+void fire_nuke(edict_t *self, vec3_t start, vec3_t aimdir, int speed);
+void fire_flame(edict_t *self, vec3_t start, vec3_t aimdir, int damage, int speed);
+void fire_burst(edict_t *self, vec3_t start, vec3_t aimdir, int damage, int speed);
+void fire_maintain(edict_t *, edict_t *, vec3_t start, vec3_t aimdir, int damage, int speed);
+void fire_incendiary_grenade(edict_t *self, vec3_t start, vec3_t aimdir, int damage, int speed, float timer, float damage_radius);
+void fire_player_melee(edict_t *self, vec3_t start, vec3_t aim, int reach, int damage, int kick, int quiet, int mod);
+void fire_tesla(edict_t *self, vec3_t start, vec3_t aimdir, int damage, int speed);
+void fire_blaster2(edict_t *self, vec3_t start, vec3_t aimdir, int damage, int speed, int effect, bool hyper);
+void rogue_fire_heat(edict_t *self, const vec3_t start, const vec3_t aimdir, const vec3_t offset, int damage, int kick, bool monster);
+void fire_tracker(edict_t *self, vec3_t start, vec3_t dir, int damage, int speed, edict_t *enemy);
+
+//
+// g_newai.c
+//
+bool blocked_checkshot(edict_t *self, float shotChance);
+bool blocked_checkplat(edict_t *self, float dist);
+bool blocked_checkjump(edict_t *self, float dist, float maxDown, float maxUp);
+bool blocked_checknewenemy(edict_t *self);
+bool monsterlost_checkhint(edict_t *self);
+bool inback(edict_t *self, edict_t *other);
+float realrange(edict_t *self, edict_t *other);
+edict_t *SpawnBadArea(vec3_t mins, vec3_t maxs, float lifespan, edict_t *owner);
+edict_t *CheckForBadArea(edict_t *ent);
+bool MarkTeslaArea(edict_t *self, edict_t *tesla);
+void InitHintPaths(void);
+void PredictAim(edict_t *target, vec3_t start, float bolt_speed, bool eye_height, float offset, vec3_t aimdir, vec3_t aimpoint);
+bool below(edict_t *self, edict_t *other);
+void drawbbox(edict_t *self);
+void M_MonsterDodge(edict_t *self, edict_t *attacker, float eta, trace_t *tr);
+void monster_duck_down(edict_t *self);
+void monster_duck_hold(edict_t *self);
+void monster_duck_up(edict_t *self);
+bool has_valid_enemy(edict_t *self);
+void TargetTesla(edict_t *self, edict_t *tesla);
+void hintpath_stop(edict_t *self);
+edict_t * PickCoopTarget(edict_t *self);
+int CountPlayers(void);
+void monster_jump_start(edict_t *self);
+bool monster_jump_finished(edict_t *self);
+
+//
+// g_sphere.c
+//
+void Defender_Launch(edict_t *self);
+void Vengeance_Launch(edict_t *self);
+void Hunter_Launch(edict_t *self);
+
+//
+// g_newdm.c
+//
+void InitGameRules(void);
+edict_t *DoRandomRespawn(edict_t *ent);
+void PrecacheForRandomRespawn(void);
+bool Tag_PickupToken(edict_t *ent, edict_t *other);
+void Tag_DropToken(edict_t *ent, const gitem_t *item);
+void Tag_PlayerDeath(edict_t *targ, edict_t *inflictor, edict_t *attacker);
+void fire_doppleganger(edict_t *ent, vec3_t start, vec3_t aimdir);
+
 //
 // g_spawn.c
 //
+edict_t *CreateMonster(const vec3_t origin, const vec3_t angles, const char *classname);
+edict_t *CreateFlyMonster(vec3_t origin, vec3_t angles, vec3_t mins, vec3_t maxs, char *classname);
+edict_t *CreateGroundMonster(const vec3_t origin, const vec3_t angles, const vec3_t mins, const vec3_t maxs, const char *classname, int height);
+bool FindSpawnPoint(vec3_t startpoint, vec3_t mins, vec3_t maxs, vec3_t spawnpoint, float maxMoveUp);
+bool CheckSpawnPoint(const vec3_t origin, const vec3_t mins, const vec3_t maxs);
+bool CheckGroundSpawnPoint(const vec3_t origin, const vec3_t entMins, const vec3_t entMaxs, float height, float gravity);
+void DetermineBBox(const char *classname, vec3_t mins, vec3_t maxs);
+void SpawnGrow_Spawn(vec3_t startpos, int size);
+void Widowlegs_Spawn(vec3_t startpos, vec3_t angles);
+
+//
+// p_client.c
+//
+void RemoveAttackingPainDaemons(edict_t *self);
+
+// ROGUE PROTOTYPES
+//====================
+
 void G_AddPrecache(void (*func)(void));
 void G_RefreshPrecaches(void);
 void ED_CallSpawn(edict_t *ent);
@@ -860,6 +1203,9 @@ typedef struct {
     int         max_grenades;
     int         max_cells;
     int         max_slugs;
+    // RAFAEL
+    int         max_magslug;
+    int         max_trap;
 
     const gitem_t   *weapon;
     const gitem_t   *lastweapon;
@@ -870,7 +1216,16 @@ typedef struct {
     int         game_helpchanged;
     int         helpchanged;
 
-    bool        spectator;      // client is a spectator
+    bool    spectator;          // client is a spectator
+
+//=========
+//ROGUE
+    int         max_tesla;
+    int         max_prox;
+    int         max_mines;
+    int         max_flechettes;
+//ROGUE
+//=========
 } client_persistant_t;
 
 // client data that stays across deathmatch respawns
@@ -933,7 +1288,7 @@ struct gclient_s {
     vec3_t      oldviewangles;
     vec3_t      oldvelocity;
 
-    int         next_drown_framenum;
+    int       next_drown_framenum;
     int         old_waterlevel;
     int         breather_sound;
 
@@ -953,10 +1308,16 @@ struct gclient_s {
 
     bool        grenade_blew_up;
     int         grenade_framenum;
+    // XATRIX.  quadfire_framenum is R-VER-15 item 2's named case: it was
+    // missing from the client save table in the mission-pack port, so Quad-Fire
+    // did not survive a save/load.  R-SAVE-3 requires a descriptor.
+    int         quadfire_framenum;
+    bool        trap_blew_up;
+    float       trap_time;
     int         silencer_shots;
     int         weapon_sound;
 
-    int         pickup_msg_framenum;
+    int       pickup_msg_framenum;
 
 #define FLOOD_MSGS  10
 
@@ -964,10 +1325,22 @@ struct gclient_s {
     float       flood_when[FLOOD_MSGS];     // when messages were said
     int         flood_whenhead;             // head pointer for when said
 
-    int         respawn_framenum;   // can respawn when time > this
+    int       respawn_framenum;       // can respawn when time > this
 
     edict_t     *chase_target;      // player we are chasing
-    bool        update_chase;       // need to update chase info?
+    bool    update_chase;       // need to update chase info?
+
+//=======
+//ROGUE
+    int         double_framenum;
+    int         ir_framenum;
+//  float       torch_framenum;
+    int         nuke_framenum;
+    int         tracker_pain_framenum;
+
+    edict_t     *owned_sphere;      // this points to the player's sphere
+//ROGUE
+//=======
 };
 
 struct edict_s {
@@ -1018,7 +1391,7 @@ struct edict_s {
     char        *classname;
     int         spawnflags;
 
-    int         timestamp;
+    int       timestamp;
 
     float       angle;          // set in qe3, -1 = up, -2 = down
     char        *target;
@@ -1037,7 +1410,7 @@ struct edict_s {
     vec3_t      velocity;
     vec3_t      avelocity;
     int         mass;
-    int         air_finished_framenum;
+    int       air_finished_framenum;
     float       gravity;        // per entity gravity multiplier (1.0 is normal)
                                 // use for lowgrav artifact, flares
 
@@ -1055,19 +1428,19 @@ struct edict_s {
     void        (*pain)(edict_t *self, edict_t *other, float kick, int damage);
     void        (*die)(edict_t *self, edict_t *inflictor, edict_t *attacker, int damage, vec3_t point);
 
-    int         touch_debounce_framenum;        // are all these legit?  do we need more/less of them?
-    int         pain_debounce_framenum;
-    int         damage_debounce_framenum;
-    int         fly_sound_debounce_framenum;    // move to clientinfo
-    int         last_move_framenum;
+    int       touch_debounce_framenum;        // are all these legit?  do we need more/less of them?
+    int       pain_debounce_framenum;
+    int       damage_debounce_framenum;
+    int       fly_sound_debounce_framenum;    // move to clientinfo
+    int       last_move_framenum;
 
     int         health;
     int         max_health;
     int         gib_health;
     int         deadflag;
-    int         show_hostile;
+    float       show_hostile;
 
-    int         powerarmor_framenum;
+    int       powerarmor_framenum;
 
     char        *map;           // target_changelevel
 
@@ -1119,4 +1492,97 @@ struct edict_s {
     // common data blocks
     moveinfo_t      moveinfo;
     monsterinfo_t   monsterinfo;
+
+    // XATRIX
+    int         orders;
+
+    // ROGUE.  gravityVector is R-SAVE-3a's named case -- it and the whole
+    // blindfire set were lost to a missing descriptor row in the mission-pack
+    // port.  R-SAVE-3 requires descriptors for all of these.
+    int         plat2flags;
+    vec3_t      offset;
+    vec3_t      gravityVector;
+    edict_t     *bad_area;
+    edict_t     *hint_chain;
+    edict_t     *monster_hint_chain;
+    edict_t     *target_hint_chain;
+    int         hint_chain_id;
+
+    // R-CORE-11a and Q13: the content flavour, latched.
+    //
+    // R-CORE-11 gates a monster's frame tables at monster_start and forbids
+    // re-reading the gate mid-move, because a live mmove_t pointer must stay
+    // valid across a cvar change.  R-CORE-11a is the harder half: the files
+    // every monster calls every frame -- g_ai.c, m_move.c, g_monster.c,
+    // g_phys.c -- have no monster_start to latch at.  So the flavour lives
+    // HERE, on the entity, set once at spawn, and those files read this field
+    // and never a cvar.  A cvar change mid-map cannot reach a monster that has
+    // already spawned.
+    //
+    // Two independent bits rather than an enum, which is Q13's closure:
+    // R-MODE-3 allows `xatrix` and `rogue` on at once, and an enum would forbid
+    // exactly the combination the R-MODE-7 matrix promises.
+    int         content_flavour;
+    float       lastMoveTime;
 };
+
+//=============
+//ROGUE
+#define ROGUE_GRAVITY   1
+
+#define SPHERE_DEFENDER         0x0001
+#define SPHERE_HUNTER           0x0002
+#define SPHERE_VENGEANCE        0x0004
+#define SPHERE_DOPPLEGANGER     0x0100
+
+#define SPHERE_TYPE             0x00FF
+#define SPHERE_FLAGS            0xFF00
+
+//
+// deathmatch games
+//
+#define     RDM_TAG         2
+#define     RDM_DEATHBALL   3
+
+typedef struct dm_game_rs {
+    void (*GameInit)(void);
+    void (*PostInitSetup)(void);
+    void (*ClientBegin)(edict_t *ent);
+    void (*SelectSpawnPoint)(edict_t *ent, vec3_t origin, vec3_t angles);
+    void (*PlayerDeath)(edict_t *targ, edict_t *inflictor, edict_t *attacker);
+    void (*Score)(edict_t *attacker, edict_t *victim, int scoreChange);
+    void (*PlayerEffects)(edict_t *ent);
+    void (*DogTag)(edict_t *ent, edict_t *killer, char **pic);
+    void (*PlayerDisconnect)(edict_t *ent);
+    int (*ChangeDamage)(edict_t *targ, edict_t *attacker, int damage, int mod);
+    int (*ChangeKnockback)(edict_t *targ, edict_t *attacker, int knockback, int mod);
+    int (*CheckDMRules)(void);
+} dm_game_rt;
+
+extern dm_game_rt   DMGame;
+
+void Tag_GameInit(void);
+void Tag_PostInitSetup(void);
+void Tag_PlayerDeath(edict_t *targ, edict_t *inflictor, edict_t *attacker);
+void Tag_Score(edict_t *attacker, edict_t *victim, int scoreChange);
+void Tag_PlayerEffects(edict_t *ent);
+void Tag_DogTag(edict_t *ent, edict_t *killer, char **pic);
+void Tag_PlayerDisconnect(edict_t *ent);
+int  Tag_ChangeDamage(edict_t *targ, edict_t *attacker, int damage, int mod);
+
+void DBall_GameInit(void);
+void DBall_ClientBegin(edict_t *ent);
+void DBall_SelectSpawnPoint(edict_t *ent, vec3_t origin, vec3_t angles);
+int  DBall_ChangeKnockback(edict_t *targ, edict_t *attacker, int knockback, int mod);
+int  DBall_ChangeDamage(edict_t *targ, edict_t *attacker, int damage, int mod);
+void DBall_PostInitSetup(void);
+int  DBall_CheckDMRules(void);
+//void Tag_PlayerDeath (edict_t *targ, edict_t *inflictor, edict_t *attacker);
+//void Tag_Score (edict_t *attacker, edict_t *victim, int scoreChange);
+//void Tag_PlayerEffects (edict_t *ent);
+//void Tag_DogTag (edict_t *ent, edict_t *killer, char **pic);
+//void Tag_PlayerDisconnect (edict_t *ent);
+//int  Tag_ChangeDamage (edict_t *targ, edict_t *attacker, int damage);
+
+//ROGUE
+//============

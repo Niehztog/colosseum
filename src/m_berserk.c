@@ -143,7 +143,8 @@ static const mframe_t berserk_frames_run1[] = {
     { ai_run, 21, NULL },
     { ai_run, 11, NULL },
     { ai_run, 21, NULL },
-    { ai_run, 25, NULL },
+    // PMM .. from NULL
+    { ai_run, 25, monster_done_dodge },
     { ai_run, 18, NULL },
     { ai_run, 19, NULL }
 };
@@ -151,6 +152,7 @@ const mmove_t berserk_move_run1 = {FRAME_run1, FRAME_run6, berserk_frames_run1, 
 
 void berserk_run(edict_t *self)
 {
+    monster_done_dodge(self);
     if (self->monsterinfo.aiflags & AI_STAND_GROUND)
         self->monsterinfo.currentmove = &berserk_move_stand;
     else
@@ -230,6 +232,8 @@ const mmove_t berserk_move_attack_strike = {FRAME_att_c21, FRAME_att_c34, berser
 
 void berserk_melee(edict_t *self)
 {
+    monster_done_dodge(self);
+
     if ((Q_rand() % 2) == 0)
         self->monsterinfo.currentmove = &berserk_move_attack_spike;
     else
@@ -302,6 +306,8 @@ void berserk_pain(edict_t *self, edict_t *other, float kick, int damage)
 
     if (skill->value == 3)
         return;     // no pain anims in nightmare
+
+    monster_done_dodge(self);
 
     if ((damage < 20) || (random() < 0.5f))
         self->monsterinfo.currentmove = &berserk_move_pain1;
@@ -377,6 +383,109 @@ void berserk_die(edict_t *self, edict_t *inflictor, edict_t *attacker, int damag
         self->monsterinfo.currentmove = &berserk_move_death2;
 }
 
+//===========
+//PGM
+static void berserk_jump_now(edict_t *self)
+{
+    vec3_t  forward, up;
+
+    monster_jump_start(self);
+
+    AngleVectors(self->s.angles, forward, NULL, up);
+    VectorMA(self->velocity, 100, forward, self->velocity);
+    VectorMA(self->velocity, 300, up, self->velocity);
+}
+
+void berserk_jump2_now(edict_t *self)
+{
+    vec3_t  forward, up;
+
+    monster_jump_start(self);
+
+    AngleVectors(self->s.angles, forward, NULL, up);
+    VectorMA(self->velocity, 150, forward, self->velocity);
+    VectorMA(self->velocity, 400, up, self->velocity);
+}
+
+static void berserk_jump_wait_land(edict_t *self)
+{
+    if (self->groundentity == NULL) {
+        self->monsterinfo.nextframe = self->s.frame;
+
+        if (monster_jump_finished(self))
+            self->monsterinfo.nextframe = self->s.frame + 1;
+    } else
+        self->monsterinfo.nextframe = self->s.frame + 1;
+}
+
+static const mframe_t berserk_frames_jump[] = {
+    { ai_move, 0, NULL },
+    { ai_move, 0, NULL },
+    { ai_move, 0, NULL },
+    { ai_move, 0, berserk_jump_now },
+    { ai_move, 0, NULL },
+    { ai_move, 0, NULL },
+    { ai_move, 0, berserk_jump_wait_land },
+    { ai_move, 0, NULL },
+    { ai_move, 0, NULL }
+};
+const mmove_t berserk_move_jump = { FRAME_jump1, FRAME_jump9, berserk_frames_jump, berserk_run };
+
+static const mframe_t berserk_frames_jump2[] = {
+    { ai_move, -8, NULL },
+    { ai_move, -4, NULL },
+    { ai_move, -4, NULL },
+    { ai_move, 0, berserk_jump_now },
+    { ai_move, 0, NULL },
+    { ai_move, 0, NULL },
+    { ai_move, 0, berserk_jump_wait_land },
+    { ai_move, 0, NULL },
+    { ai_move, 0, NULL }
+};
+const mmove_t berserk_move_jump2 = { FRAME_jump1, FRAME_jump9, berserk_frames_jump2, berserk_run };
+
+static void berserk_jump(edict_t *self)
+{
+    if (!self->enemy)
+        return;
+
+    monster_done_dodge(self);
+
+    if (self->enemy->s.origin[2] > self->s.origin[2])
+        self->monsterinfo.currentmove = &berserk_move_jump2;
+    else
+        self->monsterinfo.currentmove = &berserk_move_jump;
+}
+
+bool berserk_blocked(edict_t *self, float dist)
+{
+    if (blocked_checkjump(self, dist, 256, 40)) {
+        berserk_jump(self);
+        return true;
+    }
+
+    if (blocked_checkplat(self, dist))
+        return true;
+
+    return false;
+}
+//PGM
+//===========
+
+void berserk_sidestep(edict_t *self)
+{
+    // if we're jumping, don't dodge
+    if ((self->monsterinfo.currentmove == &berserk_move_jump) ||
+        (self->monsterinfo.currentmove == &berserk_move_jump2)) {
+        return;
+    }
+
+    // don't check for attack; the eta should suffice for melee monsters
+
+    if (self->monsterinfo.currentmove != &berserk_move_run1)
+        self->monsterinfo.currentmove = &berserk_move_run1;
+}
+
 static void berserk_precache(void)
 {
     sound_pain   = gi.soundindex("berserk/berpain2.wav");
@@ -418,11 +527,16 @@ void SP_monster_berserk(edict_t *self)
     self->monsterinfo.stand = berserk_stand;
     self->monsterinfo.walk = berserk_walk;
     self->monsterinfo.run = berserk_run;
-    self->monsterinfo.dodge = NULL;
+    // pmm
+//  self->monsterinfo.dodge = NULL;
+    self->monsterinfo.dodge = M_MonsterDodge;
+    self->monsterinfo.sidestep = berserk_sidestep;
+    // pmm
     self->monsterinfo.attack = NULL;
     self->monsterinfo.melee = berserk_melee;
     self->monsterinfo.sight = berserk_sight;
     self->monsterinfo.search = berserk_search;
+    self->monsterinfo.blocked = berserk_blocked;        //PGM
 
     self->monsterinfo.currentmove = &berserk_move_stand;
     self->monsterinfo.scale = MODEL_SCALE;

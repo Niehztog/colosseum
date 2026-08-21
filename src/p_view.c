@@ -216,8 +216,13 @@ static void SV_CalcViewOffset(edict_t *ent)
     if (ent->deadflag) {
         VectorClear(angles);
 
-        ent->client->ps.viewangles[ROLL] = 40;
-        ent->client->ps.viewangles[PITCH] = -15;
+        if (ent->flags & FL_SAM_RAIMI) {
+            ent->client->ps.viewangles[ROLL] = 0;
+            ent->client->ps.viewangles[PITCH] = 0;
+        } else {
+            ent->client->ps.viewangles[ROLL] = 40;
+            ent->client->ps.viewangles[PITCH] = -15;
+        }
         ent->client->ps.viewangles[YAW] = ent->client->killer_yaw;
     } else {
         // add angles based on weapon kick
@@ -310,29 +315,44 @@ static void SV_CalcGunOffset(edict_t *ent)
 {
     int     i;
     float   delta;
+    //ROGUE
+    static const gitem_t *heatbeam;
 
-    // gun angles from bobbing
-    ent->client->ps.gunangles[ROLL] = xyspeed * bobfracsin * 0.005f;
-    ent->client->ps.gunangles[YAW] = xyspeed * bobfracsin * 0.01f;
-    if (bobcycle & 1) {
-        ent->client->ps.gunangles[ROLL] = -ent->client->ps.gunangles[ROLL];
-        ent->client->ps.gunangles[YAW] = -ent->client->ps.gunangles[YAW];
+    if (!heatbeam)
+        heatbeam = FindItemByClassname("weapon_plasmabeam");
+
+    //ROGUE - heatbeam shouldn't bob so the beam looks right
+    if (ent->client->pers.weapon != heatbeam) {
+        // ROGUE
+        // gun angles from bobbing
+        ent->client->ps.gunangles[ROLL] = xyspeed * bobfracsin * 0.005f;
+        ent->client->ps.gunangles[YAW] = xyspeed * bobfracsin * 0.01f;
+        if (bobcycle & 1) {
+            ent->client->ps.gunangles[ROLL] = -ent->client->ps.gunangles[ROLL];
+            ent->client->ps.gunangles[YAW] = -ent->client->ps.gunangles[YAW];
+        }
+
+        ent->client->ps.gunangles[PITCH] = xyspeed * bobfracsin * 0.005f;
+
+        // gun angles from delta movement
+        for (i = 0; i < 3; i++) {
+            delta = ent->client->oldviewangles[i] - ent->client->ps.viewangles[i];
+            if (delta > 180)
+                delta -= 360;
+            if (delta < -180)
+                delta += 360;
+            delta = Q_clipf(delta, -45, 45);
+            if (i == YAW)
+                ent->client->ps.gunangles[ROLL] += 0.1f * delta;
+            ent->client->ps.gunangles[i] += 0.2f * delta;
+        }
     }
-
-    ent->client->ps.gunangles[PITCH] = xyspeed * bobfracsin * 0.005f;
-
-    // gun angles from delta movement
-    for (i = 0; i < 3; i++) {
-        delta = ent->client->oldviewangles[i] - ent->client->ps.viewangles[i];
-        if (delta > 180)
-            delta -= 360;
-        if (delta < -180)
-            delta += 360;
-        delta = Q_clipf(delta, -45, 45);
-        if (i == YAW)
-            ent->client->ps.gunangles[ROLL] += 0.1f * delta;
-        ent->client->ps.gunangles[i] += 0.2f * delta;
+    // ROGUE
+    else {
+        for (i = 0; i < 3; i++)
+            ent->client->ps.gunangles[i] = 0;
     }
+    //ROGUE
 
     // gun height
     VectorClear(ent->client->ps.gunoffset);
@@ -401,7 +421,25 @@ static void SV_CalcBlend(edict_t *ent)
             gi.sound(ent, CHAN_ITEM, gi.soundindex("items/damage2.wav"), 1, ATTN_NORM, 0);
         if (remaining > 30 || (remaining & 4))
             SV_AddBlend(0, 0, 1, 0.08f, ent->client->ps.blend);
-    } else if (ent->client->invincible_framenum > level.framenum) {
+    }
+    // RAFAEL
+    else if (ent->client->quadfire_framenum > level.framenum) {
+        remaining = ent->client->quadfire_framenum - level.framenum;
+        if (remaining == 30)    // beginning to fade
+            gi.sound(ent, CHAN_ITEM, gi.soundindex("items/quadfire2.wav"), 1, ATTN_NORM, 0);
+        if (remaining > 30 || (remaining & 4))
+            SV_AddBlend(1, 0.2f, 0.5f, 0.08f, ent->client->ps.blend);
+    }
+    // ROGUE -- Double Damage
+    else if (ent->client->double_framenum > level.framenum) {
+        remaining = ent->client->double_framenum - level.framenum;
+        if (remaining == 30)    // beginning to fade
+            gi.sound(ent, CHAN_ITEM, gi.soundindex("misc/ddamage2.wav"), 1, ATTN_NORM, 0);
+        if (remaining > 30 || (remaining & 4))
+            SV_AddBlend(0.9f, 0.7f, 0, 0.08f, ent->client->ps.blend);
+    }
+    // PMM
+    else if (ent->client->invincible_framenum > level.framenum) {
         remaining = ent->client->invincible_framenum - level.framenum;
         if (remaining == 30)    // beginning to fade
             gi.sound(ent, CHAN_ITEM, gi.soundindex("items/protect2.wav"), 1, ATTN_NORM, 0);
@@ -420,6 +458,24 @@ static void SV_CalcBlend(edict_t *ent)
         if (remaining > 30 || (remaining & 4))
             SV_AddBlend(0.4f, 1, 0.4f, 0.04f, ent->client->ps.blend);
     }
+
+//PGM
+    if (ent->client->nuke_framenum > level.framenum) {
+        float brightness;
+        brightness = (ent->client->nuke_framenum - level.framenum) / 20.0f;
+        SV_AddBlend(1, 1, 1, brightness, ent->client->ps.blend);
+    }
+    if (ent->client->ir_framenum > level.framenum) {
+        remaining = ent->client->ir_framenum - level.framenum;
+        if (remaining > 30 || (remaining & 4)) {
+            ent->client->ps.rdflags |= RDF_IRGOGGLES;
+            SV_AddBlend(1, 0, 0, 0.2f, ent->client->ps.blend);
+        } else
+            ent->client->ps.rdflags &= ~RDF_IRGOGGLES;
+    } else {
+        ent->client->ps.rdflags &= ~RDF_IRGOGGLES;
+    }
+//PGM
 
     // add for damage
     if (ent->client->damage_alpha > 0)
@@ -545,7 +601,7 @@ static void P_WorldEffects(void)
         current_player->flags |= FL_INWATER;
 
         // clear damage_debounce, so the pain sound will play immediately
-        current_player->damage_debounce_framenum = level.framenum - 1 * BASE_FRAMERATE;
+        current_player->damage_debounce_framenum = level.framenum - 1;
     }
 
     //
@@ -572,7 +628,7 @@ static void P_WorldEffects(void)
             // gasp for air
             gi.sound(current_player, CHAN_VOICE, gi.soundindex("player/gasp1.wav"), 1, ATTN_NORM, 0);
             PlayerNoise(current_player, current_player->s.origin, PNOISE_SELF);
-        } else  if (current_player->air_finished_framenum < level.framenum + 11 * BASE_FRAMERATE) {
+        } else  if (current_player->air_finished_framenum < level.framenum + 11) {
             // just break surface
             gi.sound(current_player, CHAN_VOICE, gi.soundindex("player/gasp2.wav"), 1, ATTN_NORM, 0);
         }
@@ -668,10 +724,25 @@ static void G_SetClientEffects(edict_t *ent)
     int     remaining;
 
     ent->s.effects = 0;
-    ent->s.renderfx = 0;
+//  ent->s.renderfx = 0;
+
+    // PGM - player is always ir visible, even dead.
+    ent->s.renderfx = RF_IR_VISIBLE;
 
     if (ent->health <= 0 || level.intermission_framenum)
         return;
+
+//=========
+//PGM
+    if (ent->flags & FL_DISGUISED)
+        ent->s.renderfx |= RF_USE_DISGUISE;
+
+    if (gamerules && gamerules->value) {
+        if (DMGame.PlayerEffects)
+            DMGame.PlayerEffects(ent);
+    }
+//PGM
+//=========
 
     if (ent->powerarmor_framenum > level.framenum) {
         pa_type = PowerArmorType(ent);
@@ -689,6 +760,28 @@ static void G_SetClientEffects(edict_t *ent)
             ent->s.effects |= EF_QUAD;
     }
 
+    // RAFAEL
+    if (ent->client->quadfire_framenum > level.framenum) {
+        remaining = ent->client->quadfire_framenum - level.framenum;
+        if (remaining > 30 || (remaining & 4))
+            ent->s.effects |= EF_QUAD;
+    }
+//=======
+//ROGUE
+    if (ent->client->double_framenum > level.framenum) {
+        remaining = ent->client->double_framenum - level.framenum;
+        if (remaining > 30 || (remaining & 4))
+            ent->s.effects |= EF_DOUBLE;
+    }
+    if ((ent->client->owned_sphere) && (ent->client->owned_sphere->spawnflags == 1)) {
+        ent->s.effects |= EF_HALF_DAMAGE;
+    }
+    if (ent->client->tracker_pain_framenum > level.framenum) {
+        ent->s.effects |= EF_TRACKERTRAIL;
+    }
+//ROGUE
+//=======
+
     if (ent->client->invincible_framenum > level.framenum) {
         remaining = ent->client->invincible_framenum - level.framenum;
         if (remaining > 30 || (remaining & 4))
@@ -700,6 +793,19 @@ static void G_SetClientEffects(edict_t *ent)
         ent->s.effects |= EF_COLOR_SHELL;
         ent->s.renderfx |= (RF_SHELL_RED | RF_SHELL_GREEN | RF_SHELL_BLUE);
     }
+
+//PGM
+    /*
+        if (ent->client->torch_framenum > level.framenum)
+        {
+            gi.WriteByte (svc_temp_entity);
+            gi.WriteByte (TE_FLASHLIGHT);
+            gi.WritePosition (ent->s.origin);
+            gi.WriteShort (ent - g_edicts);
+            gi.multicast (ent->s.origin, MULTICAST_PVS);
+        }
+    */
+//PGM
 }
 
 /*
@@ -749,6 +855,9 @@ static void G_SetClientSound(edict_t *ent)
         ent->s.sound = gi.soundindex("weapons/rg_hum.wav");
     else if (strcmp(weap, "weapon_bfg") == 0)
         ent->s.sound = gi.soundindex("weapons/bfg_hum.wav");
+    // RAFAEL
+    else if (strcmp(weap, "weapon_phalanx") == 0)
+        ent->s.sound = gi.soundindex("weapons/phaloop.wav");
     else if (ent->client->weapon_sound)
         ent->s.sound = ent->client->weapon_sound;
     else
@@ -952,6 +1061,7 @@ void ClientEndServerFrame(edict_t *ent)
         G_SetSpectatorStats(ent);
     else
         G_SetStats(ent);
+
     G_CheckChaseStats(ent);
 
     G_SetClientEvent(ent);

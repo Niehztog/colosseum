@@ -72,6 +72,7 @@ def _gates(out):
 
 PARSERS = {
     'gates.py': _gates,
+    'dsweep.py': _bang,
     'keycontract.py': _bang,
     'slotkind.py': _bang,
     'auditsave.py': _auditsave,
@@ -116,9 +117,23 @@ def main():
     results.append(run('gates.py', ['--tree', tree], 'gates'))
 
     # --- comparative audits: need a donor ---------------------------------
+    # dsweep, not auditsave: both implement R-SAVE-3's "a persistent field with
+    # no descriptor", but auditsave's struct_body regex misattributes members --
+    # asked about the mission-pack merge it reported spawn_temp_t's `pausetime`,
+    # `minyaw` and `height` as monsterinfo_t fields.  dsweep brace-matches the
+    # struct bodies and carries its own extractor self-test.  §7 rule 9: where a
+    # tool and a reviewer disagree, fix the tool.
+    results.append(run('dsweep.py', [], 'dsweep/descriptors'))
     if donors:
         for label, path in donors:
-            results.append(run('auditsave.py', [path], f'auditsave/{label}'))
+            # R-VER-15 item 1 compares against **q2pro's baseq2 entries**, not
+            # against the donor: the regression it names is a baseq2 field lost
+            # in the merge (a railgun precache, dropped by a conflict
+            # resolution).  Pointed at a donor instead, a merged union tree
+            # always reports the OTHER donor's legitimate changes -- Xatrix's
+            # Use_Weapon2 on the hyperblaster and railgun, and the items Ground
+            # Zero's KILL_DISRUPTOR branch marks IT_NOT_GIVEABLE -- which are
+            # correct and would fail the build forever.
             base_items = os.path.join(tree, 'g_items.c')
             var_items = os.path.join(path, 'g_items.c')
             if os.path.exists(var_items):

@@ -188,7 +188,7 @@ static const mframe_t gunner_frames_run[] = {
     { ai_run, 26, NULL },
     { ai_run, 9,  NULL },
     { ai_run, 9,  NULL },
-    { ai_run, 9,  NULL },
+    { ai_run, 9,  monster_done_dodge },
     { ai_run, 15, NULL },
     { ai_run, 10, NULL },
     { ai_run, 13, NULL },
@@ -199,6 +199,7 @@ const mmove_t gunner_move_run = {FRAME_run01, FRAME_run08, gunner_frames_run, NU
 
 void gunner_run(edict_t *self)
 {
+    monster_done_dodge(self);
     if (self->monsterinfo.aiflags & AI_STAND_GROUND)
         self->monsterinfo.currentmove = &gunner_move_stand;
     else
@@ -264,6 +265,14 @@ void gunner_pain(edict_t *self, edict_t *other, float kick, int damage)
     if (self->health < (self->max_health / 2))
         self->s.skinnum = 1;
 
+    monster_done_dodge(self);
+
+    if (!self->groundentity) {
+//      if ((g_showlogic) && (g_showlogic->value))
+//          gi.dprintf ("gunner: pain avoided due to no ground\n");
+        return;
+    }
+
     if (level.framenum < self->pain_debounce_framenum)
         return;
 
@@ -283,6 +292,12 @@ void gunner_pain(edict_t *self, edict_t *other, float kick, int damage)
         self->monsterinfo.currentmove = &gunner_move_pain2;
     else
         self->monsterinfo.currentmove = &gunner_move_pain1;
+
+    self->monsterinfo.aiflags &= ~AI_MANUAL_STEERING;
+
+    // PMM - clear duck flag
+    if (self->monsterinfo.aiflags & AI_DUCKED)
+        monster_duck_up(self);
 }
 
 static void gunner_dead(edict_t *self)
@@ -336,60 +351,42 @@ void gunner_die(edict_t *self, edict_t *inflictor, edict_t *attacker, int damage
     self->monsterinfo.currentmove = &gunner_move_death;
 }
 
+// PMM - changed to duck code for new dodge
+
+//
+// this is specific to the gunner, leave it be
+//
 static void gunner_duck_down(edict_t *self)
 {
-    if (self->monsterinfo.aiflags & AI_DUCKED)
-        return;
+//  if (self->monsterinfo.aiflags & AI_DUCKED)
+//      return;
     self->monsterinfo.aiflags |= AI_DUCKED;
     if (skill->value >= 2) {
         if (random() > 0.5f)
             GunnerGrenade(self);
     }
 
-    self->maxs[2] -= 32;
+//  self->maxs[2] -= 32;
+    self->maxs[2] = self->monsterinfo.base_height - 32;
     self->takedamage = DAMAGE_YES;
-    self->monsterinfo.pause_framenum = level.framenum + 1 * BASE_FRAMERATE;
-    gi.linkentity(self);
-}
-
-static void gunner_duck_hold(edict_t *self)
-{
-    if (level.framenum >= self->monsterinfo.pause_framenum)
-        self->monsterinfo.aiflags &= ~AI_HOLD_FRAME;
-    else
-        self->monsterinfo.aiflags |= AI_HOLD_FRAME;
-}
-
-static void gunner_duck_up(edict_t *self)
-{
-    self->monsterinfo.aiflags &= ~AI_DUCKED;
-    self->maxs[2] += 32;
-    self->takedamage = DAMAGE_AIM;
+    if (self->monsterinfo.duck_wait_framenum < level.framenum)
+        self->monsterinfo.duck_wait_framenum = level.framenum + 1 * BASE_FRAMERATE;
     gi.linkentity(self);
 }
 
 static const mframe_t gunner_frames_duck[] = {
     { ai_move, 1,  gunner_duck_down },
     { ai_move, 1,  NULL },
-    { ai_move, 1,  gunner_duck_hold },
+    { ai_move, 1,  monster_duck_hold },
     { ai_move, 0,  NULL },
     { ai_move, -1, NULL },
     { ai_move, -1, NULL },
-    { ai_move, 0,  gunner_duck_up },
+    { ai_move, 0,  monster_duck_up },
     { ai_move, -1, NULL }
 };
 const mmove_t gunner_move_duck = {FRAME_duck01, FRAME_duck08, gunner_frames_duck, gunner_run};
 
-void gunner_dodge(edict_t *self, edict_t *attacker, float eta)
-{
-    if (random() > 0.25f)
-        return;
-
-    if (!self->enemy)
-        self->enemy = attacker;
-
-    self->monsterinfo.currentmove = &gunner_move_duck;
-}
+// PMM - gunner dodge moved below so I know about attack sequences
 
 static void gunner_opengun(edict_t *self)
 {
@@ -403,6 +400,9 @@ static void GunnerFire(edict_t *self)
     vec3_t  target;
     vec3_t  aim;
     int     flash_number;
+
+    if (!self->enemy || !self->enemy->inuse)    //PGM
+        return;                                 //PGM
 
     flash_number = MZ2_GUNNER_MACHINEGUN_1 + (self->s.frame - FRAME_attak216);
 
@@ -419,27 +419,141 @@ static void GunnerFire(edict_t *self)
     monster_fire_bullet(self, start, aim, 3, 4, DEFAULT_BULLET_HSPREAD, DEFAULT_BULLET_VSPREAD, flash_number);
 }
 
+static bool gunner_grenade_check(edict_t *self)
+{
+    vec3_t      start;
+    vec3_t      forward, right;
+    trace_t     tr;
+    vec3_t      target, dir;
+
+    if (!self->enemy)
+        return false;
+
+    // if the player is above my head, use machinegun.
+
+    // check for flag telling us that we're blindfiring
+    if (self->monsterinfo.aiflags & AI_MANUAL_STEERING) {
+        if (self->s.origin[2] + self->viewheight < self->monsterinfo.blind_fire_target[2]) {
+//          if(g_showlogic && g_showlogic->value)
+//              gi.dprintf("blind_fire_target is above my head, using machinegun\n");
+            return false;
+        }
+    } else if (self->absmax[2] <= self->enemy->absmin[2]) {
+//      if(g_showlogic && g_showlogic->value)
+//          gi.dprintf("player is above my head, using machinegun\n");
+        return false;
+    }
+
+    // check to see that we can trace to the player before we start
+    // tossing grenades around.
+    AngleVectors(self->s.angles, forward, right, NULL);
+    G_ProjectSource(self->s.origin, monster_flash_offset[MZ2_GUNNER_GRENADE_1], forward, right, start);
+
+    // pmm - check for blindfire flag
+    if (self->monsterinfo.aiflags & AI_MANUAL_STEERING)
+        VectorCopy(self->monsterinfo.blind_fire_target, target);
+    else
+        VectorCopy(self->enemy->s.origin, target);
+
+    // see if we're too close
+    VectorSubtract(self->s.origin, target, dir);
+
+    if (VectorLength(dir) < 100)
+        return false;
+
+    tr = gi.trace(start, vec3_origin, vec3_origin, target, self, MASK_SHOT);
+    if (tr.ent == self->enemy || tr.fraction == 1)
+        return true;
+
+//  if(g_showlogic && g_showlogic->value)
+//      gi.dprintf("can't trace to target, using machinegun\n");
+    return false;
+}
+
 static void GunnerGrenade(edict_t *self)
 {
     vec3_t  start;
-    vec3_t  forward, right;
+    vec3_t  forward, right, up;
     vec3_t  aim;
     int     flash_number;
+    float   spread;
+    float   pitch = 0;
+    // PMM
+    vec3_t  target;
+    // ROGUE, and FIXED rather than preserved.  The donor declares this
+    // uninitialised and assigns it only under AI_MANUAL_STEERING, then reads it
+    // below -- so with manual steering off it reads an indeterminate value.
+    // That is undefined behaviour, which means there is no shipped behaviour to
+    // preserve (unlike doc/reconciliation.md R-22 and R-30, where the original
+    // did something well-defined but wrong).  The intent is unambiguous from the
+    // one assignment: blindfire only when manually steered.
+    bool blindfire = false;
 
-    if (self->s.frame == FRAME_attak105)
+    if (!self->enemy || !self->enemy->inuse)    //PGM
+        return;                                 //PGM
+
+    // pmm
+    if (self->monsterinfo.aiflags & AI_MANUAL_STEERING)
+        blindfire = true;
+
+    if (self->s.frame == FRAME_attak105) {
+        spread = .02f;
         flash_number = MZ2_GUNNER_GRENADE_1;
-    else if (self->s.frame == FRAME_attak108)
+    } else if (self->s.frame == FRAME_attak108) {
+        spread = .05f;
         flash_number = MZ2_GUNNER_GRENADE_2;
-    else if (self->s.frame == FRAME_attak111)
+    } else if (self->s.frame == FRAME_attak111) {
+        spread = .08f;
         flash_number = MZ2_GUNNER_GRENADE_3;
-    else // (self->s.frame == FRAME_attak114)
+    } else { // (self->s.frame == FRAME_attak114)
+        self->monsterinfo.aiflags &= ~AI_MANUAL_STEERING;
+        spread = .11f;
         flash_number = MZ2_GUNNER_GRENADE_4;
+    }
 
-    AngleVectors(self->s.angles, forward, right, NULL);
+    //  pmm
+    // if we're shooting blind and we still can't see our enemy
+    if ((blindfire) && (!visible(self, self->enemy))) {
+        // and we have a valid blind_fire_target
+        if (VectorCompare(self->monsterinfo.blind_fire_target, vec3_origin))
+            return;
+
+//      gi.dprintf ("blind_fire_target = %s\n", vtos (self->monsterinfo.blind_fire_target));
+//      gi.dprintf ("GunnerGrenade: ideal yaw is %f\n", self->ideal_yaw);
+        VectorCopy(self->monsterinfo.blind_fire_target, target);
+    } else
+        VectorCopy(self->s.origin, target);
+    // pmm
+
+    AngleVectors(self->s.angles, forward, right, up);   //PGM
     G_ProjectSource(self->s.origin, monster_flash_offset[flash_number], forward, right, start);
 
+//PGM
+    if (self->enemy) {
+        float   dist;
+
+//      VectorSubtract(self->enemy->s.origin, self->s.origin, aim);
+        VectorSubtract(target, self->s.origin, aim);
+        dist = VectorLength(aim);
+
+        // aim up if they're on the same level as me and far away.
+        if ((dist > 512) && (aim[2] < 64) && (aim[2] > -64)) {
+            aim[2] += (dist - 512);
+        }
+
+        VectorNormalize(aim);
+        pitch = aim[2];
+        if (pitch > 0.4f) {
+            pitch = 0.4f;
+        } else if (pitch < -0.5f)
+            pitch = -0.5f;
+    }
+//PGM
+
     //FIXME : do a spread -225 -75 75 225 degrees around forward
-    VectorCopy(forward, aim);
+//  VectorCopy (forward, aim);
+    VectorMA(forward, spread, right, aim);
+    VectorMA(aim, pitch, up, aim);
 
     monster_fire_grenade(self, start, aim, 50, 600, flash_number);
 }
@@ -478,8 +592,21 @@ static const mframe_t gunner_frames_endfire_chain[] = {
 };
 const mmove_t gunner_move_endfire_chain = {FRAME_attak224, FRAME_attak230, gunner_frames_endfire_chain, gunner_run};
 
+static void gunner_blind_check(edict_t *self)
+{
+    vec3_t  aim;
+
+    if (self->monsterinfo.aiflags & AI_MANUAL_STEERING) {
+        VectorSubtract(self->monsterinfo.blind_fire_target, self->s.origin, aim);
+        self->ideal_yaw = vectoyaw(aim);
+
+//      gi.dprintf ("blind_fire_target = %s\n", vtos (self->monsterinfo.blind_fire_target));
+//      gi.dprintf ("gunner_attack: ideal yaw is %f\n", self->ideal_yaw);
+    }
+}
+
 static const mframe_t gunner_frames_attack_grenade[] = {
-    { ai_charge, 0, NULL },
+    { ai_charge, 0, gunner_blind_check },
     { ai_charge, 0, NULL },
     { ai_charge, 0, NULL },
     { ai_charge, 0, NULL },
@@ -503,13 +630,104 @@ static const mframe_t gunner_frames_attack_grenade[] = {
 };
 const mmove_t gunner_move_attack_grenade = {FRAME_attak101, FRAME_attak121, gunner_frames_attack_grenade, gunner_run};
 
+// R-CORE-11: baseq2's gunner_move_attack_grenade, kept alongside Ground Zero's.
+// Ground Zero adds gunner_blind_check to the grenade sequence, which re-aims
+// the gunner at monsterinfo.blind_fire_target.  baseq2's sequence has no such
+// frame.
+static const mframe_t bq2_gunner_frames_attack_grenade[] = {
+    { ai_charge, 0, NULL },
+    { ai_charge, 0, NULL },
+    { ai_charge, 0, NULL },
+    { ai_charge, 0, NULL },
+    { ai_charge, 0, GunnerGrenade },
+    { ai_charge, 0, NULL },
+    { ai_charge, 0, NULL },
+    { ai_charge, 0, GunnerGrenade },
+    { ai_charge, 0, NULL },
+    { ai_charge, 0, NULL },
+    { ai_charge, 0, GunnerGrenade },
+    { ai_charge, 0, NULL },
+    { ai_charge, 0, NULL },
+    { ai_charge, 0, GunnerGrenade },
+    { ai_charge, 0, NULL },
+    { ai_charge, 0, NULL },
+    { ai_charge, 0, NULL },
+    { ai_charge, 0, NULL },
+    { ai_charge, 0, NULL },
+    { ai_charge, 0, NULL },
+    { ai_charge, 0, NULL }
+};
+
+const mmove_t bq2_gunner_move_attack_grenade = {FRAME_attak101, FRAME_attak121, bq2_gunner_frames_attack_grenade, gunner_run};
+
 void gunner_attack(edict_t *self)
 {
-    if (range(self, self->enemy) == RANGE_MELEE) {
+    float chance, r;
+
+    monster_done_dodge(self);
+
+    // PMM
+    if (self->monsterinfo.attack_state == AS_BLIND) {
+        // setup shot probabilities
+        if (self->monsterinfo.blind_fire_delay < 1.0f)
+            chance = 1.0f;
+        else if (self->monsterinfo.blind_fire_delay < 7.5f)
+            chance = 0.4f;
+        else
+            chance = 0.1f;
+
+        r = random();
+
+        // minimum of 2 seconds, plus 0-3, after the shots are done
+        self->monsterinfo.blind_fire_delay += 2.1f + 2.0f + random() * 3.0f;
+
+        // don't shoot at the origin
+        if (VectorCompare(self->monsterinfo.blind_fire_target, vec3_origin))
+            return;
+
+        // don't shoot if the dice say not to
+        if (r > chance) {
+//          if ((g_showlogic) && (g_showlogic->value))
+//              gi.dprintf ("blindfire - NO SHOT\n");
+            return;
+        }
+
+        // turn on manual steering to signal both manual steering and blindfire
+        self->monsterinfo.aiflags |= AI_MANUAL_STEERING;
+        if (gunner_grenade_check(self)) {
+            // if the check passes, go for the attack
+            // R-CORE-11: both sequences ship; the latch selects (if/else with
+            // literal assignments so genptr.py sees both -- R-CORE-11b).
+            if (self->content_flavour & CONTENT_ROGUE)
+                self->monsterinfo.currentmove = &gunner_move_attack_grenade;
+            else
+                self->monsterinfo.currentmove = &bq2_gunner_move_attack_grenade;
+            self->monsterinfo.attack_finished = level.time + 2 * random();
+        }
+        // pmm - should this be active?
+//      else
+//          self->monsterinfo.currentmove = &gunner_move_attack_chain;
+//      if ((g_showlogic) && (g_showlogic->value))
+//          gi.dprintf ("blind grenade check failed, doing nothing\n");
+
+        // turn off blindfire flag
+        self->monsterinfo.aiflags &= ~AI_MANUAL_STEERING;
+        return;
+    }
+    // pmm
+
+    // PGM - gunner needs to use his chaingun if he's being attacked by a tesla.
+    if ((range(self, self->enemy) == RANGE_MELEE) || self->bad_area) {
         self->monsterinfo.currentmove = &gunner_move_attack_chain;
     } else {
-        if (random() <= 0.5f)
-            self->monsterinfo.currentmove = &gunner_move_attack_grenade;
+        if (random() <= 0.5f && gunner_grenade_check(self)) {
+            // R-CORE-11: both sequences ship; the latch selects (if/else with
+            // literal assignments so genptr.py sees both -- R-CORE-11b).
+            if (self->content_flavour & CONTENT_ROGUE)
+                self->monsterinfo.currentmove = &gunner_move_attack_grenade;
+            else
+                self->monsterinfo.currentmove = &bq2_gunner_move_attack_grenade;
+        }
         else
             self->monsterinfo.currentmove = &gunner_move_attack_chain;
     }
@@ -530,6 +748,248 @@ static void gunner_refire_chain(edict_t *self)
             }
     self->monsterinfo.currentmove = &gunner_move_endfire_chain;
 }
+/*
+void gunner_dodge (edict_t *self, edict_t *attacker, float eta, trace_t *tr)
+{
+// original quake2 dodge code
+
+    if (random() > 0.25)
+        return;
+
+    if (!self->enemy)
+        self->enemy = attacker;
+
+    self->monsterinfo.currentmove = &gunner_move_duck;
+
+//===========
+//PMM - rogue rewrite of gunner dodge code.
+    float   r;
+    float   height;
+    int     shooting = 0;
+
+    if (!self->enemy)
+    {
+        self->enemy = attacker;
+        FoundTarget (self);
+    }
+
+    // PMM - don't bother if it's going to hit anyway; fix for weird in-your-face etas (I was
+    // seeing numbers like 13 and 14)
+    if ((eta < 0.1) || (eta > 5))
+        return;
+
+    r = random();
+    if (r > (0.25*((skill->value)+1)))
+        return;
+
+    if ((self->monsterinfo.currentmove == &gunner_move_attack_chain) ||
+        (self->monsterinfo.currentmove == &gunner_move_fire_chain) ||
+        (self->monsterinfo.currentmove == &gunner_move_attack_grenade)
+        )
+    {
+        shooting = 1;
+    }
+    if (self->monsterinfo.aiflags & AI_DODGING)
+    {
+        height = self->absmax[2];
+    }
+    else
+    {
+        height = self->absmax[2]-32-1;  // the -1 is because the absmax is s.origin + maxs + 1
+    }
+
+    // check to see if it makes sense to duck
+    if (tr->endpos[2] <= height)
+    {
+        vec3_t right, diff;
+        if (shooting)
+        {
+            self->monsterinfo.attack_state = AS_SLIDING;
+            return;
+        }
+        AngleVectors (self->s.angles, NULL, right, NULL);
+        VectorSubtract (tr->endpos, self->s.origin, diff);
+        if (DotProduct (right, diff) < 0)
+        {
+            self->monsterinfo.lefty = 1;
+        }
+        // if it doesn't sense to duck, try to strafe away
+        monster_done_dodge (self);
+        self->monsterinfo.currentmove = &gunner_move_run;
+        self->monsterinfo.attack_state = AS_SLIDING;
+        return;
+    }
+
+    if (skill->value == 0)
+    {
+        self->monsterinfo.currentmove = &gunner_move_duck;
+        // PMM - stupid dodge
+        self->monsterinfo.duck_wait_framenum = level.framenum + (eta + 1) * BASE_FRAMERATE;
+        self->monsterinfo.aiflags |= AI_DODGING;
+        return;
+    }
+
+    if (!shooting)
+    {
+        self->monsterinfo.currentmove = &gunner_move_duck;
+        self->monsterinfo.duck_wait_framenum = level.framenum + (eta + (0.1 * (3 - skill->value))) * BASE_FRAMERATE;
+        self->monsterinfo.aiflags |= AI_DODGING;
+    }
+    return;
+//PMM
+//===========
+}
+*/
+//===========
+//PGM
+static void gunner_jump_now(edict_t *self)
+{
+    vec3_t  forward, up;
+
+    monster_jump_start(self);
+
+    AngleVectors(self->s.angles, forward, NULL, up);
+    VectorMA(self->velocity, 100, forward, self->velocity);
+    VectorMA(self->velocity, 300, up, self->velocity);
+}
+
+void gunner_jump2_now(edict_t *self)
+{
+    vec3_t  forward, up;
+
+    monster_jump_start(self);
+
+    AngleVectors(self->s.angles, forward, NULL, up);
+    VectorMA(self->velocity, 150, forward, self->velocity);
+    VectorMA(self->velocity, 400, up, self->velocity);
+}
+
+static void gunner_jump_wait_land(edict_t *self)
+{
+    if (self->groundentity == NULL) {
+        self->monsterinfo.nextframe = self->s.frame;
+
+        if (monster_jump_finished(self))
+            self->monsterinfo.nextframe = self->s.frame + 1;
+    } else
+        self->monsterinfo.nextframe = self->s.frame + 1;
+}
+
+static const mframe_t gunner_frames_jump[] = {
+    { ai_move, 0, NULL },
+    { ai_move, 0, NULL },
+    { ai_move, 0, NULL },
+    { ai_move, 0, gunner_jump_now },
+    { ai_move, 0, NULL },
+    { ai_move, 0, NULL },
+    { ai_move, 0, gunner_jump_wait_land },
+    { ai_move, 0, NULL },
+    { ai_move, 0, NULL },
+    { ai_move, 0, NULL }
+};
+const mmove_t gunner_move_jump = { FRAME_jump01, FRAME_jump10, gunner_frames_jump, gunner_run };
+
+static const mframe_t gunner_frames_jump2[] = {
+    { ai_move, -8, NULL },
+    { ai_move, -4, NULL },
+    { ai_move, -4, NULL },
+    { ai_move, 0, gunner_jump_now },
+    { ai_move, 0, NULL },
+    { ai_move, 0, NULL },
+    { ai_move, 0, gunner_jump_wait_land },
+    { ai_move, 0, NULL },
+    { ai_move, 0, NULL },
+    { ai_move, 0, NULL }
+};
+const mmove_t gunner_move_jump2 = { FRAME_jump01, FRAME_jump10, gunner_frames_jump2, gunner_run };
+
+static void gunner_jump(edict_t *self)
+{
+    if (!self->enemy)
+        return;
+
+    monster_done_dodge(self);
+
+    if (self->enemy->s.origin[2] > self->s.origin[2])
+        self->monsterinfo.currentmove = &gunner_move_jump2;
+    else
+        self->monsterinfo.currentmove = &gunner_move_jump;
+}
+
+//===========
+//PGM
+bool gunner_blocked(edict_t *self, float dist)
+{
+    if (blocked_checkshot(self, 0.25f + (0.05f * skill->value)))
+        return true;
+
+    if (blocked_checkplat(self, dist))
+        return true;
+
+    if (blocked_checkjump(self, dist, 192, 40)) {
+        gunner_jump(self);
+        return true;
+    }
+
+    return false;
+}
+//PGM
+//===========
+
+// PMM - new duck code
+void gunner_duck(edict_t *self, float eta)
+{
+    if ((self->monsterinfo.currentmove == &gunner_move_jump2) ||
+        (self->monsterinfo.currentmove == &gunner_move_jump)) {
+        return;
+    }
+
+    if ((self->monsterinfo.currentmove == &gunner_move_attack_chain) ||
+        (self->monsterinfo.currentmove == &gunner_move_fire_chain) ||
+        (self->monsterinfo.currentmove == &gunner_move_attack_grenade)
+       ) {
+        // if we're shooting, and not on easy, don't dodge
+        if (skill->value) {
+            self->monsterinfo.aiflags &= ~AI_DUCKED;
+            return;
+        }
+    }
+
+    if (skill->value == 0)
+        // PMM - stupid dodge
+        self->monsterinfo.duck_wait_framenum = level.framenum + (eta + 1) * BASE_FRAMERATE;
+    else
+        self->monsterinfo.duck_wait_framenum = level.framenum + (eta + (0.1f * (3 - skill->value))) * BASE_FRAMERATE;
+
+    // has to be done immediately otherwise he can get stuck
+    gunner_duck_down(self);
+
+    self->monsterinfo.nextframe = FRAME_duck01;
+    self->monsterinfo.currentmove = &gunner_move_duck;
+    return;
+}
+
+void gunner_sidestep(edict_t *self)
+{
+    if ((self->monsterinfo.currentmove == &gunner_move_jump2) ||
+        (self->monsterinfo.currentmove == &gunner_move_jump)) {
+        return;
+    }
+
+    if ((self->monsterinfo.currentmove == &gunner_move_attack_chain) ||
+        (self->monsterinfo.currentmove == &gunner_move_fire_chain) ||
+        (self->monsterinfo.currentmove == &gunner_move_attack_grenade)
+       ) {
+        // if we're shooting, and not on easy, don't dodge
+        if (skill->value) {
+            self->monsterinfo.aiflags &= ~AI_DODGING;
+            return;
+        }
+    }
+
+    if (self->monsterinfo.currentmove != &gunner_move_run)
+        self->monsterinfo.currentmove = &gunner_move_run;
+}
 
 static void gunner_precache(void)
 {
@@ -540,6 +1000,79 @@ static void gunner_precache(void)
     sound_open = gi.soundindex("gunner/gunatck1.wav");
     sound_search = gi.soundindex("gunner/gunsrch1.wav");
     sound_sight = gi.soundindex("gunner/sight1.wav");
+}
+
+
+// ---------------------------------------------------------------------------
+// R-CORE-11: baseq2's duck-and-dodge for the gunner, restored alongside Ground
+// Zero's rewrite so that BOTH ship and the spawn-time latch selects.
+//
+// Ground Zero does not add to this monster, it replaces its evasion: baseq2's
+// per-monster gunner_dodge and gunner_duck_* become the shared M_MonsterDodge with
+// generic monster_duck_* plus a sidestep.  Without this block, `rogue 0` still
+// got Ground Zero's AI.
+//
+// Reintroduced under a bq2_ prefix rather than by un-commenting the donor's dead
+// copy, so the two sets are distinct symbols and both are visible to genptr.py
+// -- the save_ptrs[] table is built by scanning for literal
+// `currentmove = &name` assignments, which is also why the gate below is an
+// if/else with two literal assignments rather than a ternary or a macro.
+// ---------------------------------------------------------------------------
+
+static void bq2_gunner_duck_down(edict_t *self)
+{
+    if (self->monsterinfo.aiflags & AI_DUCKED)
+        return;
+    self->monsterinfo.aiflags |= AI_DUCKED;
+    if (skill->value >= 2) {
+        if (random() > 0.5f)
+            GunnerGrenade(self);
+    }
+
+    self->maxs[2] -= 32;
+    self->takedamage = DAMAGE_YES;
+    self->monsterinfo.pause_framenum = level.framenum + 1 * BASE_FRAMERATE;
+    gi.linkentity(self);
+}
+
+static void bq2_gunner_duck_hold(edict_t *self)
+{
+    if (level.framenum >= self->monsterinfo.pause_framenum)
+        self->monsterinfo.aiflags &= ~AI_HOLD_FRAME;
+    else
+        self->monsterinfo.aiflags |= AI_HOLD_FRAME;
+}
+
+static void bq2_gunner_duck_up(edict_t *self)
+{
+    self->monsterinfo.aiflags &= ~AI_DUCKED;
+    self->maxs[2] += 32;
+    self->takedamage = DAMAGE_AIM;
+    gi.linkentity(self);
+}
+
+static const mframe_t bq2_gunner_frames_duck[] = {
+    { ai_move, 1,  bq2_gunner_duck_down },
+    { ai_move, 1,  NULL },
+    { ai_move, 1,  bq2_gunner_duck_hold },
+    { ai_move, 0,  NULL },
+    { ai_move, -1, NULL },
+    { ai_move, -1, NULL },
+    { ai_move, 0,  bq2_gunner_duck_up },
+    { ai_move, -1, NULL }
+};
+
+const mmove_t bq2_gunner_move_duck = {FRAME_duck01, FRAME_duck08, bq2_gunner_frames_duck, gunner_run};
+
+void bq2_gunner_dodge(edict_t *self, edict_t *attacker, float eta, trace_t *tr)
+{
+    if (random() > 0.25f)
+        return;
+
+    if (!self->enemy)
+        self->enemy = attacker;
+
+    self->monsterinfo.currentmove = &bq2_gunner_move_duck;
 }
 
 /*QUAKED monster_gunner (1 .5 0) (-16 -16 -24) (16 16 32) Ambush Trigger_Spawn Sight
@@ -575,16 +1108,38 @@ void SP_monster_gunner(edict_t *self)
     self->monsterinfo.stand = gunner_stand;
     self->monsterinfo.walk = gunner_walk;
     self->monsterinfo.run = gunner_run;
-    self->monsterinfo.dodge = gunner_dodge;
+    // pmm
+    // *** R-CORE-11's gate. ***  Both evasion sets ship; the latch selects at
+    // spawn.  content_flavour is latched in ED_CallSpawn, which runs BEFORE this
+    // function -- R-CORE-11 names monster_start as the latch point and that is
+    // too late, see doc/reconciliation.md R-31.
+    //
+    // An if/else with literal assignments, deliberately: genptr.py builds
+    // save_ptrs[] by scanning the source for `= &name`, so a ternary or a macro
+    // would hide one or both tables from the savegame pointer table.
+    if (self->content_flavour & CONTENT_ROGUE) {
+        self->monsterinfo.dodge = M_MonsterDodge;
+        self->monsterinfo.duck = gunner_duck;
+        self->monsterinfo.unduck = monster_duck_up;
+        self->monsterinfo.sidestep = gunner_sidestep;
+    } else {
+        self->monsterinfo.dodge = bq2_gunner_dodge;
+    }
+//  self->monsterinfo.dodge = gunner_dodge;
+    // pmm
     self->monsterinfo.attack = gunner_attack;
     self->monsterinfo.melee = NULL;
     self->monsterinfo.sight = gunner_sight;
     self->monsterinfo.search = gunner_search;
+    self->monsterinfo.blocked = gunner_blocked;     //PGM
 
     gi.linkentity(self);
 
     self->monsterinfo.currentmove = &gunner_move_stand;
     self->monsterinfo.scale = MODEL_SCALE;
+
+    // PMM
+    self->monsterinfo.blindfire = true;
 
     walkmonster_start(self);
 }

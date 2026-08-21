@@ -18,11 +18,17 @@ pointers = {
     'monsterinfo_search'        : 'void {p}(edict_t *)',
     'monsterinfo_walk'          : 'void {p}(edict_t *)',
     'monsterinfo_run'           : 'void {p}(edict_t *)',
-    'monsterinfo_dodge'         : 'void {p}(edict_t *, edict_t *, float)',
+    'monsterinfo_dodge'         : 'void {p}(edict_t *, edict_t *, float, trace_t *)',
     'monsterinfo_attack'        : 'void {p}(edict_t *)',
     'monsterinfo_melee'         : 'void {p}(edict_t *)',
     'monsterinfo_sight'         : 'void {p}(edict_t *, edict_t *)',
     'monsterinfo_checkattack'   : 'bool {p}(edict_t *)',
+    # ROGUE
+    'monsterinfo_blocked'       : 'bool {p}(edict_t *, float)',
+    'monsterinfo_duck'          : 'void {p}(edict_t *, float)',
+    'monsterinfo_unduck'        : 'void {p}(edict_t *)',
+    'monsterinfo_sidestep'      : 'void {p}(edict_t *)',
+    # ROGUE
 }
 
 if __name__ == "__main__":
@@ -38,9 +44,59 @@ if __name__ == "__main__":
     for p in pointers.keys():
         types[p] = []
 
+    # Collect the macros the sources actually define, so blocks guarded by
+    # feature switches that are never set (INCLUDE_INCENDIARY, ...) are skipped;
+    # otherwise we would emit externs for functions that do not exist.
+    defined = set()
     for a in sys.argv[1:]:
-        with open(a) as f:
+        with open(a, encoding='latin-1') as f:
             for line in f:
+                m = re.match(r'\s*#\s*define\s+(\w+)', line)
+                if m:
+                    defined.add(m.group(1))
+
+    for a in sys.argv[1:]:
+        skip = 0          # nesting depth inside an inactive #if block
+        depth = 0
+        incomment = False
+        with open(a, encoding='latin-1') as f:
+            for line in f:
+                # block comments hide code just as effectively as #if 0
+                if incomment:
+                    if '*/' in line:
+                        incomment = False
+                        line = line.split('*/', 1)[1]
+                    else:
+                        continue
+                while '/*' in line:
+                    head, rest = line.split('/*', 1)
+                    if '*/' in rest:
+                        line = head + rest.split('*/', 1)[1]
+                    else:
+                        line = head
+                        incomment = True
+                        break
+                s = line.strip()
+                if s.startswith('#'):
+                    m = re.match(r'#\s*(ifdef|ifndef|if|else|elif|endif)\b(.*)', s)
+                    if m:
+                        kind, rest = m.group(1), m.group(2).strip()
+                        if kind in ('ifdef', 'ifndef', 'if'):
+                            depth += 1
+                            if not skip:
+                                inactive = (kind == 'ifdef' and rest not in defined) or \
+                                           (kind == 'if' and rest == '0')
+                                if inactive:
+                                    skip = depth
+                        elif kind == 'endif':
+                            if skip == depth:
+                                skip = 0
+                            depth -= 1
+                        elif kind in ('else', 'elif') and skip == depth:
+                            skip = 0
+                    continue
+                if skip:
+                    continue
                 if not line.lstrip().startswith('//'):
                     match = regex.search(line)
                     if match:

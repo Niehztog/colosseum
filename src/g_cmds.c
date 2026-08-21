@@ -232,6 +232,8 @@ static void Cmd_Give_f(edict_t *ent)
             it = itemlist + i;
             if (!it->pickup)
                 continue;
+            if (it->flags & IT_NOT_GIVEABLE)                    // ROGUE
+                continue;                                       // ROGUE
             if (it->flags & (IT_ARMOR | IT_WEAPON | IT_AMMO))
                 continue;
             ent->client->pers.inventory[i] = 1;
@@ -254,6 +256,13 @@ static void Cmd_Give_f(edict_t *ent)
         return;
     }
 
+//ROGUE
+    if (it->flags & IT_NOT_GIVEABLE) {
+        gi.dprintf("item cannot be given\n");
+        return;
+    }
+//ROGUE
+
     index = ITEM_INDEX(it);
 
     if (it->flags & IT_AMMO) {
@@ -265,6 +274,10 @@ static void Cmd_Give_f(edict_t *ent)
         it_ent = G_Spawn();
         it_ent->classname = it->classname;
         SpawnItem(it_ent, it);
+        // PMM - since some items don't actually spawn when you say to ..
+        if (!it_ent->inuse)
+            return;
+        // pmm
         Touch_Item(it_ent, ent, NULL, NULL);
         if (it_ent->inuse)
             G_FreeEdict(it_ent);
@@ -347,6 +360,7 @@ Cmd_Use_f
 Use an inventory item
 ==================
 */
+
 static void Cmd_Use_f(edict_t *ent)
 {
     int         index;
@@ -363,10 +377,30 @@ static void Cmd_Use_f(edict_t *ent)
         gi.cprintf(ent, PRINT_HIGH, "Item is not usable.\n");
         return;
     }
+
     index = ITEM_INDEX(it);
     if (!ent->client->pers.inventory[index]) {
-        gi.cprintf(ent, PRINT_HIGH, "Out of item: %s\n", s);
-        return;
+        // RAFAEL
+        if (strcmp(it->pickup_name, "HyperBlaster") == 0) {
+            it = FindItem("Ionripper");
+            index = ITEM_INDEX(it);
+            if (!ent->client->pers.inventory[index]) {
+                gi.cprintf(ent, PRINT_HIGH, "Out of item: %s\n", s);
+                return;
+            }
+        }
+        // RAFAEL
+        else if (strcmp(it->pickup_name, "Railgun") == 0) {
+            it = FindItem("Phalanx");
+            index = ITEM_INDEX(it);
+            if (!ent->client->pers.inventory[index]) {
+                gi.cprintf(ent, PRINT_HIGH, "Out of item: %s\n", s);
+                return;
+            }
+        } else {
+            gi.cprintf(ent, PRINT_HIGH, "Out of item: %s\n", s);
+            return;
+        }
     }
 
     it->use(ent, it);
@@ -395,10 +429,30 @@ static void Cmd_Drop_f(edict_t *ent)
         gi.cprintf(ent, PRINT_HIGH, "Item is not dropable.\n");
         return;
     }
+
     index = ITEM_INDEX(it);
     if (!ent->client->pers.inventory[index]) {
-        gi.cprintf(ent, PRINT_HIGH, "Out of item: %s\n", s);
-        return;
+        // RAFAEL
+        if (strcmp(it->pickup_name, "HyperBlaster") == 0) {
+            it = FindItem("Ionripper");
+            index = ITEM_INDEX(it);
+            if (!ent->client->pers.inventory[index]) {
+                gi.cprintf(ent, PRINT_HIGH, "Out of item: %s\n", s);
+                return;
+            }
+        }
+        // RAFAEL
+        else if (strcmp(it->pickup_name, "Railgun") == 0) {
+            it = FindItem("Phalanx");
+            index = ITEM_INDEX(it);
+            if (!ent->client->pers.inventory[index]) {
+                gi.cprintf(ent, PRINT_HIGH, "Out of item: %s\n", s);
+                return;
+            }
+        } else {
+            gi.cprintf(ent, PRINT_HIGH, "Out of item: %s\n", s);
+            return;
+        }
     }
 
     it->drop(ent, it);
@@ -462,6 +516,7 @@ static void Cmd_InvUse_f(edict_t *ent)
 Cmd_WeapPrev_f
 =================
 */
+
 static void Cmd_WeapPrev_f(edict_t *ent)
 {
     gclient_t   *cl;
@@ -478,7 +533,9 @@ static void Cmd_WeapPrev_f(edict_t *ent)
 
     // scan  for the next valid one
     for (i = 1; i <= game.num_items; i++) {
-        index = (selected_weapon + i) % game.num_items;
+        // PMM - prevent scrolling through ALL weapons
+//      index = (selected_weapon + i) % game.num_items;
+        index = (selected_weapon + game.num_items - i) % game.num_items;
         if (!cl->pers.inventory[index])
             continue;
         it = &itemlist[index];
@@ -487,8 +544,11 @@ static void Cmd_WeapPrev_f(edict_t *ent)
         if (!(it->flags & IT_WEAPON))
             continue;
         it->use(ent, it);
-        if (cl->pers.weapon == it)
-            return; // successful
+        // PMM - prevent scrolling through ALL weapons
+//      if (cl->pers.weapon == it)
+//          return; // successful
+        if (cl->newweapon == it)
+            return;
     }
 }
 
@@ -497,6 +557,7 @@ static void Cmd_WeapPrev_f(edict_t *ent)
 Cmd_WeapNext_f
 =================
 */
+#if 0
 static void Cmd_WeapNext_f(edict_t *ent)
 {
     gclient_t   *cl;
@@ -513,7 +574,43 @@ static void Cmd_WeapNext_f(edict_t *ent)
 
     // scan  for the next valid one
     for (i = 1; i <= game.num_items; i++) {
-        index = (selected_weapon + game.num_items - i) % game.num_items;
+        // PMM - prevent scrolling through ALL weapons
+//      index = (selected_weapon + game.num_items - i) % game.num_items;
+        index = (selected_weapon + i) % game.num_items;
+        if (!cl->pers.inventory[index])
+            continue;
+        it = &itemlist[index];
+        if (!it->use)
+            continue;
+        if (!(it->flags & IT_WEAPON))
+            continue;
+        it->use(ent, it);
+        // PMM - prevent scrolling through ALL weapons
+//      if (cl->pers.weapon == it)
+//          return; // successful
+        if (cl->newweapon == it)
+            return;
+    }
+}
+#endif
+void Cmd_WeapNext_f(edict_t *ent)
+{
+    gclient_t   *cl;
+    int         i, index;
+    const gitem_t   *it;
+    int         selected_weapon;
+
+    cl = ent->client;
+
+    if (!cl->pers.weapon)
+        return;
+
+    selected_weapon = ITEM_INDEX(cl->pers.weapon);
+
+    // scan  for the next valid one
+    for (i = 1; i <= MAX_ITEMS; i++) {
+        index = (selected_weapon + MAX_ITEMS - i) % MAX_ITEMS;
+
         if (!cl->pers.inventory[index])
             continue;
         it = &itemlist[index];
@@ -590,6 +687,18 @@ static void Cmd_Kill_f(edict_t *ent)
     ent->flags &= ~FL_GODMODE;
     ent->health = 0;
     meansOfDeath = MOD_SUICIDE;
+
+//ROGUE
+    // make sure no trackers are still hurting us.
+    if (ent->client->tracker_pain_framenum)
+        RemoveAttackingPainDaemons(ent);
+
+    if (ent->client->owned_sphere) {
+        G_FreeEdict(ent->client->owned_sphere);
+        ent->client->owned_sphere = NULL;
+    }
+//ROGUE
+
     player_die(ent, ent, ent, 100000, ent->s.origin);
 }
 
@@ -799,6 +908,25 @@ static void Cmd_Say_f(edict_t *ent, bool team, bool arg0)
     }
 }
 
+//======
+//ROGUE
+void Cmd_Ent_Count_f(edict_t *ent)
+{
+    int     x;
+    edict_t *e;
+
+    x = 0;
+
+    for (e = g_edicts; e < &g_edicts[globals.num_edicts]; e++) {
+        if (e->inuse)
+            x++;
+    }
+
+    gi.dprintf("%d entites active\n", x);
+}
+//ROGUE
+//======
+
 static void Cmd_PlayerList_f(edict_t *ent)
 {
     int i;
@@ -818,7 +946,7 @@ static void Cmd_PlayerList_f(edict_t *ent)
                    e2->client->ping,
                    e2->client->resp.score,
                    e2->client->pers.netname,
-                   e2->client->resp.spectator ? " (spectator)" : "");
+                   e2->client->pers.spectator ? " (spectator)" : "");
         if (strlen(text) + strlen(st) > sizeof(text) - 50) {
             if (strlen(text) < sizeof(text) - 12)
                 strcat(text, "And more...\n");
@@ -912,6 +1040,10 @@ void ClientCommand(edict_t *ent)
         Cmd_Wave_f(ent);
     else if (Q_stricmp(cmd, "playerlist") == 0)
         Cmd_PlayerList_f(ent);
-    else    // anything that doesn't match a command will be a chat
+    else if (Q_stricmp(cmd, "entcount") == 0)       // PGM
+        Cmd_Ent_Count_f(ent);                       // PGM
+    else if (Q_stricmp(cmd, "disguise") == 0) {     // PGM
+        ent->flags |= FL_DISGUISED;
+    } else  // anything that doesn't match a command will be a chat
         Cmd_Say_f(ent, false, true);
 }

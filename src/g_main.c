@@ -70,6 +70,16 @@ cvar_t  *flood_waitdelay;
 
 cvar_t  *sv_maplist;
 
+cvar_t  *sv_stopspeed;  //PGM    (this was a define in g_phys.c)
+
+//ROGUE cvars
+cvar_t  *g_showlogic;
+cvar_t  *gamerules;
+cvar_t  *huntercam;
+cvar_t  *strong_mines;
+cvar_t  *randomrespawn;
+//ROGUE
+
 cvar_t  *sv_features;
 
 static void G_RunFrame(void);
@@ -112,6 +122,14 @@ static void InitGame(void)
     sv_rollangle = gi.cvar("sv_rollangle", "2", 0);
     sv_maxvelocity = gi.cvar("sv_maxvelocity", "2000", 0);
     sv_gravity = gi.cvar("sv_gravity", "800", 0);
+    sv_stopspeed = gi.cvar("sv_stopspeed", "100", 0);         // PGM - was #define in g_phys.c
+
+//ROGUE
+    g_showlogic = gi.cvar("g_showlogic", "0", 0);
+    huntercam = gi.cvar("huntercam", "1", CVAR_SERVERINFO | CVAR_LATCH);
+    strong_mines = gi.cvar("strong_mines", "0", 0);
+    randomrespawn = gi.cvar("randomrespawn", "0", 0);
+//ROGUE
 
     // noset vars
     dedicated = gi.cvar("dedicated", "0", CVAR_NOSET);
@@ -127,6 +145,7 @@ static void InitGame(void)
     coop = gi.cvar("coop", "0", CVAR_LATCH);
     skill = gi.cvar("skill", "1", CVAR_LATCH);
     maxentities = gi.cvar("maxentities", "1024", CVAR_LATCH);
+    gamerules = gi.cvar("gamerules", "0", CVAR_LATCH);             //PGM
 
     // change anytime vars
     dmflags = gi.cvar("dmflags", "0", CVAR_SERVERINFO);
@@ -142,7 +161,7 @@ static void InitGame(void)
 
     run_pitch = gi.cvar("run_pitch", "0.002", 0);
     run_roll = gi.cvar("run_roll", "0.005", 0);
-    bob_up = gi.cvar("bob_up", "0.005", 0);
+    bob_up  = gi.cvar("bob_up", "0.005", 0);
     bob_pitch = gi.cvar("bob_pitch", "0.002", 0);
     bob_roll = gi.cvar("bob_roll", "0.002", 0);
 
@@ -182,17 +201,25 @@ static void InitGame(void)
 
     InitItems();
 
+//======
+//ROGUE
+    if (gamerules) {
+        InitGameRules(); // if there are game rules to set up, do so now.
+    }
+//ROGUE
+//======
+
     game.helpmessage1[0] = 0;
     game.helpmessage2[0] = 0;
 
     // initialize all entities for this game
-    game.maxentities = Q_clip(maxentities->value, (int)maxclients->value + 1, game.csr.max_edicts);
+    game.maxentities = Q_clip(maxentities->value, (int)game.maxclients + 1, game.csr.max_edicts);
     g_edicts = gi.TagMalloc(game.maxentities * sizeof(g_edicts[0]), TAG_GAME);
     globals.edicts = g_edicts;
     globals.max_edicts = game.maxentities;
 
     // initialize all clients for this game
-    game.maxclients = maxclients->value;
+    game.maxclients = game.maxclients;
     game.clients = gi.TagMalloc(game.maxclients * sizeof(game.clients[0]), TAG_GAME);
     globals.num_edicts = game.maxclients + 1;
 }
@@ -286,6 +313,7 @@ static void ClientEndServerFrames(void)
             continue;
         ClientEndServerFrame(ent);
     }
+
 }
 
 /*
@@ -368,31 +396,7 @@ void EndDMLevel(void)
 
 /*
 =================
-CheckNeedPass
-=================
-*/
-static void CheckNeedPass(void)
-{
-    int need;
 
-    // if password or spectator_password has changed, update needpass
-    // as needed
-    if (password->modified || spectator_password->modified) {
-        password->modified = spectator_password->modified = false;
-
-        need = 0;
-
-        if (*password->string && Q_stricmp(password->string, "none"))
-            need |= 1;
-        if (*spectator_password->string && Q_stricmp(spectator_password->string, "none"))
-            need |= 2;
-
-        gi.cvar_set("needpass", va("%d", need));
-    }
-}
-
-/*
-=================
 CheckDMRules
 =================
 */
@@ -406,6 +410,15 @@ void CheckDMRules(void)
 
     if (!deathmatch->value)
         return;
+
+//=======
+//ROGUE
+    if (gamerules && gamerules->value && DMGame.CheckDMRules) {
+        if (DMGame.CheckDMRules())
+            return;
+    }
+//ROGUE
+//=======
 
     if (timelimit->value) {
         if (level.time >= timelimit->value * 60) {
@@ -522,10 +535,11 @@ static void G_RunFrame(void)
     // R-MODE-5: the match-rules gate.  dm checks fraglimit and timelimit, ctf
     // adds capturelimit, arena runs its round state machine, tourney its match
     // system, and sp has no match to end.  NULL inherits dm (R-MODE-6).
+    //
+    // Ground Zero calls CheckDMRules() directly here.  Phase 1's seam wins:
+    // Rogue's own DM rulesets (dm_ball, dm_tag, driven by `gamerules`) are a
+    // dispatch row, not a second direct call.
     G_CheckRules();
-
-    // see if needpass needs updated
-    CheckNeedPass();
 
     // build the playerstate_t structures for all players
     ClientEndServerFrames();

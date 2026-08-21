@@ -227,4 +227,17 @@ with this program; if not, write to the Free Software Foundation, Inc.,
 #define FRAME_attak207          205
 #define FRAME_attak208          206
 
+//PGM
+#define FRAME_jump01            207
+#define FRAME_jump02            208
+#define FRAME_jump03            209
+#define FRAME_jump04            210
+#define FRAME_jump05            211
+#define FRAME_jump06            212
+#define FRAME_jump07            213
+#define FRAME_jump08            214
+#define FRAME_jump09            215
+#define FRAME_jump10            216
+//PGM
+
 #define MODEL_SCALE     1.000000

@@ -24,6 +24,28 @@ colosseum_src = files(
   'src/g_phys.c',
   'src/g_ptrs.c',
   'src/g_ruleset.c',
+  # XATRIX -- the four Reckoning-only monsters (R-SP-5)
+  'src/xatrix/m_boss5.c',
+  'src/xatrix/m_fixbot.c',
+  'src/xatrix/m_gekk.c',
+  'src/xatrix/m_gladb.c',
+  # ROGUE -- Ground Zero.  m_move2.c is deliberately NOT here: R-MP-5 ships it
+  # as reference and unbuilt, because it redefines all nine of m_move.c's
+  # functions with external linkage.
+  'src/rogue/dm_ball.c',
+  'src/rogue/dm_tag.c',
+  'src/rogue/g_newai.c',
+  'src/rogue/g_newdm.c',
+  'src/rogue/g_newfnc.c',
+  'src/rogue/g_newtarg.c',
+  'src/rogue/g_newtrig.c',
+  'src/rogue/g_newweap.c',
+  'src/rogue/g_sphere.c',
+  'src/rogue/m_carrier.c',
+  'src/rogue/m_stalker.c',
+  'src/rogue/m_turret.c',
+  'src/rogue/m_widow.c',
+  'src/rogue/m_widow2.c',
   'src/g_save.c',
   'src/g_spawn.c',
   'src/g_svcmds.c',

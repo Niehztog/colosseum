@@ -59,6 +59,9 @@ static void floater_fire_blaster(edict_t *self)
     vec3_t  dir;
     int     effect;
 
+    if (!self->enemy || !self->enemy->inuse)    //PGM
+        return;                                 //PGM
+
     if ((self->s.frame == FRAME_attak104) || (self->s.frame == FRAME_attak107))
         effect = EF_HYPERBLASTER;
     else
@@ -245,6 +248,25 @@ static const mframe_t floater_frames_attack1[] = {
 };
 const mmove_t floater_move_attack1 = {FRAME_attak101, FRAME_attak114, floater_frames_attack1, floater_run};
 
+// PMM - circle strafe frames
+static const mframe_t floater_frames_attack1a[] = {
+    { ai_charge,  10, NULL },       // Blaster attack
+    { ai_charge,  10, NULL },
+    { ai_charge,  10, NULL },
+    { ai_charge,  10, floater_fire_blaster },       // BOOM (0, -25.8, 32.5)    -- LOOP Starts
+    { ai_charge,  10, floater_fire_blaster },
+    { ai_charge,  10, floater_fire_blaster },
+    { ai_charge,  10, floater_fire_blaster },
+    { ai_charge,  10, floater_fire_blaster },
+    { ai_charge,  10, floater_fire_blaster },
+    { ai_charge,  10, floater_fire_blaster },
+    { ai_charge,  10, NULL },
+    { ai_charge,  10, NULL },
+    { ai_charge,  10, NULL },
+    { ai_charge,  10, NULL }        //                          -- LOOP Ends
+};
+const mmove_t floater_move_attack1a = {FRAME_attak101, FRAME_attak114, floater_frames_attack1a, floater_run};
+//pmm
 static const mframe_t floater_frames_attack2[] = {
     { ai_charge,  0,  NULL },           // Claws
     { ai_charge,  0,  NULL },
@@ -532,7 +554,25 @@ static void floater_zap(edict_t *self)
 
 void floater_attack(edict_t *self)
 {
-    self->monsterinfo.currentmove = &floater_move_attack1;
+    float chance = 0;
+    // 0% chance of circle in easy
+    // 50% chance in normal
+    // 75% chance in hard
+    // 86.67% chance in nightmare
+    if (!skill->value)
+        chance = 0;
+    else
+        chance = 1.0f - (0.5f / (float)(skill->value));
+
+    if (random() > chance) {
+        self->monsterinfo.attack_state = AS_STRAIGHT;
+        self->monsterinfo.currentmove = &floater_move_attack1;
+    } else { // circle strafe
+        if (random() <= 0.5f)  // switch directions
+            self->monsterinfo.lefty = 1 - self->monsterinfo.lefty;
+        self->monsterinfo.attack_state = AS_SLIDING;
+        self->monsterinfo.currentmove = &floater_move_attack1a;
+    }
 }
 
 void floater_melee(edict_t *self)
@@ -582,6 +622,18 @@ void floater_die(edict_t *self, edict_t *inflictor, edict_t *attacker, int damag
     gi.sound(self, CHAN_VOICE, sound_death1, 1, ATTN_NORM, 0);
     BecomeExplosion1(self);
 }
+
+//===========
+//PGM
+bool floater_blocked(edict_t *self, float dist)
+{
+    if (blocked_checkshot(self, 0.25f + (0.05f * skill->value)))
+        return true;
+
+    return false;
+}
+//PGM
+//===========
 
 static void floater_precache(void)
 {
@@ -633,6 +685,7 @@ void SP_monster_floater(edict_t *self)
     self->monsterinfo.melee = floater_melee;
     self->monsterinfo.sight = floater_sight;
     self->monsterinfo.idle = floater_idle;
+    self->monsterinfo.blocked = floater_blocked;        // PGM
 
     gi.linkentity(self);
 

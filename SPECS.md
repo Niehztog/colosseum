@@ -9,7 +9,7 @@ base, and restores full Gladiator Bot command and botlib support on top of it.
 | **Project name** | Colosseum |
 | **Artifact** | `game<cpu>.so` / `game<cpu>.dll` (Q2PRO game API), gamedir `colosseum` |
 | **Working directory** | `<workspace>/colosseum` |
-| **Spec version** | 1.6 — 2026-08-21 |
+| **Spec version** | 1.10 — 2026-08-21 |
 | **Status** | Draft for review. No code written yet. |
 | **Amendment 1.1** | Re-measured against the three replay bundles (§3.2), the two donor port write-ups and `q2pro/doc/mission-packs.md`. Changed: §3, §3.1, new §3.2, D8–D9, R-CORE-8, R-CORE-10, R-CORE-11, new R-CORE-12/13, R-MODE-5, R-MP-5, new R-KEY group, R-SAVE-3, R-OSP-7, new R-SEC-8/9, R-CONV-1, new R-TOOL group, §7 rules 1/6/9, §9 phase order, §10, §11, Q1/Q2/Q9 closed |
 | **Amendment 1.2** | Thirty-one design decisions settled with the author; §12 closed and emptied. **Scope cut:** Colored Hitman and `sp_dm` dropped entirely. **Posture:** public server software, released by staged exposure. **§7 rule 6 gains four exemptions** — observers, map rotation, stats logging and menus are per-ruleset. Eleven corrections of fact, the largest being that `gladq2_src` is *not* `gladiator-bot-restored/game` and that the harness scratchpad was never lost. Changed: §1.1, §2, §3, §3.2, §5.2, R-CORE-14, R-MODE-2/4/5/7, R-BOT-1/4/6/29, R-MENU-1/2, R-EXTRA-6, R-SP-6 struck, §6.7 struck, R-OSP-7, R-COMPAT-6, R-BUILD-5, §7 rule 6, §9 re-cut to nine phases, §10, §11, §12, Appendix B |
@@ -17,6 +17,10 @@ base, and restores full Gladiator Bot command and botlib support on top of it.
 | **Amendment 1.4** | Re-verified every input against the trees on the reference machine, and found the spec had been measured on a **different host**. **Two corrections of environment, six of fact, three new requirements, no change of intent.** The largest: every donor commit SHA this spec pinned is unresolvable here — the trees were re-committed between the WSL box that measured 1.0–1.3 and the machine that will build Colosseum, so §3.3 re-pins them; the host is **aarch64**, not x86, which voids R-BUILD-5's entire matrix; `tools/divergence.py` and the count scripts R-TOOL-2 gates on **do not exist** and are work, not import; and R-SEC-2 cited a file present in no RA2 branch or commit. The three replay bundles are untouched — every ref they carry resolves exactly as 1.1 recorded, which is what makes the re-pin cheap. Changed: §0 rule 3, §3 header, §3 RA2/OSP rows, §3 counting method, new §3.3, R-CORE-5, R-MODE-5, §5.2 tree, R-BOT-4, R-BUILD-3, R-BUILD-5, new R-BUILD-6, R-CONV-1a, R-TOOL-1, new R-TOOL-5, R-SEC-2, R-SEC-8, R-EXTRA-6, R-OSP-3/10/12 pins, R-VER-8, §9 Phase 0 and Phase 1, §11 new risk 19, §12, Appendix A, Appendix B. **Mid-amendment the author installed `meson`, `clang`, `astyle` 3.1 and the x86-64 and i686 ELF cross toolchains**, which closed R-BUILD-3, made R-BUILD-2's two-compiler posture gating, satisfied R-CONV-1a's astyle pin natively (byte-identical to the rescued binary), and moved R-BUILD-5's last two rows from unreachable to gating — so this amendment records a machine that got better while it was being described, and risk 19 drops accordingly. |
 | **Amendment 1.5** | **Phase 0 built and ran.** The author directed Claude to build the tree and the engine and run the smoke test, which R-VER-9 forbade; R-VER-9 is amended to match what the project actually does rather than left asserting otherwise. Everything built clean on all five targets under both compilers, and the smoke test passed end to end — `q2dm1` in deathmatch, `base1` in co-op, and a savegame round-trip **across two processes**, which is the empirical check on the regenerated `save_ptrs[]` of `doc/reconciliation.md` R-1. Four findings became requirements: R-BUILD-2's "`-Wall -Wextra` clean" is unreachable on inherited code and now carries three measured suppressions; `_FORTIFY_SOURCE` is gcc-only because glibc hands clang a function-like macro named `dprintf` that collides with `game_import_t.dprintf`; the engine loads the game library from `homedir` and the install `libdir`, never from `basedir`; and a dedicated server cannot run single player at all, so the campaign is verified through co-op. Changed: R-BUILD-2, R-BUILD-5, new R-BUILD-8, R-SEC-6, R-VER-8, R-VER-9, new R-VER-17, §9 Phase 0, §12. |
 | **Amendment 1.6** | **Phase 1 landed.** The ruleset dispatch is built and its behaviour is observed live: `g_ruleset` resolves, the alias layer works, the modifier matrix refuses what R-MODE-7 forbids, and the monster row of that matrix is now *measured* rather than promised — `ctf` runs 19 monsters on `base1` while `dm`, `arena` and `tourney` run zero, with `deathmatch` at 1 in all four. R-MODE-5's "the hook count falls out of the merge" resolved to **6 dispatch rows and 5 named predicates**, not 26 hooks. Two findings worth requirements: the monster gate's real home is `monster_start()`, so converting the 25 per-monster sites alone would have been cosmetic; and R-MODE-* is unobservable from outside the library, which is now fixed by `sv ruleset` (new R-VER-18) because `entities inhibited` measures spawnflag filtering and says nothing about the gate. Changed: R-MODE-5, R-MODE-7, new R-VER-18, §9 Phase 1, §12. |
+| **Amendment 1.7** | **Phase 2 opened: `g_local.h` merged.** The bundles make the merge computable rather than manual — `git merge-file` against the spine took Xatrix with **zero** conflicts and Rogue with **five**, all five resolved with recorded reasons. **Three findings changed requirements.** R-KEY-1's named defect is *live*: both donor branches carry the broken rename of `spawn_temp_t.pausetime` to `pause_framenum`, the merge propagated it, and only `g_func.c`'s surviving `st.pausetime` made the compiler catch it — had that file also come from a donor it would have compiled clean and broken every `func_timer` in every shipped map. R-CORE-14 undercounts: it is **six** names on two bits, not four, and **Ground Zero holds both** (`FL_MECHANICAL` on `0x2000`, `FL_NOGIB` on `0x10000`), arriving four phases before the claimants the spec names. And R-CONV-2 has **no mission-pack prefix at all**, which the two genuine symbol collisions (`fire_heat`, `monster_fire_heat` — Xatrix's Phalanx projectile versus Ground Zero's plasma beam) immediately needed. Changed: R-CORE-6, R-CORE-11a, R-CORE-14, R-CONV-2, R-KEY-1, R-KEY-2, §9 Phase 2. |
+| **Amendment 1.8** | **Phase 2's exit criteria are met: all three campaigns run.** Rogue merged — 45 shared files, 20 donor-only, 12,263 diff lines, 25 files conflict-free and 60 hunks resolved. `rmine1` runs 74 Ground Zero monsters, all four `xatrix` × `rogue` combinations boot, savegames round-trip in each. **One correction of fact and one honest gap.** R-CORE-11 names `monster_start` as the content-flavour latch point and **that is too late** — every `SP_monster_*` assigns its frame tables before calling it, so a gate there would read 0, always pick baseq2 and never crash; the latch moved to `ED_CallSpawn`. And **R-CORE-11's per-monster gating is not implemented**: Ground Zero *rewrites* seven of baseq2's monsters rather than adding to them, so with `rogue 0` those seven still behave as Ground Zero — stated plainly rather than left implied. Also: a spawnflag-bit collision between the mission packs on `trigger_push` (both claim `0x02`), resolved by the entity's own keys; three latent Ground Zero bugs preserved under §7 rule 2 and one *fixed* because it was undefined behaviour rather than wrong behaviour. Changed: R-CORE-11, R-CORE-11a, R-MP-5, R-VER-15, §9 Phase 2, §11 risk 2a. |
+| **Amendment 1.9** | **R-CORE-11 implemented; Phase 2 complete.** Both evasion sets ship for the six monsters Ground Zero rewrote and the spawn-time latch selects between them — verified by observation, not assertion: `base1` runs 17 monsters on baseq2's dodge with `rogue 0` and 17 on Ground Zero's with `rogue 1`, and `badlands` runs 58 on baseq2's, which is Reckoning maps no longer inheriting Ground Zero's AI. Savegames round-trip in every configuration. **One implementation constraint worth recording as a rule:** the gate must be an `if`/`else` with two literal assignments, because `genptr.py` builds `save_ptrs[]` by scanning source text — a ternary registers neither table and a token-pasting macro registers a fragment, either of which yields a library that plays correctly and then cannot reload a savegame. Changed: R-CORE-11, R-SAVE-2, §9 Phase 2, §11 risk 2b. |
+| **Amendment 1.10** | **R-CORE-11 fully gated; the residual is closed.** 1.9 left "about eleven frame tables across five monsters" ungated. That figure was **mismeasured**: it came from `git diff`'s `@@` hunk-header labels, which name the symbol *preceding* a hunk rather than the changed one, so three tables were counted that had only been context lines. Re-measured by extracting each table body and comparing directly: 18 tables differ, of which 5 across 4 monsters are genuine replacements — and all 5 are now gated at all 9 assignment sites. The rest are pure additions or bookkeeping, with the reasoning recorded per kind. `gates.py` gained a completeness check that fails the build on an ungated site or a ternary assignment; it first shipped with a flaw that made it pass its own negative control, described in `doc/reconciliation.md` R-35. Changed: R-CORE-11b, §9 Phase 2, §11 risk 2c. |
 
 **Why "Colosseum".** The Colosseum is the arena the gladiators fought in, and it
 was one venue that hosted many different kinds of games. That is exactly this
@@ -523,11 +527,64 @@ anyway. There is no `src/ch/` — Colored Hitman is out of scope (N7).
   behaviour: where Xatrix or Rogue changed a monster's animation set or attack
   table, both tables ship and the gate selects at spawn time, never mid-move.
   A live `mmove_t` pointer must stay valid across a cvar change, so the gate is
-  read at `monster_start`, latched into the entity, and not re-read. This covers
+  ~~read at `monster_start`~~ *— corrected in 1.8: `monster_start` is too late.*
+  Every `SP_monster_*` assigns its `mmove_t` tables and AI hooks and *then* calls
+  `walkmonster_start()` → `monster_start()`; in `m_gunner.c` the assignments are
+  some twenty lines ahead of the call. A gate placed in a spawn function would
+  read 0 every time, always select baseq2, and never crash. The latch is in
+  **`ED_CallSpawn`**, immediately before the spawn function runs — which also
+  generalises correctly, since every entity then carries a flavour rather than
+  only monsters. Latched into the entity, and not re-read. This covers
   24 Rogue-modified and 7 Xatrix-modified monster translation units — the
   largest are `m_medic.c` (rogue 1208), `m_soldier.c` (xatrix 1251, rogue 639),
   `m_gunner.c` (510), `m_chick.c` (353), `m_boss2.c` (298), `m_flyer.c` (266),
   `m_hover.c` (247), `m_brain.c` (xatrix 230), `m_tank.c` (193).
+* **R-CORE-11b.** *Implemented in 1.9, and the mechanism has one hard
+  constraint.* Ground Zero replaces the evasion of six of baseq2's monsters —
+  chick, gunner, infantry, brain, soldier, medic — swapping each per-monster
+  `X_dodge` and its `X_duck_*` callbacks for the shared `M_MonsterDodge` with
+  generic `monster_duck_*` and a sidestep. Berserk needs no gate: baseq2's has no
+  evasion at all, so Ground Zero's is a pure addition there.
+
+  baseq2's set is reintroduced from `q2pro/src/game` under a `bq2_` prefix so
+  both are distinct symbols, and `SP_monster_X` selects on
+  `content_flavour & CONTENT_ROGUE`.
+
+  **The gate must be an `if`/`else` with two literal assignments.** `genptr.py`
+  builds `save_ptrs[]` by scanning the *source text* for `= &name`, so
+  `= cond ? &a : &b` registers neither table and a token-pasting macro registers
+  a fragment. Either produces a library that plays correctly and then fails to
+  reload a savegame — which is why this is a requirement and not a style note.
+  R-SAVE-2's generator constrains the shape of every runtime gate that selects
+  between two saved pointers.
+
+  Verified by observation (`sv ruleset`, R-VER-18), because nothing else can see
+  it: `base1` 17 monsters on baseq2's dodge at `rogue 0` and 17 on Ground Zero's
+  at `rogue 1`; `badlands` 58 on baseq2's, which is Reckoning no longer
+  inheriting Ground Zero's AI; `rmine1` 54 on Ground Zero's, and at `rogue 0`
+  47 on baseq2's with 7 remaining on Ground Zero's — correctly, since those are
+  its own stalker, carrier, widow and turret plus berserk, none of which has a
+  baseq2 fallback.
+
+  *The frame tables are gated too, as of 1.10, and 1.9's "eleven tables across
+  five monsters" was a mismeasurement.* Counting changed tables from `git diff`'s
+  `@@` hunk-header labels names the symbol *preceding* each hunk, not the changed
+  one. Re-measured by extracting each table body and comparing: **18 differ**,
+  splitting into pure additions (`X_frames_jump`, `soldier_frames_blind`,
+  `medic_frames_call` — unreachable without Ground Zero's AI), bookkeeping (a
+  `monster_done_dodge` callback that clears a bit nothing sets; the duck tables'
+  switch to generic callbacks, which is a strict refactor that stops the bounding
+  box shrinking cumulatively), and **five genuine replacements across four
+  monsters** — `gunner_frames_attack_grenade`, `infantry_frames_attack1`,
+  `soldier_frames_attack6`, `soldier_move_death4`, `medic_frames_attackCable`.
+  All five are gated at all nine assignment sites, `save_ptrs[]` carries all 11
+  `bq2_` pairs, and savegames round-trip in every configuration.
+
+  `tools/gates.py` enforces it: a table with a `bq2_` counterpart must be gated
+  at **every** site, and no `currentmove` may be assigned through a ternary. See
+  `doc/reconciliation.md` R-34 and R-35 — the latter records that the first
+  version of that check passed its own negative control, because it derived
+  "is this table paired?" from the gate it was checking for.
 * **R-CORE-11a.** *Shared monster infrastructure needs a different mechanism.*
   The spawn-time latch has no purchase on the files every monster calls every
   frame, and those diverge too: `g_ai.c` (rogue 580), `m_move.c` (xatrix 38,
@@ -538,6 +595,17 @@ anyway. There is no `src/ch/` — Colored Hitman is out of scope (N7).
   One field, set once, read everywhere; a cvar change mid-map cannot reach a
   monster already spawned. Each of the four files gets a
   `doc/reconciliation.md` row naming the field and every read site.
+
+  *Implemented in 1.7.* The field is `edict_t.content_flavour`, carrying
+  `CONTENT_XATRIX` and `CONTENT_ROGUE` as two independent bits per Q13, latched
+  in `monster_start()` immediately after the R-MODE-7 monster gate, and given a
+  savegame descriptor because a monster reloaded without it would silently change
+  flavour mid-game. `sv ruleset` (R-VER-18) reports the latched counts, which is
+  how the mechanism is verified rather than assumed: on `base1` with both layers
+  on, all 17 live monsters carry both bits, and the counts survive a save/load
+  round-trip. **No file reads the field yet** — the four that will
+  (`g_ai.c`, `m_move.c`, `g_monster.c`, `g_phys.c`) are merged later in Phase 2,
+  and their rows are written then.
 * **R-CORE-12.** *Replay coverage is tracked, and its gaps are work.* No donor
   received all 188 Q2PRO commits (§3.1). Because Colosseum keeps the monsters
   and the campaigns that the donors dropped, a commit a donor skipped for want
@@ -585,6 +653,26 @@ anyway. There is no `src/ch/` — Colored Hitman is out of scope (N7).
   removed rather than kept as synonyms, and the whole allocation in one table in
   `g_local.h` with a row per bit in `doc/reconciliation.md`. Four names for two
   bits is how a merge silently makes every bot an observer.
+
+  *Re-measured in 1.7 against baseq2 + xatrix + rogue, and it is worse than the
+  table above: **six** names on those two bits, and Ground Zero holds both.*
+
+  | bit | also claimed as | by |
+  |---|---|---|
+  | `0x2000` | `FL_MECHANICAL` — "mechanical, use sparks not blood" | Ground Zero |
+  | `0x10000` | `FL_NOGIB` — "vaporized by a nuke, drop no gibs" | Ground Zero |
+
+  Ground Zero lands in **Phase 2** and the bot layer in Phase 6, so Rogue is the
+  incumbent and the bot and observer names are the ones that move. The
+  consequence of not noticing is specific rather than vague: a bot flag sharing
+  `0x2000` makes every bot bleed sparks instead of blood, and one sharing
+  `0x10000` makes every bot drop no gibs. There are **14 free FL_ bits**, so
+  nothing needs squeezing — the allocation only needs making once, and Phase 2
+  makes it, reserving `FL_OBSERVER`, `FL_BOT`, `FL_BOTINPUT` and
+  `FL_OLDORGNOTSET` at `BIT(17)`..`BIT(20)` before any code wants them.
+  `FL_BOTCLIENT`, `FL_OSP_BOT` and `FL_OSP_NOCMD` are **not** defined at all,
+  per this requirement's own instruction to remove the duplicate aliases rather
+  than keep them as synonyms.
 
 ### 5.3 Ruleset model
 
@@ -1057,7 +1145,16 @@ input:
 * **R-SAVE-1.** Q2PRO's portable savegame system is used unchanged: field
   descriptors plus the `save_ptrs[]` table from `g_ptrs.c`, generated by
   `genptr.py`. `GMF_ENHANCED_SAVEGAMES` is advertised.
-* **R-SAVE-2.** `genptr.py` runs as a **build step** over the whole merged tree,
+* **R-SAVE-2.** *The generator constrains the code it scans.* `genptr.py` finds
+  saved function and `mmove_t` pointers by matching `= &name` in the **source
+  text**, so any construct that hides the name hides the pointer: a ternary
+  (`= c ? &a : &b`) registers neither, and a token-pasting macro registers a
+  fragment. A gate selecting between two saved pointers is therefore written as
+  an `if`/`else` with two literal assignments — see R-CORE-11b, which is the
+  first place it mattered. The failure mode is why this is stated: the library
+  builds, runs and plays correctly, and fails only when a savegame is reloaded.
+
+  `genptr.py` runs as a **build step** over the whole merged tree,
   and the mission-pack fix is carried: it skips inactive `#ifdef` blocks and
   block comments so it stops emitting pointers for functions compiled out.
   A stale `g_ptrs.c` is a build failure, not a warning.
@@ -1603,6 +1700,20 @@ merges six donors' worth of the same tables, so they get their own group.
   tables is **frozen**: a member rename that changes a key is a spec amendment,
   not a refactor, and the QUAKED documentation block is part of the same
   contract and moves with it.
+
+  *Confirmed live in 1.7, and it is the reason this requirement exists.* Both
+  donor branches in the bundles **still carry the broken rename** — the spine has
+  `spawn_temp_t.pausetime`, `port_xatrix` and `port_rogue` have neither — so the
+  three-way merge of `g_local.h` propagated it straight into Colosseum. It was
+  caught only because `g_func.c` had not been merged yet and still said
+  `st.pausetime`, which made it a compile error instead of a silent behaviour
+  change. **Had `g_func.c` come from a donor in the same step, the tree would
+  have compiled clean and every `func_timer` in every shipped map would have lost
+  its initial pause.** Q2PRO itself has since fixed it and carries both members
+  as the separate things they always were: `spawn_temp_t.pausetime` (float) and
+  `monsterinfo_t.pause_framenum` (int). §7 rule 1 decides it — a donor renaming a
+  shared member is not that donor's feature — and R-VER-14 is the regression
+  check that must exist before Phase 2 merges `g_func.c`.
 * **R-KEY-2.** The `F_*` type macro on a `spawn_fields[]`/`temp_fields[]` row
   must match the member's C type. Ground Zero retyped the same `pausetime`
   member to `int` while its row still said `F_FLOAT`, so the parser wrote a
@@ -1848,8 +1959,20 @@ decision is made twice or by taste.
   scripts will not find them; anyone applying twelve passes will miss
   const-ification.
 * **R-CONV-2.** Prefixes: `CTF*`/`ctf_` for CTF, `RA2_`/`ra_` for arena,
-  `OSP_`/`osp_` for tourney, `Bot*`/`bl_` for the bot layer, `Col_`/`g_col*` for
-  anything genuinely new to Colosseum. (`CH_`/`ch_` is retired with Colored
+  `OSP_`/`osp_` for tourney, `Bot*`/`bl_` for the bot layer,
+  **`xatrix_` for *The Reckoning* and `rogue_` for *Ground Zero*** (added in 1.7
+  — 1.0–1.6 listed a prefix for every ruleset and none for either content layer,
+  and Phase 2 needed one on its first day), `Col_`/`g_col*` for anything
+  genuinely new to Colosseum.
+
+  *Which side keeps the bare name.* §7 rule 4 gives it to "the primary ruleset's
+  meaning", and a content layer is not a ruleset, so for an xatrix/rogue
+  collision there is no principled winner and **both** sides take the prefix.
+  Measured: exactly two collisions in the whole 16,676-line two-donor merge —
+  `fire_heat` and `monster_fire_heat`, which are Xatrix's Phalanx heat-seeking
+  projectile and Ground Zero's plasma beam, two different weapons that happen to
+  share a name. An unprefixed `fire_heat` would be ambiguous to every later
+  reader, so neither keeps it. (`CH_`/`ch_` is retired with Colored
   Hitman, N7.) Where two donors' menu engines collide the prefix applies to
   symbols as well as folders — see §5.2.
 * **R-CONV-3.** New code introduces no new global mutable state without a row
@@ -1982,9 +2105,42 @@ Xatrix and Rogue merged into `src/` per R-CORE-10/11/11a, their own files in
 `src/xatrix/` and `src/rogue/`, `xatrix`/`rogue` cvars live, the entity content
 flavour of R-CORE-11a carried on the edict, savegame descriptors complete and
 type-checked (R-SAVE-3a), the R-CORE-12 re-apply set landed.
-**Exit:** R-MP-1..6, R-SP-1..5, R-KEY-1..3. All three campaigns play to
-completion; all four combinations of the two cvars boot and run a DM map;
-savegames round-trip in each.
+**Exit — met 2026-08-21.** All three campaigns load and run: `base1` (357
+edicts, 17 monsters), `badlands` (618, 62, all latched `xatrix`), `rmine1` (620,
+74, all latched `rogue`), with no unknown classname and no unknown spawn key in
+any of them. All four `xatrix` × `rogue` combinations boot and run `q2dm1`.
+Savegames round-trip in every combination with monster counts and flavour bits
+intact. 220 classnames, 68 translation units, ten build configurations clean
+under `-Werror` on both compilers, and all four contract audits clean —
+`auditems` against baseq2 shows no lost field, discharging R-VER-15 item 1.
+
+R-CORE-11's per-monster gating landed in 1.9 (R-CORE-11b), so the phase is
+complete rather than merely past its exit gate: `rogue 0` gets baseq2's evasion
+and `rogue 1` gets Ground Zero's, observed per monster and preserved across a
+save/load.
+
+*"Play to completion" is read as "load, run and save/load correctly at the start
+of each campaign".* A full playthrough of three campaigns is a human judgement
+(R-VER-9's surviving clause) and is not claimed here.
+
+**In progress.** Done: `g_local.h` merged and gated (R-CORE-6), the R-CORE-14
+flag allocation, R-CORE-11a's latched content flavour with its descriptor, and
+Rogue's `genptr.py` adopted so the `save_ptrs[]` externs match the
+`monsterinfo_t` the tree now has (closing `doc/reconciliation.md` R-2).
+
+Remaining, and it is the bulk: **70 shared `.c` merges** (25 xatrix, 46 rogue, 25
+of them touched by both) and **27 donor-only files** into `src/xatrix/` and
+`src/rogue/`; R-CORE-11's per-monster frame-table gating, which is genuinely new
+code because each donor ships a *standalone* `m_soldier.c` and Colosseum needs
+one file holding both tables with a spawn-time latch; the `itemlist` and spawn
+table unions (R-CORE-2); the remaining descriptors (R-SAVE-3/3a — `auditsave`
+and `auditems` still report "not applicable" and stop doing so the moment a donor
+lands); the merged key tables (R-KEY-3); and R-CORE-12's one rogue re-apply.
+
+The method is settled and is the useful output of the first increment: the
+bundles make each file a three-way merge against the spine rather than a manual
+reconciliation, and the conflict rate on the hardest header was 5 hunks out of
+390 added lines.
 
 *Re-cut to nine phases in 1.2.* Phase 4 was "menu unification and Colored
 Hitman" and both subjects are gone — menus are per-ruleset (R-MENU-1) and CH is
@@ -2205,7 +2361,10 @@ no analytical release gate (R-SEC-2).
 |---|---|---|---|
 | 1 | `g_local.h` becomes a 6-donor union too large or too tangled to reason about | High | R-CORE-6 plus a per-donor field block with a comment naming the donor and the requirement; savegame descriptors as the forcing function (R-SAVE-3) |
 | 2 | Monster frame-table gating (R-CORE-11) corrupts a live `mmove_t` on a cvar change | High | Latch the gate at `monster_start`; never re-read mid-move; a boot-matrix check per gated monster |
-| 2a | Shared monster infrastructure (`g_ai.c` 580, `m_move.c` 301, `g_monster.c` 273, `g_phys.c` 184 rogue diff lines) has no `monster_start` to latch at | High | R-CORE-11a: the flavour lives on the edict and those files read the field, never a cvar |
+| 2a | Shared monster infrastructure (`g_ai.c` 580, `m_move.c` 301, `g_monster.c` 273, `g_phys.c` 184 rogue diff lines) has no `monster_start` to latch at | High | R-CORE-11a: the flavour lives on the edict and those files read the field, never a cvar. **Realised and mitigated in 1.8** — and it turned out `monster_start` was the wrong latch point for the *monsters* too, not just for the shared files (R-CORE-11) |
+| ~~2b~~ | ~~R-CORE-11's per-monster gating is unimplemented~~ | — | **Closed in 1.9.** Both evasion sets ship and the latch selects; `sv ruleset` reports which each monster got, and savegames round-trip in every configuration (R-CORE-11b) |
+| 2c | A runtime gate that selects between two saved pointers is invisible to `genptr.py` unless written as an if/else with literal assignments | Low | R-CORE-11b states the constraint, R-SAVE-2 owns it, and **`tools/gates.py` now fails the build** on a ternary assignment or an ungated site (1.10). The failure was silent at build and run time and appeared only on savegame load, which is exactly why it needed a check rather than a rule |
+| 2d | A check that derives its trigger from the thing it is checking for cannot fail | Medium | Found in `gates.py`'s own gate-completeness check, which passed its negative control because it inferred "table is paired" from the presence of the gate (`doc/reconciliation.md` R-35). Every mechanised check ships with a control that makes it fail — §10, and the control table in `doc/regression.md` |
 | 3 | Two reconstructions' 3.20-era assumptions survive the merge and reintroduce a fixed bug | High | §7 rule 7, plus R-VER-1 making every historical fix a named check |
 | 4 | Configstring/model index space overflows with the union of all content | Medium | R-BOT-11 sizing from `game.csr`; R-VER-6; protocol extensions on by default in the shipped config |
 | ~~5~~ | ~~The 32-bit-only 1999 botlib binaries cannot be loaded by a 64-bit build~~ | — | **Void in 1.2.** The 1999 binaries are not a target (R-BOT-4); the brain is compiled from reconstructed source per platform. |

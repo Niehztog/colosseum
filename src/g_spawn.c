@@ -147,188 +147,326 @@ void SP_turret_breach(edict_t *self);
 void SP_turret_base(edict_t *self);
 void SP_turret_driver(edict_t *self);
 
+// RAFAEL 14-APR-98
+void SP_monster_soldier_hypergun(edict_t *self);
+void SP_monster_soldier_lasergun(edict_t *self);
+void SP_monster_soldier_ripper(edict_t *self);
+void SP_monster_fixbot(edict_t *self);
+void SP_monster_gekk(edict_t *self);
+void SP_monster_chick_heat(edict_t *self);
+void SP_monster_gladb(edict_t *self);
+void SP_monster_boss5(edict_t *self);
+void SP_rotating_light(edict_t *self);
+void SP_object_repair(edict_t *self);
+void SP_misc_crashviper(edict_t *ent);
+void SP_misc_viper_missile(edict_t *self);
+void SP_misc_amb4(edict_t *ent);
+void SP_target_mal_laser(edict_t *ent);
+void SP_misc_transport(edict_t *ent);
+// END 14-APR-98
+
+void SP_misc_nuke(edict_t *ent);
+
+//===========
+//ROGUE
+void SP_func_plat2(edict_t *ent);
+void SP_func_door_secret2(edict_t *ent);
+void SP_func_force_wall(edict_t *ent);
+void SP_info_player_coop_lava(edict_t *self);
+void SP_info_teleport_destination(edict_t *self);
+void SP_trigger_teleport(edict_t *self);
+void SP_trigger_disguise(edict_t *self);
+void SP_monster_stalker(edict_t *self);
+void SP_monster_turret(edict_t *self);
+void SP_target_steam(edict_t *self);
+void SP_target_anger(edict_t *self);
+void SP_target_killplayers(edict_t *self);
+// PMM - still experimental!
+void SP_target_blacklight(edict_t *self);
+void SP_target_orb(edict_t *self);
+// pmm
+//void SP_target_spawn (edict_t *self);
+void SP_hint_path(edict_t *self);
+void SP_monster_carrier(edict_t *self);
+void SP_monster_widow(edict_t *self);
+void SP_monster_widow2(edict_t *self);
+void SP_dm_tag_token(edict_t *self);
+void SP_dm_dball_goal(edict_t *self);
+void SP_dm_dball_ball(edict_t *self);
+void SP_dm_dball_team1_start(edict_t *self);
+void SP_dm_dball_team2_start(edict_t *self);
+void SP_dm_dball_ball_start(edict_t *self);
+void SP_dm_dball_speed_change(edict_t *self);
+void SP_monster_kamikaze(edict_t *self);
+//void SP_monster_chick2 (edict_t *self);
+void SP_turret_invisible_brain(edict_t *self);
+void SP_xatrix_item(edict_t *self);
+void SP_misc_nuke_core(edict_t *self);
+//ROGUE
+//===========
 static const spawn_func_t spawn_funcs[] = {
-    { "item_health", SP_item_health },
-    { "item_health_small", SP_item_health_small },
-    { "item_health_large", SP_item_health_large },
-    { "item_health_mega", SP_item_health_mega },
+    {"item_health", SP_item_health},
+    {"item_health_small", SP_item_health_small},
+    {"item_health_large", SP_item_health_large},
+    {"item_health_mega", SP_item_health_mega},
 
-    { "info_player_start", SP_info_player_start },
-    { "info_player_deathmatch", SP_info_player_deathmatch },
-    { "info_player_coop", SP_info_player_coop },
-    { "info_player_intermission", SP_info_player_intermission },
+    {"info_player_start", SP_info_player_start},
+    {"info_player_deathmatch", SP_info_player_deathmatch},
+    {"info_player_coop", SP_info_player_coop},
+    {"info_player_intermission", SP_info_player_intermission},
 
-    { "func_plat", SP_func_plat },
-    { "func_button", SP_func_button },
-    { "func_door", SP_func_door },
-    { "func_door_secret", SP_func_door_secret },
-    { "func_door_rotating", SP_func_door_rotating },
-    { "func_rotating", SP_func_rotating },
-    { "func_train", SP_func_train },
-    { "func_water", SP_func_water },
-    { "func_conveyor", SP_func_conveyor },
-    { "func_areaportal", SP_func_areaportal },
-    { "func_clock", SP_func_clock },
-    { "func_wall", SP_func_wall },
-    { "func_object", SP_func_object },
-    { "func_timer", SP_func_timer },
-    { "func_explosive", SP_func_explosive },
-    { "func_killbox", SP_func_killbox },
+    {"func_plat", SP_func_plat},
+    {"func_button", SP_func_button},
+    {"func_door", SP_func_door},
+    {"func_door_secret", SP_func_door_secret},
+    {"func_door_rotating", SP_func_door_rotating},
+    {"func_rotating", SP_func_rotating},
+    {"func_train", SP_func_train},
+    {"func_water", SP_func_water},
+    {"func_conveyor", SP_func_conveyor},
+    {"func_areaportal", SP_func_areaportal},
+    {"func_clock", SP_func_clock},
+    {"func_wall", SP_func_wall},
+    {"func_object", SP_func_object},
+    {"func_timer", SP_func_timer},
+    {"func_explosive", SP_func_explosive},
+    {"func_killbox", SP_func_killbox},
 
-    { "trigger_always", SP_trigger_always },
-    { "trigger_once", SP_trigger_once },
-    { "trigger_multiple", SP_trigger_multiple },
-    { "trigger_relay", SP_trigger_relay },
-    { "trigger_push", SP_trigger_push },
-    { "trigger_hurt", SP_trigger_hurt },
-    { "trigger_key", SP_trigger_key },
-    { "trigger_counter", SP_trigger_counter },
-    { "trigger_elevator", SP_trigger_elevator },
-    { "trigger_gravity", SP_trigger_gravity },
-    { "trigger_monsterjump", SP_trigger_monsterjump },
+    // RAFAEL
+    {"func_object_repair", SP_object_repair},
+    {"rotating_light", SP_rotating_light},
 
-    { "target_temp_entity", SP_target_temp_entity },
-    { "target_speaker", SP_target_speaker },
-    { "target_explosion", SP_target_explosion },
-    { "target_changelevel", SP_target_changelevel },
-    { "target_secret", SP_target_secret },
-    { "target_goal", SP_target_goal },
-    { "target_splash", SP_target_splash },
-    { "target_spawner", SP_target_spawner },
-    { "target_blaster", SP_target_blaster },
-    { "target_crosslevel_trigger", SP_target_crosslevel_trigger },
-    { "target_crosslevel_target", SP_target_crosslevel_target },
-    { "target_laser", SP_target_laser },
-    { "target_help", SP_target_help },
-    { "target_actor", SP_target_actor },
-    { "target_lightramp", SP_target_lightramp },
-    { "target_earthquake", SP_target_earthquake },
-    { "target_character", SP_target_character },
-    { "target_string", SP_target_string },
+    {"trigger_always", SP_trigger_always},
+    {"trigger_once", SP_trigger_once},
+    {"trigger_multiple", SP_trigger_multiple},
+    {"trigger_relay", SP_trigger_relay},
+    {"trigger_push", SP_trigger_push},
+    {"trigger_hurt", SP_trigger_hurt},
+    {"trigger_key", SP_trigger_key},
+    {"trigger_counter", SP_trigger_counter},
+    {"trigger_elevator", SP_trigger_elevator},
+    {"trigger_gravity", SP_trigger_gravity},
+    {"trigger_monsterjump", SP_trigger_monsterjump},
 
-    { "worldspawn", SP_worldspawn },
-    { "viewthing", SP_viewthing },
+    {"target_temp_entity", SP_target_temp_entity},
+    {"target_speaker", SP_target_speaker},
+    {"target_explosion", SP_target_explosion},
+    {"target_changelevel", SP_target_changelevel},
+    {"target_secret", SP_target_secret},
+    {"target_goal", SP_target_goal},
+    {"target_splash", SP_target_splash},
+    {"target_spawner", SP_target_spawner},
+    {"target_blaster", SP_target_blaster},
+    {"target_crosslevel_trigger", SP_target_crosslevel_trigger},
+    {"target_crosslevel_target", SP_target_crosslevel_target},
+    {"target_laser", SP_target_laser},
+    {"target_help", SP_target_help},
+    {"target_actor", SP_target_actor},
+    {"target_lightramp", SP_target_lightramp},
+    {"target_earthquake", SP_target_earthquake},
+    {"target_character", SP_target_character},
+    {"target_string", SP_target_string},
 
-    { "light", SP_light },
-    { "light_mine1", SP_light_mine1 },
-    { "light_mine2", SP_light_mine2 },
-    { "info_null", SP_info_null },
-    { "func_group", SP_info_null },
-    { "info_notnull", SP_info_notnull },
-    { "path_corner", SP_path_corner },
-    { "point_combat", SP_point_combat },
+    // RAFAEL 15-APR-98
+    {"target_mal_laser", SP_target_mal_laser},
 
-    { "misc_explobox", SP_misc_explobox },
-    { "misc_banner", SP_misc_banner },
-    { "misc_satellite_dish", SP_misc_satellite_dish },
-    { "misc_actor", SP_misc_actor },
-    { "misc_gib_arm", SP_misc_gib_arm },
-    { "misc_gib_leg", SP_misc_gib_leg },
-    { "misc_gib_head", SP_misc_gib_head },
-    { "misc_insane", SP_misc_insane },
-    { "misc_deadsoldier", SP_misc_deadsoldier },
-    { "misc_viper", SP_misc_viper },
-    { "misc_viper_bomb", SP_misc_viper_bomb },
-    { "misc_bigviper", SP_misc_bigviper },
-    { "misc_strogg_ship", SP_misc_strogg_ship },
-    { "misc_teleporter", SP_misc_teleporter },
-    { "misc_teleporter_dest", SP_misc_teleporter_dest },
-    { "misc_blackhole", SP_misc_blackhole },
-    { "misc_eastertank", SP_misc_eastertank },
-    { "misc_easterchick", SP_misc_easterchick },
-    { "misc_easterchick2", SP_misc_easterchick2 },
+    {"worldspawn", SP_worldspawn},
+    {"viewthing", SP_viewthing},
 
-    { "monster_berserk", SP_monster_berserk },
-    { "monster_gladiator", SP_monster_gladiator },
-    { "monster_gunner", SP_monster_gunner },
-    { "monster_infantry", SP_monster_infantry },
-    { "monster_soldier_light", SP_monster_soldier_light },
-    { "monster_soldier", SP_monster_soldier },
-    { "monster_soldier_ss", SP_monster_soldier_ss },
-    { "monster_tank", SP_monster_tank },
-    { "monster_tank_commander", SP_monster_tank },
-    { "monster_medic", SP_monster_medic },
-    { "monster_flipper", SP_monster_flipper },
-    { "monster_chick", SP_monster_chick },
-    { "monster_parasite", SP_monster_parasite },
-    { "monster_flyer", SP_monster_flyer },
-    { "monster_brain", SP_monster_brain },
-    { "monster_floater", SP_monster_floater },
-    { "monster_hover", SP_monster_hover },
-    { "monster_mutant", SP_monster_mutant },
-    { "monster_supertank", SP_monster_supertank },
-    { "monster_boss2", SP_monster_boss2 },
-    { "monster_boss3_stand", SP_monster_boss3_stand },
-    { "monster_makron", SP_monster_makron },
-    { "monster_jorg", SP_monster_jorg },
+    {"light", SP_light},
+    {"light_mine1", SP_light_mine1},
+    {"light_mine2", SP_light_mine2},
+    {"info_null", SP_info_null},
+    {"func_group", SP_info_null},
+    {"info_notnull", SP_info_notnull},
+    {"path_corner", SP_path_corner},
+    {"point_combat", SP_point_combat},
 
-    { "monster_commander_body", SP_monster_commander_body },
+    {"misc_explobox", SP_misc_explobox},
+    {"misc_banner", SP_misc_banner},
+    {"misc_satellite_dish", SP_misc_satellite_dish},
+    {"misc_actor", SP_misc_actor},
+    {"misc_gib_arm", SP_misc_gib_arm},
+    {"misc_gib_leg", SP_misc_gib_leg},
+    {"misc_gib_head", SP_misc_gib_head},
+    {"misc_insane", SP_misc_insane},
+    {"misc_deadsoldier", SP_misc_deadsoldier},
+    {"misc_viper", SP_misc_viper},
+    {"misc_viper_bomb", SP_misc_viper_bomb},
+    {"misc_bigviper", SP_misc_bigviper},
+    {"misc_strogg_ship", SP_misc_strogg_ship},
+    {"misc_teleporter", SP_misc_teleporter},
+    {"misc_teleporter_dest", SP_misc_teleporter_dest},
+    {"misc_blackhole", SP_misc_blackhole},
+    {"misc_eastertank", SP_misc_eastertank},
+    {"misc_easterchick", SP_misc_easterchick},
+    {"misc_easterchick2", SP_misc_easterchick2},
+    // RAFAEL
+    {"misc_crashviper", SP_misc_crashviper},
+    {"misc_viper_missile", SP_misc_viper_missile},
+    {"misc_amb4", SP_misc_amb4},
+    // RAFAEL 17-APR-98
+    {"misc_transport", SP_misc_transport},
+    // END 17-APR-98
+    // RAFAEL 12-MAY-98
+    {"misc_nuke", SP_misc_nuke},
 
-    { "turret_breach", SP_turret_breach },
-    { "turret_base", SP_turret_base },
-    { "turret_driver", SP_turret_driver },
+    {"monster_berserk", SP_monster_berserk},
+    {"monster_gladiator", SP_monster_gladiator},
+    {"monster_gunner", SP_monster_gunner},
+    {"monster_infantry", SP_monster_infantry},
+    {"monster_soldier_light", SP_monster_soldier_light},
+    {"monster_soldier", SP_monster_soldier},
+    {"monster_soldier_ss", SP_monster_soldier_ss},
+    {"monster_tank", SP_monster_tank},
+    {"monster_tank_commander", SP_monster_tank},
+    {"monster_medic", SP_monster_medic},
+    {"monster_flipper", SP_monster_flipper},
+    {"monster_chick", SP_monster_chick},
+    {"monster_parasite", SP_monster_parasite},
+    {"monster_flyer", SP_monster_flyer},
+    {"monster_brain", SP_monster_brain},
+    {"monster_floater", SP_monster_floater},
+    {"monster_hover", SP_monster_hover},
+    {"monster_mutant", SP_monster_mutant},
+    {"monster_supertank", SP_monster_supertank},
+    {"monster_boss2", SP_monster_boss2},
+    {"monster_boss3_stand", SP_monster_boss3_stand},
+    {"monster_makron", SP_monster_makron},
+    {"monster_jorg", SP_monster_jorg},
 
-    { NULL, NULL }
+    {"monster_commander_body", SP_monster_commander_body},
+
+    // RAFAEL 14-APR-98
+    {"monster_soldier_hypergun", SP_monster_soldier_hypergun},
+    {"monster_soldier_lasergun", SP_monster_soldier_lasergun},
+    {"monster_soldier_ripper",  SP_monster_soldier_ripper},
+    {"monster_fixbot", SP_monster_fixbot},
+    {"monster_gekk", SP_monster_gekk},
+    {"monster_chick_heat", SP_monster_chick_heat},
+    {"monster_gladb", SP_monster_gladb},
+    {"monster_boss5", SP_monster_boss5},
+    // END 14-APR-98
+
+    {"turret_breach", SP_turret_breach},
+    {"turret_base", SP_turret_base},
+    {"turret_driver", SP_turret_driver},
+
+//==============
+//ROGUE
+    {"func_plat2", SP_func_plat2},
+    {"func_door_secret2", SP_func_door_secret2},
+    {"func_force_wall", SP_func_force_wall},
+    {"trigger_teleport", SP_trigger_teleport},
+    {"trigger_disguise", SP_trigger_disguise},
+    {"info_teleport_destination", SP_info_teleport_destination},
+    {"info_player_coop_lava", SP_info_player_coop_lava},
+    {"monster_stalker", SP_monster_stalker},
+    {"monster_turret", SP_monster_turret},
+    {"target_steam", SP_target_steam},
+    {"target_anger", SP_target_anger},
+//  {"target_spawn", SP_target_spawn},
+    {"target_killplayers", SP_target_killplayers},
+    // PMM - experiment
+    {"target_blacklight", SP_target_blacklight},
+    {"target_orb", SP_target_orb},
+    // pmm
+    {"monster_daedalus", SP_monster_hover},
+    {"hint_path", SP_hint_path},
+    {"monster_carrier", SP_monster_carrier},
+    {"monster_widow", SP_monster_widow},
+    {"monster_widow2", SP_monster_widow2},
+    {"monster_medic_commander", SP_monster_medic},
+    {"dm_tag_token", SP_dm_tag_token},
+    {"dm_dball_goal", SP_dm_dball_goal},
+    {"dm_dball_ball", SP_dm_dball_ball},
+    {"dm_dball_team1_start", SP_dm_dball_team1_start},
+    {"dm_dball_team2_start", SP_dm_dball_team2_start},
+    {"dm_dball_ball_start", SP_dm_dball_ball_start},
+    {"dm_dball_speed_change", SP_dm_dball_speed_change},
+    {"monster_kamikaze", SP_monster_kamikaze},
+//  {"monster_chick2", SP_monster_chick2},
+    {"turret_invisible_brain", SP_turret_invisible_brain},
+    {"misc_nuke_core", SP_misc_nuke_core},
+
+    {"ammo_magslug", SP_xatrix_item},
+    {"ammo_trap", SP_xatrix_item},
+    {"item_quadfire", SP_xatrix_item},
+    {"weapon_boomer", SP_xatrix_item},
+    {"weapon_phalanx", SP_xatrix_item},
+//ROGUE
+//==============
+
+    {NULL, NULL}
 };
 
 static const spawn_field_t spawn_fields[] = {
-    { "classname", FOFS(classname), F_LSTRING },
-    { "model", FOFS(model), F_LSTRING },
-    { "spawnflags", FOFS(spawnflags), F_INT },
-    { "speed", FOFS(speed), F_FLOAT },
-    { "accel", FOFS(accel), F_FLOAT },
-    { "decel", FOFS(decel), F_FLOAT },
-    { "target", FOFS(target), F_LSTRING },
-    { "targetname", FOFS(targetname), F_LSTRING },
-    { "pathtarget", FOFS(pathtarget), F_LSTRING },
-    { "deathtarget", FOFS(deathtarget), F_LSTRING },
-    { "killtarget", FOFS(killtarget), F_LSTRING },
-    { "combattarget", FOFS(combattarget), F_LSTRING },
-    { "message", FOFS(message), F_LSTRING },
-    { "team", FOFS(team), F_LSTRING },
-    { "wait", FOFS(wait), F_FLOAT },
-    { "delay", FOFS(delay), F_FLOAT },
-    { "random", FOFS(random), F_FLOAT },
-    { "move_origin", FOFS(move_origin), F_VECTOR },
-    { "move_angles", FOFS(move_angles), F_VECTOR },
-    { "style", FOFS(style), F_INT },
-    { "count", FOFS(count), F_INT },
-    { "health", FOFS(health), F_INT },
-    { "sounds", FOFS(sounds), F_INT },
-    { "light", 0, F_IGNORE },
-    { "dmg", FOFS(dmg), F_INT },
-    { "mass", FOFS(mass), F_INT },
-    { "volume", FOFS(volume), F_FLOAT },
-    { "attenuation", FOFS(attenuation), F_FLOAT },
-    { "map", FOFS(map), F_LSTRING },
-    { "origin", FOFS(s.origin), F_VECTOR },
-    { "angles", FOFS(s.angles), F_VECTOR },
-    { "angle", FOFS(s.angles), F_ANGLEHACK },
+    {"classname", FOFS(classname), F_LSTRING},
+    {"model", FOFS(model), F_LSTRING},
+    {"spawnflags", FOFS(spawnflags), F_INT},
+    {"speed", FOFS(speed), F_FLOAT},
+    {"accel", FOFS(accel), F_FLOAT},
+    {"decel", FOFS(decel), F_FLOAT},
+    {"target", FOFS(target), F_LSTRING},
+    {"targetname", FOFS(targetname), F_LSTRING},
+    {"pathtarget", FOFS(pathtarget), F_LSTRING},
+    {"deathtarget", FOFS(deathtarget), F_LSTRING},
+    {"killtarget", FOFS(killtarget), F_LSTRING},
+    {"combattarget", FOFS(combattarget), F_LSTRING},
+    {"message", FOFS(message), F_LSTRING},
+    {"team", FOFS(team), F_LSTRING},
+    {"wait", FOFS(wait), F_FLOAT},
+    {"delay", FOFS(delay), F_FLOAT},
+    {"random", FOFS(random), F_FLOAT},
+    {"move_origin", FOFS(move_origin), F_VECTOR},
+    {"move_angles", FOFS(move_angles), F_VECTOR},
+    {"style", FOFS(style), F_INT},
+    {"count", FOFS(count), F_INT},
+    {"health", FOFS(health), F_INT},
+    {"sounds", FOFS(sounds), F_INT},
+    {"light", 0, F_IGNORE},
+    {"dmg", FOFS(dmg), F_INT},
+    {"mass", FOFS(mass), F_INT},
+    {"volume", FOFS(volume), F_FLOAT},
+    {"attenuation", FOFS(attenuation), F_FLOAT},
+    {"map", FOFS(map), F_LSTRING},
+    {"origin", FOFS(s.origin), F_VECTOR},
+    {"angles", FOFS(s.angles), F_VECTOR},
+    {"angle", FOFS(s.angles), F_ANGLEHACK},
 
-    { NULL }
+    {NULL}
 };
 
 // temp spawn vars -- only valid when the spawn function is called
 static const spawn_field_t temp_fields[] = {
-    { "lip", STOFS(lip), F_INT },
-    { "distance", STOFS(distance), F_INT },
-    { "height", STOFS(height), F_INT },
-    { "noise", STOFS(noise), F_LSTRING },
-    { "pausetime", STOFS(pausetime), F_FLOAT },
-    { "item", STOFS(item), F_LSTRING },
+    {"lip", STOFS(lip), F_INT},
+    {"distance", STOFS(distance), F_INT},
+    {"height", STOFS(height), F_INT},
+    {"noise", STOFS(noise), F_LSTRING},
+    // *** R-KEY-1: FROZEN KEY. ***  The key text is what a .bsp contains, so it
+    // is an external contract and a member rename may not change it.  Q2PRO's
+    // "Convert monster timers to frame numbers." renamed the unrelated
+    // monsterinfo_t.pausetime; replayed tree-wide it renamed spawn_temp_t's too
+    // AND this row with it, so every map setting `pausetime` on a func_timer got
+    // "pausetime is not a field" and banks of timers fired in lockstep instead
+    // of staggering.  Both donor branches still carry it; the xatrix merge
+    // brought it back in and the compiler caught it only because g_local.h had
+    // already been corrected.  F_FLOAT agrees with the member type (R-KEY-2).
+    {"pausetime", STOFS(pausetime), F_FLOAT},
+    {"item", STOFS(item), F_LSTRING},
 
-    { "gravity", STOFS(gravity), F_LSTRING },
-    { "sky", STOFS(sky), F_LSTRING },
-    { "skyrotate", STOFS(skyrotate), F_FLOAT },
-    { "skyaxis", STOFS(skyaxis), F_VECTOR },
-    { "minyaw", STOFS(minyaw), F_FLOAT },
-    { "maxyaw", STOFS(maxyaw), F_FLOAT },
-    { "minpitch", STOFS(minpitch), F_FLOAT },
-    { "maxpitch", STOFS(maxpitch), F_FLOAT },
-    { "nextmap", STOFS(nextmap), F_LSTRING },
-    { "musictrack", STOFS(musictrack), F_LSTRING },
+    {"gravity", STOFS(gravity), F_LSTRING},
+    {"sky", STOFS(sky), F_LSTRING},
+    {"skyrotate", STOFS(skyrotate), F_FLOAT},
+    {"skyaxis", STOFS(skyaxis), F_VECTOR},
+    {"minyaw", STOFS(minyaw), F_FLOAT},
+    {"maxyaw", STOFS(maxyaw), F_FLOAT},
+    {"minpitch", STOFS(minpitch), F_FLOAT},
+    {"maxpitch", STOFS(maxpitch), F_FLOAT},
+    {"nextmap", STOFS(nextmap), F_LSTRING},
+    {"musictrack", STOFS(musictrack), F_LSTRING},
 
-    { NULL }
+    {NULL}
 };
 
 /*
@@ -349,6 +487,43 @@ void ED_CallSpawn(edict_t *ent)
         G_FreeEdict(ent);
         return;
     }
+
+//PGM - do this before calling the spawn function so it can be overridden.
+#ifdef ROGUE_GRAVITY
+    ent->gravityVector[0] =  0.0f;
+    ent->gravityVector[1] =  0.0f;
+    ent->gravityVector[2] = -1.0f;
+#endif
+//PGM
+
+    // FIXME - PMM classnames hack
+    if (!strcmp(ent->classname, "weapon_nailgun"))
+        ent->classname = (FindItem("ETF Rifle"))->classname;
+    if (!strcmp(ent->classname, "ammo_nails"))
+        ent->classname = (FindItem("Flechettes"))->classname;
+    if (!strcmp(ent->classname, "weapon_heatbeam"))
+        ent->classname = (FindItem("Plasma Beam"))->classname;
+    // pmm
+
+    // R-CORE-11a / Q13: latch the content flavour HERE, before the spawn
+    // function runs.
+    //
+    // *** R-CORE-11 names monster_start() as the latch point, and that is too
+    // late. *** Every SP_monster_* assigns its mmove_t tables and AI hooks and
+    // only then calls walkmonster_start() -> monster_start(); in m_gunner.c the
+    // assignments are ~20 lines ahead of the call.  A gate placed in a spawn
+    // function to choose between a donor's frame table and baseq2's would
+    // therefore read 0 every time, always pick baseq2, and never crash -- the
+    // silent-wrong-answer shape this whole project keeps running into.
+    //
+    // Latching in ED_CallSpawn fixes the ordering and generalises correctly:
+    // every entity gets its flavour at birth, not just monsters, which is what
+    // R-CORE-11a's other three readers (g_phys.c especially) need.
+    ent->content_flavour = 0;
+    if (G_LayerEnabled(LAYER_XATRIX))
+        ent->content_flavour |= CONTENT_XATRIX;
+    if (G_LayerEnabled(LAYER_ROGUE))
+        ent->content_flavour |= CONTENT_ROGUE;
 
     // check item spawn functions
     for (i = 0, item = itemlist; i < game.num_items; i++, item++) {
@@ -379,7 +554,7 @@ void ED_CallSpawn(edict_t *ent)
 ED_NewString
 =============
 */
-static char *ED_NewString(const char *string)
+char *ED_NewString(const char *string)
 {
     char    *newb, *new_p;
     int     i, l;
@@ -518,6 +693,50 @@ All but the first will have the FL_TEAMSLAVE flag set.
 All but the last will have the teamchain field set to the next one
 ================
 */
+void G_FixTeams(void)
+{
+    edict_t *e, *e2, *chain;
+    int     i, j;
+    int     c;   // ROGUE declared a c2 here, incremented it and never
+                 // printed it -- G_FindTeams below is the one that reports
+                 // both.  Dead in the donor, removed rather than silenced.
+
+    c = 0;
+    for (i = 1, e = g_edicts + i; i < globals.num_edicts; i++, e++) {
+        if (!e->inuse)
+            continue;
+        if (!e->team)
+            continue;
+        if (!strcmp(e->classname, "func_train")) {
+            if (e->flags & FL_TEAMSLAVE) {
+                chain = e;
+                e->teammaster = e;
+                e->teamchain = NULL;
+                e->flags &= ~FL_TEAMSLAVE;
+                c++;
+                for (j = 1, e2 = g_edicts + j; j < globals.num_edicts; j++, e2++) {
+                    if (e2 == e)
+                        continue;
+                    if (!e2->inuse)
+                        continue;
+                    if (!e2->team)
+                        continue;
+                    if (!strcmp(e->team, e2->team)) {
+                        chain->teamchain = e2;
+                        e2->teammaster = e;
+                        e2->teamchain = NULL;
+                        chain = e2;
+                        e2->flags |= FL_TEAMSLAVE;
+                        e2->movetype = MOVETYPE_PUSH;
+                        e2->speed = e->speed;
+                    }
+                }
+            }
+        }
+    }
+    gi.dprintf("%i teams repaired\n", c);
+}
+
 static void G_FindTeams(void)
 {
     edict_t *e, *e2, *chain;
@@ -553,6 +772,8 @@ static void G_FindTeams(void)
             }
         }
     }
+
+    G_FixTeams();
 
     gi.dprintf("%i teams with %i entities\n", c, c2);
 }
@@ -673,6 +894,16 @@ void SpawnEntities(const char *mapname, const char *entities, const char *spawnp
         if (!Q_stricmp(level.mapname, "command") && !Q_stricmp(ent->classname, "trigger_once") && !Q_stricmp(ent->model, "*27"))
             ent->spawnflags &= ~SPAWNFLAG_NOT_HARD;
 
+        // ROGUE
+        //ahh, the joys of map hacks ..
+        if (!Q_stricmp(level.mapname, "rhangar2") && !Q_stricmp(ent->classname, "func_door_rotating") && ent->targetname && !Q_stricmp(ent->targetname, "t265"))
+            ent->spawnflags &= ~SPAWNFLAG_NOT_COOP;
+        if (!Q_stricmp(level.mapname, "rhangar2") && !Q_stricmp(ent->classname, "trigger_always") && ent->target && !Q_stricmp(ent->target, "t265"))
+            ent->spawnflags |= SPAWNFLAG_NOT_COOP;
+        if (!Q_stricmp(level.mapname, "rhangar2") && !Q_stricmp(ent->classname, "func_wall") && !Q_stricmp(ent->model, "*15"))
+            ent->spawnflags |= SPAWNFLAG_NOT_COOP;
+        // rogue
+
         // remove things (except the world) from different skill levels or deathmatch
         if (ent != g_edicts) {
             if (deathmatch->value) {
@@ -681,8 +912,28 @@ void SpawnEntities(const char *mapname, const char *entities, const char *spawnp
                     inhibit++;
                     continue;
                 }
+            } else if (coop->value) {
+                if (ent->spawnflags & SPAWNFLAG_NOT_COOP) {
+                    G_FreeEdict(ent);
+                    inhibit++;
+                    continue;
+                }
+
+                // stuff marked !easy & !med & !hard are coop only, all levels
+                if (!((ent->spawnflags & SPAWNFLAG_NOT_EASY) &&
+                      (ent->spawnflags & SPAWNFLAG_NOT_MEDIUM) &&
+                      (ent->spawnflags & SPAWNFLAG_NOT_HARD))) {
+                    if (((skill->value == 0) && (ent->spawnflags & SPAWNFLAG_NOT_EASY)) ||
+                        ((skill->value == 1) && (ent->spawnflags & SPAWNFLAG_NOT_MEDIUM)) ||
+                        (((skill->value == 2) || (skill->value == 3)) && (ent->spawnflags & SPAWNFLAG_NOT_HARD))
+                       ) {
+                        G_FreeEdict(ent);
+                        inhibit++;
+                        continue;
+                    }
+                }
             } else {
-                if ( /* ((coop->value) && (ent->spawnflags & SPAWNFLAG_NOT_COOP)) || */
+                if ( /*((coop->value) && (ent->spawnflags & SPAWNFLAG_NOT_COOP)) || */
                     ((skill->value == 0) && (ent->spawnflags & SPAWNFLAG_NOT_EASY)) ||
                     ((skill->value == 1) && (ent->spawnflags & SPAWNFLAG_NOT_MEDIUM)) ||
                     (((skill->value == 2) || (skill->value == 3)) && (ent->spawnflags & SPAWNFLAG_NOT_HARD))
@@ -696,7 +947,16 @@ void SpawnEntities(const char *mapname, const char *entities, const char *spawnp
             ent->spawnflags &= ~(SPAWNFLAG_NOT_EASY | SPAWNFLAG_NOT_MEDIUM | SPAWNFLAG_NOT_HARD | SPAWNFLAG_NOT_COOP | SPAWNFLAG_NOT_DEATHMATCH);
         }
 
+//PGM - do this before calling the spawn function so it can be overridden.
+#ifdef ROGUE_GRAVITY
+        ent->gravityVector[0] =  0.0f;
+        ent->gravityVector[1] =  0.0f;
+        ent->gravityVector[2] = -1.0f;
+#endif
+//PGM
         ED_CallSpawn(ent);
+
+        ent->s.renderfx |= RF_IR_VISIBLE;       //PGM
     }
 
     memset(&st, 0, sizeof(st));
@@ -716,6 +976,22 @@ void SpawnEntities(const char *mapname, const char *entities, const char *spawnp
     G_FindTeams();
 
     PlayerTrail_Init();
+
+//ROGUE
+    if (deathmatch->value) {
+        if (randomrespawn && randomrespawn->value)
+            PrecacheForRandomRespawn();
+    } else {
+        InitHintPaths();        // if there aren't hintpaths on this map, enable quick aborts
+    }
+//ROGUE
+
+// ROGUE    -- allow dm games to do init stuff right before game starts.
+    if (deathmatch->value && gamerules && gamerules->value) {
+        if (DMGame.PostInitSetup)
+            DMGame.PostInitSetup();
+    }
+// ROGUE
 }
 
 //===================================================================
@@ -786,7 +1062,7 @@ static const char single_statusbar[] =
   "yb -50 "
 "endif "
 
-// timer 1 (quad, enviro, breather)
+// timer 1 (quad, quadfire, double, enviro, breather)
 "if 9 "
   "xv 262 "
   "num 2 10 "
@@ -990,18 +1266,29 @@ void SP_worldspawn(edict_t *ent)
 
     // sexed models
     // THIS ORDER MUST MATCH THE DEFINES IN g_local.h
-    // you can add more, max 15
-    gi.modelindex("#w_blaster.md2");
-    gi.modelindex("#w_shotgun.md2");
-    gi.modelindex("#w_sshotgun.md2");
-    gi.modelindex("#w_machinegun.md2");
-    gi.modelindex("#w_chaingun.md2");
-    gi.modelindex("#a_grenades.md2");
-    gi.modelindex("#w_glauncher.md2");
-    gi.modelindex("#w_rlauncher.md2");
-    gi.modelindex("#w_hyperblaster.md2");
-    gi.modelindex("#w_railgun.md2");
-    gi.modelindex("#w_bfg.md2");
+    // you can add more, max 19 (pete change)
+    // these models are only loaded in coop or deathmatch. not singleplayer.
+    if (coop->value || deathmatch->value) {
+        gi.modelindex("#w_blaster.md2");
+        gi.modelindex("#w_shotgun.md2");
+        gi.modelindex("#w_sshotgun.md2");
+        gi.modelindex("#w_machinegun.md2");
+        gi.modelindex("#w_chaingun.md2");
+        gi.modelindex("#a_grenades.md2");
+        gi.modelindex("#w_glauncher.md2");
+        gi.modelindex("#w_rlauncher.md2");
+        gi.modelindex("#w_hyperblaster.md2");
+        gi.modelindex("#w_railgun.md2");
+        gi.modelindex("#w_bfg.md2");
+
+        gi.modelindex("#w_phalanx.md2");
+        gi.modelindex("#w_ripper.md2");
+        gi.modelindex("#w_disrupt.md2");            // PGM
+        gi.modelindex("#w_etfrifle.md2");           // PGM
+        gi.modelindex("#w_plasma.md2");             // PGM
+        gi.modelindex("#w_plauncher.md2");          // PGM
+        gi.modelindex("#w_chainfist.md2");          // PGM
+    }
 
     //-------------------
 
@@ -1021,6 +1308,9 @@ void SP_worldspawn(edict_t *ent)
     gi.soundindex("misc/h2ohit1.wav");      // landing splash
 
     gi.soundindex("items/damage.wav");
+    // ROGUE - double damage
+    gi.soundindex("misc/ddamage1.wav");
+    // rogue
     gi.soundindex("items/protect.wav");
     gi.soundindex("items/protect4.wav");
     gi.soundindex("weapons/noammo.wav");
@@ -1047,4 +1337,537 @@ void SP_worldspawn(edict_t *ent)
 
     // 63 testing
     gi.configstring(game.csr.lights + 63, "a");
+}
+
+//
+//ROGUE
+//
+
+//
+// Monster spawning code
+//
+// Used by the carrier, the medic_commander, and the black widow
+//
+// The sequence to create a flying monster is:
+//
+//  FindSpawnPoint - tries to find suitable spot to spawn the monster in
+//  CreateFlyMonster  - this verifies the point as good and creates the monster
+
+// To create a ground walking monster:
+//
+//  FindSpawnPoint - same thing
+//  CreateGroundMonster - this checks the volume and makes sure the floor under the volume is suitable
+//
+
+// FIXME - for the black widow, if we want the stalkers coming in on the roof, we'll have to tweak some things
+
+//
+// CreateMonster
+//
+edict_t *CreateMonster(const vec3_t origin, const vec3_t angles, const char *classname)
+{
+    edict_t     *newEnt;
+
+    newEnt = G_Spawn();
+
+    VectorCopy(origin, newEnt->s.origin);
+    VectorCopy(angles, newEnt->s.angles);
+    newEnt->classname = ED_NewString(classname);
+    newEnt->monsterinfo.aiflags |= AI_DO_NOT_COUNT;
+
+    VectorSet(newEnt->gravityVector, 0, 0, -1);
+    ED_CallSpawn(newEnt);
+    newEnt->s.renderfx |= RF_IR_VISIBLE;
+
+    return newEnt;
+}
+
+edict_t *CreateFlyMonster(vec3_t origin, vec3_t angles, vec3_t mins, vec3_t maxs, char *classname)
+{
+    if (!mins || !maxs || VectorCompare(mins, vec3_origin) || VectorCompare(maxs, vec3_origin)) {
+        DetermineBBox(classname, mins, maxs);
+    }
+
+    if (!CheckSpawnPoint(origin, mins, maxs))
+        return NULL;
+
+    return (CreateMonster(origin, angles, classname));
+}
+
+// This is just a wrapper for CreateMonster that looks down height # of CMUs and sees if there
+// are bad things down there or not
+//
+// this is from m_move.c
+#define STEPSIZE    18
+
+edict_t *CreateGroundMonster(const vec3_t origin, const vec3_t angles, const vec3_t entMins, const vec3_t entMaxs, const char *classname, int height)
+{
+//  trace_t     tr;
+    edict_t     *newEnt;
+//  vec3_t      start, stop;
+//  int         failure = 0;
+//  vec3_t      mins, maxs;
+//  int         x, y;
+//  float       mid, bottom;
+    vec3_t      mins, maxs;
+
+    // if they don't provide us a bounding box, figure it out
+    if (!entMins || !entMaxs || VectorCompare(entMins, vec3_origin) || VectorCompare(entMaxs, vec3_origin)) {
+        DetermineBBox(classname, mins, maxs);
+    } else {
+        VectorCopy(entMins, mins);
+        VectorCopy(entMaxs, maxs);
+    }
+
+    // check the ground to make sure it's there, it's relatively flat, and it's not toxic
+    if (!CheckGroundSpawnPoint(origin, mins, maxs, height, -1))
+        return NULL;
+
+    newEnt = CreateMonster(origin, angles, classname);
+    if (!newEnt)
+        return NULL;
+
+    return newEnt;
+}
+
+// FindSpawnPoint
+// PMM - this is used by the medic commander (possibly by the carrier) to find a good spawn point
+// if the startpoint is bad, try above the startpoint for a bit
+
+bool FindSpawnPoint(vec3_t startpoint, vec3_t mins, vec3_t maxs, vec3_t spawnpoint, float maxMoveUp)
+{
+    trace_t     tr;
+    vec3_t      top;
+
+
+    tr = gi.trace(startpoint, mins, maxs, startpoint, NULL, MASK_MONSTERSOLID | CONTENTS_PLAYERCLIP);
+    if ((tr.startsolid || tr.allsolid) || (tr.ent != world)) {
+//      if ( ((tr.ent->svflags & SVF_MONSTER) && (tr.ent->health <= 0)) ||
+//           (tr.ent->svflags & SVF_DAMAGEABLE) )
+//      {
+//          T_Damage (tr.ent, self, self, vec3_origin, self->enemy->s.origin,
+//                      pain_normal, hurt, 0, 0, MOD_UNKNOWN);
+
+        VectorCopy(startpoint, top);
+        top[2] += maxMoveUp;
+        /*
+                gi.WriteByte (svc_temp_entity);
+                gi.WriteByte (TE_DEBUGTRAIL);
+                gi.WritePosition (top);
+                gi.WritePosition (startpoint);
+                gi.multicast (startpoint, MULTICAST_ALL);
+        */
+        tr = gi.trace(top, mins, maxs, startpoint, NULL, MASK_MONSTERSOLID);
+        if (tr.startsolid || tr.allsolid) {
+//          if ((g_showlogic) && (g_showlogic->value))
+//              if (tr.ent)
+//                  gi.dprintf("FindSpawnPoint: failed to find a point -- blocked by %s\n", tr.ent->classname);
+//              else
+//                  gi.dprintf("FindSpawnPoint: failed to find a point\n");
+
+            return false;
+        } else {
+//          if ((g_showlogic) && (g_showlogic->value))
+//              gi.dprintf ("FindSpawnPoint: %s -> %s\n", vtos (startpoint), vtos (tr.endpos));
+            VectorCopy(tr.endpos, spawnpoint);
+            return true;
+        }
+    } else {
+        VectorCopy(startpoint, spawnpoint);
+        return true;
+    }
+}
+
+// FIXME - all of this needs to be tweaked to handle the new gravity rules
+// if we ever want to spawn stuff on the roof
+
+//
+// CheckSpawnPoint
+//
+// PMM - checks volume to make sure we can spawn a monster there (is it solid?)
+//
+// This is all fliers should need
+
+bool CheckSpawnPoint(const vec3_t origin, const vec3_t mins, const vec3_t maxs)
+{
+    trace_t tr;
+
+    if (!mins || !maxs || VectorCompare(mins, vec3_origin) || VectorCompare(maxs, vec3_origin)) {
+        return false;
+    }
+
+    tr = gi.trace(origin, mins, maxs, origin, NULL, MASK_MONSTERSOLID);
+    if (tr.startsolid || tr.allsolid) {
+//      if ((g_showlogic) && (g_showlogic->value))
+//          gi.dprintf("createmonster in wall. removing\n");
+        return false;
+    }
+    if (tr.ent != world) {
+//      if ((g_showlogic) && (g_showlogic->value))
+//          gi.dprintf("createmonster in entity %s\n", tr.ent->classname);
+        return false;
+    }
+    return true;
+}
+
+//
+// CheckGroundSpawnPoint
+//
+// PMM - used for walking monsters
+//  checks:
+//      1)  is there a ground within the specified height of the origin?
+//      2)  is the ground non-water?
+//      3)  is the ground flat enough to walk on?
+//
+
+bool CheckGroundSpawnPoint(const vec3_t origin, const vec3_t entMins, const vec3_t entMaxs, float height, float gravity)
+{
+    trace_t     tr;
+    vec3_t      start, stop;
+    vec3_t      mins, maxs;
+    int         x, y;
+    float       mid, bottom;
+
+    if (!CheckSpawnPoint(origin, entMins, entMaxs))
+        return false;
+
+    // FIXME - this is too conservative about angled surfaces
+
+    VectorCopy(origin, stop);
+    // FIXME - gravity vector
+    stop[2] = origin[2] + entMins[2] - height;
+
+    /*
+    gi.WriteByte (svc_temp_entity);
+    gi.WriteByte (TE_DEBUGTRAIL);
+    gi.WritePosition (origin);
+    gi.WritePosition (stop);
+    gi.multicast (start, MULTICAST_ALL);
+    */
+
+    tr = gi.trace(origin, entMins, entMaxs, stop, NULL, MASK_MONSTERSOLID | MASK_WATER);
+    // it's not going to be all solid or start solid, since that's checked above
+
+    if ((tr.fraction < 1) && (tr.contents & MASK_MONSTERSOLID)) {
+        // we found a non-water surface down there somewhere.  now we need to check to make sure it's not too sloped
+        //
+        // algorithm straight out of m_move.c:M_CheckBottom()
+        //
+
+        // first, do the midpoint trace
+
+        VectorAdd(tr.endpos, entMins, mins);
+        VectorAdd(tr.endpos, entMaxs, maxs);
+
+        // first, do the easy flat check
+        //
+#ifdef ROGUE_GRAVITY
+        // FIXME - this will only handle 0,0,1 and 0,0,-1 gravity vectors
+        if (gravity > 0)
+            start[2] = maxs[2] + 1;
+        else
+            start[2] = mins[2] - 1;
+#else
+        start[2] = mins[2] - 1;
+#endif
+        for (x = 0; x <= 1; x++) {
+            for (y = 0; y <= 1; y++) {
+                start[0] = x ? maxs[0] : mins[0];
+                start[1] = y ? maxs[1] : mins[1];
+                if (gi.pointcontents(start) != CONTENTS_SOLID)
+                    goto realcheck;
+            }
+        }
+
+        // if it passed all four above checks, we're done
+        return true;
+
+realcheck:
+
+        // check it for real
+
+        start[0] = stop[0] = (mins[0] + maxs[0]) * 0.5f;
+        start[1] = stop[1] = (mins[1] + maxs[1]) * 0.5f;
+        start[2] = mins[2];
+
+        tr = gi.trace(start, vec3_origin, vec3_origin, stop, NULL, MASK_MONSTERSOLID);
+
+        if (tr.fraction == 1.0f)
+            return false;
+        mid = bottom = tr.endpos[2];
+
+#ifdef ROGUE_GRAVITY
+        if (gravity < 0) {
+            start[2] = mins[2];
+            stop[2] = start[2] - STEPSIZE - STEPSIZE;
+            mid = bottom = tr.endpos[2] + entMins[2];
+        } else {
+            start[2] = maxs[2];
+            stop[2] = start[2] + STEPSIZE + STEPSIZE;
+            mid = bottom = tr.endpos[2] - entMaxs[2];
+        }
+#else
+        stop[2] = start[2] - 2 * STEPSIZE;
+        mid = bottom = tr.endpos[2] + entMins[2];
+#endif
+
+        for (x = 0; x <= 1; x++)
+            for (y = 0; y <= 1; y++) {
+                start[0] = stop[0] = x ? maxs[0] : mins[0];
+                start[1] = stop[1] = y ? maxs[1] : mins[1];
+
+                /*
+                gi.WriteByte (svc_temp_entity);
+                gi.WriteByte (TE_DEBUGTRAIL);
+                gi.WritePosition (start);
+                gi.WritePosition (stop);
+                gi.multicast (start, MULTICAST_ALL);
+                */
+                tr = gi.trace(start, vec3_origin, vec3_origin, stop, NULL, MASK_MONSTERSOLID);
+
+//PGM
+#ifdef ROGUE_GRAVITY
+// FIXME - this will only handle 0,0,1 and 0,0,-1 gravity vectors
+                if (gravity > 0) {
+                    if (tr.fraction != 1.0f && tr.endpos[2] < bottom)
+                        bottom = tr.endpos[2];
+                    if (tr.fraction == 1.0f || tr.endpos[2] - mid > STEPSIZE) {
+//                      if ((g_showlogic) && (g_showlogic->value))
+//                          gi.dprintf ("spawn - rejecting due to uneven ground\n");
+                        return false;
+                    }
+                } else {
+                    if (tr.fraction != 1.0f && tr.endpos[2] > bottom)
+                        bottom = tr.endpos[2];
+                    if (tr.fraction == 1.0f || mid - tr.endpos[2] > STEPSIZE) {
+//                      if ((g_showlogic) && (g_showlogic->value))
+//                          gi.dprintf ("spawn - rejecting due to uneven ground\n");
+                        return false;
+                    }
+                }
+#else
+                if (tr.fraction != 1.0f && tr.endpos[2] > bottom)
+                    bottom = tr.endpos[2];
+                if (tr.fraction == 1.0f || mid - tr.endpos[2] > STEPSIZE) {
+                    return false;
+                }
+#endif
+            }
+
+        return true;        // we can land on it, it's ok
+    }
+
+    // otherwise, it's either water (bad) or not there (too far)
+    // if we're here, it's bad below
+//  if ((g_showlogic) && (g_showlogic->value))
+//  {
+//      if (tr.fraction < 1)
+//          if ((g_showlogic) && (g_showlogic->value))
+//              gi.dprintf("groundmonster would fall into water/slime/lava\n");
+//      else
+//          if ((g_showlogic) && (g_showlogic->value))
+//              gi.dprintf("groundmonster would fall too far\n");
+//  }
+
+    return false;
+}
+
+void DetermineBBox(const char *classname, vec3_t mins, vec3_t maxs)
+{
+    // FIXME - cache this stuff
+    edict_t     *newEnt;
+
+    newEnt = G_Spawn();
+
+    VectorCopy(vec3_origin, newEnt->s.origin);
+    VectorCopy(vec3_origin, newEnt->s.angles);
+    newEnt->classname = ED_NewString(classname);
+    newEnt->monsterinfo.aiflags |= AI_DO_NOT_COUNT;
+
+    ED_CallSpawn(newEnt);
+
+    VectorCopy(newEnt->mins, mins);
+    VectorCopy(newEnt->maxs, maxs);
+
+    G_FreeEdict(newEnt);
+}
+
+// ****************************
+// SPAWNGROW stuff
+// ****************************
+
+#define SPAWNGROW_LIFESPAN      0.3f
+
+void spawngrow_think(edict_t *self)
+{
+    int i;
+
+    for (i = 0; i < 2; i++) {
+        self->s.angles[0] = Q_rand() % 360;
+        self->s.angles[1] = Q_rand() % 360;
+        self->s.angles[2] = Q_rand() % 360;
+    }
+    if ((level.time < self->wait) && (self->s.frame < 2))
+        self->s.frame++;
+    if (level.time >= self->wait) {
+        if (self->s.effects & EF_SPHERETRANS) {
+            G_FreeEdict(self);
+            return;
+        } else if (self->s.frame > 0)
+            self->s.frame--;
+        else {
+            G_FreeEdict(self);
+            return;
+        }
+    }
+    self->nextthink += FRAMETIME;
+}
+
+void SpawnGrow_Spawn(vec3_t startpos, int size)
+{
+    edict_t *ent;
+    int i;
+    float   lifespan;
+
+    ent = G_Spawn();
+    VectorCopy(startpos, ent->s.origin);
+    for (i = 0; i < 2; i++) {
+        ent->s.angles[0] = Q_rand() % 360;
+        ent->s.angles[1] = Q_rand() % 360;
+        ent->s.angles[2] = Q_rand() % 360;
+    }
+    ent->solid = SOLID_NOT;
+//  ent->s.renderfx = RF_FULLBRIGHT | RF_IR_VISIBLE;
+    ent->s.renderfx = RF_IR_VISIBLE;
+    ent->movetype = MOVETYPE_NONE;
+    ent->classname = "spawngro";
+
+    if (size <= 1) {
+        lifespan = SPAWNGROW_LIFESPAN;
+        ent->s.modelindex = gi.modelindex("models/items/spawngro2/tris.md2");
+    } else if (size == 2) {
+        ent->s.modelindex = gi.modelindex("models/items/spawngro3/tris.md2");
+        lifespan = 2;
+    } else {
+        ent->s.modelindex = gi.modelindex("models/items/spawngro/tris.md2");
+        lifespan = SPAWNGROW_LIFESPAN;
+    }
+
+    ent->think = spawngrow_think;
+
+    ent->wait = level.time + lifespan;
+    ent->nextthink = level.framenum + 1;
+    if (size != 2)
+        ent->s.effects |= EF_SPHERETRANS;
+    gi.linkentity(ent);
+}
+
+// ****************************
+// WidowLeg stuff
+// ****************************
+
+#define MAX_LEGSFRAME   23
+#define LEG_WAIT_TIME   1
+
+void ThrowMoreStuff(edict_t *self, vec3_t point);
+void ThrowSmallStuff(edict_t *self, vec3_t point);
+void ThrowWidowGibLoc(edict_t *self, char *gibname, int damage, int type, vec3_t startpos, bool fade);
+void ThrowWidowGibSized(edict_t *self, char *gibname, int damage, int type, vec3_t startpos, int hitsound, bool fade);
+
+void widowlegs_think(edict_t *self)
+{
+    vec3_t  offset;
+    vec3_t  point;
+    vec3_t  f, r, u;
+
+    if (self->s.frame == 17) {
+        VectorSet(offset, 11.77f, -7.24f, 23.31f);
+        AngleVectors(self->s.angles, f, r, u);
+        G_ProjectSource2(self->s.origin, offset, f, r, u, point);
+        gi.WriteByte(svc_temp_entity);
+        gi.WriteByte(TE_EXPLOSION1);
+        gi.WritePosition(point);
+        gi.multicast(point, MULTICAST_ALL);
+        ThrowSmallStuff(self, point);
+    }
+
+    if (self->s.frame < MAX_LEGSFRAME) {
+        self->s.frame++;
+        self->nextthink = level.framenum + 1;
+        return;
+    } else if (self->wait == 0) {
+        self->wait = level.time + LEG_WAIT_TIME;
+    }
+    if (level.time > self->wait) {
+        AngleVectors(self->s.angles, f, r, u);
+
+        VectorSet(offset, -65.6f, -8.44f, 28.59f);
+        G_ProjectSource2(self->s.origin, offset, f, r, u, point);
+        gi.WriteByte(svc_temp_entity);
+        gi.WriteByte(TE_EXPLOSION1);
+        gi.WritePosition(point);
+        gi.multicast(point, MULTICAST_ALL);
+        ThrowSmallStuff(self, point);
+
+        ThrowWidowGibSized(self, "models/monsters/blackwidow/gib1/tris.md2", 80 + (int)(random() * 20.0f), GIB_METALLIC, point, 0, true);
+        ThrowWidowGibSized(self, "models/monsters/blackwidow/gib2/tris.md2", 80 + (int)(random() * 20.0f), GIB_METALLIC, point, 0, true);
+
+        VectorSet(offset, -1.04f, -51.18f, 7.04f);
+        G_ProjectSource2(self->s.origin, offset, f, r, u, point);
+        gi.WriteByte(svc_temp_entity);
+        gi.WriteByte(TE_EXPLOSION1);
+        gi.WritePosition(point);
+        gi.multicast(point, MULTICAST_ALL);
+        ThrowSmallStuff(self, point);
+
+        ThrowWidowGibSized(self, "models/monsters/blackwidow/gib1/tris.md2", 80 + (int)(random() * 20.0f), GIB_METALLIC, point, 0, true);
+        ThrowWidowGibSized(self, "models/monsters/blackwidow/gib2/tris.md2", 80 + (int)(random() * 20.0f), GIB_METALLIC, point, 0, true);
+        ThrowWidowGibSized(self, "models/monsters/blackwidow/gib3/tris.md2", 80 + (int)(random() * 20.0f), GIB_METALLIC, point, 0, true);
+
+        G_FreeEdict(self);
+        return;
+    }
+    if ((level.time > (self->wait - 0.5f)) && (self->count == 0)) {
+        self->count = 1;
+        AngleVectors(self->s.angles, f, r, u);
+
+        VectorSet(offset, 31, -88.7f, 10.96f);
+        G_ProjectSource2(self->s.origin, offset, f, r, u, point);
+        gi.WriteByte(svc_temp_entity);
+        gi.WriteByte(TE_EXPLOSION1);
+        gi.WritePosition(point);
+        gi.multicast(point, MULTICAST_ALL);
+//      ThrowSmallStuff (self, point);
+
+        VectorSet(offset, -12.67f, -4.39f, 15.68f);
+        G_ProjectSource2(self->s.origin, offset, f, r, u, point);
+        gi.WriteByte(svc_temp_entity);
+        gi.WriteByte(TE_EXPLOSION1);
+        gi.WritePosition(point);
+        gi.multicast(point, MULTICAST_ALL);
+//      ThrowSmallStuff (self, point);
+
+        self->nextthink = level.framenum + 1;
+        return;
+    }
+    self->nextthink = level.framenum + 1;
+}
+
+void Widowlegs_Spawn(vec3_t startpos, vec3_t angles)
+{
+    edict_t *ent;
+
+    ent = G_Spawn();
+    VectorCopy(startpos, ent->s.origin);
+    VectorCopy(angles, ent->s.angles);
+    ent->solid = SOLID_NOT;
+    ent->s.renderfx = RF_IR_VISIBLE;
+    ent->movetype = MOVETYPE_NONE;
+    ent->classname = "widowlegs";
+
+    ent->s.modelindex = gi.modelindex("models/monsters/legs/tris.md2");
+    ent->think = widowlegs_think;
+
+    ent->nextthink = level.framenum + 1;
+    gi.linkentity(ent);
 }
