@@ -465,26 +465,26 @@ void trigger_effect(edict_t *self)
 
 void trigger_push_inactive(edict_t *self)
 {
-    if (self->delay > level.time) {
-        self->nextthink = level.time + 0.1;
+    if (self->delay > level.framenum) {
+        self->nextthink = level.framenum + 0.1 * BASE_FRAMERATE;
     } else {
         self->touch = trigger_push_touch;
         self->think = trigger_push_active;
-        self->nextthink = level.time + 0.1;
-        self->delay = self->nextthink + self->wait;
+        self->nextthink = level.framenum + 0.1 * BASE_FRAMERATE;
+        self->delay = self->nextthink + self->wait * BASE_FRAMERATE;
     }
 }
 
 void trigger_push_active(edict_t *self)
 {
-    if (self->delay > level.time) {
-        self->nextthink = level.time + 0.1;
+    if (self->delay > level.framenum) {
+        self->nextthink = level.framenum + 0.1 * BASE_FRAMERATE;
         trigger_effect(self);
     } else {
         self->touch = NULL;
         self->think = trigger_push_inactive;
-        self->nextthink = level.time + 0.1;
-        self->delay = self->nextthink + self->wait;
+        self->nextthink = level.framenum + 0.1 * BASE_FRAMERATE;
+        self->delay = self->nextthink + self->wait * BASE_FRAMERATE;
     }
 }
 
@@ -501,8 +501,8 @@ void SP_trigger_push(edict_t *self)
             self->wait = 10;
 
         self->think = trigger_push_active;
-        self->nextthink = level.time + 0.1;
-        self->delay = self->nextthink + self->wait;
+        self->nextthink = level.framenum + 0.1 * BASE_FRAMERATE;
+        self->delay = self->nextthink + self->wait * BASE_FRAMERATE;
     }
 
     if (!self->speed)

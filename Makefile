@@ -60,7 +60,15 @@ INCLUDES = -I. -Iinc -Isrc
 
 # CLAUDE.md / the workspace standard for this era of code.  -fvisibility=hidden
 # keeps everything but GetGameAPI/GetGameAPIEx out of the dynamic symbol table.
-BASE_CFLAGS = -DHAVE_CONFIG_H $(INCLUDES) -std=gnu99 \
+# -MMD -MP: HEADER DEPENDENCIES, and this is not a nicety.  Without them a
+# change to g_local.h rebuilds nothing, so the next `make` links objects
+# compiled against DIFFERENT struct layouts -- and it links cleanly.  Phase 3
+# hit exactly that: adding level_locals_t.forcemap and six gclient_t fields
+# produced a library that read level.sight_client at the old offset and
+# segfaulted on the first frame, while `make` reported nothing to do.  The
+# symptom looked like memory corruption in game code and cost an hour of
+# bisecting before the build was suspected (doc/reconciliation.md R-48).
+BASE_CFLAGS = -DHAVE_CONFIG_H $(INCLUDES) -std=gnu99 -MMD -MP \
 	-fno-strict-aliasing -fwrapv -fvisibility=hidden
 
 # R-BUILD-2 / R-SEC-9.  -Wall -Wextra, no casts to silence the
@@ -188,7 +196,7 @@ PE_SHLIBLDFLAGS = -shared
 GAME_SRC = \
 	g_ai.c g_chase.c g_cmds.c g_combat.c g_func.c g_items.c g_main.c \
 	g_misc.c g_monster.c g_phys.c g_ptrs.c g_save.c g_spawn.c g_svcmds.c \
-	g_ruleset.c \
+	g_ruleset.c g_stats.c \
 	g_target.c g_trigger.c g_turret.c g_utils.c g_weapon.c \
 	m_actor.c m_berserk.c m_boss2.c m_boss3.c m_boss31.c m_boss32.c \
 	m_brain.c m_chick.c m_flipper.c m_float.c m_flyer.c m_gladiator.c \
@@ -196,6 +204,8 @@ GAME_SRC = \
 	m_mutant.c m_parasite.c m_soldier.c m_supertank.c m_tank.c \
 	p_client.c p_hud.c p_trail.c p_view.c p_weapon.c \
 	shared/m_flash.c shared/shared.c \
+	\
+	ctf/g_ctf.c ctf/p_menu.c \
 	\
 	xatrix/m_boss5.c xatrix/m_fixbot.c xatrix/m_gekk.c xatrix/m_gladb.c \
 	\
@@ -270,6 +280,10 @@ $(TARGET): $(OBJS)
 $(BUILDDIR)/%.o: src/%.c
 	$(CC) $(CFLAGS) $($(KIND)_SHLIBCFLAGS) -DCPUSTRING='"$(CPU)"' -o $@ -c $<
 
+# The generated .d files.  Absent on a clean tree, which is why this is a
+# hyphenated include: the first build has nothing to read and needs nothing.
+-include $(OBJS:.o=.d)
+
 # ---------------------------------------------------------------- checks
 
 check: check-ptrs check-audits
@@ -294,8 +308,15 @@ check-ptrs:
 # the driver that turns a finding into a non-zero exit, which is what R-TOOL-3
 # actually asks for.  It also labels the two comparative audits "not applicable"
 # rather than "clean" while no donor is in the tree.
+# R-33 / R-VER-15 item 1: `auditems` compares the merged itemlist against
+# **q2pro's baseq2 entries**, not against a donor, because the regression it
+# names is a baseq2 field lost in a merge.  Passed here rather than left to a
+# human, because from Phase 2 on the tree HAS donors in it and "not applicable"
+# would be a vacuous pass.  A missing reference tree is skipped and said so.
+BASEQ2_REF ?= ../q2pro/src/game
+
 check-audits:
-	@$(PYTHON) tools/audit.py --tree src
+	@$(PYTHON) tools/audit.py --tree src --donor baseq2=$(BASEQ2_REF)
 
 # ---------------------------------------------------------------- housekeeping
 

@@ -60,7 +60,7 @@ byte P_DamageModifier(edict_t *ent)
 //ROGUE
 //========
 
-static void P_ProjectSource(gclient_t *client, vec3_t point, vec3_t distance, vec3_t forward, vec3_t right, vec3_t result)
+void P_ProjectSource(gclient_t *client, vec3_t point, vec3_t distance, vec3_t forward, vec3_t right, vec3_t result)
 {
     vec3_t  _distance;
 
@@ -503,7 +503,11 @@ A generic function to handle the basics of weapon thinking
 #define FRAME_IDLE_FIRST        (FRAME_FIRE_LAST + 1)
 #define FRAME_DEACTIVATE_FIRST  (FRAME_IDLE_LAST + 1)
 
-static void Weapon_Generic(edict_t *ent, int FRAME_ACTIVATE_LAST, int FRAME_FIRE_LAST, int FRAME_IDLE_LAST, int FRAME_DEACTIVATE_LAST, const int *pause_frames, const int *fire_frames, void (*fire)(edict_t *ent))
+// Threewave splits Weapon_Generic in two: the body keeps the name
+// Weapon_Generic2 and a new Weapon_Generic wraps it to run the frame a second
+// time under the haste tech.  Kept as the donor has it -- the wrapper is a
+// no-op in every other ruleset, because CTFApplyHaste() is.
+static void Weapon_Generic2(edict_t *ent, int FRAME_ACTIVATE_LAST, int FRAME_FIRE_LAST, int FRAME_IDLE_LAST, int FRAME_DEACTIVATE_LAST, const int *pause_frames, const int *fire_frames, void (*fire)(edict_t *ent))
 {
     int     n;
 
@@ -529,7 +533,9 @@ static void Weapon_Generic(edict_t *ent, int FRAME_ACTIVATE_LAST, int FRAME_FIRE
     }
 
     if (ent->client->weaponstate == WEAPON_ACTIVATING) {
-        if (ent->client->ps.gunframe == FRAME_ACTIVATE_LAST) {
+        // CTF's `instantweap`: no raise animation.  The cvar is registered in
+        // every ruleset and defaults to 0, so this reads as baseq2 elsewhere.
+        if (ent->client->ps.gunframe == FRAME_ACTIVATE_LAST || instantweap->value) {
             ent->client->weaponstate = WEAPON_READY;
             ent->client->ps.gunframe = FRAME_IDLE_FIRST;
             return;
@@ -541,6 +547,10 @@ static void Weapon_Generic(edict_t *ent, int FRAME_ACTIVATE_LAST, int FRAME_FIRE
 
     if ((ent->client->newweapon) && (ent->client->weaponstate != WEAPON_FIRING)) {
         ent->client->weaponstate = WEAPON_DROPPING;
+        if (instantweap->value) {
+            ChangeWeapon(ent);
+            return;
+        }
         ent->client->ps.gunframe = FRAME_DEACTIVATE_FIRST;
 
         if ((FRAME_DEACTIVATE_LAST - FRAME_DEACTIVATE_FIRST) < 4) {
@@ -605,10 +615,19 @@ static void Weapon_Generic(edict_t *ent, int FRAME_ACTIVATE_LAST, int FRAME_FIRE
         for (n = 0; fire_frames[n]; n++) {
             if (ent->client->ps.gunframe == fire_frames[n]) {
                 // FIXME - double should use different sound
-                if (ent->client->quad_framenum > level.framenum)
-                    gi.sound(ent, CHAN_ITEM, gi.soundindex("items/damage3.wav"), 1, ATTN_NORM, 0);
-                else if (ent->client->double_framenum > level.framenum)
-                    gi.sound(ent, CHAN_ITEM, gi.soundindex("misc/ddamage3.wav"), 1, ATTN_NORM, 0);
+                //
+                // Three powerup sounds, one channel.  CTF's strength tech wins
+                // over baseq2's quad and Ground Zero's double: it is the only
+                // one of the three that is also a damage *multiplier* the
+                // opponent has to hear about.  All three are no-ops without
+                // their powerup, so the chain reads the same in every ruleset.
+                if (!CTFApplyStrengthSound(ent)) {
+                    if (ent->client->quad_framenum > level.framenum)
+                        gi.sound(ent, CHAN_ITEM, gi.soundindex("items/damage3.wav"), 1, ATTN_NORM, 0);
+                    else if (ent->client->double_framenum > level.framenum)
+                        gi.sound(ent, CHAN_ITEM, gi.soundindex("misc/ddamage3.wav"), 1, ATTN_NORM, 0);
+                }
+                CTFApplyHasteSound(ent);
 
                 fire(ent);
                 break;
@@ -620,6 +639,41 @@ static void Weapon_Generic(edict_t *ent, int FRAME_ACTIVATE_LAST, int FRAME_FIRE
 
         if (ent->client->ps.gunframe == FRAME_IDLE_FIRST + 1)
             ent->client->weaponstate = WEAPON_READY;
+    }
+}
+
+// CTF's haste tech runs the weapon frame twice, and the grapple runs twice
+// whenever it is not mid-fire so that it retracts at full speed.  Both are
+// false in every other ruleset, so this wrapper costs one predicate call.
+//
+// ONE FIX.  Threewave dereferences `pers.weapon->pickup_name` unguarded here.
+// pers.weapon is NULL for a client between InitClientPersistant and its first
+// ChangeWeapon, and for one that has just dropped its last weapon -- and this
+// runs from Think_Weapon, which ClientBeginServerFrame calls for every live
+// client every frame.  It is a null dereference rather than wrong behaviour, so
+// §7 rule 2 does not protect it: see doc/reconciliation.md R-46, and R-29 for
+// the precedent from Ground Zero.
+void Weapon_Generic(edict_t *ent, int FRAME_ACTIVATE_LAST, int FRAME_FIRE_LAST, int FRAME_IDLE_LAST, int FRAME_DEACTIVATE_LAST, const int *pause_frames, const int *fire_frames, void (*fire)(edict_t *ent))
+{
+    int oldstate = ent->client->weaponstate;
+    bool grapple;
+
+    Weapon_Generic2(ent, FRAME_ACTIVATE_LAST, FRAME_FIRE_LAST,
+                    FRAME_IDLE_LAST, FRAME_DEACTIVATE_LAST, pause_frames,
+                    fire_frames, fire);
+
+    grapple = ent->client->pers.weapon &&
+              Q_stricmp(ent->client->pers.weapon->pickup_name, "Grapple") == 0;
+
+    // holding the grapple: one frame per server frame, no double-step
+    if (grapple && ent->client->weaponstate == WEAPON_FIRING)
+        return;
+
+    if ((CTFApplyHaste(ent) || grapple)
+        && oldstate == ent->client->weaponstate) {
+        Weapon_Generic2(ent, FRAME_ACTIVATE_LAST, FRAME_FIRE_LAST,
+                        FRAME_IDLE_LAST, FRAME_DEACTIVATE_LAST, pause_frames,
+                        fire_frames, fire);
     }
 }
 

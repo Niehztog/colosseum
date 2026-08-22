@@ -23,9 +23,9 @@ because the verdict is about that donor's import.
 
 | donor | q2pro commit | subject | verdict | why |
 |---|---|---|---|---|
-| ctf | `5b10061f4bc2` | Avoid generating missing savegame pointer. | **re-apply** | Savegames are in scope for sp (R-SAVE-1..5) and g_ptrs.c is generated here (R-SAVE-2) |
-| ctf | `372e2503fe47` | Fix crashes due to G_PickTarget() returning NULL. | **re-apply** | R-SEC-4; G_PickTarget is in g_utils.c, which is live |
-| ctf | `322173ff18f4` | Use initializer for aim vector. | **re-apply** | g_weapon.c/monster fire paths are live here |
+| ctf | `5b10061f4bc2` | Avoid generating missing savegame pointer. | re-apply — done | Savegames are in scope for sp (R-SAVE-1..5) and g_ptrs.c is generated here (R-SAVE-2). **landed, Phase 3: m_flyer.c carries no commented `&flyer_move_attack1` and check-ptrs passes** |
+| ctf | `372e2503fe47` | Fix crashes due to G_PickTarget() returning NULL. | re-apply — done | R-SEC-4; G_PickTarget is in g_utils.c, which is live. **landed, Phase 3 -- and it found a THIRD call site. The two the commit names are guarded; turret_brain_link is Ground Zero's own addition, arrived in Phase 2, and dereferenced the result unguarded. See reconciliation.md R-53: re-applying a fix means re-asking its question of the merged tree, not confirming its hunks survived** |
+| ctf | `322173ff18f4` | Use initializer for aim vector. | re-apply — done | g_weapon.c/monster fire paths are live here. **landed, Phase 3: five `vec3_t aim = { ... }` initialisers across m_berserk.c and m_brain.c** |
 | osp | `5b10061f4bc2` | Avoid generating missing savegame pointer. | **re-apply** | Savegames are in scope for sp (R-SAVE-1..5) and g_ptrs.c is generated here (R-SAVE-2) |
 | osp | `ba2814c2a796` | Fix annoying FOV change when exiting SP level. | **re-apply** | SP level exit exists here (R-SP-1) |
 | osp | `05d35f770058` | Fix client disconnect in ss_pic state. | **re-apply** | Client state machine is shared by every ruleset |
@@ -52,7 +52,7 @@ because the verdict is about that donor's import.
 
 ## Summary
 
-26 rows: 3 not-applicable, 21 re-apply, 2 superseded.
+26 rows: 3 not-applicable, 21 re-apply, 2 superseded. 3 of the 21 re-apply rows are landed and recorded in LANDED.
 
 Every row has a verdict, which is the Phase 0 exit condition for
 D9. The `re-apply` rows are the work R-CORE-12 predicted: each

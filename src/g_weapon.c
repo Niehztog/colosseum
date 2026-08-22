@@ -435,7 +435,7 @@ void fire_blueblaster(edict_t *self, vec3_t start, vec3_t dir, int damage, int s
     bolt->s.sound = gi.soundindex("misc/lasfly.wav");
     bolt->owner = self;
     bolt->touch = blaster_touch;
-    bolt->nextthink = level.time + 2;
+    bolt->nextthink = level.framenum + 2 * BASE_FRAMERATE;
     bolt->think = G_FreeEdict;
     bolt->dmg = damage;
     bolt->classname = "bolt";
@@ -688,7 +688,7 @@ void fire_rocket(edict_t *self, vec3_t start, vec3_t dir, int damage, int speed,
     rocket->s.modelindex = gi.modelindex("models/objects/rocket/tris.md2");
     rocket->owner = self;
     rocket->touch = rocket_touch;
-    rocket->nextthink = level.framenum + 8000 / speed * BASE_FRAMERATE;
+    rocket->nextthink = level.framenum + BASE_FRAMERATE * 8000 / speed;
     rocket->think = G_FreeEdict;
     rocket->dmg = damage;
     rocket->radius_dmg = radius_damage;
@@ -883,6 +883,14 @@ void bfg_think(edict_t *self)
 //          && (strcmp(ent->classname, "tesla") != 0))
             continue;
 
+        // CTF: the BFG does not chase your own team.  Reachable only under ctf
+        // -- resp.ctf_team is CTF_NOTEAM for everyone otherwise -- but the
+        // ruleset test states the intent rather than relying on that.
+        if (G_Ruleset() == RULESET_CTF && ent->client &&
+            self->owner->client &&
+            ent->client->resp.ctf_team == self->owner->client->resp.ctf_team)
+            continue;
+
         VectorMA(ent->absmin, 0.5f, ent->size, point);
 
         VectorSubtract(point, self->s.origin, dir);
@@ -946,7 +954,7 @@ void fire_bfg(edict_t *self, vec3_t start, vec3_t dir, int damage, int speed, fl
     bfg->s.modelindex = gi.modelindex("sprites/s_bfg1.sp2");
     bfg->owner = self;
     bfg->touch = bfg_touch;
-    bfg->nextthink = level.framenum + 8000 / speed * BASE_FRAMERATE;
+    bfg->nextthink = level.framenum + BASE_FRAMERATE * 8000 / speed;
     bfg->think = G_FreeEdict;
     bfg->radius_dmg = damage;
     bfg->dmg_radius = damage_radius;
@@ -1034,7 +1042,7 @@ void fire_ionripper(edict_t *self, vec3_t start, vec3_t dir, int damage, int spe
     ion->s.sound = gi.soundindex("misc/lasfly.wav");
     ion->owner = self;
     ion->touch = ionripper_touch;
-    ion->nextthink = level.time + 3;
+    ion->nextthink = level.framenum + 3 * BASE_FRAMERATE;
     ion->think = ionripper_sparks;
     ion->dmg = damage;
     ion->dmg_radius = 100;
@@ -1120,7 +1128,7 @@ void heat_think(edict_t *self)
         VectorScale(vec, 500, self->velocity);
     }
 
-    self->nextthink = level.time + 0.1;
+    self->nextthink = level.framenum + 0.1 * BASE_FRAMERATE;
 }
 
 // RAFAEL
@@ -1143,7 +1151,7 @@ void xatrix_fire_heat(edict_t *self, vec3_t start, vec3_t dir, int damage, int s
     heat->owner = self;
     heat->touch = rocket_touch;
 
-    heat->nextthink = level.time + 0.1;
+    heat->nextthink = level.framenum + 0.1 * BASE_FRAMERATE;
     heat->think = heat_think;
 
     heat->dmg = damage;
@@ -1214,7 +1222,7 @@ void fire_plasma(edict_t *self, vec3_t start, vec3_t dir, int damage, int speed,
 
     plasma->owner = self;
     plasma->touch = plasma_touch;
-    plasma->nextthink = level.time + 8000 / speed;
+    plasma->nextthink = level.framenum + BASE_FRAMERATE * 8000 / speed;
     plasma->think = G_FreeEdict;
     plasma->dmg = damage;
     plasma->radius_dmg = radius_damage;
@@ -1243,14 +1251,14 @@ void Trap_Think(edict_t *ent)
     int     oldlen = 8000;
     vec3_t  forward, right, up;
 
-    if (ent->timestamp < level.time) {
+    if (ent->timestamp < level.framenum) {
         BecomeExplosion1(ent);
         // note to self
         // cause explosion damage???
         return;
     }
 
-    ent->nextthink = level.time + 0.1;
+    ent->nextthink = level.framenum + 0.1 * BASE_FRAMERATE;
 
     if (!ent->groundentity)
         return;
@@ -1305,7 +1313,7 @@ void Trap_Think(edict_t *ent)
                 if (best->watertype & MASK_WATER)
                     best->waterlevel = 1;
 
-                best->nextthink = level.time + 0.1;
+                best->nextthink = level.framenum + 0.1 * BASE_FRAMERATE;
                 best->think = G_FreeEdict;
                 gi.linkentity(best);
             }
@@ -1317,7 +1325,7 @@ void Trap_Think(edict_t *ent)
         }
         ent->s.frame ++;
         if (ent->s.frame == 8) {
-            ent->nextthink = level.time + 1.0;
+            ent->nextthink = level.framenum + 1.0 * BASE_FRAMERATE;
             ent->think = G_FreeEdict;
 
             best = G_Spawn();
@@ -1394,7 +1402,7 @@ void Trap_Think(edict_t *ent)
                 ent->enemy = best;
                 ent->wait = 64;
                 VectorCopy(ent->s.origin, ent->s.old_origin);
-                ent->timestamp = level.time + 30;
+                ent->timestamp = level.framenum + 30 * BASE_FRAMERATE;
                 if (deathmatch->value)
                     ent->mass = best->mass / 4;
                 else
@@ -1438,7 +1446,7 @@ void fire_trap(edict_t *self, vec3_t start, vec3_t aimdir, int damage, int speed
     VectorSet(trap->maxs, 4, 4, 8);
     trap->s.modelindex = gi.modelindex("models/weapons/z_trap/tris.md2");
     trap->owner = self;
-    trap->nextthink = level.time + 1.0;
+    trap->nextthink = level.framenum + 1.0 * BASE_FRAMERATE;
     trap->think = Trap_Think;
     trap->dmg = damage;
     trap->dmg_radius = damage_radius;
@@ -1458,6 +1466,6 @@ void fire_trap(edict_t *self, vec3_t start, vec3_t aimdir, int damage, int speed
         gi.linkentity(trap);
     }
 
-    trap->timestamp = level.time + 30;
+    trap->timestamp = level.framenum + 30 * BASE_FRAMERATE;
 
 }

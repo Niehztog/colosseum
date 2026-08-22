@@ -656,7 +656,7 @@ bool M_CheckAttack(edict_t *self)
                         if (level.time < self->monsterinfo.attack_finished) {
                             return false;
                         }
-                        if (level.time < (self->monsterinfo.trail_framenum + self->monsterinfo.blind_fire_delay)) {
+                        if (level.framenum < (self->monsterinfo.trail_framenum + self->monsterinfo.blind_fire_delay * BASE_FRAMERATE)) {
                             // wait for our time
                             return false;
                         } else {
@@ -865,7 +865,7 @@ static void ai_run_slide(edict_t *self, float distance)
     // flyer (which has FL_FLY) and never for any non-flyer carrying any other
     // flag.  The jerkiness smoothing has therefore never operated.
     //
-    // Behaviour preserved, grouping made explicit.  ง7 rule 2 gives the donor
+    // Behaviour preserved, grouping made explicit.  ยง7 rule 2 gives the donor
     // its own feature, and turning the clamp on would change how every Ground
     // Zero monster sidesteps -- a gameplay change disguised as a warning fix.
     // Recorded in doc/reconciliation.md R-30.  Found by clang; gcc is silent.
@@ -1278,7 +1278,7 @@ void ai_run(edict_t *self, float dist)
 //PGM
     // if we've been looking (unsuccessfully) for the player for 10 seconds
     // PMM - reduced to 5, makes them much nastier
-    if ((self->monsterinfo.trail_framenum + 5) <= level.time) {
+    if ((self->monsterinfo.trail_framenum + 5 * BASE_FRAMERATE) <= level.framenum) {
         // and we haven't checked for valid hint paths in the last 10 seconds
         if ((self->monsterinfo.last_hint_framenum + 10 * BASE_FRAMERATE) <= level.framenum) {
             // check for hint_paths.

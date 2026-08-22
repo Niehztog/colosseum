@@ -137,7 +137,7 @@ void dabeam_hit(edict_t *self)
     }
 
     VectorCopy(tr.endpos, self->s.old_origin);
-    self->nextthink = level.time + 0.1;
+    self->nextthink = level.framenum + 0.1 * BASE_FRAMERATE;
     self->think = G_FreeEdict;
 
 }
@@ -173,7 +173,7 @@ void monster_dabeam(edict_t *self)
         G_SetMovedir(self->s.angles, self->movedir);
 
     self->think = dabeam_hit;
-    self->nextthink = level.time + 0.1;
+    self->nextthink = level.framenum + 0.1 * BASE_FRAMERATE;
     VectorSet(self->mins, -8, -8, -8);
     VectorSet(self->maxs, 8, 8, 8);
     gi.linkentity(self);

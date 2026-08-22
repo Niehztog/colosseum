@@ -657,7 +657,7 @@ void target_mal_laser_on(edict_t *self)
     self->spawnflags |= 0x80000001;
     self->svflags &= ~SVF_NOCLIENT;
     // target_laser_think (self);
-    self->nextthink = level.time + self->wait + self->delay;
+    self->nextthink = level.framenum + (self->wait + self->delay) * BASE_FRAMERATE;
 }
 
 void target_mal_laser_off(edict_t *self)
@@ -679,7 +679,7 @@ void target_mal_laser_use(edict_t *self, edict_t *other, edict_t *activator)
 void mal_laser_think(edict_t *self)
 {
     target_laser_think(self);
-    self->nextthink = level.time + self->wait + 0.1;
+    self->nextthink = level.framenum + (self->wait + 0.1) * BASE_FRAMERATE;
     self->spawnflags |= 0x80000000;
 }
 
@@ -722,7 +722,7 @@ void SP_target_mal_laser(edict_t *self)
     VectorSet(self->mins, -8, -8, -8);
     VectorSet(self->maxs, 8, 8, 8);
 
-    self->nextthink = level.time + self->delay;
+    self->nextthink = level.framenum + self->delay * BASE_FRAMERATE;
     self->think = mal_laser_think;
 
     self->use = target_mal_laser_use;

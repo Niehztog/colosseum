@@ -553,6 +553,11 @@ extern void chick_walk(edict_t *);
 extern void commander_body_drop(edict_t *);
 extern void commander_body_think(edict_t *);
 extern void commander_body_use(edict_t *, edict_t *, edict_t *);
+extern void CTFDropFlagThink(edict_t *);
+extern void CTFDropFlagTouch(edict_t *, edict_t *, cplane_t *, csurface_t *);
+extern void CTFFlagSetup(edict_t *);
+extern void CTFFlagThink(edict_t *);
+extern void CTFGrappleTouch(edict_t *, edict_t *, cplane_t *, csurface_t *);
 extern void dabeam_hit(edict_t *);
 extern void DBall_BallDie(edict_t *, edict_t *, edict_t *, int, vec3_t);
 extern void DBall_BallPain(edict_t *, edict_t *, float, int);
@@ -765,6 +770,7 @@ extern void MegaHealth_think(edict_t *);
 extern void misc_banner_think(edict_t *);
 extern void misc_blackhole_think(edict_t *);
 extern void misc_blackhole_use(edict_t *, edict_t *, edict_t *);
+extern void misc_ctf_banner_think(edict_t *);
 extern void misc_deadsoldier_die(edict_t *, edict_t *, edict_t *, int, vec3_t);
 extern void misc_easterchick2_think(edict_t *);
 extern void misc_easterchick_think(edict_t *);
@@ -805,6 +811,7 @@ extern void Nuke_Think(edict_t *);
 extern void object_repair_dead(edict_t *);
 extern void object_repair_fx(edict_t *);
 extern void object_repair_sparks(edict_t *);
+extern void old_teleporter_touch(edict_t *, edict_t *, cplane_t *, csurface_t *);
 extern void orb_think(edict_t *);
 extern void parasite_attack(edict_t *);
 extern void parasite_die(edict_t *, edict_t *, edict_t *, int, vec3_t);
@@ -869,6 +876,7 @@ extern void soldierh_walk(edict_t *);
 extern void SP_CreateCoopSpots(edict_t *);
 extern void SP_FixCoopSpots(edict_t *);
 extern void spawngrow_think(edict_t *);
+extern void SpawnTechs(edict_t *);
 extern void sphere_explode(edict_t *, edict_t *, edict_t *, int, vec3_t);
 extern void sphere_if_idle_die(edict_t *, edict_t *, edict_t *, int, vec3_t);
 extern void sphere_think_explode(edict_t *);
@@ -918,6 +926,7 @@ extern void target_lightramp_use(edict_t *, edict_t *, edict_t *);
 extern void target_mal_laser_use(edict_t *, edict_t *, edict_t *);
 extern void target_steam_start(edict_t *);
 extern void target_string_use(edict_t *, edict_t *, edict_t *);
+extern void TechThink(edict_t *);
 extern void teleporter_touch(edict_t *, edict_t *, cplane_t *, csurface_t *);
 extern void tesla_activate(edict_t *);
 extern void tesla_die(edict_t *, edict_t *, edict_t *, int, vec3_t);
@@ -1044,6 +1053,9 @@ const save_ptr_t save_ptrs[] = {
 { P_think, button_return },
 { P_think, commander_body_drop },
 { P_think, commander_body_think },
+{ P_think, CTFDropFlagThink },
+{ P_think, CTFFlagSetup },
+{ P_think, CTFFlagThink },
 { P_think, dabeam_hit },
 { P_think, DBall_BallRespawn },
 { P_think, defender_think },
@@ -1079,6 +1091,7 @@ const save_ptr_t save_ptrs[] = {
 { P_think, MegaHealth_think },
 { P_think, misc_banner_think },
 { P_think, misc_blackhole_think },
+{ P_think, misc_ctf_banner_think },
 { P_think, misc_easterchick2_think },
 { P_think, misc_easterchick_think },
 { P_think, misc_eastertank_think },
@@ -1108,6 +1121,7 @@ const save_ptr_t save_ptrs[] = {
 { P_think, SP_CreateCoopSpots },
 { P_think, SP_FixCoopSpots },
 { P_think, spawngrow_think },
+{ P_think, SpawnTechs },
 { P_think, sphere_think_explode },
 { P_think, stationarymonster_start_go },
 { P_think, stationarymonster_triggered_spawn },
@@ -1121,6 +1135,7 @@ const save_ptr_t save_ptrs[] = {
 { P_think, target_laser_think },
 { P_think, target_lightramp_think },
 { P_think, target_steam_start },
+{ P_think, TechThink },
 { P_think, tesla_activate },
 { P_think, tesla_think },
 { P_think, tesla_think_active },
@@ -1162,6 +1177,8 @@ const save_ptr_t save_ptrs[] = {
 { P_touch, blaster2_touch },
 { P_touch, blaster_touch },
 { P_touch, button_touch },
+{ P_touch, CTFDropFlagTouch },
+{ P_touch, CTFGrappleTouch },
 { P_touch, DBall_BallTouch },
 { P_touch, DBall_GoalTouch },
 { P_touch, DBall_SpeedTouch },
@@ -1180,6 +1197,7 @@ const save_ptr_t save_ptrs[] = {
 { P_touch, misc_viper_bomb_touch },
 { P_touch, mutant_jump_touch },
 { P_touch, nuke_bounce },
+{ P_touch, old_teleporter_touch },
 { P_touch, path_corner_touch },
 { P_touch, plasma_touch },
 { P_touch, point_combat_touch },

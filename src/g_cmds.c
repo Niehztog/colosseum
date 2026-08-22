@@ -66,6 +66,14 @@ static void SelectNextItem(edict_t *ent, int itflags)
 
     cl = ent->client;
 
+    // R-MENU-4: menu input is consumed before anything else can interpret the
+    // same key.  The menu owner decides which engine sees it.
+    if (G_MenuActive(ent)) {
+        if (cl->menu_owner == MENU_CTF)
+            ctf_PMenu_Next(ent);
+        return;
+    }
+
     if (cl->chase_target) {
         ChaseNext(ent);
         return;
@@ -96,6 +104,14 @@ static void SelectPrevItem(edict_t *ent, int itflags)
     const gitem_t   *it;
 
     cl = ent->client;
+
+    // R-MENU-4: menu input is consumed before anything else can interpret the
+    // same key.  The menu owner decides which engine sees it.
+    if (G_MenuActive(ent)) {
+        if (cl->menu_owner == MENU_CTF)
+            ctf_PMenu_Prev(ent);
+        return;
+    }
 
     if (cl->chase_target) {
         ChasePrev(ent);
@@ -419,6 +435,13 @@ static void Cmd_Drop_f(edict_t *ent)
     const gitem_t   *it;
     char        *s;
 
+    // CTF: `drop tech` drops whichever tech you hold, since the four techs have
+    // four classnames and the player has one key bound.
+    if (Q_stricmp(gi.args(), "tech") == 0 && (it = CTFWhat_Tech(ent)) != NULL) {
+        it->drop(ent, it);
+        return;
+    }
+
     s = gi.args();
     it = FindItem(s);
     if (!it) {
@@ -473,8 +496,24 @@ static void Cmd_Inven_f(edict_t *ent)
     cl->showscores = false;
     cl->showhelp = false;
 
+    // R-MENU-4 again: `inven` closes an open menu rather than opening the
+    // inventory behind it.
+    if (G_MenuActive(ent)) {
+        G_MenuClose(ent);
+        cl->update_chase = true;
+        return;
+    }
+
     if (cl->showinventory) {
         cl->showinventory = false;
+        return;
+    }
+
+    // ...and under ctf, with no team yet, `inven` is how you reach the join
+    // menu.  R-RA-4 wants the same for the arena menu in Phase 4, which is why
+    // the test is on the ruleset here rather than inside CTFOpenJoinMenu.
+    if (G_Ruleset() == RULESET_CTF && cl->resp.ctf_team == CTF_NOTEAM) {
+        CTFOpenJoinMenu(ent);
         return;
     }
 
@@ -495,6 +534,12 @@ Cmd_InvUse_f
 static void Cmd_InvUse_f(edict_t *ent)
 {
     const gitem_t   *it;
+
+    if (G_MenuActive(ent)) {
+        if (ent->client->menu_owner == MENU_CTF)
+            ctf_PMenu_Select(ent);
+        return;
+    }
 
     ValidateSelectedItem(ent);
 
@@ -682,6 +727,11 @@ Cmd_Kill_f
 */
 static void Cmd_Kill_f(edict_t *ent)
 {
+    // An observer has nothing to kill.  Threewave tests `solid != SOLID_NOT`,
+    // which also catches a dead player -- who should be able to re-suicide.
+    if (G_IsObserver(ent))
+        return;
+
     if ((level.framenum - ent->client->respawn_framenum) < 5 * BASE_FRAMERATE)
         return;
     ent->flags &= ~FL_GODMODE;
@@ -712,6 +762,8 @@ static void Cmd_PutAway_f(edict_t *ent)
     ent->client->showscores = false;
     ent->client->showhelp = false;
     ent->client->showinventory = false;
+    G_MenuClose(ent);
+    ent->client->update_chase = true;
 }
 
 static int PlayerSort(void const *a, void const *b)
@@ -822,7 +874,11 @@ static void Cmd_Wave_f(edict_t *ent)
     }
 }
 
-static bool FloodProtect(edict_t *ent)
+// §7 rule 6 keeps ONE flood check and Q2PRO's is the one; Threewave renamed it
+// CheckFlood and added a second call in Cmd_Say_f, which charges the counter
+// twice for one message.  The name and the single call stay; g_ctf.c's
+// CTFSay_Team calls this one (R-CORE-13: linkage follows what calls what).
+bool FloodProtect(edict_t *ent)
 {
     int i, msgs = flood_msgs->value;
     gclient_t *cl = ent->client;
@@ -980,8 +1036,14 @@ void ClientCommand(edict_t *ent)
         Cmd_Say_f(ent, false, false);
         return;
     }
-    if (Q_stricmp(cmd, "say_team") == 0) {
-        Cmd_Say_f(ent, true, false);
+    if (Q_stricmp(cmd, "say_team") == 0 || Q_stricmp(cmd, "steam") == 0) {
+        // CTF has its own team chat: it prefixes the team name, reports flag
+        // and tech state through `%` macros, and reaches only the sender's
+        // team rather than everyone with a matching skin.
+        if (G_Ruleset() == RULESET_CTF)
+            CTFSay_Team(ent, gi.args());
+        else
+            Cmd_Say_f(ent, true, false);
         return;
     }
     if (Q_stricmp(cmd, "score") == 0) {
@@ -1038,8 +1100,49 @@ void ClientCommand(edict_t *ent)
         Cmd_PutAway_f(ent);
     else if (Q_stricmp(cmd, "wave") == 0)
         Cmd_Wave_f(ent);
-    else if (Q_stricmp(cmd, "playerlist") == 0)
-        Cmd_PlayerList_f(ent);
+    // CTF's client commands.  Gated on the ruleset rather than registered
+    // conditionally, so that a player who types `team` under dm gets the chat
+    // fallback rather than silence.
+    else if (G_Ruleset() == RULESET_CTF && Q_stricmp(cmd, "team") == 0)
+        CTFTeam_f(ent);
+    else if (G_Ruleset() == RULESET_CTF && Q_stricmp(cmd, "id") == 0)
+        CTFID_f(ent);
+    else if (G_Ruleset() == RULESET_CTF && Q_stricmp(cmd, "yes") == 0)
+        CTFVoteYes(ent);
+    else if (G_Ruleset() == RULESET_CTF && Q_stricmp(cmd, "no") == 0)
+        CTFVoteNo(ent);
+    else if (G_Ruleset() == RULESET_CTF && Q_stricmp(cmd, "ready") == 0)
+        CTFReady(ent);
+    else if (G_Ruleset() == RULESET_CTF && Q_stricmp(cmd, "notready") == 0)
+        CTFNotReady(ent);
+    else if (G_Ruleset() == RULESET_CTF && Q_stricmp(cmd, "ghost") == 0)
+        CTFGhost(ent);
+    else if (G_Ruleset() == RULESET_CTF && Q_stricmp(cmd, "admin") == 0)
+        CTFAdmin(ent);
+    else if (G_Ruleset() == RULESET_CTF && Q_stricmp(cmd, "stats") == 0)
+        CTFStats(ent);
+    else if (G_Ruleset() == RULESET_CTF && Q_stricmp(cmd, "warp") == 0)
+        CTFWarp(ent);
+    else if (G_Ruleset() == RULESET_CTF && Q_stricmp(cmd, "boot") == 0)
+        CTFBoot(ent);
+    else if (G_Ruleset() == RULESET_CTF && Q_stricmp(cmd, "observer") == 0)
+        CTFObserver(ent);
+    // R-CTF-3's offhand hook.  Two commands rather than a +hook alias, which is
+    // what uGladQ2 v0.97u did and what every 1999 config binds.
+    else if (G_Ruleset() == RULESET_CTF && Q_stricmp(cmd, "hookon") == 0)
+        CTFHook_f(ent);
+    else if (G_Ruleset() == RULESET_CTF && Q_stricmp(cmd, "hookoff") == 0)
+        CTFUnhook_f(ent);
+    else if (Q_stricmp(cmd, "playerlist") == 0) {
+        // Threewave DELETES baseq2's Cmd_PlayerList_f and replaces it; R-CORE-8's
+        // rule applies to functions as well as files, so both survive and the
+        // ruleset picks.  CTF's adds team, ghost code and ready state; baseq2's
+        // reports `resp.spectator`, which CTF has no equivalent for.
+        if (G_Ruleset() == RULESET_CTF)
+            CTFPlayerList(ent);
+        else
+            Cmd_PlayerList_f(ent);
+    }
     else if (Q_stricmp(cmd, "entcount") == 0)       // PGM
         Cmd_Ent_Count_f(ent);                       // PGM
     else if (Q_stricmp(cmd, "disguise") == 0) {     // PGM

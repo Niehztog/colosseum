@@ -9,7 +9,7 @@ base, and restores full Gladiator Bot command and botlib support on top of it.
 | **Project name** | Colosseum |
 | **Artifact** | `game<cpu>.so` / `game<cpu>.dll` (Q2PRO game API), gamedir `colosseum` |
 | **Working directory** | `<workspace>/colosseum` |
-| **Spec version** | 1.10 — 2026-08-21 |
+| **Spec version** | 1.15 — 2026-08-22 |
 | **Status** | Draft for review. No code written yet. |
 | **Amendment 1.1** | Re-measured against the three replay bundles (§3.2), the two donor port write-ups and `q2pro/doc/mission-packs.md`. Changed: §3, §3.1, new §3.2, D8–D9, R-CORE-8, R-CORE-10, R-CORE-11, new R-CORE-12/13, R-MODE-5, R-MP-5, new R-KEY group, R-SAVE-3, R-OSP-7, new R-SEC-8/9, R-CONV-1, new R-TOOL group, §7 rules 1/6/9, §9 phase order, §10, §11, Q1/Q2/Q9 closed |
 | **Amendment 1.2** | Thirty-one design decisions settled with the author; §12 closed and emptied. **Scope cut:** Colored Hitman and `sp_dm` dropped entirely. **Posture:** public server software, released by staged exposure. **§7 rule 6 gains four exemptions** — observers, map rotation, stats logging and menus are per-ruleset. Eleven corrections of fact, the largest being that `gladq2_src` is *not* `gladiator-bot-restored/game` and that the harness scratchpad was never lost. Changed: §1.1, §2, §3, §3.2, §5.2, R-CORE-14, R-MODE-2/4/5/7, R-BOT-1/4/6/29, R-MENU-1/2, R-EXTRA-6, R-SP-6 struck, §6.7 struck, R-OSP-7, R-COMPAT-6, R-BUILD-5, §7 rule 6, §9 re-cut to nine phases, §10, §11, §12, Appendix B |
@@ -21,6 +21,11 @@ base, and restores full Gladiator Bot command and botlib support on top of it.
 | **Amendment 1.8** | **Phase 2's exit criteria are met: all three campaigns run.** Rogue merged — 45 shared files, 20 donor-only, 12,263 diff lines, 25 files conflict-free and 60 hunks resolved. `rmine1` runs 74 Ground Zero monsters, all four `xatrix` × `rogue` combinations boot, savegames round-trip in each. **One correction of fact and one honest gap.** R-CORE-11 names `monster_start` as the content-flavour latch point and **that is too late** — every `SP_monster_*` assigns its frame tables before calling it, so a gate there would read 0, always pick baseq2 and never crash; the latch moved to `ED_CallSpawn`. And **R-CORE-11's per-monster gating is not implemented**: Ground Zero *rewrites* seven of baseq2's monsters rather than adding to them, so with `rogue 0` those seven still behave as Ground Zero — stated plainly rather than left implied. Also: a spawnflag-bit collision between the mission packs on `trigger_push` (both claim `0x02`), resolved by the entity's own keys; three latent Ground Zero bugs preserved under §7 rule 2 and one *fixed* because it was undefined behaviour rather than wrong behaviour. Changed: R-CORE-11, R-CORE-11a, R-MP-5, R-VER-15, §9 Phase 2, §11 risk 2a. |
 | **Amendment 1.9** | **R-CORE-11 implemented; Phase 2 complete.** Both evasion sets ship for the six monsters Ground Zero rewrote and the spawn-time latch selects between them — verified by observation, not assertion: `base1` runs 17 monsters on baseq2's dodge with `rogue 0` and 17 on Ground Zero's with `rogue 1`, and `badlands` runs 58 on baseq2's, which is Reckoning maps no longer inheriting Ground Zero's AI. Savegames round-trip in every configuration. **One implementation constraint worth recording as a rule:** the gate must be an `if`/`else` with two literal assignments, because `genptr.py` builds `save_ptrs[]` by scanning source text — a ternary registers neither table and a token-pasting macro registers a fragment, either of which yields a library that plays correctly and then cannot reload a savegame. Changed: R-CORE-11, R-SAVE-2, §9 Phase 2, §11 risk 2b. |
 | **Amendment 1.10** | **R-CORE-11 fully gated; the residual is closed.** 1.9 left "about eleven frame tables across five monsters" ungated. That figure was **mismeasured**: it came from `git diff`'s `@@` hunk-header labels, which name the symbol *preceding* a hunk rather than the changed one, so three tables were counted that had only been context lines. Re-measured by extracting each table body and comparing directly: 18 tables differ, of which 5 across 4 monsters are genuine replacements — and all 5 are now gated at all 9 assignment sites. The rest are pure additions or bookkeeping, with the reasoning recorded per kind. `gates.py` gained a completeness check that fails the build on an ungated site or a ternary assignment; it first shipped with a flaw that made it pass its own negative control, described in `doc/reconciliation.md` R-35. Changed: R-CORE-11b, §9 Phase 2, §11 risk 2c. |
+| **Amendment 1.11** | **Phase 3 opens with the slots, because the CTF merge needs somewhere to put 17, 18 and 19.** The per-ruleset slot map (R-OSP-7) and the composed statusbar (R-OSP-7a) are implemented and observed: `sv slots` (new, R-VER-19) prints the resolved map and the emitted bar, and the `dm` bar it emits is **token-identical** to the two literals it replaced. **Three findings changed requirements.** R-OSP-7 clause 3's "one header" and clause 7's "a tool checks it" conflict in C, resolved by an X-macro both the compiler and `slotkind.py` read — and the tool takes the column order from the macro signature rather than assuming it. CTF's timer pair goes to **32/33**, which clause 6 permits as droppable content and which upstream could not do at all with a literal bar, so under `ctf` the second powerup timer now displays on an extended server where before it could not display anywhere. And `slotkind.py`'s "known gap" was **not a missing special case but a missing question**: the old check keyed on *kind* and found RA2's slot 20 only because its two claimants happened to disagree about kind; the availability check keys on the **number** and now reports 17, 18 *and* 19 on `q2pro/src/ctf` where it reported one. Its five controls ship inside the tool and run in `make check`. Changed: R-OSP-7 clauses 3/4/6/7, R-OSP-7a, R-TOOL-1, new R-VER-19, §9 Phase 3. |
+| **Amendment 1.12** | **Phase 3 complete: Threewave CTF runs on the dispatch.** 20 shared files merged, 4 donor-only into `src/ctf/`, and **63% of the donor's 265 hunks against the spine are stale copies of id's code rather than CTF's feature** — §7 rule 1 decides all 167 without a judgement call. **Five corrections of fact, four findings that needed running and four that needed reading.** R-CTF-1 says "all five techs"; Threewave 1.52 ships **four** (`item_tech1..4`) and five is tourney's rune count. R-CTF-5 understates the problem: Threewave does not merely lack baseq2's spectator flag, it **deletes** both fields, the userinfo key, the password, `maxspectators`, `spectator_respawn()` and `GetChaseTarget()` — resolved by one named predicate, `G_IsObserver()`, at thirteen sites. **The donor's CTF cannot start a level** — built from upstream's own build system and run, not inferred: `CTFInit()` is called by nothing in `port_ctf` or in `q2pro/src/ctf`, so `ctf`, `competition`, `capturelimit` and `instantweap` are all null and the first `+map` faults in `SP_worldspawn`. The `xatrix` and `rogue` packs from the same branch and build boot clean, which is the control that makes it the CTF library rather than the branch. **`game.maxclients = game.maxclients;` has been in `src/g_main.c` since Phase 2** — a self-assignment that leaves maxclients at 0, invisible to every static check and to every dedicated-server boot with no client connecting. Measured across all five trees it is a **replay artefact**: `port_ctf` and `port_rogue` carry it, `baseq2` and `port_xatrix` do not, and upstream's three worktrees all read `maxclients->value` — so Colosseum took it from the rogue merge, and §7 rule 1 is what stopped `port_ctf` re-introducing it. The composed statusbar dropped an `if` while keeping its body under `ctf`, which 1.11's token-identical `dm` bar could not see. Read rather than run: `CTFObserver` resets the grapple for the client who is *already* an observer, so a player who types `observer` mid-swing keeps being winched; `ctf_PMenu_Close` left `menu_owner` set at eighteen call sites; baseq2's `spectator` userinfo key was still reachable under `ctf`, giving one client two observer systems; and re-applying `372e2503fe47` found a **third** unguarded `G_PickTarget` site that Phase 2 had introduced (R-VER-10 now records which re-apply rows are landed). And **the Makefile had no header dependencies**, so adding a `level_locals_t` field rebuilt nothing and the next `make` linked objects compiled against two struct layouts, cleanly: new R-BUILD-9. Q14 is answered — `ctf` × monsters runs on all three campaigns, twelve boots clean, and the reason is that CTF never edited the monster code, it deleted it. **And §7 rule 6's grapple count is wrong**: it says three implementations, and measuring finds **one** — `osp_hook.c` sets `CTF_GRAPPLE_STATE_FLY` by name and RA2 declares `ctf_grapplestate` and carries `CTFResetGrapple` verbatim, so both are Threewave's forked. The resolution is one core plus three tunable sets rather than a merit choice between designs. Changed: R-CTF-1/3/5/7, R-MENU-1/3/4/5, R-CORE-14, new R-BUILD-9, R-VER-2, R-VER-10, new R-VER-19 (1.11), §7 rule 6, §9 Phase 3. |
+| **Amendment 1.13** | **Real Threewave assets, and the first check that waits rather than counts.** All nine shipped CTF maps boot with both flags at base, all four techs spawned, team spawn points and banners present — R-CTF-1 observed rather than argued. Getting there found the **worst defect in the tree**: `nextthink` is an `int` frame count and `src/g_phys.c`'s `SV_RunThink` compares it against `level.time` in *seconds*, so **every think in the game fires ten times late** — doors, plats, item respawns, trigger delays, every monster animation frame. Measured exactly: a spawner with `nextthink = 20` fired at frame ~200. It is **upstream's**, live in the shipped Ground Zero pack (`q2pro/src/rogue`), and Colosseum inherited it at `d3c6d83`; `port_ctf` and `port_xatrix` both have the correct version, so the CTF merge did not cause it and §7 rule 1 would have refused it. A second, opposite upstream defect collides with it: Xatrix has 43 `nextthink = level.time + N` sites, identical in `q2pro/src/xatrix`, which are correct only under the reverted comparison. **Recorded, not patched** — fixing one half moves the breakage, so it wants one pass with the full matrix behind it. And it explains a gap in the whole evidence base: every check here is static or a spawn-time census, and all of Phase 2's observations remain true with all timing 10× wrong. Changed: R-VER-1, R-VER-2, new R-VER-20, §9 Phase 3 evidence, §11 new risk 20. |
+| **Amendment 1.14** | **Upstream's bugfix commit imported (`q2pro@38873740`), and it found more of the class than 1.13 did.** 32 files, 111 hunks, mapped hunk-by-hunk because upstream ships four separate libraries and this is one merged tree — a fix to `src/xatrix/g_func.c` lands in our `src/g_func.c`. **R-54 is fixed**: `SV_RunThink` restored *and* Xatrix's 43 `nextthink = level.time` sites converted with `tools/nextthink.py`, whose output is byte-identical to upstream's. Beyond it: `trail_framenum` read against seconds at five sites, plat2's `last_move_framenum`, the trap's `timestamp` (read **and** both writes), the intermittent `trigger_push` fed from two clocks at once, the intermission wait at 0.5s, the drowning gasp at 1.1s, two `/ FRAMETIME` quad-drop timeouts, and a `8000 / speed * BASE_FRAMERATE` precedence bug in three projectiles. **Three corrections of our own work.** Phase 2 *silenced* six `abs()`-on-float defects with an `(int)` cast rather than fixing them — the cast truncates before taking the magnitude, which was the bug. Phase 3 kept `BecomeExplosion1`'s wrong-team message under §7 rule 2; §7 rule 7 makes q2pro's fix cumulative, so it is ours. And Phase 3's `CTFObserver` fix is replaced by upstream's, which restores the braces, message and `return` the 1.52 release had — a better reading of the original than my inference. **One defect the import could not contain**, because it exists only in a merged tree: `attack_finished` is `float` here (rogue's declaration won R-CORE-6's union) while three Gekk sites write frames, agreeing with each other and disagreeing with the shared `M_CheckAttack` every monster reaches. New `tools/units.py` (R-VER-21) is upstream's two greps plus that third, merged-tree check, with three controls; new `tools/encoding.py` because writing files as latin-1 broke `grep` silently — twice. R-VER-20 is now two real temporal assertions: techs at frame 31 not 221, and `base1`'s gib freed by frame 331. Changed: R-VER-1, new R-VER-21, §9 Phase 3 evidence, §11 risk 20. |
+| **Amendment 1.15** | **The harness has a client, and the first run of it dropped the server.** Every phase so far recorded "needs a client" as a property of the machine; it was a property of nobody having tried. q2pro's own client runs under `Xvfb` on Mesa's software GLX, `cl_beginmapcmd` executes a console script the moment the map loads, `wait N` paces it in frames and `viewpos` makes movement observable — a driven player went from `(1744 480 686)` to `(1528 480 654)` on `q2ctf1` having joined the RED team on the way. `tools/play.sh` is that, parameterised (new R-VER-23). **Its first run found `ERROR: PF_configstring: bad index: 13118`** — `CS_GENERAL` exactly. This library is compiled with the protocol extensions so the constant is 13118, but their *use* is negotiated at runtime and `g_protocol_extensions` **defaults to 0**, where the engine's end is 2080: so a stock `ctf` server died on the first client connect, on every connect, and three phases of static checks and boots could not see it because none of them was ever a player. Three sites fixed to `game.csr.general`, the runtime remap the line four above already used; a fourth of the same kind found by reading — `CONFIG_CTF_MATCH`/`CONFIG_CTF_TEAMINFO` compile to 57/58 and land inside the old model table — fixed to `game.csr.airaccel`. All four are upstream's verbatim, and the control that would have settled it by running cannot be run: upstream's own CTF still segfaults on `+map` (R-42, unchanged by the `38873740` import). And Phase 3's last mechanised residue lands: `tools/allocpairs.py` (new R-VER-22), the matched-pair allocator audit R-55 asked for, shaped like `units.py` because the unit that has to agree is the pointer — a libc ban would fail the build on `g_main.c`'s correct inherited `strdup`/`free` pair, and a file-level check describes that same one file. Changed: R-CTF-6, new R-VER-22, new R-VER-23, R-VER-3, §9 Phase 3 evidence, §11 risk 21. `doc/reconciliation.md` R-62..R-63. |
 
 **Why "Colosseum".** The Colosseum is the arena the gladiators fought in, and it
 was one venue that hosted many different kinds of games. That is exactly this
@@ -654,6 +659,21 @@ anyway. There is no `src/ch/` — Colored Hitman is out of scope (N7).
   `g_local.h` with a row per bit in `doc/reconciliation.md`. Four names for two
   bits is how a merge silently makes every bot an observer.
 
+  *Widened in 1.12: the rule is about **value** collisions, not only `FL_` bits.*
+  CTF brought three more, in three different numbering spaces, and they resolve
+  three different ways — which is the useful part, because "allocate once in one
+  table" is not a single remedy:
+
+  | value | claimants | resolution |
+  |---|---|---|
+  | `IT_TECH` = `64` = `BIT(6)` | Ground Zero's `IT_MELEE` | **moved** to `BIT(8)`. Item flags are game-internal |
+  | `MOD_GRAPPLE` = `34` | Xatrix's `MOD_RIPPER` | **moved** to `56`. `meansOfDeath` appears in no protocol or savegame |
+  | `WEAP_GRAPPLE` = `12` | Xatrix's `WEAP_PHALANX`, Ground Zero's `WEAP_DISRUPTOR` | **left alone.** `weapmodel` is packed into `s.skinnum` as an index into the *player model's own* weapon list, so it is a per-content-set client asset index rather than a game identifier. The two mission packs already collide there and Phase 2 shipped it |
+
+  The third row is the one worth keeping: a value collision is only a defect if
+  the two claimants can be live in one namespace at one time, and this one cannot
+  be — the client resolves it against whichever player model is loaded.
+
   *Re-measured in 1.7 against baseq2 + xatrix + rogue, and it is worse than the
   table above: **six** names on those two bits, and Ground Zero holds both.*
 
@@ -1084,6 +1104,15 @@ input:
   everywhere. File and symbol layout is in §5.2. This is the fourth exemption to
   §7 rule 6, for the same reason as the other three: the donors' menus are part
   of the ruleset a player is choosing, not a generic mechanism.
+
+  *One of the four ships as of 1.12* — Threewave's, under `ctf`, at
+  `src/ctf/p_menu.c` with `ctf_PMenu_*` symbols and a `ctf_pmenuhnd_t` that
+  `g_local.h` forward-declares rather than includes. So the **contention** this
+  requirement is really about is not yet observable: R-MENU-2a's "four engines
+  claiming one input channel" needs at least two engines. What is in place now is
+  the part that has to exist *before* the second one arrives — the single owner
+  field and the single open path (R-MENU-3) — because retrofitting arbitration
+  after two engines are live is how two menus end up open at once.
 * **R-MENU-2.** ~~`pmenu_*` and `qmenu_*` are thin adapters over one core.~~
   *Struck in 1.2.* There is no core to adapt to; each engine is itself. What the
   adapter scheme was for — the two incompatible `pmenu_t` layouts, `arg` on the
@@ -1100,11 +1129,37 @@ input:
 * **R-MENU-3.** Exactly one menu owner per client at a time, recorded in
   `gclient_t`. Opening a menu while another is open closes the first and logs
   nothing. Entering the chase camera closes any open menu — the v0.93 fix.
+
+  *Implemented in 1.12* as `gclient_t.menu_owner` plus
+  `G_MenuOpen`/`G_MenuClose`/`G_MenuActive` in `p_hud.c`, beside the other owners
+  of the layout channel. Threewave's per-engine `inmenu` boolean is **not**
+  carried: with four engines that is four answers to a question that must have
+  one. Threewave leaks or dangles its handle in four places — disconnect, spawn,
+  level change, and a second open that only warns — and each is one line here
+  (`doc/reconciliation.md` R-46). The allocation moved to
+  `gi.TagMalloc(TAG_LEVEL)`, which is what put the level-change case in reach of
+  a fix rather than leaving it a leak.
 * **R-MENU-4.** Menu input is consumed in `ClientThink` before weapon and
   movement handling, and the client's own `showscores` is forced off for bots
   in `ClientEndServerFrame` (the v0.91 fix).
+
+  *First half in 1.12:* the four item-cycle and use commands
+  (`invnext`/`invprev`/`invuse`/`inven`) check `G_MenuActive()` before anything
+  else can interpret the same key, and `ClientThink` flushes a pending redraw at
+  the engine's cadence rather than the player's. **The bot half is Phase 6** —
+  there is no bot whose `showscores` could be forced off.
 * **R-MENU-5.** The layout string built by the core respects `MAXSTATUSBAR`
   (1400) and truncates on a whole item, never mid-token.
+
+  *Implemented in 1.12, and it was a real defect rather than a precaution.*
+  Threewave builds into `char string[1400]` with
+  `sprintf(string + strlen(string), …)` and **no bound at all** — 24 entries of
+  40 characters run off the end of a stack buffer whose contents then go to
+  `gi.WriteString`. `q2pro/src/ctf` did not fix it either. Each entry is now
+  composed into its own scratch buffer and appended only if it fits whole, with
+  the position and the text treated as one item: emitting the `yv`/`xv` pair and
+  then dropping the string would move the cursor and draw nothing. The same 1400
+  and the same discipline apply to the composed statusbar (R-OSP-7a).
 
 ### 5.7 Engine features used
 
@@ -1298,6 +1353,27 @@ input:
   So the install instruction is `<homedir>/colosseum/game<cpu>.<ext>`, and
   `README.md` says so. This is a documentation requirement, not an engine
   change (R-ENG-7).
+* **R-BUILD-9.** *The build tracks header dependencies, and a "clean build"
+  claim means `make clean` was run.* `-MMD -MP` in `BASE_CFLAGS` and
+  `-include $(OBJS:.o=.d)` after the compile rule.
+
+  Added in 1.12 because its absence produced the worst failure of the phase.
+  `$(BUILDDIR)/%.o: src/%.c` with no `.h` prerequisites means a change to
+  `g_local.h` rebuilds **nothing**, and the next `make` links objects compiled
+  against two different struct layouts — cleanly, warning-free. Adding
+  `level_locals_t.forcemap` produced a library whose `AI_SetSightClient()`
+  segfaulted on the first frame because one translation unit still had
+  `level.total_goals` where another had `level.sight_client`; the symptom read as
+  memory corruption in game code, it vanished under `gdb` and under ASAN because
+  it was ASLR-sensitive, and a watchpoint blamed an innocent function.
+
+  Two consequences beyond the flags. Every build claim in this project is now
+  from `make clean && make everything`, because an incremental build over a
+  header change is not evidence. And `git stash` is recorded as a build-cache
+  hazard: the stale object survived a `stash -u` experiment that restored the
+  sources with fresh mtimes but left objects only a header dependency could have
+  invalidated.
+
 * **R-BUILD-7.** *Phase 0 needs an engine, and the engine is a prerequisite
   rather than a deliverable.* Colosseum is a game library; nothing in §10 can be
   observed without a Q2PRO that loads it, and the reference machine has **no
@@ -1383,23 +1459,73 @@ struck through and kept.
 
 ### 6.4 R-CTF — Threewave CTF
 
-* **R-CTF-1.** All CTF entities, both flags, all five techs, the grapple and
-  the CTF scoreboard work as in `q2pro/src/ctf`.
+* **R-CTF-1.** All CTF entities, both flags, ~~all five techs~~ **all four
+  techs**, the grapple and the CTF scoreboard work as in `q2pro/src/ctf`.
+  *Corrected in 1.12:* Threewave 1.52 ships **four** — `item_tech1` Disruptor
+  Shield, `item_tech2` Power Amplifier, `item_tech3` Time Accel, `item_tech4`
+  AutoDoc — and `g_ctf.c`'s own `tnames[]` lists four. Five is tourney's *rune*
+  count (R-OSP-7's slot table, `RUNE_RESIST`…`RUNE_VAMPIRE`), which is a
+  different mechanic in a different ruleset.
 * **R-CTF-2.** `capturelimit` ends a match, and it works when `fraglimit` is
   unset — the uGladQ2 v0.97u fix.
 * **R-CTF-3.** The offhand hook is available and switchable with `ctf_hook`
   (uGladQ2 v0.97u); observers cannot fire it. The `laserhook` variant is
   selectable and reported to the brain through the `laserhook` libvar.
+
+  *Implemented in 1.12, except the libvar.* `ctf_hook` defaults to 1 as uGladQ2
+  had it; `hookon`/`hookoff` drive a three-bit latch on the client
+  (`ON`/`TURNOFF`/`FIRED`) and the hook fires from `ClientThink`, which is what
+  makes it offhand — it costs no weapon slot and does not interrupt what the
+  player is holding. "Observers cannot fire it" is `G_IsObserver()` rather than
+  uGladQ2's `solid != SOLID_NOT`, which also catches a *dead* player.
+  `laserhook` selects the beam rendering, which Threewave shipped as
+  `#if 1 //def USE_GRAPPLE_CABLE` — a compile-time choice, and the reason it has
+  to become a cvar is precisely that a compile-time switch cannot be reported to
+  the brain. **The libvar push itself is Phase 6**, with the rest of the
+  ruleset → libvar mapping: there is no botlib to push it to yet, and a check
+  that cannot fail is not a check.
 * **R-CTF-4.** `botctfteam` assigns bots to a team, and it is editable from the
   bot menu (v0.92).
 * **R-CTF-5.** Threewave has no baseq2 `spectator` flag — observers are
   `CTF_NOTEAM` players — so spectator handling and the savegame descriptors
   point at the fields Threewave uses, as the mission-pack port established.
+
+  *Understated, corrected in 1.12.* Threewave does not merely lack the flag: it
+  **deletes** `client_persistant_t.spectator`, `client_respawn_t.spectator`, the
+  `spectator` userinfo key, the spectator password, `maxspectators`,
+  `spectator_respawn()` and `GetChaseTarget()`. Colosseum cannot point at "the
+  fields Threewave uses" and be done, because `dm` and `sp` need baseq2's and
+  R-CORE-6 makes the struct a union. So the *question* is named once —
+  `G_IsObserver()` in `p_hud.c` — and thirteen sites ask it instead of testing a
+  field. Two of those sites are wrong in the donor and the predicate fixes both:
+  `Cmd_Kill_f` tests `solid == SOLID_NOT`, which is also true of a dead player,
+  and `ClientThink` gates the attack button on `movetype != MOVETYPE_NOCLIP`,
+  which is the right set under `ctf` only by coincidence.
 * **R-CTF-6.** Player id display is on by default and shows the team icon
   (uGladQ2 v0.98.2u).
+
+  *1.15: the id view is what carried the defect of R-62.* It needs a player's
+  name without the skin that the `playerskins` configstring carries, so it
+  writes one to `CS_GENERAL + playernum` and puts that **index** in a stat for
+  the client to dereference. Both halves used the compile-time constant while
+  the line four above used `game.csr.playerskins`, and on a server that did not
+  negotiate the protocol extensions — the default — the index is out of range and
+  the server drops on the first connect. All three sites now take the runtime
+  remap. The requirement is unchanged; what is added is that **a configstring
+  number in this library is `game.csr.*`, never a `CS_*` literal**, for any
+  slot the remap moves.
 * **R-CTF-7.** The 1999 CTF bot-model bug fixed in `ClientUserInfoChanged`
   (v0.95) and the CTF userinfo bug (v0.93) must not reappear; both get a
   regression entry.
+
+  *Both entries exist as of 1.12 and both are honestly **partial**.* Each one's
+  trigger is a *client* — a bot in the first case, a userinfo change in the
+  second — and this harness runs a dedicated server with no clients, so the
+  observation waits for R-VER-3's bot matrix in Phase 7. What is discharged now
+  is structural and reviewed: under `ctf`, `CTFAssignSkin` is the only writer of
+  `game.csr.playerskins + n`, reached from the one call site, and
+  `CS_GENERAL + n` is written only there. Recording them as held would be the
+  vacuous pass `audit.py` exists to prevent.
 
 ### 6.5 R-RA — Rocket Arena 2
 
@@ -1515,11 +1641,24 @@ struck through and kept.
      no baseq2 spectator flag (R-CTF-5), and RA2 and tourney qualify through
      their own observer systems;
   3. 18 upward is ruleset-private, one numbering per ruleset, declared in one
-     header — **including `dm`'s own**, which owns 18/19;
+     header — **including `dm`'s own**, which owns 18/19. *Implemented in 1.11*
+     as `src/g_stats.h`'s `STATSLOT_MAP(E)` X-macro: one row per logical stat,
+     one column per ruleset, the kind beside the number, `-1` for absent. The
+     X-macro form is not decoration — clause 3 wants one header and clause 7
+     wants a tool to check it, and in C those pull opposite ways; this is the one
+     text the compiler and `tools/slotkind.py` both read. `arena` and `tourney`
+     inherit `dm`'s column until their own bars land in Phases 4 and 5, per
+     R-MODE-6: a column that renumbers a slot while the bar still says 18 is
+     worse than inheriting, and the checker would have to be told to ignore it;
   4. a **shared mechanic** that needs a private slot in every ruleset declares
      it once per ruleset in that header and is compiled against the ruleset's
      map, never against a bare `#define`. The second powerup timer is the
-     reference case and the only one known today;
+     reference case and the only one known today. *Implemented in 1.11:*
+     `p_hud.c`'s `#define STAT_TIMER2_ICON 18` is gone and the one shared
+     `G_SetStats` writes `G_SetStat(ent, SID_TIMER2_ICON, …)`. An id the active
+     ruleset does not have is a **silent no-op**, not a write to `stats[-1]`,
+     which is what lets shared code stay ignorant of where — or whether — the
+     mechanic landed;
   5. a **modifier** may only take a slot no ruleset it composes with uses —
      ~~which is why Colored Hitman cannot keep its 1999 `STAT_COLOR 30`
      unexamined (R-CH-4)~~. *R-CH-4 is struck in 1.2 with Colored Hitman, so this
@@ -1530,7 +1669,11 @@ struck through and kept.
      (`MAX_STATS_NEW`) rather than 32, so headroom exists — but only for clients
      that negotiate the extension, so a ruleset must stay inside 32 for its
      baseline statusbar and may use 32–63 only for content it can drop
-     (R-COMPAT-5);
+     (R-COMPAT-5). *Exercised in 1.11:* `ctf` puts the second powerup timer at
+     **32/33**, and "content it can drop" is made structural rather than
+     remembered — `G_InitStats()` deletes every slot `>= MAX_STATS_OLD` when
+     `game.csr.extended` is false, so the bar items and the writes disappear
+     together and `sv slots` reports each dropped row by name;
   7. the check is on **kind** as well as number. A statusbar element declares
      what a slot holds — `stat_string N` a configstring index, `pic N` an image
      index, `num W N` a plain number — and writing the wrong kind is a type
@@ -1538,6 +1681,21 @@ struck through and kept.
      cannot see it when the bar uses a bare number, which is how RA2's slot 20
      got through. `tools/slotkind.py` (R-TOOL-1) is that check and its known
      gap is closed before Phase 4 exits.
+
+     *Closed in 1.11, and the diagnosis changed.* The gap was not a missing
+     special case but a **missing question**. Kind alone found RA2's slot 20 by
+     luck — its two claimants happened to disagree about kind; had both been
+     `pic`, a slot with two live meanings would have passed. So the check now
+     asks two questions, and the second keys on the **number**: *was the slot
+     available at all?* No two ids on one slot per ruleset; nothing below 16;
+     nothing on a slot the pristine bar already draws by its `shared.h` name,
+     even when both agree on the number, because a slot with two owners is the
+     ambiguity clause 3 exists to remove; and the emitter's op, the map's kind
+     and the writer's value must all agree. On `q2pro/src/ctf` it now reports
+     **17, 18 and 19** where it reported 17 — the two it used to miss are exactly
+     the two whose claimants agreed about kind. Five controls ship inside the
+     tool (`--selftest`) and run in `make check`, because a control kept in a
+     document cannot report that it has stopped testing anything (R-35).
 * **R-OSP-7a.** *The statusbar is built, not stored.* Static bar strings are why
   the slot problem is intractable: a literal hardcodes its slot numbers, so a
   ruleset that needs a slot a bar already uses has nowhere to go. CTF is the
@@ -1553,6 +1711,20 @@ struck through and kept.
   (baseq2 18/19, RA2 26/27, tourney 29/30). The 64 slots of `MAX_STATS_NEW` are
   only available under `USE_NEW_GAME_API`, which is why the CTF squeeze exists at
   all, and clause 6 still applies.
+
+  *Implemented and verified in 1.11.* `single_statusbar` and `dm_statusbar` are
+  deleted from `g_spawn.c` and `ctf_statusbar` never arrives; `G_SetStatusbar()`
+  composes. The replacement is checked rather than trusted, because it replaces
+  working code with generated code: the emitted `dm` bar is **token-identical**
+  to the concatenation of the two literals as they stood at `4d03591`, compared
+  mechanically after whitespace normalisation, and `sp` emits the universal block
+  alone, which is what `single_statusbar` was. Two things fall out that upstream's
+  `!ctf->value` gating could not buy: the CTF squeeze is *resolved* rather than
+  worked around — the pent countdown displays under `ctf` on an extended server,
+  where before it could display nowhere — and one deliberate departure from the
+  donor becomes a decision rather than an accident: Threewave draws the powerup
+  timer at `xv 246` and baseq2 at `xv 262`, which is a stale copy of id's layout
+  rather than a CTF feature, so §7 rule 1 gives every ruleset 262.
 * **R-OSP-8.** Monsters do not spawn in `tourney`; same treatment as R-RA-6.
 * **R-OSP-9.** *Map rotation is per ruleset* — the third exemption to §7 rule 6.
   `sv_maplist` for `dm` and `sp`, RA2's `maploop.c` (845 lines, which is also the
@@ -1870,7 +2042,14 @@ decision is made twice or by taste.
    mechanism, Colosseum keeps **one**, chosen as the most capable, and the others
    become adapters or are dropped. The choice and its loser are recorded.
 
-   Applies to: **grapples** (CTF grapple/hook, OSP hook, RA2's own — 3),
+   Applies to: **grapples** (~~CTF grapple/hook, OSP hook, RA2's own — 3~~;
+   *measured in 1.12 and the count is wrong: there is **one** implementation.
+   `osp_hook.c` sets `CTF_GRAPPLE_STATE_FLY` by name and RA2 declares
+   `ctf_grapplestate` and carries `CTFResetGrapple` verbatim — both are
+   Threewave's, forked. So the resolution is not a merit choice between designs
+   but one core plus three tunable sets: OSP's fourteen `hook_*` cvars and RA2's
+   `allow_grapple` land as parameters on this code in Phases 5 and 4.
+   `doc/reconciliation.md` R-50*),
    **flood/spam checks** (Q2PRO's `FloodProtect()`, RA2's hardcoded spam
    counter, tourney's inline check gated on `!team && !match_paused`; both ports
    kept Q2PRO's and ran it first — 3), **statusbar assembly** (Q2PRO
@@ -2010,7 +2189,7 @@ audits this spec asks for. They are not rewritten from the prose here.
   | `rb.py`, `drive.py`, `autores.py`, `res.py`, `staticres.py` | the replay driver and its conflict resolution |
   | `staticize.py`, `unstatic.py`, `fixdecls.py` | R-CORE-13 |
   | `auditsave.py` | R-SAVE-3 and R-SAVE-3a |
-  | `slotkind.py` | R-OSP-7 clause 7 — *and it has a known gap: its own docstring records that it missed RA2's slot 20* |
+  | `slotkind.py` | R-OSP-7 clause 7 — ~~*and it has a known gap: its own docstring records that it missed RA2's slot 20*~~ *gap closed in 1.11: it asks about availability by slot number as well as kind, in both tree shapes, and carries five of its own controls* |
   | `keycontract.py`, `keys.py` | R-KEY-1..3 |
   | `auditems.py` | R-CORE-2's itemlist union |
   | `balance.py` | brace balancing inside `#if 0` so astyle does not mis-indent past it |
@@ -2038,7 +2217,7 @@ audits this spec asks for. They are not rewritten from the prose here.
   |---|---|---|
   | `tools/divergence.py` | R-CORE-10 — "regenerated by `tools/divergence.py` rather than transcribed", and the generated copy is declared **authoritative over the spec's own table** | **does not exist.** Written in Phase 0; until then the R-CORE-10 matrix is a transcription, which is the one thing that requirement forbids |
   | the classname / cvar / command counters | R-TOOL-2, and every count in §3 and §6 acting as an acceptance criterion — 157 / 173 / 192 / 259 / 137 and the rest | **does not exist.** §3's counting-method paragraph already concedes it. Until it ships, no count gates a phase, which means R-BASE-1/2/3, R-MP-1, R-OSP-2 and R-RA-2 are **unenforceable as written** |
-  | the pristine-statusbar availability check | R-OSP-7 clause 7 and §9 Phase 3, as "closing `slotkind.py`'s known gap" | `slotkind.py` exists and the gap is real, recorded in its own docstring. An extension, not a new tool |
+  | the pristine-statusbar availability check | R-OSP-7 clause 7 and §9 Phase 3, as "closing `slotkind.py`'s known gap" | ~~`slotkind.py` exists and the gap is real, recorded in its own docstring. An extension, not a new tool~~ **done in 1.11**, and it was an extension: same tool, one more question |
 
   R-TOOL-1's own line counts do check out — 30 scripts, 1,696 lines, twelve
   `mech.py` transforms — so the inventory is accurate about what it holds. The
@@ -2155,7 +2334,87 @@ the per-ruleset slot map, R-OSP-7a's composed statusbar emitter, clause 7's kind
 check, and closing `slotkind.py`'s known gap by writing the prescribed
 pristine-statusbar availability check. CTF is the right home for it — slots 17,
 18 and 19 are each double-assigned there with no free slot to move to.
-**Exit:** R-CTF-1..7, R-MENU-1..5, R-OSP-7, R-OSP-7a.
+**Exit — met 2026-08-21.** R-CTF-1..7, R-MENU-1..5, R-OSP-7 and R-OSP-7a, with
+one clause of R-CTF-3 and one of R-MENU-4 explicitly deferred to the phase that
+can check them rather than claimed here.
+
+*The slots landed first*, because the merge needs somewhere to put 17, 18 and 19
+before it can put anything there: R-OSP-7's map as `src/g_stats.h`'s X-macro with
+`p_hud.c` off its two `#define`s, R-OSP-7a's `sb_*` emitter with the `dm` bar
+verified **token-identical** to the two literals it replaced, clause 7's kind
+check, and `slotkind.py`'s gap closed — with five controls that ship inside the
+tool and run in `make check`. `sv slots` (R-VER-19) is how any of it is
+observable from outside the library, and it is what caught the emitter dropping
+an `if` while keeping its body (`doc/reconciliation.md` R-49).
+
+Then CTF: 20 shared files merged, 4 donor-only into `src/ctf/`, the ctf row of
+the dispatch, its own `pmenu_t` engine with `ctf_` symbols, and the grapple as
+the one implementation of its concept per §7 rule 6 — with R-CTF-3's offhand
+`ctf_hook` and `laserhook` written from uGladQ2's behaviour rather than copied
+(N2).
+
+**Evidence.** Ten build configurations clean under `-Werror` from `make clean`,
+the native one additionally under `clang` (R-BUILD-9 is why that sentence now
+names `make clean`). `make check` clean: six audits, no vacuous rows — `auditems`
+now runs in the build against `q2pro/src/game` with two recorded accepted
+differences. R-VER-2's boot matrix: all **20** combinations boot, run and shut
+down clean. Q14's added row: `ctf` × monsters on `base1`, `badlands` and `rmine1`
+in all four layer combinations — **twelve boots, no finding**, and the reason is
+visible in the hunk census (R-40): CTF never edited the monster code, it deleted
+it. R-VER-17 passes under `ctf` and still under `dm` and `sp`, including the
+cross-process savegame round-trip that is the only end-to-end check on the
+regenerated `save_ptrs[]`. `gates.py`'s budget did **not** rise: 165 inherited
+`deathmatch`/`coop` sites before the merge and 165 after.
+
+R-VER-10 is discharged for this donor: CTF's three *re-apply* rows are landed
+and marked `re-apply — done`, and one of them found an unguarded third
+`G_PickTarget` call site that Phase 2 had introduced (R-53).
+
+*Re-verified in 1.13 against real Threewave assets.* All nine shipped CTF maps
+boot with both flags at base, all four techs in the world, team spawn points and
+banners present, a 658-byte composed bar and a clean shutdown — R-CTF-1 measured
+rather than argued. That test also found R-54: **every think in the tree fires
+ten times late**, from a `SV_RunThink` the Rogue merge reverted in Phase 2. It is
+upstream's defect, it is not CTF's, and it is recorded rather than patched
+because the fix is one coherent pass that also has to convert Xatrix's 43
+`level.time` sites — see R-VER-20 for why no check caught it for three phases.
+
+**What is not claimed.** **R-CTF-4** is `botctfteam` and the bot menu, which §9
+Phase 7's own exit list also names — it belongs to that phase, and listing it
+under "R-CTF-1..7" here is the spec double-counting rather than a gap. Both
+halves of R-CTF-7 whose trigger is a *client* — the v0.95 bot-model bug and the
+v0.93 userinfo bug — are structural and reviewed but unobserved, because this
+harness has no clients; they are Phase 7 rows too. R-CTF-3's `laserhook`
+**libvar** and R-MENU-4's "bots' `showscores` forced off" are Phase 6, for the
+same reason: there is no brain to tell and no bot to force. R-MENU-1 ships one of
+its four engines, so the contention it exists to police is not yet observable —
+what is in place is the arbitration that has to precede the second engine. And
+no CTF map was played: the retail paks here have no `q2ctf*`, so flag capture,
+tech pickup and the grapple are exercised as code paths and boots, not as a game.
+`doc/reconciliation.md` R-40..R-53.
+
+*And overtaken again in 1.15: the harness has a client.* `tools/play.sh` drives
+q2pro's own client headlessly — `Xvfb`, `cl_beginmapcmd`, `wait`-paced console
+input, `viewpos` for position — and its first run dropped the server with
+`PF_configstring: bad index: 13118`, a `CS_GENERAL` literal read against a
+runtime remap that a stock server does not extend (`doc/reconciliation.md` R-62).
+Three sites fixed, a fourth of the same kind found by reading, all four
+upstream's. Phase 3's last mechanised residue also lands: `tools/allocpairs.py`
+(R-VER-22), the matched-pair allocator audit R-55 asked for, with three controls
+— `make check` is now **11 audits**, all clean. **A played CTF match is still not
+claimed**: a capture, a tech pickup and a grapple swing need drive scripts that
+navigate, and what 1.15 delivers is the capability plus the first defect it
+found, not the match.
+
+*Both of the last two are overtaken by 1.13 and 1.14.* Retail Threewave assets
+are in place and all nine shipped maps run with both flags at base and all four
+techs (R-CTF-1 measured). And after importing `q2pro@38873740` the whole matrix
+was re-run: ten configurations clean from `make clean` on gcc and clang, nine
+audits clean, R-VER-2's 20 combinations clean, R-VER-17 under `sp`/`ctf`/`dm`
+with the cross-process savegame round-trip, and R-VER-20's two temporal
+assertions passing — CTF's techs now appear at frame 31 rather than frame 221.
+`doc/reconciliation.md` R-54..R-60. What is still not claimed: a *played* CTF
+match — a capture, a tech pickup, a grapple swing — which needs a client.
 
 ### Phase 4 — Rocket Arena 2
 `src/arena/`, RA2 onto the dispatch, its own menu engine and its four observer
@@ -2198,10 +2457,19 @@ no analytical release gate (R-SEC-2).
   trigger and the check. An entry with no check is not done.
 * **R-VER-2.** Boot matrix: every `g_ruleset` × `xatrix` × `rogue` combination
   (5 × 2 × 2 = 20) starts, loads a map appropriate to the ruleset, and runs 100
-  frames with no crash and no assertion.
+  frames with no crash and no assertion. *Q14's row added in 1.12 and measured:*
+  `ctf` × monsters on a map that has them, which means the first map of all three
+  campaigns × all four layer combinations — twelve further boots. Passed;
+  `doc/regression.md` has the counts. Q14 expected findings and there are none,
+  which the hunk census explains rather than leaves lucky: CTF contributes no
+  feature hunk at all to `g_ai.c`, `g_monster.c`, `g_combat.c` or `g_turret.c`.
 * **R-VER-3.** Bot matrix: for each ruleset that accepts bots, 1 bot and 16
   bots spawn, play for 5 minutes and disconnect cleanly; `botlibdump` and
   `clientdump` show no leaked library reference and no leaked client slot.
+  *1.15: the human half of this no longer waits on the harness.* R-VER-23's
+  `tools/play.sh` connects real clients, so "1 bot and 16 bots" can be "1 bot,
+  16 bots and a driven human", and R-BOT-15's slot relocation (R-VER-5) has
+  something to relocate *for*.
 * **R-VER-4.** Savegame matrix: for each campaign combination, save and reload
   at three points, and verify entity count, client state and pointer fixup.
 * **R-VER-5.** Slot-exhaustion test: fill every client slot with bots, then
@@ -2254,6 +2522,18 @@ no analytical release gate (R-SEC-2).
   every (donor, skipped commit) pair, every *re-apply* verdict has a commit that
   lands it, and the check is re-run after each donor import. Neither compiler nor
   test suite can see a Q2PRO fix that simply never arrived (R-CORE-12).
+
+  *"has a commit that lands it" is now recorded, from 1.12.* `coverage.py` gained
+  a `LANDED` table keyed by (donor, subject) beside `VERDICTS`, because a verdict
+  is a judgement and says nothing about whether anyone acted on it; the generated
+  table marks a discharged row `re-apply — done` and the summary counts them.
+  CTF's three are the first, and discharging them taught the sharper form of the
+  requirement: **re-applying a fix means re-asking its question of the merged
+  tree, not confirming its hunks survived the merge.** `372e2503fe47` guarded the
+  two `G_PickTarget` sites `g_turret.c` had in 2024; the merged tree has three,
+  and the third — Ground Zero's `turret_brain_link`, arrived in Phase 2 — still
+  crashed. Nothing in this project compares a fix against the *shape* it fixed,
+  so that class is found by reading, and this is where it gets read.
 * **R-VER-11.** Contract checks, run in the build (R-TOOL-3) and re-run per
   phase: `keycontract.py` over the merged spawn tables (R-KEY-1..3),
   `auditsave.py` over every persistent struct for presence *and* type
@@ -2270,7 +2550,14 @@ no analytical release gate (R-SEC-2).
   `pausetime` on a `func_timer` staggers as intended, and `ED_ParseEdict` reports
   no unknown field. This is R-KEY-1's named case and the one contract breach the
   replay shipped before it was caught.
-* **R-VER-15.** *The original harness's unfinished checks are inherited.* The
+* **R-VER-15.** *The original harness's unfinished checks are inherited.*
+  **All eight are discharged as of 1.14** — the last two, items 4 and 8, by
+  measurement rather than by the phase they were assigned to: the flash-offset
+  table has 288 rows for 288 enumerators and is sized by the enum, and `clamp()`
+  is gone from the tree with rogue's `p_view.c` clean in all ten configurations
+  (`doc/reconciliation.md` R-61). Items 1 and 2 stopped being vacuous when
+  `auditems` and `dsweep` were wired into `make check` with a real donor behind
+  them. The
   rescued archive (R-PROV-2a) contains the harness's own `TODO.md` — eight items
   its author left open. Each becomes a check here, because each is a thing the
   replay could have got wrong in the donors Colosseum is built from:
@@ -2316,6 +2603,109 @@ no analytical release gate (R-SEC-2).
   `SVF_MONSTER` plus `EF_GIB` for a gib, and both correctly spawn in every
   ruleset — which had made `dm` report a live monster on `base1` and the gate look
   leaky while it was working.
+* **R-VER-23.** *At least one check must be a player.* `tools/play.sh`, driving
+  q2pro's own client headlessly against a local server.
+
+  R-VER-20 established that every check must not be static — that something has
+  to advance the clock and look again. This is the next thing that was missing
+  and it went unnoticed for the same reason: every check up to 1.14, R-VER-20's
+  temporal assertions included, is *state a server reaches on its own*. A door
+  that has to be walked into, an item that has to be picked up before it can
+  respawn, a flag that has to be carried home, a userinfo string that only
+  exists once a client sends one — none of it had ever been executed, and the
+  phases recorded that as a property of the harness.
+
+  It was not. `Xvfb` and q2pro's X11 backend on Mesa's software GLX give a
+  client with no GPU and no audio device; `cl_beginmapcmd` fires a console
+  script when the map finishes loading; `wait N` paces it in frames, so a drive
+  is deterministic rather than timed; `viewpos` prints the player's position, so
+  movement is observed rather than assumed. The requirement is that **at least
+  one check connects a real client, sends real input, and asserts on what the
+  server did about it** — and that the drive script's assertions name frames, the
+  way R-VER-20's do.
+
+  The evidence that it is real is not that the client starts. It is that
+  reverting the one line of R-VER-22's sibling fix (`doc/reconciliation.md` R-62)
+  makes `play.sh` report `verdict=2, server errored` and restoring it makes a
+  player move 216 units.
+* **R-VER-22.** *A pointer is released by the family that allocated it, and the
+  check is not a libc ban.* `tools/allocpairs.py`, in `make check`.
+
+  Two allocator families are live in this tree — libc's
+  `malloc`/`calloc`/`realloc`/`strdup` released by `free()`, and the engine's
+  `gi.TagMalloc`/`G_CopyString` released by `gi.TagFree()` — and crossing them is
+  undefined behaviour, not a leak, because `gi.TagFree` walks a block list and
+  asserts on a header it did not write. R-55 is the live case and it was
+  client-reachable on the first `warp` command.
+
+  **The obvious form of the check is wrong.** "No libc allocator in a tree whose
+  frees go through `gi.TagFree`" fails on `src/g_main.c`'s `EndDMLevel`, whose
+  `strdup`/`free` pair is correct and is upstream's, which R-CORE-5 keeps
+  byte-identical — the build would fail on the one file the spec forbids editing.
+  "This file uses both families" is no better: `g_main.c` also `gi.TagMalloc`s
+  `g_edicts`, so it describes exactly the file that is right. The unit that has to
+  agree is the **pointer**, which is why this is shaped like R-VER-21's tool:
+  MIX is one pointer allocated by one family and freed by the other; SPLIT is one
+  struct **member** allocated by both across the tree, the merged-tree case;
+  UNKNOWN is a free whose operand its file never allocates, in a file that uses
+  both families.
+
+  Three controls ship in the tool, the first being R-55's actual bug restored.
+  The tool verifies its own wrapper list too: if `G_CopyString` ever stops
+  allocating with `gi.TagMalloc` the build fails, because otherwise the check
+  would go green by no longer looking.
+* **R-VER-21.** *The timer-unit contract is checked, and a merged tree needs a
+  check the separate packs do not.* `tools/units.py`, in `make check`.
+
+  q2pro's frame-number conversion retypes every timer from float seconds to `int`
+  frames, so a field's **type no longer says what its unit is** and mixing them
+  compiles silently and runs wrong by ten. `q2pro/doc/mission-packs.md` promotes
+  this to the fourth contract the replay could not check and gives two greps for
+  it: cross-unit mixing on one line, and a `level.framenum` beside a float
+  literal with no `BASE_FRAMERATE`.
+
+  The third check is ours and has no upstream equivalent, because upstream cannot
+  have the defect. Four separate libraries are each internally consistent even
+  where they disagree — rogue declares `monsterinfo.attack_finished` a `float`
+  and writes seconds, xatrix declares it an `int` and writes frames. Colosseum has
+  **one** `g_local.h`, so exactly one declaration survives R-CORE-6's union and
+  every site written against the other is now in the wrong unit. So: **one field,
+  both clocks, anywhere in the tree** is a finding, reported with the minority
+  side named, because the minority is what has to move.
+
+  Three controls ship in the tool, each a reversion of a real fix. And the gap is
+  stated rather than left implied: none of the three can see a comparison written
+  entirely in the wrong unit, because `SV_RunThink`'s `thinktime > level.time`
+  names no timer field. That one needs R-VER-20.
+* **R-VER-20.** *At least one check must wait for something to happen.* Every
+  other check in §10 is static analysis or a dedicated-server boot with an entity
+  census taken at spawn: builds, the four audits, R-VER-2's boot matrix,
+  R-VER-17's savegame round-trip. **None of them advances the clock and then looks
+  again**, and the whole of Phase 2's evidence — 74 monsters on `rmine1`, three
+  campaigns loading, per-monster flavour and evasion latched — is spawn-time state
+  that stays true even if every timer in the game is wrong by a factor of ten.
+
+  It was, and the check that found it is the one that had to wait: CTF's techs
+  are spawned by an entity think two seconds after level load, so counting them
+  requires letting two seconds pass. They arrived at twenty
+  (`doc/reconciliation.md` R-54). The requirement is therefore that the regression
+  set keeps at least one *temporal* check — spawn a level, advance past a known
+  think deadline, and assert the thing that think was supposed to do. `sv ruleset`
+  reporting `level.framenum` is what makes the assertion precise rather than
+  "it eventually appeared".
+* **R-VER-19.** *The slot map must be observable from outside the library too, and
+  `sv slots` is how.* It reports the active ruleset's resolved map as (slot, kind,
+  logical id) triples, **every row the map declares that resolution dropped and
+  why**, and the composed statusbar with its byte count.
+
+  Same argument as R-VER-18 and the same failure it prevents: nothing the engine
+  prints reveals which slot a stat landed in, and "the HUD looks right" is not
+  evidence about slot 32 — a client that never negotiated the extension draws an
+  identical HUD whether the extension-only rows were dropped correctly or written
+  into a void. The dropped-row list is the part that matters, because a silently
+  absent stat is precisely the failure mode R-OSP-7a exists to remove. It is also
+  what makes R-OSP-7a's equivalence claim checkable at all: the bar is printed, so
+  it can be diffed against the literal it replaced.
 * **R-VER-17.** *The smoke test is a named, repeatable check, not a one-off.*
   Run after every phase, on the native target, against a stock Q2PRO:
   1. **Deathmatch.** `+set deathmatch 1 +map q2dm1`. Expect `Loaded game library
@@ -2381,9 +2771,11 @@ no analytical release gate (R-SEC-2).
 | 14 | An entity key or savegame descriptor breaks silently — text contracts with no compiler on them, and the replay broke both before | Medium | R-KEY-1..3, R-SAVE-3a, R-VER-11/14, all wired into the build |
 | 15 | `p_client.c` — 3,749 diff lines across five donors in one merged file (R-CORE-7) — becomes unreviewable | High | Phase 1 cuts the dispatch seam before any donor merge; decompose-and-replay keeps each step reviewable |
 | 16 | Four menu engines contend for one client input channel (R-MENU-1) and two end up open at once | Medium | R-MENU-2a makes the single-owner rule structural, not advisory: one field, one open path that closes the incumbent, and a per-donor menu walk as a release check |
+| 20 | **A whole class of defect that only shows when time passes.** Realised in 1.13, and 1.14 measured its extent: the reverted `SV_RunThink` was one of **twenty-four** unit defects in the same class, and upstream found them independently in the same week. Originally: `SV_RunThink` compared frames against seconds for three phases and nothing noticed, because every check was static or a spawn-time census. The same blindness covers item respawn intervals, powerup durations, door and plat cycles, monster animation rates, flood-protection windows and the match clock | **High** | R-VER-20 requires at least one temporal check in the regression set, and `sv ruleset` reports `level.framenum` so a temporal assertion can name a deadline instead of waiting vaguely. The timer conversion itself is one bounded pass over 43 sites plus one comparison, with `tools/nextthink.py` to do it |
 | 17 | Re-expressing the 17 live TOURNEY blocks (R-BOT-29) breaks bot behaviour under `tourney`, which currently works | High | Enumerate all 17 with their gate targets before touching any; R-VER-3 bot matrix run under `tourney` before and after; the `bots_*` namespace preserved per R-OSP-11 |
 | 18 | Staged exposure means the first real players are the security test (R-SEC-2) | High | Accepted deliberately. R-SEC-1..9 all still stand and the inherited upstream fixes are the floor; the mitigation is that exposure widens only after the private stage holds |
 | 19 | Development host and player host diverge: everything is written and *run* on **aarch64** (R-BUILD-6) while Q2 players are on x86-64 and win32 | Low–Medium | Reduced in 1.4 from Medium: all four player-facing targets now **cross-build from the dev host** (R-BUILD-5), so a compile or link regression on any of them fails here rather than in the field, and all five are gating in R-VER-8. What is left is narrow but real — nothing x86 is *executed* here, so anything that survives compilation and differs at runtime (pointer width, struct padding, the by-value `bsp_trace_t` of R-BOT-5, the botlib bitness handshake of R-BOT-4) is caught only when the user runs it. Endianness is not the exposure: all five targets are little-endian and R-BASE-7 already forbids `Swap_Init`. Mitigation is to make the 32-bit PE build part of the routine build set rather than an occasional check, since it exercises the widest gap from the host in one artifact |
+| 21 | **Everything verified so far is state the server reaches on its own.** Realised in 1.15 and the sibling of risk 20: R-VER-20 fixed "no check advances the clock", but every check still ran with nobody playing, so nothing a *player* triggers had ever executed — and a defect on the first line of the connect path survived three phases, a boot matrix of 32 combinations and an upstream bugfix import. Doors walked into, items picked up and respawned, flags carried, userinfo sent, menus opened, the grapple fired: all unexecuted | **High** | R-VER-23 and `tools/play.sh`. The capability exists and is proven; what is left is drive scripts, and the rows in `doc/reconciliation.md` R-61 that read "needs a client" are re-scoped to "needs a drive script" |
 | 20 | A pin in this spec silently stops resolving, as all three donor pins did between 1.3 and 1.4 | Medium | §3.3's re-pin plus R-PROV-6: the bundles are the durable half of the provenance and their refs cannot drift. A pin check belongs in the R-TOOL-3 build audits, so the failure is loud rather than discovered by a re-read |
 
 ---

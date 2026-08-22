@@ -142,13 +142,21 @@ void DoRespawn(edict_t *ent)
 
         master = ent->teammaster;
 
-        for (count = 0, ent = master; ent; ent = ent->chain, count++)
-            ;
+        // CTF with weapons-stay respawns the team master rather than a random
+        // member, so a weapon stack does not migrate around the map.
+        if (G_Ruleset() == RULESET_CTF &&
+            ((int)dmflags->value & DF_WEAPONS_STAY) &&
+            master->item && (master->item->flags & IT_WEAPON)) {
+            ent = master;
+        } else {
+            for (count = 0, ent = master; ent; ent = ent->chain, count++)
+                ;
 
-        choice = Q_rand_uniform(count);
+            choice = Q_rand_uniform(count);
 
-        for (count = 0, ent = master; count < choice; ent = ent->chain, count++)
-            ;
+            for (count = 0, ent = master; count < choice; ent = ent->chain, count++)
+                ;
+        }
     }
 
 //=====
@@ -206,7 +214,7 @@ static bool Pickup_Powerup(edict_t *ent, edict_t *other)
             SetRespawn(ent, ent->item->quantity);
         if (((int)dmflags->value & DF_INSTANT_ITEMS) || ((ent->item->use == Use_Quad) && (ent->spawnflags & DROPPED_PLAYER_ITEM))) {
             if ((ent->item->use == Use_Quad) && (ent->spawnflags & DROPPED_PLAYER_ITEM))
-                quad_drop_timeout_hack = (ent->nextthink - level.framenum) / FRAMETIME;
+                quad_drop_timeout_hack = ent->nextthink - level.framenum;
 //PGM
             if (ent->item->use)
                 ent->item->use(other, ent->item);
@@ -217,7 +225,7 @@ static bool Pickup_Powerup(edict_t *ent, edict_t *other)
         // RAFAEL
         else if (((int)dmflags->value & DF_INSTANT_ITEMS) || ((ent->item->use == Use_QuadFire) && (ent->spawnflags & DROPPED_PLAYER_ITEM))) {
             if ((ent->item->use == Use_QuadFire) && (ent->spawnflags & DROPPED_PLAYER_ITEM))
-                quad_fire_drop_timeout_hack = (ent->nextthink - level.time) / FRAMETIME;
+                quad_fire_drop_timeout_hack = ent->nextthink - level.framenum;
             ent->item->use(other, ent->item);
         }
     }
@@ -851,7 +859,9 @@ static void Drop_Ammo(edict_t *ent, const gitem_t *item)
 
 void MegaHealth_think(edict_t *self)
 {
-    if (self->owner->health > self->owner->max_health) {
+    // CTF regeneration tech holds the overhealth instead of bleeding it off.
+    if (self->owner->health > self->owner->max_health
+        && !CTFHasRegeneration(self->owner)) {
         self->nextthink = level.framenum + 1 * BASE_FRAMERATE;
         self->owner->health -= 1;
         return;
@@ -869,7 +879,14 @@ bool Pickup_Health(edict_t *ent, edict_t *other)
         if (other->health >= other->max_health)
             return false;
 
+    // CTF caps stacked mega-health at 250 rather than letting it run to 999.
+    if (G_Ruleset() == RULESET_CTF && other->health >= 250 && ent->count > 25)
+        return false;
+
     other->health += ent->count;
+
+    if (G_Ruleset() == RULESET_CTF && other->health > 250 && ent->count > 25)
+        other->health = 250;
 
     // PMM - health sound fix
     /*
@@ -888,7 +905,7 @@ bool Pickup_Health(edict_t *ent, edict_t *other)
             other->health = other->max_health;
     }
 
-    if (ent->style & HEALTH_TIMED) {
+    if ((ent->style & HEALTH_TIMED) && !CTFHasRegeneration(other)) {
         ent->think = MegaHealth_think;
         ent->nextthink = level.framenum + 5 * BASE_FRAMERATE;
         ent->owner = other;
@@ -1075,6 +1092,11 @@ void Touch_Item(edict_t *ent, edict_t *other, cplane_t *plane, csurface_t *surf)
         return;     // dead people can't pickup
     if (!ent->item->pickup)
         return;     // not a grabbable item?
+
+    // CTF match setup: nothing is pickable while captains pick teams.  False in
+    // every other ruleset.
+    if (CTFMatchSetup())
+        return;
 
     taken = ent->item->pickup(ent, other);
 
@@ -1479,6 +1501,17 @@ void SpawnItem(edict_t *ent, const gitem_t *item)
         level.power_cubes++;
     }
 
+    // CTF's two flags are ordinary itemlist entries (R-CORE-2's union), so a
+    // map that places them is loadable in every ruleset; only ctf makes them
+    // real.  Elsewhere they are removed rather than left as scenery.
+    if (strcmp(ent->classname, "item_flag_team1") == 0 ||
+        strcmp(ent->classname, "item_flag_team2") == 0) {
+        if (G_Ruleset() != RULESET_CTF) {
+            G_FreeEdict(ent);
+            return;
+        }
+    }
+
     ent->item = item;
     ent->nextthink = level.framenum + 2;    // items start after other solids
     ent->think = droptofloor;
@@ -1486,6 +1519,12 @@ void SpawnItem(edict_t *ent, const gitem_t *item)
     ent->s.renderfx = RF_GLOW;
     if (ent->model)
         gi.modelindex(ent->model);
+
+    // ...and the flags are server-animated and carry their own setup, which
+    // replaces droptofloor.
+    if (strcmp(ent->classname, "item_flag_team1") == 0 ||
+        strcmp(ent->classname, "item_flag_team2") == 0)
+        ent->think = CTFFlagSetup;
 
     if (ent->spawnflags & 1)
         SetTriggeredSpawn(ent);
@@ -1610,6 +1649,29 @@ const gitem_t itemlist[] = {
     //
     // WEAPONS
     //
+
+    /* weapon_grapple (.3 .3 1) (-16 -16 -16) (16 16 16)
+    always owned, never in the world -- CTF
+    */
+    {
+        .classname          = "weapon_grapple",
+        .use                = Use_Weapon,
+        .weaponthink        = CTFWeapon_Grapple,
+        .pickup_sound       = "misc/w_pkup.wav",
+        .view_model         = "models/weapons/grapple/tris.md2",
+        .icon               = "w_grapple",
+        .pickup_name        = "Grapple",
+        .flags              = IT_WEAPON,
+        .weapmodel          = WEAP_GRAPPLE,
+        .precaches          = (const char *const[]) {
+            "weapons/grapple/grfire.wav",
+            "weapons/grapple/grpull.wav",
+            "weapons/grapple/grhang.wav",
+            "weapons/grapple/grreset.wav",
+            "weapons/grapple/grhit.wav",
+            NULL
+        },
+    },
 
     /* weapon_blaster (.3 .3 1) (-16 -16 -16) (16 16 16)
     always owned, never in the world
@@ -2924,6 +2986,119 @@ const gitem_t itemlist[] = {
             "items/n_health.wav",
             "items/l_health.wav",
             "items/m_health.wav",
+            NULL
+        },
+    },
+
+    // CTF (R-CTF-1): both flags and all five techs.  Content unions -- §7 rule 3
+    // -- so they are in the one itemlist every ruleset compiles against and
+    // SpawnItem removes the flags outside ctf.  Four tech classnames, five
+    // techs: item_tech1..4 plus the flag-carrier bonus is not an item.
+    /*QUAKED item_flag_team1 (1 0.2 0) (-16 -16 -24) (16 16 32)
+    */
+    {
+        .classname          = "item_flag_team1",
+        .pickup             = CTFPickup_Flag,
+        .drop               = CTFDrop_Flag,
+        .pickup_sound       = "ctf/flagtk.wav",
+        .world_model        = "players/male/flag1.md2",
+        .world_model_flags  = EF_FLAG1,
+        .icon               = "i_ctf1",
+        .pickup_name        = "Red Flag",
+        .count_width        = 2,
+        .precaches          = (const char *const[]) {
+            "ctf/flagcap.wav",
+            NULL
+        },
+    },
+
+    /*QUAKED item_flag_team2 (1 0.2 0) (-16 -16 -24) (16 16 32)
+    */
+    {
+        .classname          = "item_flag_team2",
+        .pickup             = CTFPickup_Flag,
+        .drop               = CTFDrop_Flag,
+        .pickup_sound       = "ctf/flagtk.wav",
+        .world_model        = "players/male/flag2.md2",
+        .world_model_flags  = EF_FLAG2,
+        .icon               = "i_ctf2",
+        .pickup_name        = "Blue Flag",
+        .count_width        = 2,
+        .precaches          = (const char *const[]) {
+            "ctf/flagcap.wav",
+            NULL
+        },
+    },
+
+    /* Resistance Tech */
+    {
+        .classname          = "item_tech1",
+        .pickup             = CTFPickup_Tech,
+        .drop               = CTFDrop_Tech,
+        .pickup_sound       = "items/pkup.wav",
+        .world_model        = "models/ctf/resistance/tris.md2",
+        .world_model_flags  = EF_ROTATE,
+        .icon               = "tech1",
+        .pickup_name        = "Disruptor Shield",
+        .count_width        = 2,
+        .flags              = IT_TECH,
+        .precaches          = (const char *const[]) {
+            "ctf/tech1.wav",
+            NULL
+        },
+    },
+
+    /* Strength Tech */
+    {
+        .classname          = "item_tech2",
+        .pickup             = CTFPickup_Tech,
+        .drop               = CTFDrop_Tech,
+        .pickup_sound       = "items/pkup.wav",
+        .world_model        = "models/ctf/strength/tris.md2",
+        .world_model_flags  = EF_ROTATE,
+        .icon               = "tech2",
+        .pickup_name        = "Power Amplifier",
+        .count_width        = 2,
+        .flags              = IT_TECH,
+        .precaches          = (const char *const[]) {
+            "ctf/tech2.wav",
+            "ctf/tech2x.wav",
+            NULL
+        },
+    },
+
+    /* Haste Tech */
+    {
+        .classname          = "item_tech3",
+        .pickup             = CTFPickup_Tech,
+        .drop               = CTFDrop_Tech,
+        .pickup_sound       = "items/pkup.wav",
+        .world_model        = "models/ctf/haste/tris.md2",
+        .world_model_flags  = EF_ROTATE,
+        .icon               = "tech3",
+        .pickup_name        = "Time Accel",
+        .count_width        = 2,
+        .flags              = IT_TECH,
+        .precaches          = (const char *const[]) {
+            "ctf/tech3.wav",
+            NULL
+        },
+    },
+
+    /* Regeneration Tech */
+    {
+        .classname          = "item_tech4",
+        .pickup             = CTFPickup_Tech,
+        .drop               = CTFDrop_Tech,
+        .pickup_sound       = "items/pkup.wav",
+        .world_model        = "models/ctf/regeneration/tris.md2",
+        .world_model_flags  = EF_ROTATE,
+        .icon               = "tech4",
+        .pickup_name        = "AutoDoc",
+        .count_width        = 2,
+        .flags              = IT_TECH,
+        .precaches          = (const char *const[]) {
+            "ctf/tech4.wav",
             NULL
         },
     },

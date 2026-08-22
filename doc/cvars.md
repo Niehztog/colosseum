@@ -18,6 +18,36 @@ spec's acceptance counts to be confirmed by a tool rather than asserted
 tools/counts.py --list cvars
 ```
 
+## Phase 3: Threewave CTF
+
+**69 cvars** total (`tools/counts.py`), of which fourteen are CTF's. Registered
+in `CTFInit()`, which `InitGame` calls unconditionally — see
+`reconciliation.md` R-42 for why the donor's failure to call it at all was a
+crash rather than a missing feature.
+
+| cvar | default | what it does |
+|---|---|---|
+| `ctf` | `0`, `CVAR_SERVERINFO` | **not a behaviour switch.** A legacy alias that can *select* the ruleset (R-MODE-2), and once resolution has decided, the dispatch forces it to agree so a Threewave-aware client reads the truth out of serverinfo. Registered by `g_ruleset.c`, not by CTF |
+| `capturelimit` | `0`, `CVAR_SERVERINFO` | captures that end a match. Independent of `fraglimit` — R-CTF-2, and structural rather than patched: it is read before any fraglimit test can shadow it |
+| `instantweap` | `0` | no raise or lower animation on a weapon switch |
+| `ctf_hook` | `1` | the offhand hook of R-CTF-3, driven by `hookon`/`hookoff` |
+| `laserhook` | `0` | the beam rendering rather than the cable. Threewave shipped this as a `#if`; it is a cvar because the brain has to be told which is in play (the libvar push is Phase 6) |
+| `ctf_forcejoin` | `""` | force joiners onto a named team |
+| `competition` | `0`, `CVAR_SERVERINFO` | 0 public, 1 admin-managed, 2+ match mode. `2` starts the level in `MATCH_SETUP` — **gated on the ruleset**, or a `dm` server with it left in its config would freeze all damage |
+| `matchlock` | `1`, `CVAR_SERVERINFO` | no joining a match once it has started |
+| `electpercentage` | `66` | share of votes an election needs |
+| `matchtime` | `20`, `CVAR_SERVERINFO` | match length, minutes |
+| `matchsetuptime` | `10` | setup window, minutes |
+| `matchstarttime` | `20` | countdown, seconds |
+| `admin_password` | `""` | the `admin` command's password |
+| `allow_admin` | `1` | whether `admin` works at all |
+| `warp_list` | `q2ctf1 … q2ctf5` | maps the `warp` vote may choose |
+| `warn_unbalanced` | `1` | the statusbar's "too many players" line |
+
+Two names that do **not** appear and are worth saying so about: `maxspectators`
+survives from baseq2 although Threewave deletes it, because `dm` and `sp` still
+use it (R-CTF-5); and `ch` is accepted and ignored (N7).
+
 Nothing is renamed, aliased or prefixed yet; every name is q2pro's own with
 q2pro's default and flags (R-BASE-2). The prefixing of §7 rule 4 begins in
 Phase 3, and R-OSP-11's per-ruleset bot cvars in Phase 6.

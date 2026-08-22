@@ -658,9 +658,9 @@ void plat2_hit_top(edict_t *ent)
             ent->nextthink = level.framenum + 5.0f * BASE_FRAMERATE;
         }
         if (deathmatch->value)
-            ent->last_move_framenum = level.framenum - 1.0f;
+            ent->last_move_framenum = level.framenum - 1.0f * BASE_FRAMERATE;
         else
-            ent->last_move_framenum = level.framenum - 2.0f;
+            ent->last_move_framenum = level.framenum - 2.0f * BASE_FRAMERATE;
     } else if (!(ent->spawnflags & PLAT2_TOP) && !(ent->spawnflags & PLAT2_TOGGLE)) {
         ent->plat2flags = 0;
         ent->think = plat2_go_down;
@@ -690,9 +690,9 @@ void plat2_hit_bottom(edict_t *ent)
             ent->nextthink = level.framenum + 5.0f * BASE_FRAMERATE;
         }
         if (deathmatch->value)
-            ent->last_move_framenum = level.framenum - 1.0f;
+            ent->last_move_framenum = level.framenum - 1.0f * BASE_FRAMERATE;
         else
-            ent->last_move_framenum = level.framenum - 2.0f;
+            ent->last_move_framenum = level.framenum - 2.0f * BASE_FRAMERATE;
     } else if ((ent->spawnflags & PLAT2_TOP) && !(ent->spawnflags & PLAT2_TOGGLE)) {
         ent->plat2flags = 0;
         ent->think = plat2_go_up;
@@ -748,7 +748,7 @@ void plat2_operate(edict_t *ent, edict_t *other)
     if (ent->plat2flags & PLAT2_MOVING)
         return;
 
-    if ((ent->last_move_framenum + 2) > level.time)
+    if ((ent->last_move_framenum + 2 * BASE_FRAMERATE) > level.framenum)
         return;
 
     platCenter = (trigger->absmin[2] + trigger->absmax[2]) / 2;
@@ -840,7 +840,7 @@ void Use_Plat2(edict_t *ent, edict_t *other, edict_t *activator)
 
     if (ent->moveinfo.state > STATE_BOTTOM)
         return;
-    if ((ent->last_move_framenum + 2) > level.time)
+    if ((ent->last_move_framenum + 2 * BASE_FRAMERATE) > level.framenum)
         return;
 
     for (i = 1, trigger = g_edicts + 1; i < globals.num_edicts; i++, trigger++) {
@@ -2657,7 +2657,7 @@ void rotating_light_alarm(edict_t *self)
         self->nextthink = 0;
     } else {
         gi.sound(self, CHAN_NO_PHS_ADD + CHAN_VOICE, self->moveinfo.sound_start, 1, ATTN_STATIC, 0);
-        self->nextthink = level.time + 1;
+        self->nextthink = level.framenum + 1 * BASE_FRAMERATE;
     }
 }
 
@@ -2676,7 +2676,7 @@ void rotating_light_killed(edict_t *self, edict_t *inflictor, edict_t *attacker,
     self->use = NULL;
 
     self->think = G_FreeEdict;
-    self->nextthink = level.time + 0.1;
+    self->nextthink = level.framenum + 0.1 * BASE_FRAMERATE;
 
 }
 
@@ -2688,7 +2688,7 @@ void rotating_light_use(edict_t *self, edict_t *other, edict_t *activator)
 
         if (self->spawnflags & 2) {
             self->think = rotating_light_alarm;
-            self->nextthink = level.time + 0.1;
+            self->nextthink = level.framenum + 0.1 * BASE_FRAMERATE;
         }
     } else {
         self->spawnflags |= START_OFF;
@@ -2748,7 +2748,7 @@ The default delay is 1 second
 void object_repair_fx(edict_t *ent)
 {
 
-    ent->nextthink = level.time + ent->delay;
+    ent->nextthink = level.framenum + ent->delay * BASE_FRAMERATE;
 
     if (ent->health <= 100)
         ent->health++;
@@ -2767,7 +2767,7 @@ void object_repair_fx(edict_t *ent)
 void object_repair_dead(edict_t *ent)
 {
     G_UseTargets(ent, ent);
-    ent->nextthink = level.time + 0.1;
+    ent->nextthink = level.framenum + 0.1 * BASE_FRAMERATE;
     ent->think = object_repair_fx;
 }
 
@@ -2775,12 +2775,12 @@ void object_repair_sparks(edict_t *ent)
 {
 
     if (ent->health < 0) {
-        ent->nextthink = level.time + 0.1;
+        ent->nextthink = level.framenum + 0.1 * BASE_FRAMERATE;
         ent->think = object_repair_dead;
         return;
     }
 
-    ent->nextthink = level.time + ent->delay;
+    ent->nextthink = level.framenum + ent->delay * BASE_FRAMERATE;
 
     gi.WriteByte(svc_temp_entity);
     gi.WriteByte(TE_WELDING_SPARKS);
@@ -2800,7 +2800,7 @@ void SP_object_repair(edict_t *ent)
     VectorSet(ent->mins, -8, -8, 8);
     VectorSet(ent->maxs, 8, 8, 8);
     ent->think = object_repair_sparks;
-    ent->nextthink = level.time + 1.0;
+    ent->nextthink = level.framenum + 1.0 * BASE_FRAMERATE;
     ent->health = 100;
     if (!ent->delay)
         ent->delay = 1.0;

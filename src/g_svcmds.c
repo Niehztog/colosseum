@@ -285,6 +285,8 @@ void    ServerCommand(void)
     cmd = gi.argv(1);
     if (Q_stricmp(cmd, "ruleset") == 0)
         G_Svcmd_Ruleset_f();
+    else if (Q_stricmp(cmd, "slots") == 0)
+        G_Svcmd_Slots_f();
     else if (Q_stricmp(cmd, "test") == 0)
         Svcmd_Test_f();
     else if (Q_stricmp(cmd, "addip") == 0)

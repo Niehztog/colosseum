@@ -1,3 +1,11 @@
+// XATRIX.  monsterinfo.attack_finished is `float` seconds in this tree, because
+// Ground Zero left the member a float and its declaration won the g_local.h
+// merge -- 50 of the 53 sites agree with it.  Upstream's xatrix pack declares
+// the same member `int` and so writes frame numbers here, which is consistent
+// *within that pack* and a unit mix in a merged one: the gekk's own three sites
+// agreed with each other while g_ai.c's shared M_CheckAttack read them as
+// seconds.  Converted to seconds to match the declaration
+// (doc/reconciliation.md R-56).
 /*
 Copyright (C) 1997-2001 Id Software, Inc.
 
@@ -613,7 +621,7 @@ static void fire_loogie(edict_t *self, vec3_t start, vec3_t dir, int damage, int
     loogie->s.modelindex = gi.modelindex("models/objects/loogy/tris.md2");
     loogie->owner = self;
     loogie->touch = loogie_touch;
-    loogie->nextthink = level.time + 2;
+    loogie->nextthink = level.framenum + 2 * BASE_FRAMERATE;
     loogie->think = G_FreeEdict;
     loogie->dmg = damage;
     gi.linkentity(loogie);
@@ -880,7 +888,7 @@ static void gekk_jump_takeoff(edict_t *self)
 
     self->groundentity = NULL;
     self->monsterinfo.aiflags |= AI_DUCKED;
-    self->monsterinfo.attack_finished = level.framenum + 3 * BASE_FRAMERATE;
+    self->monsterinfo.attack_finished = level.time + 3;
     self->touch = gekk_jump_touch;
 }
 
@@ -902,7 +910,7 @@ static void gekk_jump_takeoff2(edict_t *self)
 
     self->groundentity = NULL;
     self->monsterinfo.aiflags |= AI_DUCKED;
-    self->monsterinfo.attack_finished = level.framenum + 3 * BASE_FRAMERATE;
+    self->monsterinfo.attack_finished = level.time + 3;
     self->touch = gekk_jump_touch;
 
 }
@@ -928,7 +936,7 @@ static void gekk_check_landing(edict_t *self)
 
     // note to self
     // causing skid
-    if (level.framenum > self->monsterinfo.attack_finished)
+    if (level.time > self->monsterinfo.attack_finished)
         self->monsterinfo.nextframe = FRAME_leapatk_11;
     else {
         self->monsterinfo.nextframe = FRAME_leapatk_12;

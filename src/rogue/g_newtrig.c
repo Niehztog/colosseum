@@ -33,7 +33,7 @@ extern void TeleportEffect(vec3_t origin);
 /*QUAKED info_teleport_destination (.5 .5 .5) (-16 -16 -24) (16 16 32)
 Destination marker for a teleporter.
 */
-void SP_info_teleport_destination(edict_t *self)
+void rogue_SP_info_teleport_destination(edict_t *self)
 {
 }
 
@@ -113,7 +113,7 @@ void trigger_teleport_use(edict_t *self, edict_t *other, edict_t *activator)
         self->delay = 1;
 }
 
-void SP_trigger_teleport(edict_t *self)
+void rogue_SP_trigger_teleport(edict_t *self)
 {
     if (!self->wait)
         self->wait = 0.2f;

@@ -58,11 +58,36 @@ def _auditsave(out):
     return hits
 
 
+# R-VER-15 item 1 asks whether the merge LOST a baseq2 field.  A merged union
+# tree also shows the donors' legitimate changes, and those are not findings --
+# reconciliation.md R-33 measured exactly two and named them.  Recording them
+# here is what lets the check run in the build at all: pointed at baseq2 with no
+# baseline it fails forever on correct code, and skipped entirely it reports
+# "not applicable" while three donors sit in the tree, which is the vacuous pass
+# this driver exists to prevent.
+#
+# A THIRD difference fails the build.  That is the whole point: the check is
+# now sensitive to the next lost field rather than saturated by these two.
+ACCEPTED_ITEM_DIFFS = {
+    # (item, field): why
+    ('weapon_hyperblaster', 'use'):
+        "Xatrix's Use_Weapon2 -- the Ionripper shares the slot (reconciliation R-33)",
+    ('weapon_railgun', 'use'):
+        "Xatrix's Use_Weapon2 -- the Phalanx shares the slot (reconciliation R-33)",
+}
+
+
 def _auditems(out):
     m = re.search(r'TOTAL differing fields across shared items:\s*(\d+)', out)
-    if m and int(m.group(1)) > 0:
-        return [ln for ln in out.splitlines() if ln.strip().startswith(('==', '   '))]
-    return _bang(out)
+    if not m:
+        return _bang(out)
+    hits = []
+    for mm in re.finditer(r'^\s*"([^"]+)"\.(\w+)\s*$', out, re.M):
+        key = (mm.group(1), mm.group(2))
+        if key not in ACCEPTED_ITEM_DIFFS:
+            hits.append(f'  !! {key[0]}.{key[1]} differs from baseq2 and is not '
+                        f'an accepted difference (R-VER-15 item 1)')
+    return hits
 
 
 def _gates(out):
@@ -72,6 +97,9 @@ def _gates(out):
 
 PARSERS = {
     'gates.py': _gates,
+    'units.py': _bang,
+    'allocpairs.py': _bang,
+    'encoding.py': _bang,
     'dsweep.py': _bang,
     'keycontract.py': _bang,
     'slotkind.py': _bang,
@@ -104,17 +132,43 @@ def main():
 
     tree = os.path.abspath(a.tree)
     donors = [d.split('=', 1) for d in a.donor if '=' in d]
+    # A donor path outside the repository is a convenience, not a dependency:
+    # R-CORE-5 measures src/ against q2pro/src/game, but a tree without q2pro
+    # beside it must still build.  Absent means skipped-and-said-so.
+    donors = [(l, p) for l, p in donors if os.path.isdir(p)]
 
     results, vacuous = [], []
 
     # --- single-tree audits: meaningful from Phase 0 on -------------------
     # keycontract: statusbar slot vs STAT_ macro vs spawn key vs descriptor type
     results.append(run('keycontract.py', [f'colosseum={tree}'], 'keycontract'))
-    # slotkind: does a bar read a slot as a kind the code does not write?
+    # slotkind: does a bar read a slot as a kind the code does not write, and
+    # was the slot available to be claimed at all (R-OSP-7 clause 7)?
     results.append(run('slotkind.py', [f'colosseum={tree}'], 'slotkind'))
+    # ...and slotkind's own controls, five mutations of the real map and emitter.
+    # R-VER-9 clause 2: a check that has never failed is not trusted, so the
+    # controls run in the build beside the check rather than in a document.
+    results.append(run('slotkind.py', ['--selftest'], 'slotkind/controls'))
     # gates: every ruleset decision goes through the dispatch or a predicate,
     # and the monster-suppression idiom has not come back (Phase 1 exit).
     results.append(run('gates.py', ['--tree', tree], 'gates'))
+    # units: the timer-unit contract (R-VER-21).  q2pro's frame-number conversion
+    # left a field's type saying nothing about its unit, and a merged tree has a
+    # failure mode the separate packs cannot: one g_local.h means one declaration
+    # wins and every site written against the other is now a mix.
+    results.append(run('units.py', ['--tree', tree], 'units'))
+    results.append(run('units.py', ['--selftest'], 'units/controls'))
+    # allocpairs: the allocator-pair contract (R-VER-22).  A pointer must be
+    # released by the family that produced it, and this tree has two -- libc and
+    # the engine's tagged blocks.  Not a libc ban: g_main.c's strdup/free pair is
+    # correct and is upstream's, so the unit that has to agree is the pointer
+    # (R-55, R-63).
+    results.append(run('allocpairs.py', ['--tree', tree], 'allocpairs'))
+    results.append(run('allocpairs.py', ['--selftest'], 'allocpairs/controls'))
+    # encoding: every source file is valid UTF-8.  Trivial, and it has bitten
+    # twice -- grep in a UTF-8 locale returns NOTHING for a file it cannot
+    # decode, so a census can silently report zero (R-60).
+    results.append(run('encoding.py', ['--tree', tree], 'encoding'))
 
     # --- comparative audits: need a donor ---------------------------------
     # dsweep, not auditsave: both implement R-SAVE-3's "a persistent field with
@@ -137,10 +191,17 @@ def main():
             base_items = os.path.join(tree, 'g_items.c')
             var_items = os.path.join(path, 'g_items.c')
             if os.path.exists(var_items):
-                results.append(run('auditems.py', [base_items, var_items],
-                                   f'auditems/{label}'))
+                r = run('auditems.py', [base_items, var_items],
+                        f'auditems/{label}')
+                # auditems exits 0 whatever it finds, and the accepted-difference
+                # baseline above decides; a non-zero rc here would be a crash.
+                results.append(r)
             else:
                 vacuous.append(f'auditems/{label}: {var_items} absent')
+        if not donors:
+            vacuous.append('auditems: the reference tree (q2pro/src/game) is not '
+                           'beside this repository, so there is nothing to '
+                           'compare the merged itemlist against')
     else:
         vacuous += [
             'auditsave: no donor supplied -- nothing has been added to a saved '

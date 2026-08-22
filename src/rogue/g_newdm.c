@@ -306,7 +306,7 @@ void body_think(edict_t *self)
 {
     float r;
 
-    if (abs((int)(self->ideal_yaw - anglemod(self->s.angles[YAW]))) < 2) {
+    if (fabsf(self->ideal_yaw - anglemod(self->s.angles[YAW])) < 2) {
         if (self->timestamp < level.framenum) {
             r = random();
             if (r < 0.10f) {

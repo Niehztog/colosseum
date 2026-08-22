@@ -101,7 +101,7 @@ void fire_flechette(edict_t *self, vec3_t start, vec3_t dir, int damage, int spe
 //  flechette->s.sound = gi.soundindex ("");            // FIXME - correct sound!
     flechette->owner = self;
     flechette->touch = flechette_touch;
-    flechette->nextthink = level.framenum + 8000 / speed * BASE_FRAMERATE;
+    flechette->nextthink = level.framenum + BASE_FRAMERATE * 8000 / speed;
     flechette->think = G_FreeEdict;
     flechette->dmg = damage;
     flechette->dmg_radius = kick;

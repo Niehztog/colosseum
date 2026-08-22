@@ -138,7 +138,7 @@ void gib_touchacid(edict_t *self, edict_t *other, cplane_t *plane, csurface_t *s
         if (self->s.modelindex == sm_meat_index) {
             self->s.frame++;
             self->think = gib_think;
-            self->nextthink = level.time + FRAMETIME;
+            self->nextthink = level.framenum + 1;
         }
     }
 }
@@ -288,7 +288,7 @@ void ThrowGibACID(edict_t *self, char *gibname, int damage, int type)
     gib->avelocity[2] = random() * 600;
 
     gib->think = G_FreeEdict;
-    gib->nextthink = level.time + 10 + random() * 10;
+    gib->nextthink = level.framenum + (10 + random() * 10) * BASE_FRAMERATE;
 
     gi.linkentity(gib);
 }
@@ -338,7 +338,7 @@ void ThrowHeadACID(edict_t *self, char *gibname, int damage, int type)
     self->avelocity[YAW] = crandom() * 600;
 
     self->think = G_FreeEdict;
-    self->nextthink = level.time + 10 + random() * 10;
+    self->nextthink = level.framenum + (10 + random() * 10) * BASE_FRAMERATE;
 
     gi.linkentity(self);
 }
@@ -422,6 +422,33 @@ void ThrowDebris(edict_t *self, char *modelname, float speed, vec3_t origin)
 
 void BecomeExplosion1(edict_t *self)
 {
+    // CTF: flags and techs do not explode, they go home.  Reachable only under
+    // ctf -- nothing else spawns an item_flag_team* or an IT_TECH item -- but
+    // the ruleset test says so rather than leaving it to be inferred from the
+    // classname comparison below (R-MODE-5's comment-fenced inline test).
+    if (G_Ruleset() == RULESET_CTF) {
+        if (strcmp(self->classname, "item_flag_team1") == 0) {
+            CTFResetFlag(CTF_TEAM1); // this will free self!
+            gi.bprintf(PRINT_HIGH, "The %s flag has returned!\n",
+                       CTFTeamName(CTF_TEAM1));
+            return;
+        }
+        if (strcmp(self->classname, "item_flag_team2") == 0) {
+            CTFResetFlag(CTF_TEAM2); // this will free self!
+            // Threewave prints CTF_TEAM1's name here, so a returning blue flag
+            // announced itself as red -- shipped that way since 1998.  Kept in
+            // Phase 3 under §7 rule 2 (R-45) and fixed now that q2pro has fixed
+            // it: §7 rule 7 makes a Q2PRO fix cumulative.
+            gi.bprintf(PRINT_HIGH, "The %s flag has returned!\n",
+                       CTFTeamName(CTF_TEAM2));
+            return;
+        }
+        if (self->item && (self->item->flags & IT_TECH)) {
+            CTFRespawnTech(self); // this frees self!
+            return;
+        }
+    }
+
     gi.WriteByte(svc_temp_entity);
     gi.WriteByte(TE_EXPLOSION1);
     gi.WritePosition(self->s.origin);
@@ -1451,7 +1478,7 @@ void SP_misc_crashviper(edict_t *ent)
     VectorSet(ent->maxs, 16, 16, 32);
 
     ent->think = func_train_find;
-    ent->nextthink = level.time + FRAMETIME;
+    ent->nextthink = level.framenum + 1;
     ent->use = misc_viper_use;
     ent->svflags |= SVF_NOCLIENT;
     ent->moveinfo.accel = ent->moveinfo.decel = ent->moveinfo.speed = ent->speed;
@@ -1567,7 +1594,7 @@ void misc_viper_missile_use(edict_t *self, edict_t *other, edict_t *activator)
 
     monster_fire_rocket(self, start, dir, self->dmg, 500, MZ2_CHICK_ROCKET_1);
 
-    self->nextthink = level.time + 0.1;
+    self->nextthink = level.framenum + 0.1 * BASE_FRAMERATE;
     self->think = G_FreeEdict;
 
 }
@@ -1658,7 +1685,7 @@ void SP_misc_transport(edict_t *ent)
     VectorSet(ent->maxs, 16, 16, 32);
 
     ent->think = func_train_find;
-    ent->nextthink = level.time + FRAMETIME;
+    ent->nextthink = level.framenum + 1;
     ent->use = misc_strogg_ship_use;
     ent->svflags |= SVF_NOCLIENT;
     ent->moveinfo.accel = ent->moveinfo.decel = ent->moveinfo.speed = ent->speed;
@@ -1989,6 +2016,10 @@ void teleporter_touch(edict_t *self, edict_t *other, cplane_t *plane, csurface_t
         return;
     }
 
+    // CTF: a teleport releases the grapple.  A no-op when there is none, so it
+    // needs no gate.
+    CTFPlayerResetGrapple(other);
+
     // unlink to make sure it can't possibly interfere with KillBox
     gi.unlinkentity(other);
 
@@ -2077,7 +2108,7 @@ static int amb4sound;
 
 void amb4_think(edict_t *ent)
 {
-    ent->nextthink = level.time + 2.7;
+    ent->nextthink = level.framenum + 2.7 * BASE_FRAMERATE;
     gi.sound(ent, CHAN_VOICE, amb4sound, 1, ATTN_NONE, 0);
 }
 
@@ -2089,7 +2120,7 @@ static void amb4_precache(void)
 void SP_misc_amb4(edict_t *ent)
 {
     ent->think = amb4_think;
-    ent->nextthink = level.time + 1;
+    ent->nextthink = level.framenum + 1 * BASE_FRAMERATE;
     G_AddPrecache(amb4_precache);
     gi.linkentity(ent);
 }
@@ -2140,3 +2171,40 @@ void SP_misc_nuke_core(edict_t *ent)
 }
 //ROGUE
 //======================
+
+/*
+=================================================================
+
+TELEPORTERS
+
+Three donors, one classname.  baseq2 has `misc_teleporter` and its own
+teleporter_touch above; Ground Zero and Threewave both add `trigger_teleport`
+and `info_teleport_destination` with the same names and different behaviour --
+Ground Zero's is toggleable by `targetname` and uses TE_TELEPORT_EFFECT,
+Threewave's requires a `target`, spawns a humming noise entity and routes the
+touch through its own old_teleporter_touch.
+
+Â§7 rule 3: two donors changing the same thing get a gate, and the gate is the
+ruleset.  Â§7 rule 4 gave each implementation its donor prefix; these two
+functions are what the spawn table points at.  The gate is one-sided and needs
+no key inspection, because `trigger_teleport` is not a baseq2 classname at all:
+outside ctf, Ground Zero's is the only implementation there is.
+
+=================================================================
+*/
+
+void SP_trigger_teleport(edict_t *self)
+{
+    if (G_Ruleset() == RULESET_CTF)
+        ctf_SP_trigger_teleport(self);
+    else
+        rogue_SP_trigger_teleport(self);
+}
+
+void SP_info_teleport_destination(edict_t *self)
+{
+    if (G_Ruleset() == RULESET_CTF)
+        ctf_SP_info_teleport_destination(self);
+    else
+        rogue_SP_info_teleport_destination(self);
+}

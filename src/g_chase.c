@@ -28,7 +28,7 @@ void UpdateChaseCam(edict_t *ent)
 
     // is our chase target gone?
     if (!ent->client->chase_target->inuse
-        || ent->client->chase_target->client->resp.spectator) {
+        || G_IsObserver(ent->client->chase_target)) {
         edict_t *old = ent->client->chase_target;
         ChaseNext(ent);
         if (ent->client->chase_target == old) {
@@ -102,6 +102,26 @@ void UpdateChaseCam(edict_t *ent)
     ent->viewheight = 0;
     ent->client->ps.pmove.pm_flags |= PMF_NO_PREDICTION;
     gi.linkentity(ent);
+
+    // Under ctf the chased player's name is a unicast layout rather than a
+    // statusbar element: CTF's bar has no slot 16 element and the slot is
+    // unmapped for that ruleset (g_stats.h), which is the honest expression of
+    // "Threewave draws this differently" -- see doc/reconciliation.md R-43.
+    // Elsewhere STAT_CHASE and the bar's `stat_string 16` do the job and this
+    // block would fight them for the layout channel.
+    if (G_Ruleset() == RULESET_CTF &&
+        ((!ent->client->showscores && !G_MenuActive(ent) &&
+          !ent->client->showinventory && !ent->client->showhelp &&
+          !(level.framenum & 31)) || ent->client->update_chase)) {
+        char s[MAX_STRING_CHARS];
+
+        ent->client->update_chase = false;
+        Q_snprintf(s, sizeof(s), "xv 0 yb -68 string2 \"Chasing %s\"",
+                   targ->client->pers.netname);
+        gi.WriteByte(svc_layout);
+        gi.WriteString(s);
+        gi.unicast(ent, false);
+    }
 }
 
 void ChaseNext(edict_t *ent)
@@ -120,7 +140,7 @@ void ChaseNext(edict_t *ent)
         e = g_edicts + i;
         if (!e->inuse)
             continue;
-        if (!e->client->resp.spectator)
+        if (!G_IsObserver(e))
             break;
     } while (e != ent->client->chase_target);
 
@@ -144,7 +164,7 @@ void ChasePrev(edict_t *ent)
         e = g_edicts + i;
         if (!e->inuse)
             continue;
-        if (!e->client->resp.spectator)
+        if (!G_IsObserver(e))
             break;
     } while (e != ent->client->chase_target);
 
@@ -152,6 +172,10 @@ void ChasePrev(edict_t *ent)
     ent->client->update_chase = true;
 }
 
+// Threewave DELETES this and reaches the chase camera through CTFObserver
+// instead.  Kept, because dm and sp still enter it from the attack button and
+// R-CORE-8's rule -- a donor's deletion is not replayed -- applies to functions
+// as well as to files.
 void GetChaseTarget(edict_t *ent)
 {
     int i;
@@ -159,7 +183,7 @@ void GetChaseTarget(edict_t *ent)
 
     for (i = 1; i <= game.maxclients; i++) {
         other = g_edicts + i;
-        if (other->inuse && !other->client->resp.spectator) {
+        if (other->inuse && !G_IsObserver(other)) {
             ent->client->chase_target = other;
             ent->client->update_chase = true;
             UpdateChaseCam(ent);

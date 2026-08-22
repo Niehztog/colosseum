@@ -214,6 +214,8 @@ static const spawn_func_t spawn_funcs[] = {
     {"info_player_deathmatch", SP_info_player_deathmatch},
     {"info_player_coop", SP_info_player_coop},
     {"info_player_intermission", SP_info_player_intermission},
+    {"info_player_team1", SP_info_player_team1},                // CTF
+    {"info_player_team2", SP_info_player_team2},                // CTF
 
     {"func_plat", SP_func_plat},
     {"func_button", SP_func_button},
@@ -284,6 +286,8 @@ static const spawn_func_t spawn_funcs[] = {
 
     {"misc_explobox", SP_misc_explobox},
     {"misc_banner", SP_misc_banner},
+    {"misc_ctf_banner", SP_misc_ctf_banner},                    // CTF
+    {"misc_ctf_small_banner", SP_misc_ctf_small_banner},        // CTF
     {"misc_satellite_dish", SP_misc_satellite_dish},
     {"misc_actor", SP_misc_actor},
     {"misc_gib_arm", SP_misc_gib_arm},
@@ -860,6 +864,16 @@ void SpawnEntities(const char *mapname, const char *entities, const char *spawnp
 
     gi.FreeTags(TAG_LEVEL);
 
+    // A menu handle is TAG_LEVEL memory -- R-MENU-1's engines all allocate from
+    // the game import -- so the free above has just invalidated every open menu.
+    // Clearing the owner here is what keeps gclient_t.menu_owner honest across a
+    // level change; the alternative is a dangling handle that PutClientInServer
+    // would have to know to ignore.
+    for (int i = 0; i < game.maxclients; i++) {
+        game.clients[i].menu_owner = MENU_NONE;
+        game.clients[i].ctf_menu = NULL;
+    }
+
     G_FreePrecaches();
 
     memset(&level, 0, sizeof(level));
@@ -977,6 +991,10 @@ void SpawnEntities(const char *mapname, const char *entities, const char *spawnp
 
     PlayerTrail_Init();
 
+    // CTF's flag and tech setup, after the entities exist.  A no-op in every
+    // other ruleset.
+    CTFSpawn();
+
 //ROGUE
     if (deathmatch->value) {
         if (randomrespawn && randomrespawn->value)
@@ -1019,96 +1037,12 @@ endif
 
 #endif
 
-static const char single_statusbar[] =
-"yb -24 "
-
-// health
-"xv 0 "
-"hnum "
-"xv 50 "
-"pic 0 "
-
-// ammo
-"if 2 "
-  "xv 100 "
-  "anum "
-  "xv 150 "
-  "pic 2 "
-"endif "
-
-// armor
-"if 4 "
-  "xv 200 "
-  "rnum "
-  "xv 250 "
-  "pic 4 "
-"endif "
-
-// selected item
-"if 6 "
-  "xv 296 "
-  "pic 6 "
-"endif "
-
-"yb -50 "
-
-// picked up item
-"if 7 "
-  "xv 0 "
-  "pic 7 "
-  "xv 26 "
-  "yb -42 "
-  "stat_string 8 "
-  "yb -50 "
-"endif "
-
-// timer 1 (quad, quadfire, double, enviro, breather)
-"if 9 "
-  "xv 262 "
-  "num 2 10 "
-  "xv 296 "
-  "pic 9 "
-"endif "
-
-// timer 2 (pent)
-"if 18 "
-  "yb -76 "
-  "xv 262 "
-  "num 2 19 "
-  "xv 296 "
-  "pic 18 "
-  "yb -50 "
-"endif "
-
-// help / weapon icon
-"if 11 "
-  "xv 148 "
-  "pic 11 "
-"endif "
-;
-
-static const char dm_statusbar[] =
-// frags
-"xr -50 "
-"yt 2 "
-"num 3 14 "
-
-// spectator
-"if 17 "
-  "xv 0 "
-  "yb -58 "
-  "string2 \"SPECTATOR MODE\" "
-"endif "
-
-// chase camera
-"if 16 "
-  "xv 0 "
-  "yb -68 "
-  "string \"Chasing\" "
-  "xv 64 "
-  "stat_string 16 "
-"endif "
-;
+// The three statusbar literals -- baseq2's single_statusbar and dm_statusbar
+// here, Threewave's ctf_statusbar in g_ctf.c -- are gone.  R-OSP-7a: a literal
+// hardcodes its slot numbers, so a ruleset that needs a slot the bar already
+// uses has nowhere to go, and CTF is the case with no free pair left at all.
+// The bar is now emitted at runtime from the active ruleset's slot map by
+// G_SetStatusbar() in g_stats.c, item for item and in the same order.
 
 static const char *const lightstyles[] = {
     // 0 normal
@@ -1206,11 +1140,12 @@ void SP_worldspawn(edict_t *ent)
 
     gi.configstring(game.csr.maxclients, va("%i", game.maxclients));
 
-    // status bar program
-    if (deathmatch->value)
-        gi.configstring(CS_STATUSBAR, va("%s%s", single_statusbar, dm_statusbar));
-    else
-        gi.configstring(CS_STATUSBAR, single_statusbar);
+    // status bar program -- composed, not stored (R-OSP-7a)
+    G_SetStatusbar();
+
+    // CTF's own precache set: the flag models and icons, the tech models, the
+    // team pics the statusbar draws.  A no-op in every other ruleset.
+    CTFPrecache();
 
     //---------------
 
@@ -1280,6 +1215,7 @@ void SP_worldspawn(edict_t *ent)
         gi.modelindex("#w_hyperblaster.md2");
         gi.modelindex("#w_railgun.md2");
         gi.modelindex("#w_bfg.md2");
+    gi.modelindex("#w_grapple.md2");    // CTF
 
         gi.modelindex("#w_phalanx.md2");
         gi.modelindex("#w_ripper.md2");

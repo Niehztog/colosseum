@@ -87,12 +87,12 @@ Runs thinking code for this frame if necessary
 */
 static bool SV_RunThink(edict_t *ent)
 {
-    float   thinktime;
+    int     thinktime;
 
     thinktime = ent->nextthink;
     if (thinktime <= 0)
         return true;
-    if (thinktime > level.time + 0.001f)
+    if (thinktime > level.framenum)
         return true;
 
     ent->nextthink = 0;
@@ -298,7 +298,7 @@ SV_AddGravity
 
 ============
 */
-static void SV_AddGravity(edict_t *ent)
+void SV_AddGravity(edict_t *ent)
 {
 #ifdef ROGUE_GRAVITY
     if (ent->gravityVector[2] > 0) {

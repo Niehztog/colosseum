@@ -52,6 +52,29 @@ DONORS = [
 #
 # The rule that decides most of these: R-CORE-8 keeps every monster and both
 # campaigns, so a fix the donor skipped "for want of a site" has a site here.
+# R-VER-10's other half: "every *re-apply* verdict has a commit that lands it."
+# A verdict is a judgement about a (donor, commit) pair; LANDED records that the
+# pair has actually been discharged, keyed the same way, because a verdict alone
+# does not say whether anyone acted on it.
+#
+# Keyed by (donor, normalised subject) so the same commit can be landed for one
+# donor and still outstanding for another -- which is the normal case, since a
+# fix skipped by three donors is discharged once per import.
+LANDED = {
+    ('ctf', 'Avoid generating missing savegame pointer'):
+        'landed, Phase 3: m_flyer.c carries no commented `&flyer_move_attack1` '
+        'and check-ptrs passes',
+    ('ctf', 'Fix crashes due to G_PickTarget() returning NULL'):
+        'landed, Phase 3 -- and it found a THIRD call site. The two the '
+        'commit names are guarded; turret_brain_link is Ground Zero\'s own '
+        'addition, arrived in Phase 2, and dereferenced the result unguarded. '
+        'See reconciliation.md R-53: re-applying a fix means re-asking its '
+        'question of the merged tree, not confirming its hunks survived',
+    ('ctf', 'Use initializer for aim vector'):
+        'landed, Phase 3: five `vec3_t aim = { ... }` initialisers across '
+        'm_berserk.c and m_brain.c',
+}
+
 VERDICTS = {
     # --- monster / AI fixes.  Three donors deleted the monster set, so these
     # had nowhere to land there.  Colosseum keeps all 31 monster TUs, so every
@@ -160,9 +183,13 @@ def build():
         per_donor[label] = (len(got), len(missing))
         for sha, subj in missing:
             v = VERDICTS.get(norm(subj))
+            landed = LANDED.get((label, norm(subj)))
+            why = v[1] if v else ''
+            if landed:
+                why = f'{why}. **{landed}**' if why else f'**{landed}**'
             rows.append({'donor': label, 'sha': sha, 'subject': subj,
                          'verdict': v[0] if v else 'TODO',
-                         'why': v[1] if v else ''})
+                         'landed': bool(landed), 'why': why})
     return spine, per_donor, rows
 
 
@@ -199,17 +226,22 @@ def render(spine, per_donor, rows):
                                          r['subject'])):
         v = r['verdict']
         mark = f'**{v}**' if v in ('re-apply', 'TODO') else v
+        if r.get('landed'):
+            mark = f'{v} — done'
         w.append(f'| {r["donor"]} | `{r["sha"][:12]}` | {r["subject"]} '
                  f'| {mark} | {r["why"]} |')
 
     counts = {}
     for r in rows:
         counts[r['verdict']] = counts.get(r['verdict'], 0) + 1
+    done = sum(1 for r in rows if r.get('landed'))
     w += ['',
           '## Summary',
           '',
           f'{len(rows)} rows: '
-          + ', '.join(f'{n} {k}' for k, n in sorted(counts.items())) + '.',
+          + ', '.join(f'{n} {k}' for k, n in sorted(counts.items()))
+          + f'. {done} of the {counts.get("re-apply", 0)} re-apply rows are '
+            f'landed and recorded in LANDED.',
           '']
     if todo:
         w += [f'**{len(todo)} row(s) have no verdict and block their phase '

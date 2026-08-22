@@ -203,7 +203,8 @@ static bool IsNeutral(edict_t *ent)
     return false;
 }
 
-static void ClientObituary(edict_t *self, edict_t *inflictor, edict_t *attacker)
+// Non-static: CTF's ghost and match code report obituaries too (R-CORE-13).
+void ClientObituary(edict_t *self, edict_t *inflictor, edict_t *attacker)
 {
     int         mod;
     char        *message;
@@ -389,6 +390,10 @@ static void ClientObituary(edict_t *self, edict_t *inflictor, edict_t *attacker)
             case MOD_TELEFRAG:
                 message = "tried to invade";
                 message2 = "'s personal space";
+                break;
+            case MOD_GRAPPLE:
+                message = "was caught by";
+                message2 = "'s grapple";
                 break;
             // RAFAEL 14-APR-98
             case MOD_RIPPER:
@@ -579,7 +584,7 @@ static void TossClientWeapon(edict_t *self)
         drop->spawnflags |= DROPPED_PLAYER_ITEM;
 
         drop->touch = Touch_Item;
-        drop->nextthink = level.time + (self->client->quadfire_framenum - level.framenum) * FRAMETIME;
+        drop->nextthink = level.framenum + (self->client->quadfire_framenum - level.framenum);
         drop->think = G_FreeEdict;
     }
 }
@@ -628,6 +633,7 @@ void player_die(edict_t *self, edict_t *inflictor, edict_t *attacker, int damage
     self->movetype = MOVETYPE_TOSS;
 
     self->s.modelindex2 = 0;    // remove linked weapon model
+    self->s.modelindex3 = 0;    // CTF: remove the linked flag model
 
     self->s.angles[0] = 0;
     self->s.angles[2] = 0;
@@ -645,8 +651,30 @@ void player_die(edict_t *self, edict_t *inflictor, edict_t *attacker, int damage
         LookAtKiller(self, inflictor, attacker);
         self->client->ps.pmove.pm_type = PM_DEAD;
         ClientObituary(self, inflictor, attacker);
+
+        // CTF: telefragging your own teammate on his spawn costs the attacker
+        // the frag it just earned, rather than rewarding a bad spawn point.
+        if (G_Ruleset() == RULESET_CTF && meansOfDeath == MOD_TELEFRAG &&
+            self->client->resp.ctf_state < 2 && attacker->client &&
+            self->client->resp.ctf_team == attacker->client->resp.ctf_team) {
+            attacker->client->resp.score--;
+            self->client->resp.ctf_state = 0;
+        }
+
+        // Flag captures, carrier defence and the four assist bonuses.  Scores
+        // nothing outside ctf.
+        CTFFragBonuses(self, inflictor, attacker);
+
         TossClientWeapon(self);
-        if (deathmatch->value)
+
+        // ...and the grapple, the flag and the tech go with the body.  All three
+        // are no-ops when there is nothing to drop.
+        CTFPlayerResetGrapple(self);
+        CTFDeadDropFlag(self);
+        CTFDeadDropTech(self);
+        // CTF adds `&& !showscores`: Cmd_Help_f toggles, so a player who already
+        // had the scoreboard up got it turned OFF by his own death.
+        if (deathmatch->value && !self->client->showscores)
             Cmd_Help_f(self);       // show scores
 
         // clear inventory
@@ -774,7 +802,8 @@ This is only called when the game first initializes in single player,
 but is called after each death and level change in deathmatch
 ==============
 */
-static void InitClientPersistant(gclient_t *client)
+// Non-static: CTF re-initialises a client on a team change (R-CORE-13).
+void InitClientPersistant(gclient_t *client)
 {
     const gitem_t   *item;
 
@@ -787,6 +816,15 @@ static void InitClientPersistant(gclient_t *client)
     client->pers.inventory[client->pers.selected_item] = 1;
 
     client->pers.weapon = item;
+    client->pers.lastweapon = item;
+
+    // CTF: everyone owns the grapple from the first frame.  Gated, because in
+    // dm and sp the item exists in the itemlist (R-CORE-2's union) but nobody
+    // should be carrying it.
+    if (G_Ruleset() == RULESET_CTF) {
+        item = FindItem("Grapple");
+        client->pers.inventory[ITEM_INDEX(item)] = 1;
+    }
 
     client->pers.health         = 100;
     client->pers.max_health     = 100;
@@ -815,9 +853,23 @@ static void InitClientPersistant(gclient_t *client)
 
 static void InitClientResp(gclient_t *client)
 {
+    // Two fields outlive a respawn under ctf: the team you are on, and whether
+    // you asked for the player-id display.  Both live in resp rather than pers
+    // because CTF re-initialises pers on a team change, so this is the only
+    // place that can preserve them.
+    int ctf_team = client->resp.ctf_team;
+    bool id_state = client->resp.id_state;
+
     memset(&client->resp, 0, sizeof(client->resp));
+
+    client->resp.ctf_team = ctf_team;
+    client->resp.id_state = id_state;
+
     client->resp.enterframe = level.framenum;
     client->resp.coop_respawn = client->pers;
+
+    if (G_Ruleset() == RULESET_CTF && client->resp.ctf_team < CTF_TEAM1)
+        CTFAssignTeam(client);
 }
 
 /*
@@ -908,7 +960,7 @@ go to a random point, but NOT the two points closest
 to other players
 ================
 */
-static edict_t *SelectRandomDeathmatchSpawnPoint(void)
+edict_t *SelectRandomDeathmatchSpawnPoint(void)
 {
     edict_t *spot, *spot1, *spot2;
     int     count = 0;
@@ -1240,7 +1292,7 @@ static void CopyToBodyQue(edict_t *ent)
     gi.linkentity(body);
 }
 
-static void PutClientInServer(edict_t *ent);
+void PutClientInServer(edict_t *ent);
 
 void respawn(edict_t *self)
 {
@@ -1358,7 +1410,7 @@ Called when a player connects to a server or respawns in
 a deathmatch.
 ============
 */
-static void PutClientInServer(edict_t *ent)
+void PutClientInServer(edict_t *ent)
 {
     char    userinfo[MAX_INFO_STRING];
     vec3_t  mins = { -16, -16, -24};
@@ -1448,8 +1500,16 @@ static void PutClientInServer(edict_t *ent)
     VectorCopy(maxs, ent->maxs);
     VectorClear(ent->velocity);
 
+    // R-MENU-3: spawning ends whatever menu was open.  Threewave leaves the
+    // handle live and relies on the join menu being reopened over it.
+    G_MenuClose(ent);
+
     // clear playerstate values
     memset(&ent->client->ps, 0, sizeof(client->ps));
+
+    // A client who was observing has PMF_NO_PREDICTION set from the chase cam;
+    // spawning clears it.  Harmless where it was never set.
+    client->ps.pmove.pm_flags &= ~PMF_NO_PREDICTION;
 
     if (deathmatch->value && ((int)dmflags->value & DF_FIXED_FOV)) {
         client->ps.fov = 90;
@@ -1517,6 +1577,14 @@ static void PutClientInServer(edict_t *ent)
     // being copied into three functions.
     G_ClientPlaced(ent);
 
+    // CTF decides here whether this client is a body at all: a player with no
+    // team gets the join menu and stays an observer, and CTFStartClient says so
+    // by returning true.  It is not an ops row because it must run *between* the
+    // spawn point and KillBox, which no hook in ruleset_ops_t straddles --
+    // ClientPlaced runs after placement, and this can prevent placement.
+    if (G_Ruleset() == RULESET_CTF && CTFStartClient(ent))
+        return;
+
     // spawn a spectator
     if (client->pers.spectator) {
         client->chase_target = NULL;
@@ -1583,7 +1651,7 @@ static void ClientBeginDeathmatch(edict_t *ent)
 
     if (level.intermission_framenum) {
         MoveClientToIntermission(ent);
-    } else if (!ent->client->pers.spectator) {
+    } else if (!G_IsObserver(ent)) {
         // send effect
         gi.WriteByte(svc_muzzleflash);
         gi.WriteShort(ent - g_edicts);
@@ -1689,7 +1757,14 @@ void ClientUserinfoChanged(edict_t *ent, char *userinfo)
     s = Info_ValueForKey(userinfo, "spectator");
     // spectators are only supported in deathmatch
     // if (deathmatch->value && strcmp(s, "0"))
-    if (deathmatch->value && *s && strcmp(s, "0"))
+    //
+    // ...and not under ctf, which has its own observer mechanism (R-CTF-5):
+    // the `observer` command and the join menu, keyed on ctf_team.  Leaving
+    // baseq2's flag reachable there would put two observer systems on one
+    // client -- `spectator 1` in userinfo would noclip a player that
+    // G_IsObserver() still reports as playing, because it asks about the team.
+    // Threewave deletes the key outright; here it is simply inert.
+    if (deathmatch->value && G_Ruleset() != RULESET_CTF && *s && strcmp(s, "0"))
         ent->client->pers.spectator = true;
     else
         ent->client->pers.spectator = false;
@@ -1699,8 +1774,23 @@ void ClientUserinfoChanged(edict_t *ent, char *userinfo)
 
     playernum = ent - g_edicts - 1;
 
-    // combine name and skin into a configstring
-    gi.configstring(game.csr.playerskins + playernum, va("%s\\%s", ent->client->pers.netname, s));
+    // combine name and skin into a configstring.  Under ctf the skin is the
+    // team's, not the player's choice -- CTFAssignSkin writes the same
+    // configstring with ctf_r or ctf_b substituted, which is also where the 1999
+    // bot-model bug lived (R-CTF-7).
+    if (G_Ruleset() == RULESET_CTF)
+        CTFAssignSkin(ent, s);
+    else
+        gi.configstring(game.csr.playerskins + playernum, va("%s\\%s", ent->client->pers.netname, s));
+
+    // CTF's player-id view reads the name out of a configstring of its own,
+    // because the playerskins string carries the skin as well (R-CTF-6).
+    // game.csr.general, not CS_GENERAL: the compile-time constant is the
+    // extended one (13118) and a server without the extensions runs on
+    // cs_remap_old, whose end is 2080 -- so the literal drops the server the
+    // first time a client connects (doc/reconciliation.md R-62).
+    if (G_Ruleset() == RULESET_CTF)
+        gi.configstring(game.csr.general + playernum, ent->client->pers.netname);
 
     // fov
     if (deathmatch->value && ((int)dmflags->value & DF_FIXED_FOV)) {
@@ -1749,7 +1839,9 @@ qboolean ClientConnect(edict_t *ent, char *userinfo)
     // check for a spectator
     value = Info_ValueForKey(userinfo, "spectator");
 //  if (deathmatch->value && strcmp(value, "0"))
-    if (deathmatch->value && *value && strcmp(value, "0")) {
+    // Same gate as ClientUserinfoChanged's, and for the same reason: under ctf
+    // the spectator password and limit guard a state no client can enter.
+    if (deathmatch->value && G_Ruleset() != RULESET_CTF && *value && strcmp(value, "0")) {
         int i, numspec;
 
         if (*spectator_password->string &&
@@ -1785,7 +1877,14 @@ qboolean ClientConnect(edict_t *ent, char *userinfo)
     // if there is already a body waiting for us (a loadgame), just
     // take it, otherwise spawn one from scratch
     if (ent->inuse == false) {
-        // clear the respawning variables
+        // clear the respawning variables.  Under ctf, force a team join and turn
+        // the player-id display on: R-CTF-6 wants id on by default, and
+        // InitClientResp preserves both fields rather than setting them, so they
+        // have to be seeded here.
+        if (G_Ruleset() == RULESET_CTF) {
+            ent->client->resp.ctf_team = -1;
+            ent->client->resp.id_state = true;
+        }
         InitClientResp(ent->client);
         if (!game.autosaved || !ent->client->pers.weapon)
             InitClientPersistant(ent->client);
@@ -1817,6 +1916,15 @@ void ClientDisconnect(edict_t *ent)
         return;
 
     gi.bprintf(PRINT_HIGH, "%s disconnected\n", ent->client->pers.netname);
+
+    // The flag and the tech stay in the world.  No-ops when the player holds
+    // neither, so no gate.
+    CTFDeadDropFlag(ent);
+    CTFDeadDropTech(ent);
+
+    // R-MENU-3: a client who quits with a menu open must not leave the handle
+    // behind it.  Threewave leaks it.
+    G_MenuClose(ent);
 
 //============
 //ROGUE
@@ -1902,7 +2010,7 @@ void ClientThink(edict_t *ent, usercmd_t *ucmd)
     if (level.intermission_framenum) {
         client->ps.pmove.pm_type = PM_FREEZE;
         // can exit intermission after five seconds
-        if (level.framenum > level.intermission_framenum + 5.0f
+        if (level.framenum > level.intermission_framenum + 5.0f * BASE_FRAMERATE
             && (ucmd->buttons & BUTTON_ANY))
             level.exitintermission = true;
         return;
@@ -1998,6 +2106,11 @@ void ClientThink(edict_t *ent, usercmd_t *ucmd)
             VectorCopy(pm.viewangles, client->ps.viewangles);
         }
 
+        // CTF: the grapple pulls from the post-pmove position, so it runs here
+        // rather than as an entity think.  NULL for everyone else.
+        if (client->ctf_grapple)
+            CTFGrapplePull(client->ctf_grapple);
+
         gi.linkentity(ent);
 
         //PGM trigger_gravity support
@@ -2030,7 +2143,10 @@ void ClientThink(edict_t *ent, usercmd_t *ucmd)
 
     // fire weapon from final position if needed
     if (client->latched_buttons & BUTTON_ATTACK) {
-        if (client->resp.spectator) {
+        // G_IsObserver, not resp.spectator: under ctf an observer is a
+        // CTF_NOTEAM player, so the inherited test would let him shoot
+        // (R-CTF-3's "observers cannot fire it", R-CTF-5).
+        if (G_IsObserver(ent)) {
             client->latched_buttons = 0;
 
             if (client->chase_target) {
@@ -2044,7 +2160,7 @@ void ClientThink(edict_t *ent, usercmd_t *ucmd)
         }
     }
 
-    if (client->resp.spectator) {
+    if (G_IsObserver(ent)) {
         if (ucmd->upmove >= 10) {
             if (!(client->ps.pmove.pm_flags & PMF_JUMP_HELD)) {
                 client->ps.pmove.pm_flags |= PMF_JUMP_HELD;
@@ -2057,11 +2173,29 @@ void ClientThink(edict_t *ent, usercmd_t *ucmd)
             client->ps.pmove.pm_flags &= ~PMF_JUMP_HELD;
     }
 
+    // CTF regeneration tech.  A no-op without it.
+    CTFApplyRegeneration(ent);
+
+    // R-CTF-3's offhand hook fires from here rather than from a weapon think,
+    // which is what makes it offhand.
+    CTFHookThink(ent);
+
     // update chase cam if being followed
     for (i = 1; i <= game.maxclients; i++) {
         other = g_edicts + i;
         if (other->inuse && other->client->chase_target == ent)
             UpdateChaseCam(other);
+    }
+
+    // R-MENU-4: a menu redraw this frame's input earned, rate-limited by the
+    // engine rather than by how fast the player presses the key.
+    if (client->menudirty && client->menutime <= level.time) {
+        if (G_MenuActive(ent) && client->menu_owner == MENU_CTF) {
+            ctf_PMenu_Do_Update(ent);
+            gi.unicast(ent, true);
+        }
+        client->menutime = level.time;
+        client->menudirty = false;
     }
 }
 
@@ -2096,8 +2230,7 @@ void ClientBeginServerFrame(edict_t *ent)
     }
 
     // run weapon animations if it hasn't been done by a ucmd_t
-    if (!client->weapon_thunk && !client->resp.spectator)
-
+    if (!client->weapon_thunk && !G_IsObserver(ent))
         Think_Weapon(ent);
     else
         client->weapon_thunk = false;
@@ -2112,7 +2245,8 @@ void ClientBeginServerFrame(edict_t *ent)
                 buttonMask = -1;
 
             if ((client->latched_buttons & buttonMask) ||
-                (deathmatch->value && ((int)dmflags->value & DF_FORCE_RESPAWN))) {
+                (deathmatch->value && ((int)dmflags->value & DF_FORCE_RESPAWN)) ||
+                CTFMatchOn()) {
                 respawn(ent);
                 client->latched_buttons = 0;
             }

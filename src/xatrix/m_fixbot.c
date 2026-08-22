@@ -270,7 +270,7 @@ static void use_scanner(edict_t *self)
                 if (visible(self, ent)) {
                     // remove the old one
                     if (strcmp(self->goalentity->classname, "bot_goal") == 0) {
-                        self->goalentity->nextthink = level.time + 0.1;
+                        self->goalentity->nextthink = level.framenum + 0.1 * BASE_FRAMERATE;
                         self->goalentity->think = G_FreeEdict;
                     }
 
@@ -296,7 +296,7 @@ static void use_scanner(edict_t *self)
         if (strcmp(self->goalentity->classname, "object_repair") == 0) {
             self->monsterinfo.currentmove = &fixbot_move_weld_start;
         } else {
-            self->goalentity->nextthink = level.time + 0.1;
+            self->goalentity->nextthink = level.framenum + 0.1 * BASE_FRAMERATE;
             self->goalentity->think = G_FreeEdict;
             self->goalentity = self->enemy = NULL;
             self->monsterinfo.currentmove = &fixbot_move_stand;
@@ -314,7 +314,7 @@ static void use_scanner(edict_t *self)
         if (strcmp(self->goalentity->classname, "object_repair") == 0) {
             self->monsterinfo.currentmove = &fixbot_move_stand;
         } else {
-            self->goalentity->nextthink = level.time + 0.1;
+            self->goalentity->nextthink = level.framenum + 0.1 * BASE_FRAMERATE;
             self->goalentity->think = G_FreeEdict;
             self->goalentity = self->enemy = NULL;
             self->monsterinfo.currentmove = &fixbot_move_stand;
@@ -466,7 +466,7 @@ static void fly_vertical(edict_t *self)
     M_ChangeYaw(self);
 
     if (self->s.frame == FRAME_landing_58 || self->s.frame == FRAME_takeoff_16) {
-        self->goalentity->nextthink = level.time + 0.1;
+        self->goalentity->nextthink = level.framenum + 0.1 * BASE_FRAMERATE;
         self->goalentity->think = G_FreeEdict;
         self->monsterinfo.currentmove = &fixbot_move_stand;
         self->goalentity = self->enemy = NULL;
@@ -496,7 +496,7 @@ static void fly_vertical2(edict_t *self)
     M_ChangeYaw(self);
 
     if (len < 32) {
-        self->goalentity->nextthink = level.time + 0.1;
+        self->goalentity->nextthink = level.framenum + 0.1 * BASE_FRAMERATE;
         self->goalentity->think = G_FreeEdict;
         self->monsterinfo.currentmove = &fixbot_move_stand;
         self->goalentity = self->enemy = NULL;

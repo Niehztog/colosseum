@@ -443,6 +443,37 @@ static const save_field_t clientfields[] = {
 
     O(pers.spectator),
 
+    // CTF (R-CTF-5, R-SAVE-3a).  Savegames are sp-only (R-ENG-6) so none of
+    // this can be reached today, but a descriptor that is absent because the
+    // field "cannot be saved yet" is exactly the R-VER-15 item 2 defect --
+    // xatrix's quadfire_framenum was lost that way.
+    I(resp.ctf_team),
+    I(resp.ctf_state),
+    F(resp.ctf_lasthurtcarrier),
+    F(resp.ctf_lastreturnedflag),
+    F(resp.ctf_flagsince),
+    F(resp.ctf_lastfraggedcarrier),
+    O(resp.id_state),
+    F(resp.lastidtime),
+    O(resp.voted),
+    O(resp.ready),
+    O(resp.admin),
+    // resp.ghost is a pointer into ctfgame.ghosts[], which is a static array in
+    // g_ctf.c that no descriptor can reach and that a savegame has no copy of.
+    // Deliberately not saved, and named here so dsweep.py's finding is answered
+    // rather than merely absent.
+
+    E(ctf_grapple),
+    I(ctf_grapplestate),
+    I(ctf_hookstate),
+    F(ctf_grapplereleasetime),
+    F(ctf_regentime),
+    F(ctf_techsndtime),
+    F(ctf_lasttechmsg),
+    // menu_owner, ctf_menu, menutime and menudirty are not saved either: the
+    // handle is TAG_LEVEL memory that SpawnEntities frees and g_spawn.c clears,
+    // so a reloaded game has no menu open and that is the correct state.
+
     O(showscores),
     O(showinventory),
     O(showhelp),
@@ -989,7 +1020,9 @@ void ReadGame(const char *filename)
     read_fields(f, gamefields, &game);
 
     // should agree with server's version
-    if (game.maxclients != (int)game.maxclients) {
+    // ...and the same defect in the savegame's own consistency check, where the
+    // comparison had become a tautology and could never fire (R-47).
+    if (game.maxclients != (int)maxclients->value) {
         gzclose(f);
         gi.error("Savegame has bad maxclients");
     }

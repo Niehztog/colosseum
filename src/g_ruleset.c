@@ -75,7 +75,7 @@ static const ruleset_ops_t ops_sp = {
 
 static const ruleset_ops_t *ruleset_ops[RULESET_COUNT] = {
     [RULESET_DM]      = &ops_dm,
-    [RULESET_CTF]     = NULL,       // Phase 3
+    [RULESET_CTF]     = &ops_ctf,   // src/ctf/g_ctf.c
     [RULESET_ARENA]   = NULL,       // Phase 4
     [RULESET_TOURNEY] = NULL,       // Phase 5
     [RULESET_SP]      = &ops_sp,
@@ -160,6 +160,16 @@ static void reconcile_legacy_cvars(void)
 {
     bool want_dm = (g_active_ruleset != RULESET_SP);
 
+    // `ctf` is serverinfo that a Threewave-aware client reads to decide what to
+    // draw, so it must agree with the resolved ruleset in both directions --
+    // `g_ruleset ctf` without `ctf 1` has to advertise CTF, and `ctf 1` with
+    // `g_ruleset dm` must not.  Threewave registers this cvar itself with
+    // default 1; it is registered here instead, because resolution owns it
+    // (R-MODE-2) and a second registration would re-assert a default that
+    // resolution has already decided.
+    gi.cvar_forceset("ctf", g_active_ruleset == RULESET_CTF ? "1" : "0");
+    gi.cvar("ctf", "0", CVAR_SERVERINFO);
+
     if (want_dm && !deathmatch->value) {
         gi.dprintf("Colosseum: ruleset '%s' requires deathmatch; setting it\n",
                    ruleset_names[g_active_ruleset]);
@@ -240,6 +250,11 @@ void G_InitRuleset(void)
             g_modifier[m] = false;
         }
     }
+
+    // The slot map is per ruleset (R-OSP-7) and must be resolved before any
+    // stat is written or any statusbar composed, which is why it hangs off
+    // resolution rather than off SP_worldspawn.
+    G_InitStats();
 
     gi.dprintf("Colosseum: ruleset '%s' (via %s)%s%s%s\n",
                ruleset_names[g_active_ruleset], via ? via : "default",
@@ -341,7 +356,7 @@ void G_Svcmd_Ruleset_f(void)
                "(R-CORE-11a)\n"
                "evasion      %d monster(s) on Ground Zero's dodge, %d on "
                "baseq2's (R-CORE-11)\n"
-               "world        %d edicts in use, %d clients, "
+               "world        frame %d, %d edicts in use, %d clients, "
                "%d live monsters, %d corpses, %d gibs\n",
                G_RulesetName(G_Ruleset()),
                G_LayerEnabled(LAYER_XATRIX), G_LayerEnabled(LAYER_ROGUE),
@@ -351,7 +366,44 @@ void G_Svcmd_Ruleset_f(void)
                G_BotsAllowed(), G_SavegamesAllowed(),
                (int)deathmatch->value, (int)coop->value,
                flav_x, flav_r, evade_rogue, evade_bq2,
-               inuse, clients, monsters, corpses, gibs);
+               level.framenum, inuse, clients, monsters, corpses, gibs);
+
+    // R-CTF-1's content, counted rather than assumed.  Nine CTF maps booting
+    // clean says nothing about whether the flags and techs are in the world:
+    // both are ordinary itemlist entries whose absence looks exactly like a map
+    // that has none.  Only printed under ctf, where the question means something.
+    if (G_Ruleset() == RULESET_CTF) {
+        static const char *const tech_names[] = {
+            "item_tech1", "item_tech2", "item_tech3", "item_tech4"
+        };
+        int spawn1 = 0, spawn2 = 0, techs = 0, banners = 0;
+        edict_t *f1 = G_Find(NULL, FOFS(classname), "item_flag_team1");
+        edict_t *f2 = G_Find(NULL, FOFS(classname), "item_flag_team2");
+
+        for (int i = 0; i < globals.num_edicts; i++) {
+            edict_t *e = &g_edicts[i];
+            if (!e->inuse || !e->classname)
+                continue;
+            if (!strcmp(e->classname, "info_player_team1"))
+                spawn1++;
+            else if (!strcmp(e->classname, "info_player_team2"))
+                spawn2++;
+            else if (!strncmp(e->classname, "misc_ctf_", 9))
+                banners++;
+            for (int t = 0; t < q_countof(tech_names); t++)
+                if (!strcmp(e->classname, tech_names[t]))
+                    techs++;
+        }
+
+        // A flag is "at base" when it is solid; SOLID_NOT means carried or
+        // dropped, which is what SetCTFStats reads to pick its icon.
+        gi.cprintf(NULL, PRINT_HIGH,
+                   "ctf          flags %s/%s, %d tech(es) in world, "
+                   "%d+%d team spawn(s), %d banner(s)\n",
+                   f1 ? (f1->solid == SOLID_NOT ? "away" : "base") : "ABSENT",
+                   f2 ? (f2->solid == SOLID_NOT ? "away" : "base") : "ABSENT",
+                   techs, spawn1, spawn2, banners);
+    }
 
     // A live monster in a ruleset that forbids them is a contradiction, and the
     // diagnostic names it rather than leaving a reader to spot an unexpected

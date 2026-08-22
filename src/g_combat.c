@@ -271,7 +271,10 @@ static int CheckPowerArmor(edict_t *ent, const vec3_t point, const vec3_t normal
         pa_te_type = TE_SCREEN_SPARKS;
         damage = damage / 3;
     } else {
-        damagePerCell = 2;
+        // CTF halves the power shield's efficiency -- "power armor is weaker in
+        // CTF", the donor's own comment.  A balance decision that belongs to the
+        // ruleset, so it is gated rather than taken globally.
+        damagePerCell = (G_Ruleset() == RULESET_CTF) ? 1 : 2;
         pa_te_type = TE_SHIELD_SPARKS;
         damage = (2 * damage) / 3;
     }
@@ -492,8 +495,16 @@ static void M_ReactToDamage(edict_t *targ, edict_t *attacker, edict_t *inflictor
     }
 }
 
-static bool CheckTeamDamage(edict_t *targ, edict_t *attacker)
+// Non-static: CTF's grapple asks the same question before hurting whoever it
+// hit, so the linkage follows the call (R-CORE-13).
+bool CheckTeamDamage(edict_t *targ, edict_t *attacker)
 {
+    // CTF: teammates cannot hurt each other at all.
+    if (G_Ruleset() == RULESET_CTF && targ->client && attacker->client)
+        if (targ->client->resp.ctf_team == attacker->client->resp.ctf_team &&
+            targ != attacker)
+            return true;
+
     //FIXME make the next line real and uncomment this block
     // if ((ability to damage a teammate == OFF) && (targ's team == attacker's team))
     return false;
@@ -586,6 +597,15 @@ void T_Damage(edict_t *targ, edict_t *inflictor, edict_t *attacker, const vec3_t
     if (!(dflags & DAMAGE_RADIUS) && (targ->svflags & SVF_MONSTER) && (attacker->client) && (!targ->enemy) && (targ->health > 0))
         damage *= 2;
 
+    // CTF strength tech.  A no-op without the tech, so no gate: CTFApplyStrength
+    // returns its argument when the attacker holds nothing.  "Holds nothing"
+    // and "is not there" are different states, and only the first is this
+    // call's to answer -- the second is answered once at the top of T_Damage,
+    // and a gate here instead would leave it unanswered for
+    // CTFCheckHurtCarrier() below and for M_ReactToDamage(), which is id's own
+    // and runs whatever the ruleset is.
+    damage = CTFApplyStrength(attacker, damage);
+
     if (targ->flags & FL_NO_KNOCKBACK)
         knockback = 0;
 
@@ -642,18 +662,44 @@ void T_Damage(edict_t *targ, edict_t *inflictor, edict_t *attacker, const vec3_t
     }
     // ROGUE
 
-    psave = CheckPowerArmor(targ, point, normal, take, dflags);
-    take -= psave;
+    // CTF's DF_ARMOR_PROTECT: with the dmflag set, a teammate's shot does not
+    // eat your armour either.  Gated on the ruleset because the dmflags bit
+    // itself is CTF's (0x40000) and means nothing elsewhere.
+    if (G_Ruleset() == RULESET_CTF && targ->client && attacker->client &&
+        targ->client->resp.ctf_team == attacker->client->resp.ctf_team &&
+        targ != attacker && ((int)dmflags->value & DF_ARMOR_PROTECT)) {
+        psave = asave = 0;
+    } else {
+        psave = CheckPowerArmor(targ, point, normal, take, dflags);
+        take -= psave;
 
-    asave = CheckArmor(targ, point, normal, take, te_sparks, dflags);
-    take -= asave;
+        asave = CheckArmor(targ, point, normal, take, te_sparks, dflags);
+        take -= asave;
+    }
 
     //treat cheat/powerup savings the same as armor
     asave += save;
 
+    // CTF resistance tech.  A no-op without it, like the strength tech above.
+    take = CTFApplyResistance(targ, take);
+
     // team damage avoidance
     if (!(dflags & DAMAGE_NO_PROTECTION) && CheckTeamDamage(targ, attacker))
         return;
+
+    // CTF: hurting a flag carrier's escort earns the carrier's killer a bonus
+    // later.  Records the fact; the scoring happens in CTFFragBonuses.
+    //
+    // Gated, where the donor's call is not, and the gate is this project's
+    // decision rather than the merge's.  The only reader of
+    // `ctf_lasthurtcarrier` is CTFFragBonuses, which returns at
+    // `CTFOtherTeam(...) < 0` before reaching it unless the victim is on a real
+    // CTF team, so outside ctf this call wrote a field nobody read.  The donor
+    // could leave it ungated because its library only ever ran CTF; this one
+    // runs every ruleset from one binary, and an ungated donor entry point in a
+    // shared T_Damage is exactly how a CTF rule reaches a deathmatch server.
+    if (G_Ruleset() == RULESET_CTF)
+        CTFCheckHurtCarrier(targ, attacker);
 
 // ROGUE - this option will do damage both to the armor and person. originally for DPU rounds
     if (dflags & DAMAGE_DESTROY_ARMOR) {
@@ -666,7 +712,7 @@ void T_Damage(edict_t *targ, edict_t *inflictor, edict_t *attacker, const vec3_t
 
 // do the damage
     if (take) {
-        // Three damage-effect rules union here (ง7 rule 3): baseq2's blood,
+        // Three damage-effect rules union here (ยง7 rule 3): baseq2's blood,
         // Xatrix's green gekk blood, and Ground Zero's mechanical sparks and
         // chainfist extra blood.  They compose -- each tests a different thing
         // about the target or the weapon -- so no gate is needed, only ordering
@@ -684,7 +730,10 @@ void T_Damage(edict_t *targ, edict_t *inflictor, edict_t *attacker, const vec3_t
             SpawnDamage(te_sparks, point, normal, take);
 //PGM
 
-        targ->health = targ->health - take;
+        // CTF match setup freezes the players while captains pick teams, so no
+        // damage lands.  CTFMatchSetup() is false in every other ruleset.
+        if (!CTFMatchSetup())
+            targ->health = targ->health - take;
 
 //PGM - spheres need to know who to shoot at
         if (client && client->owned_sphere) {
@@ -723,7 +772,7 @@ void T_Damage(edict_t *targ, edict_t *inflictor, edict_t *attacker, const vec3_t
                 targ->pain_debounce_framenum = level.framenum + 5 * BASE_FRAMERATE;
         }
     } else if (client) {
-        if (!(targ->flags & FL_GODMODE) && (take))
+        if (!(targ->flags & FL_GODMODE) && (take) && !CTFMatchSetup())
             targ->pain(targ, attacker, knockback, take);
     } else if (take) {
         if (targ->pain)

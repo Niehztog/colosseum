@@ -35,6 +35,12 @@ with this program; if not, write to the Free Software Foundation, Inc.,
 // test that happens to be in scope.
 #include "g_ruleset.h"
 
+// the per-ruleset stat slot map and the composed statusbar (R-OSP-7,
+// R-OSP-7a).  Same argument as above: a slot is asked for by name, and the
+// number it resolves to is the active ruleset's business, not the call
+// site's.
+#include "g_stats.h"
+
 // the "gameversion" client command will print this plus compile date.
 // R-ENG-8: this feeds the `gamename` serverinfo cvar.  Phase 0 deliberately
 // left it at "baseq2" so src/ stayed byte-identical to the pin and the
@@ -307,6 +313,11 @@ typedef struct {
 // ROGUE
 #define IT_MELEE        BIT(6)
 #define IT_NOT_GIVEABLE BIT(7)      // item can not be given
+// CTF -- Threewave writes this as a bare `64`, i.e. BIT(6), which Ground Zero
+// already holds for IT_MELEE.  A value collision, not a name collision, so
+// R-CORE-14's treatment applies rather than §7 rule 4's: the bit moves and the
+// allocation is recorded (doc/reconciliation.md R-40).
+#define IT_TECH         BIT(8)
 // ROGUE
 
 // gitem_t->weapmodel for weapons indicates model index
@@ -321,6 +332,7 @@ typedef struct {
 #define WEAP_HYPERBLASTER       9
 #define WEAP_RAILGUN            10
 #define WEAP_BFG                11
+#define WEAP_GRAPPLE            12  // CTF
 #define WEAP_PHALANX            12
 #define WEAP_BOOMER             13
 
@@ -405,6 +417,27 @@ typedef struct {
     precache_t  *precaches;
 } game_locals_t;
 
+// CTF types the client structs below hold pointers to.  Forward-declared rather
+// than included: Threewave puts `#include "p_menu.h"` at the top of g_local.h
+// and `#include "g_ctf.h"` at the bottom, and both of those headers need
+// edict_t, so the include order only works by accident.  §5.2 is explicit that
+// CTF and tourney will both ship a p_menu.h, which is the other half of the
+// reason (R-25 item 3).
+typedef struct ctf_pmenuhnd_s   ctf_pmenuhnd_t;
+typedef struct ghost_s          ghost_t;
+
+// R-MENU-1 ships four donor menu engines and R-MENU-3 allows exactly one open
+// per client.  This is the single field R-MENU-2a asks for: the engines are
+// separate translation units with prefixed symbols and no knowledge of each
+// other, so the arbiter has to be outside all of them.
+typedef enum {
+    MENU_NONE,
+    MENU_CTF,           // Threewave pmenu_t     -- src/ctf/p_menu.c
+    MENU_TOURNEY,       // OSP pmenu_t           -- Phase 5
+    MENU_ARENA,         // RA2 qmenu_t           -- Phase 4
+    MENU_BOT,           // Gladiator menu_t tree -- Phase 6
+} menu_owner_t;
+
 //
 // this structure is cleared as each map is entered
 // it is read/written to the level.sav file for savegames
@@ -416,6 +449,8 @@ typedef struct {
     char        level_name[MAX_QPATH];  // the descriptive name (Outer Base, etc)
     char        mapname[MAX_QPATH];     // the server name (base1, etc)
     char        nextmap[MAX_QPATH];     // go here when fraglimit is hit
+    char        forcemap[MAX_QPATH];    // CTF: a vote or `sv warp` overrides the
+                                        // rotation for exactly one level change
 
     // intermission state
     int       intermission_framenum;       // time the intermission was started
@@ -694,6 +729,10 @@ extern  int sm_meat_index;
 #define MOD_DOPPLE_HUNTER       55
 //ROGUE
 //========
+// CTF.  Threewave numbers this 34, which Xatrix already holds for MOD_RIPPER.
+// meansOfDeath is game-internal and appears in no protocol or savegame, so the
+// collision is resolved by taking the next free value rather than by a prefix.
+#define MOD_GRAPPLE             56
 
 extern  int meansOfDeath;
 
@@ -715,6 +754,8 @@ extern  cvar_t  *dmflags;
 extern  cvar_t  *skill;
 extern  cvar_t  *fraglimit;
 extern  cvar_t  *timelimit;
+extern  cvar_t  *capturelimit;      // CTF
+extern  cvar_t  *instantweap;       // CTF
 extern  cvar_t  *password;
 extern  cvar_t  *spectator_password;
 extern  cvar_t  *needpass;
@@ -859,7 +900,9 @@ edict_t *findradius2(edict_t *from, vec3_t org, float rad);
 // g_combat.c
 //
 bool OnSameTeam(edict_t *ent1, edict_t *ent2);
+bool FloodProtect(edict_t *ent);
 bool CanDamage(edict_t *targ, edict_t *inflictor);
+bool CheckTeamDamage(edict_t *targ, edict_t *attacker);
 void T_Damage(edict_t *targ, edict_t *inflictor, edict_t *attacker, const vec3_t dir, vec3_t point, const vec3_t normal, int damage, int knockback, int dflags, int mod);
 void T_RadiusDamage(edict_t *inflictor, edict_t *attacker, float damage, edict_t *ignore, float radius, int mod);
 
@@ -1000,6 +1043,12 @@ edict_t *PlayerTrail_LastSpot(void);
 // p_client.c
 //
 void respawn(edict_t *self);
+void PutClientInServer(edict_t *ent);
+void InitClientPersistant(gclient_t *client);
+void ClientObituary(edict_t *self, edict_t *inflictor, edict_t *attacker);
+float PlayersRangeFromSpot(edict_t *spot);
+edict_t *SelectRandomDeathmatchSpawnPoint(void);
+edict_t *SelectFarthestDeathmatchSpawnPoint(void);
 void InitBodyQue(void);
 void ClientBeginServerFrame(edict_t *ent);
 void ClientBegin(edict_t *ent);
@@ -1036,6 +1085,21 @@ void CheckDMRules(void);
 void EndDMLevel(void);
 void SelectSpawnPoint(edict_t *ent, vec3_t origin, vec3_t angles);
 void G_SetStats(edict_t *ent);
+void DeathmatchScoreboard(edict_t *ent);
+
+// R-MENU-2a/3, implemented in p_hud.c beside the other owners of the layout
+// channel.  G_MenuOpen closes the incumbent -- whichever engine owns it -- and
+// records the new owner; nothing else may write gclient_t.menu_owner.
+void G_MenuOpen(edict_t *ent, menu_owner_t who);
+void G_MenuClose(edict_t *ent);
+bool G_MenuActive(edict_t *ent);
+
+// R-CTF-5, and the one predicate that replaces thirteen `resp.spectator` tests.
+// "Is this client watching rather than playing?" has two answers in one library:
+// baseq2's `resp.spectator` under dm and sp, and Threewave's
+// `resp.ctf_team == CTF_NOTEAM` under ctf, which has no baseq2 spectator flag
+// at all.  Asking the question by name means no call site has to know which.
+bool G_IsObserver(edict_t *ent);
 void G_SetSpectatorStats(edict_t *ent);
 void G_CheckChaseStats(edict_t *ent);
 void ValidateSelectedItem(edict_t *ent);
@@ -1045,6 +1109,9 @@ void DeathmatchScoreboardMessage(edict_t *client, edict_t *killer);
 // p_weapon.c
 //
 void PlayerNoise(edict_t *who, vec3_t where, int type);
+void P_ProjectSource(gclient_t *client, vec3_t point, vec3_t distance, vec3_t forward, vec3_t right, vec3_t result);
+void Weapon_Generic(edict_t *ent, int FRAME_ACTIVATE_LAST, int FRAME_FIRE_LAST, int FRAME_IDLE_LAST, int FRAME_DEACTIVATE_LAST, const int *pause_frames, const int *fire_frames, void (*fire)(edict_t *ent));
+void ChangeWeapon(edict_t *ent);
 
 //
 // m_move.c
@@ -1058,6 +1125,9 @@ void M_ChangeYaw(edict_t *ent);
 // g_phys.c
 //
 void G_RunEntity(edict_t *ent);
+void SV_AddGravity(edict_t *ent);
+void rogue_SP_trigger_teleport(edict_t *self);
+void rogue_SP_info_teleport_destination(edict_t *self);
 
 //
 // g_chase.c
@@ -1236,6 +1306,24 @@ typedef struct {
     vec3_t      cmd_angles;         // angles sent over in the last command
 
     bool        spectator;          // client is a spectator
+
+    // CTF.  Threewave DELETED pers.spectator and resp.spectator and expressed
+    // "watching rather than playing" as ctf_team == CTF_NOTEAM instead
+    // (R-CTF-5).  The merged struct keeps both, because dm and sp still need
+    // baseq2's flag and R-CORE-8 keeps the campaign in scope; G_IsObserver()
+    // is the one place that knows which is authoritative.
+    int         ctf_team;
+    int         ctf_state;
+    float       ctf_lasthurtcarrier;
+    float       ctf_lastreturnedflag;
+    float       ctf_flagsince;
+    float       ctf_lastfraggedcarrier;
+    bool        id_state;           // player-id display, on by default (R-CTF-6)
+    float       lastidtime;
+    bool        voted;              // for elections
+    bool        ready;
+    bool        admin;
+    ghost_t     *ghost;             // ghost code, for reconnecting mid-match
 } client_respawn_t;
 
 // this structure is cleared on each PutClientInServer(),
@@ -1254,6 +1342,18 @@ struct gclient_s {
     bool        showinventory;      // set layout stat
     bool        showhelp;
     bool        showhelpicon;
+
+    // R-MENU-2a: the menu owner is a SINGLE field, and every engine's open path
+    // goes through G_MenuOpen() which closes the incumbent first.  Four donor
+    // menu engines contend for one client input channel (R-MENU-1) and nothing
+    // else structurally prevents two being open at once, so this field -- not a
+    // per-engine `inmenu` boolean -- is what makes R-MENU-3 true.  Threewave's
+    // own `inmenu` is therefore not carried: it would be a second answer to a
+    // question that must have one.
+    menu_owner_t    menu_owner;
+    ctf_pmenuhnd_t  *ctf_menu;      // MENU_CTF's handle
+    float           menutime;       // next allowed refresh
+    bool            menudirty;
 
     int         ammo_index;
 
@@ -1329,6 +1429,25 @@ struct gclient_s {
 
     edict_t     *chase_target;      // player we are chasing
     bool    update_chase;       // need to update chase info?
+
+    // CTF.  ctf_grapple is an edict_t*; Threewave declares it `void *` only
+    // because g_local.h had not defined edict_t yet at that point in its own
+    // file.  It has here, so it is typed.
+    //
+    // The timeouts stay `float level.time` seconds rather than being converted
+    // to the `_framenum` model.  §7 rule 1 says q2pro wins on a timer, and
+    // q2pro's own CTF port is the tree that answers what q2pro thinks here: it
+    // kept every one of these as a float.  level.time is live and saved, the
+    // conversion would touch ~40 sites in g_ctf.c for no behavioural gain, and
+    // the _framenum model in this tree covers client powerup timers and entity
+    // debounces, not mod-internal timeouts (doc/reconciliation.md R-41).
+    edict_t     *ctf_grapple;
+    int         ctf_grapplestate;
+    int         ctf_hookstate;      // the offhand hook's latch (R-CTF-3)
+    float       ctf_grapplereleasetime;
+    float       ctf_regentime;
+    float       ctf_techsndtime;
+    float       ctf_lasttechmsg;
 
 //=======
 //ROGUE
@@ -1586,3 +1705,9 @@ int  DBall_CheckDMRules(void);
 
 //ROGUE
 //============
+
+// Threewave CTF, at the bottom because g_ctf.h's prototypes need edict_t and
+// gclient_t.  Qualified path, never -Isrc/ctf: §5.2 has CTF and tourney both
+// shipping a p_menu.h, so putting a donor directory on the include path is
+// precisely the thing that breaks later (R-25 item 3).
+#include "ctf/g_ctf.h"

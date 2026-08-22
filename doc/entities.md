@@ -50,3 +50,29 @@ tools/counts.py --list items     # itemlist[] classnames alone
 Tourney's five extra spawn keys (`botlib`, `name`, `skin`, `charfile`,
 `charname`) arrive in Phase 5 and live in `g_spawn.c`'s `temp_fields[]`, where
 Q2PRO moved that table (R-OSP-6).
+
+## Phase 3: Threewave CTF
+
+**231 classnames** now (164 in the spawn table, 72 item classnames, 5 in both),
+up from Phase 2's 220. CTF adds **eleven** — four spawn rows and seven items —
+and *shares* two classnames with Ground Zero without adding a row for either.
+
+| classname | kind | note |
+|---|---|---|
+| `info_player_team1`, `info_player_team2` | spawn | the team spawn sets `SelectCTFSpawnPoint` chooses from |
+| `misc_ctf_banner`, `misc_ctf_small_banner` | spawn | scenery |
+| `weapon_grapple` | item | always owned, never in the world; issued by `InitClientPersistant` under `ctf` only |
+| `item_flag_team1`, `item_flag_team2` | item | in `itemlist[]` in every ruleset (R-CORE-2's union), so a CTF map loads anywhere; `SpawnItem` removes them outside `ctf` rather than leaving them as scenery |
+| `item_tech1` … `item_tech4` | item | **four**, not five. `g_ctf.c`'s own `tnames[]` lists four, and R-CTF-1's "five" was tourney's rune count (SPECS.md 1.12) |
+| `trigger_teleport`, `info_teleport_destination` | spawn, **shared** | one classname, two implementations, no new row: Ground Zero brought both in Phase 2 and CTF brings its own version of each. `g_misc.c` dispatches on the ruleset and each donor's spawn function keeps its prefix — `reconciliation.md` R-44 |
+
+**No new spawn key.** CTF adds no `spawn_temp_t` member and no
+`spawn_fields[]`/`temp_fields[]` row, so the frozen key column above is
+untouched — `keycontract.py` is clean on the merged tables. The two entities that
+*look* like they need one, the flags, are ordinary `itemlist[]` rows and are
+configured entirely from their classname.
+
+One spawnflag note: CTF's `trigger_teleport` reads **no** spawnflags at all while
+Ground Zero's reads four (`player_only`, `silent`, `ctf_only`, `start_on`), so
+unlike R-27's `trigger_push` there is no bit collision to resolve here — only the
+classname, and the ruleset settles that.

@@ -326,7 +326,7 @@ void turret_driver_think(edict_t *self)
         return;
 
     reaction_time = (3 - skill->value) * 1.0f;
-    if ((level.time - self->monsterinfo.trail_framenum) < reaction_time)
+    if ((level.framenum - self->monsterinfo.trail_framenum) < reaction_time * BASE_FRAMERATE)
         return;
 
     self->monsterinfo.attack_finished = level.time + reaction_time + 1.0f;
@@ -478,7 +478,7 @@ void turret_brain_think(edict_t *self)
         reaction_time = self->delay;
     else
         reaction_time = (3 - skill->value) * 1.0f;
-    if ((level.time - self->monsterinfo.trail_framenum) < reaction_time)
+    if ((level.framenum - self->monsterinfo.trail_framenum) < reaction_time * BASE_FRAMERATE)
         return;
 
     self->monsterinfo.attack_finished = level.time + reaction_time + 1.0f;
@@ -500,7 +500,23 @@ void turret_brain_link(edict_t *self)
     self->think = turret_brain_think;
     self->nextthink = level.framenum + 1;
 
+    // Q2PRO's 372e2503fe47 "Fix crashes due to G_PickTarget() returning NULL"
+    // guarded the two baseq2 sites in this file.  turret_brain_link is Ground
+    // Zero's own addition and the fix never reached it: a `turret_brain` whose
+    // `target` names nothing crashes the server here, exactly as the two
+    // guarded sites used to.  Same remedy as the fix used at turret_driver_link
+    // -- free the brain and give up, since it has nothing to drive.
+    //
+    // Found while discharging R-VER-10 for the CTF import, which is what that
+    // check is for: the commit is marked *re-apply* for ctf in
+    // doc/replay-coverage.md, and re-applying it meant looking at every call
+    // site rather than at the two the diff named.
     self->target_ent = G_PickTarget(self->target);
+    if (!self->target_ent) {
+        gi.dprintf("%s at %s has no target\n", self->classname, vtos(self->s.origin));
+        G_FreeEdict(self);
+        return;
+    }
     self->target_ent->owner = self;
     self->target_ent->teammaster->owner = self;
     VectorCopy(self->target_ent->s.angles, self->s.angles);

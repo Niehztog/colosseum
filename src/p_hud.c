@@ -18,8 +18,67 @@ with this program; if not, write to the Free Software Foundation, Inc.,
 
 #include "g_local.h"
 
-#define STAT_TIMER2_ICON        18
-#define STAT_TIMER2             19
+/*
+===============================================================================
+
+MENU OWNERSHIP AND THE OBSERVER QUESTION
+
+Two small arbiters, here because p_hud.c is where the other claimants of the
+layout channel already live -- the scoreboard, the inventory and the help
+computer -- and because neither belongs inside any one donor's engine.
+
+===============================================================================
+*/
+
+// R-MENU-2a/3.  One owner per client, and the open path closes the incumbent.
+// Which engine that is is the owner field's business, not the caller's: an
+// engine does not know the others exist, so nothing but this function can close
+// a menu it did not open.
+void G_MenuClose(edict_t *ent)
+{
+    if (!ent->client)
+        return;
+
+    switch (ent->client->menu_owner) {
+    case MENU_CTF:
+        ctf_PMenu_Close(ent);
+        break;
+    case MENU_TOURNEY:      // Phase 5
+    case MENU_ARENA:        // Phase 4
+    case MENU_BOT:          // Phase 6
+    case MENU_NONE:
+        break;
+    }
+    ent->client->menu_owner = MENU_NONE;
+}
+
+void G_MenuOpen(edict_t *ent, menu_owner_t who)
+{
+    G_MenuClose(ent);
+    ent->client->menu_owner = who;
+}
+
+bool G_MenuActive(edict_t *ent)
+{
+    return ent->client && ent->client->menu_owner != MENU_NONE;
+}
+
+// R-CTF-5.  "Is this client watching rather than playing?" has two answers in
+// one library and thirteen call sites that must not have to know which.
+//
+// baseq2 has a `spectator` userinfo key, a password, a limit and a pers/resp
+// pair that ClientBeginServerFrame watches for a change.  Threewave has none of
+// that: it deleted both fields and expressed the same state as
+// `ctf_team == CTF_NOTEAM`, joined and left through the menu.  Both survive
+// (R-CORE-6's union, R-CORE-8's campaign), so the question is asked by name.
+bool G_IsObserver(edict_t *ent)
+{
+    if (!ent->client)
+        return false;
+    if (G_Ruleset() == RULESET_CTF)
+        return ent->client->resp.ctf_team == CTF_NOTEAM;
+    return ent->client->resp.spectator;
+}
 
 /*
 ======================================================================
@@ -189,7 +248,7 @@ void DeathmatchScoreboardMessage(edict_t *ent, edict_t *killer)
     total = 0;
     for (i = 0; i < game.maxclients; i++) {
         cl_ent = g_edicts + 1 + i;
-        if (!cl_ent->inuse || game.clients[i].resp.spectator)
+        if (!cl_ent->inuse || G_IsObserver(cl_ent))
             continue;
         score = game.clients[i].resp.score;
         for (j = 0; j < total; j++) {
@@ -272,7 +331,9 @@ Draw instead of help message.
 Note that it isn't that hard to overflow the 1400 byte message limit!
 ==================
 */
-static void DeathmatchScoreboard(edict_t *ent)
+// Non-static: CTF's admin menu and match code show the scoreboard too, and the
+// ruleset picks which message it carries (R-CORE-13).
+void DeathmatchScoreboard(edict_t *ent)
 {
     G_ScoreboardMessage(ent, ent->enemy);
     gi.unicast(ent, true);
@@ -290,11 +351,19 @@ void Cmd_Score_f(edict_t *ent)
     ent->client->showinventory = false;
     ent->client->showhelp = false;
 
+    // R-MENU-3: the scoreboard and the menu are the same channel, so asking for
+    // one closes the other.
+    if (G_MenuActive(ent)) {
+        G_MenuClose(ent);
+        return;
+    }
+
     if (!deathmatch->value && !coop->value)
         return;
 
     if (ent->client->showscores) {
         ent->client->showscores = false;
+        ent->client->update_chase = true;
         return;
     }
 
@@ -493,12 +562,18 @@ void G_SetStats(edict_t *ent)
     //
     // timer 2 (pent)
     //
-    ent->client->ps.stats[STAT_TIMER2_ICON] = 0;
-    ent->client->ps.stats[STAT_TIMER2] = 0;
+    // R-OSP-7 clause 4's reference case: a baseq2 mechanic written by the shared
+    // G_SetStats that needs two private slots in every ruleset, and that each
+    // donor had to place differently (baseq2 18/19, RA2 26/27, tourney 29/30,
+    // and CTF had nowhere at all).  It asks the slot map where its pair landed
+    // and does not care; where the ruleset has no pair, both writes and the bar
+    // items vanish together and the pent falls back to timer 1 below.
+    G_SetStat(ent, SID_TIMER2_ICON, 0);
+    G_SetStat(ent, SID_TIMER2, 0);
     if (ent->client->invincible_framenum > level.framenum) {
-        if (ent->client->ps.stats[STAT_TIMER_ICON]) {
-            ent->client->ps.stats[STAT_TIMER2_ICON] = gi.imageindex("p_invulnerability");
-            ent->client->ps.stats[STAT_TIMER2] = (ent->client->invincible_framenum - level.framenum) / 10;
+        if (ent->client->ps.stats[STAT_TIMER_ICON] && G_Stat(SID_TIMER2_ICON) >= 0) {
+            G_SetStat(ent, SID_TIMER2_ICON, gi.imageindex("p_invulnerability"));
+            G_SetStat(ent, SID_TIMER2, (ent->client->invincible_framenum - level.framenum) / 10);
         } else {
             ent->client->ps.stats[STAT_TIMER_ICON] = gi.imageindex("p_invulnerability");
             ent->client->ps.stats[STAT_TIMER] = (ent->client->invincible_framenum - level.framenum) / 10;
@@ -549,7 +624,13 @@ void G_SetStats(edict_t *ent)
     else
         ent->client->ps.stats[STAT_HELPICON] = 0;
 
-    ent->client->ps.stats[STAT_SPECTATOR] = 0;
+    G_SetStat(ent, SID_SPECTATOR, 0);
+
+    // CTF's fourteen stats.  A gated tail rather than an ops row: everything
+    // above this line is shared and only the last step differs, which is exactly
+    // the case R-MODE-5 says to gate inline rather than to hook.
+    if (G_Ruleset() == RULESET_CTF)
+        SetCTFStats(ent);
 }
 
 /*
@@ -583,7 +664,7 @@ void G_SetSpectatorStats(edict_t *ent)
     if (!cl->chase_target)
         G_SetStats(ent);
 
-    cl->ps.stats[STAT_SPECTATOR] = 1;
+    G_SetStat(ent, SID_SPECTATOR, 1);
 
     // layouts are independant in spectator
     cl->ps.stats[STAT_LAYOUTS] = 0;
@@ -593,8 +674,8 @@ void G_SetSpectatorStats(edict_t *ent)
         cl->ps.stats[STAT_LAYOUTS] |= LAYOUTS_INVENTORY;
 
     if (cl->chase_target && cl->chase_target->inuse) {
-        cl->ps.stats[STAT_CHASE] = game.csr.playerskins +
-                                   (cl->chase_target - g_edicts) - 1;
+        G_SetStat(ent, SID_CHASE, game.csr.playerskins +
+                  (cl->chase_target - g_edicts) - 1);
     } else
-        cl->ps.stats[STAT_CHASE] = 0;
+        G_SetStat(ent, SID_CHASE, 0);
 }

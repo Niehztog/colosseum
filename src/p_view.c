@@ -522,6 +522,14 @@ static void P_FallingDamage(edict_t *ent)
     }
     delta = delta * delta * 0.0001f;
 
+    // CTF: the grapple cancels falling damage, both while attached and for two
+    // frames after release -- otherwise a swing that ends near the floor kills
+    // you for the grapple's own velocity.
+    if (level.time - ent->client->ctf_grapplereleasetime <= FRAMETIME * 2 ||
+        (ent->client->ctf_grapple &&
+         ent->client->ctf_grapplestate > CTF_GRAPPLE_STATE_FLY))
+        return;
+
     // never take falling damage if completely underwater
     if (ent->waterlevel == 3)
         return;
@@ -601,7 +609,7 @@ static void P_WorldEffects(void)
         current_player->flags |= FL_INWATER;
 
         // clear damage_debounce, so the pain sound will play immediately
-        current_player->damage_debounce_framenum = level.framenum - 1;
+        current_player->damage_debounce_framenum = level.framenum - 1 * BASE_FRAMERATE;
     }
 
     //
@@ -628,7 +636,7 @@ static void P_WorldEffects(void)
             // gasp for air
             gi.sound(current_player, CHAN_VOICE, gi.soundindex("player/gasp1.wav"), 1, ATTN_NORM, 0);
             PlayerNoise(current_player, current_player->s.origin, PNOISE_SELF);
-        } else  if (current_player->air_finished_framenum < level.framenum + 11) {
+        } else  if (current_player->air_finished_framenum < level.framenum + 11 * BASE_FRAMERATE) {
             // just break surface
             gi.sound(current_player, CHAN_VOICE, gi.soundindex("player/gasp2.wav"), 1, ATTN_NORM, 0);
         }
@@ -754,10 +762,17 @@ static void G_SetClientEffects(edict_t *ent)
         }
     }
 
+    // CTF's flag and tech effects, and the reason the two powerup effects below
+    // go through CTFSetPowerUpEffect: a flag carrier already has EF_FLAG1 or
+    // EF_FLAG2 on s.effects, and EF_QUAD would replace the colour the flag
+    // needs.  CTFSetPowerUpEffect keeps both visible; outside ctf it is a
+    // straight `|=`.
+    CTFEffects(ent);
+
     if (ent->client->quad_framenum > level.framenum) {
         remaining = ent->client->quad_framenum - level.framenum;
         if (remaining > 30 || (remaining & 4))
-            ent->s.effects |= EF_QUAD;
+            CTFSetPowerUpEffect(ent, EF_QUAD);
     }
 
     // RAFAEL
@@ -785,7 +800,7 @@ static void G_SetClientEffects(edict_t *ent)
     if (ent->client->invincible_framenum > level.framenum) {
         remaining = ent->client->invincible_framenum - level.framenum;
         if (remaining > 30 || (remaining & 4))
-            ent->s.effects |= EF_PENT;
+            CTFSetPowerUpEffect(ent, EF_PENT);
     }
 
     // show cheaters!!!
@@ -925,10 +940,17 @@ newanim:
     client->anim_run = run;
 
     if (!ent->groundentity) {
-        client->anim_priority = ANIM_JUMP;
-        if (ent->s.frame != FRAME_jump2)
-            ent->s.frame = FRAME_jump1;
-        client->anim_end = FRAME_jump2;
+        // CTF: on the grapple, stand rather than fall -- the jump frames look
+        // wrong for a player being winched upward.
+        if (client->ctf_grapple) {
+            ent->s.frame = FRAME_stand01;
+            client->anim_end = FRAME_stand40;
+        } else {
+            client->anim_priority = ANIM_JUMP;
+            if (ent->s.frame != FRAME_jump2)
+                ent->s.frame = FRAME_jump1;
+            client->anim_end = FRAME_jump2;
+        }
     } else if (run) {
         // running
         if (duck) {
@@ -1056,8 +1078,10 @@ void ClientEndServerFrame(edict_t *ent)
     // should be determined by the client
     SV_CalcBlend(ent);
 
-    // chase cam stuff
-    if (ent->client->resp.spectator)
+    // chase cam stuff.  G_IsObserver() rather than resp.spectator: under ctf an
+    // observer is a CTF_NOTEAM player and resp.spectator is never set, so the
+    // inherited test would give an observer a live player's HUD (R-CTF-5).
+    if (G_IsObserver(ent))
         G_SetSpectatorStats(ent);
     else
         G_SetStats(ent);
@@ -1081,7 +1105,17 @@ void ClientEndServerFrame(edict_t *ent)
 
     // if the scoreboard is up, update it
     if (ent->client->showscores && !(level.framenum & 31)) {
-        G_ScoreboardMessage(ent, ent->enemy);
+        // The menu shares the layout channel with the scoreboard -- which is
+        // exactly why every engine sets showscores when it opens (R-MENU-2a) --
+        // so the owner decides which of the two is redrawn.
+        if (G_MenuActive(ent)) {
+            if (ent->client->menu_owner == MENU_CTF)
+                ctf_PMenu_Do_Update(ent);
+            ent->client->menudirty = false;
+            ent->client->menutime = level.time;
+        } else {
+            G_ScoreboardMessage(ent, ent->enemy);
+        }
         gi.unicast(ent, false);
     }
 }

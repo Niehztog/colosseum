@@ -618,7 +618,7 @@ void BossExplode2(edict_t *self)
     gi.WritePosition(org);
     gi.multicast(self->s.origin, MULTICAST_PVS);
 
-    self->nextthink = level.time + 0.1;
+    self->nextthink = level.framenum + 0.1 * BASE_FRAMERATE;
 }
 
 void boss5_die(edict_t *self, edict_t *inflictor, edict_t *attacker, int damage, vec3_t point)

@@ -740,7 +740,7 @@ bool turret_checkattack(edict_t *self)
                         if (level.time < self->monsterinfo.attack_finished) {
                             return false;
                         }
-                        if (level.time < (self->monsterinfo.trail_framenum + self->monsterinfo.blind_fire_delay)) {
+                        if (level.framenum < (self->monsterinfo.trail_framenum + self->monsterinfo.blind_fire_delay * BASE_FRAMERATE)) {
                             // wait for our time
                             return false;
                         } else {

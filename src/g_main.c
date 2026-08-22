@@ -35,6 +35,8 @@ cvar_t  *dmflags;
 cvar_t  *skill;
 cvar_t  *fraglimit;
 cvar_t  *timelimit;
+cvar_t  *capturelimit;      // CTF
+cvar_t  *instantweap;       // CTF
 cvar_t  *password;
 cvar_t  *spectator_password;
 cvar_t  *needpass;
@@ -212,14 +214,30 @@ static void InitGame(void)
     game.helpmessage1[0] = 0;
     game.helpmessage2[0] = 0;
 
+    // Threewave's own init.  NO DONOR TREE CALLS THIS -- not port_ctf, not
+    // q2pro/src/ctf -- so every CTF cvar pointer stays null and SpawnEntities'
+    // CTFSpawn() dereferences `competition->value` on the first map load, before
+    // a player can connect.  Found by running it (doc/reconciliation.md R-42).
+    //
+    // Called unconditionally rather than under `ctf`, because CTF's flag and
+    // tech drop paths are reached from shared code -- player_die and
+    // ClientDisconnect -- in every ruleset, and they need flag1_item resolved.
+    CTFInit();
+
     // initialize all entities for this game
-    game.maxentities = Q_clip(maxentities->value, (int)game.maxclients + 1, game.csr.max_edicts);
+    //
+    // `maxclients->value`, not `game.maxclients`.  Both donor branches carry
+    // `game.maxclients = game.maxclients;` -- a self-assignment -- and the
+    // mission-pack merge propagated it here in Phase 2, where nothing could
+    // catch it: on a dedicated server with no clients connecting, maxclients 0
+    // is invisible.  See doc/reconciliation.md R-47.
+    game.maxentities = Q_clip(maxentities->value, (int)maxclients->value + 1, game.csr.max_edicts);
     g_edicts = gi.TagMalloc(game.maxentities * sizeof(g_edicts[0]), TAG_GAME);
     globals.edicts = g_edicts;
     globals.max_edicts = game.maxentities;
 
     // initialize all clients for this game
-    game.maxclients = game.maxclients;
+    game.maxclients = maxclients->value;
     game.clients = gi.TagMalloc(game.maxclients * sizeof(game.clients[0]), TAG_GAME);
     globals.num_edicts = game.maxclients + 1;
 }
@@ -355,6 +373,13 @@ void EndDMLevel(void)
     }
 
     // see if it's in the map list
+    // CTF's `warp` vote and admin menu override the rotation for exactly one
+    // level change.  Empty in every other ruleset, so no gate.
+    if (*level.forcemap) {
+        BeginIntermission(CreateTargetChangeLevel(level.forcemap));
+        return;
+    }
+
     if (*sv_maplist->string) {
         s = strdup(sv_maplist->string);
         f = NULL;
@@ -454,11 +479,20 @@ static void ExitLevel(void)
     edict_t *ent;
     char    command[256];
 
+    // The two clears move ahead of CTFNextMap because it starts the next map
+    // itself when a match is running, and it must not leave the intermission
+    // flags set behind it.  Harmless for dm: nothing below reads either.
+    level.exitintermission = 0;
+    level.intermission_framenum = 0;
+
+    // CTF's match system owns the level change during a match.  False in every
+    // other ruleset.
+    if (CTFNextMap())
+        return;
+
     Q_snprintf(command, sizeof(command), "gamemap \"%s\"\n", level.changemap);
     gi.AddCommandString(command);
     level.changemap = NULL;
-    level.exitintermission = 0;
-    level.intermission_framenum = 0;
 
     // clear some things before going to next level
     for (i = 0; i < game.maxclients; i++) {
