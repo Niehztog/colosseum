@@ -138,6 +138,8 @@ static const save_field_t entityfields[] = {
     I(movetype),
     I(flags),
 
+    I(arena),
+
     L(model),
     F(freetime),
 
@@ -456,6 +458,26 @@ static const save_field_t clientfields[] = {
     O(resp.id_state),
     F(resp.lastidtime),
     O(resp.voted),
+
+    // Rocket Arena (R-SAVE-3a).  Only the scalars: `teammember` is a list node
+    // and `track_target` an edict pointer, both of them per-level state that
+    // arena_init() rebuilds, so saving either would restore a link into a level
+    // that no longer exists.  Named here rather than left silent, which is what
+    // dsweep.py's finding asks for.
+    I(resp.teamnum),
+    I(resp.fightstate),
+    I(resp.context),
+    I(resp.spawn_recheck),
+    I(resp.omode),
+    I(resp.lastomode),
+    I(resp.omode_buttons),
+    O(resp.entered),
+    O(resp.ra_voted),
+    I(resp.ra_votes),
+    I(resp.damagedealt),
+    I(resp.zbotcount),
+    F(resp.zbotlastcheck),
+    I(resp.isbot),
     O(resp.ready),
     O(resp.admin),
     // resp.ghost is a pointer into ctfgame.ghosts[], which is a static array in
@@ -475,6 +497,13 @@ static const save_field_t clientfields[] = {
     // so a reloaded game has no menu open and that is the correct state.
 
     O(showscores),
+    I(scoremode),
+    // RA2's ZBot samples and its own spam counter.  `menuqueue`, `curmenulink`,
+    // `selected`, `ra_menutime`, `menuusetime` and `menutext` are not saved for
+    // the same reason the CTF menu handle above is not.
+    I(zbotscore),
+    I(spamcount),
+    F(spamtime),
     O(showinventory),
     O(showhelp),
     O(showhelpicon),

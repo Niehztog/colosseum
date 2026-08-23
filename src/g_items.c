@@ -16,6 +16,7 @@ with this program; if not, write to the Free Software Foundation, Inc.,
 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
 */
 #include "g_local.h"
+#include "arena/arena.h"
 
 bool        Pickup_Weapon(edict_t *ent, edict_t *other);
 void        Use_Weapon(edict_t *ent, const gitem_t *inv);
@@ -1412,6 +1413,16 @@ void SpawnItem(edict_t *ent, const gitem_t *item)
         }
     }
 
+    // RA2 removes every item from the map: an arena hands out a fixed loadout
+    // and anything lying on the floor is somebody's advantage.  Unconditional
+    // in the donor -- there is no `noitems` cvar in RA2 v2.25, that is a
+    // uGladQ2 addition (R-RA-4) -- so the gate is the ruleset, and baseq2's
+    // dmflags filter below is what every other ruleset still needs.
+    if (G_Ruleset() == RULESET_ARENA && item->pickup) {
+        G_FreeEdict(ent);
+        return;
+    }
+
     // some items will be prevented in deathmatch
     if (deathmatch->value) {
         if ((int)dmflags->value & DF_NO_ARMOR) {
@@ -1669,9 +1680,17 @@ const gitem_t itemlist[] = {
             "weapons/grapple/grhang.wav",
             "weapons/grapple/grreset.wav",
             "weapons/grapple/grhit.wav",
+            // CTFGrapplePull() plays this and Threewave never precached it;
+            // RA2's copy of the row does, and sec 7 rule 7 makes the fix ours.
+            "weapons/grapple/grhurt.wav",
             NULL
         },
     },
+
+    // RA2's own weapon_grapple row was here.  Dropped: the itemlist already
+    // has Threewave's for the same classname and there is one grapple
+    // (sec 7 rule 6, R-50).  Its one real difference -- the grhurt.wav
+    // precache -- is on that entry instead.
 
     /* weapon_blaster (.3 .3 1) (-16 -16 -16) (16 16 16)
     always owned, never in the world

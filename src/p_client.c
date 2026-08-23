@@ -17,6 +17,8 @@ with this program; if not, write to the Free Software Foundation, Inc.,
 */
 #include "g_local.h"
 #include "m_player.h"
+#include "arena/arena.h"
+#include "arena/ra2stats.h"
 
 void SP_misc_teleporter_dest(edict_t *ent);
 
@@ -210,6 +212,9 @@ void ClientObituary(edict_t *self, edict_t *inflictor, edict_t *attacker)
     char        *message;
     char        *message2;
     int         ff;
+
+    if (G_Ruleset() == RULESET_ARENA)
+        RA_Obituary(self, inflictor, attacker);
 
     if (coop->value && attacker->client)
         meansOfDeath |= MOD_FRIENDLY_FIRE;
@@ -647,6 +652,8 @@ void player_die(edict_t *self, edict_t *inflictor, edict_t *attacker, int damage
     self->svflags |= SVF_DEADMONSTER;
 
     if (!self->deadflag) {
+        if (G_Ruleset() == RULESET_ARENA)
+            GSLogDeath(self, inflictor, attacker);
         self->client->respawn_framenum = level.framenum + 1.0f * BASE_FRAMERATE;
         LookAtKiller(self, inflictor, attacker);
         self->client->ps.pmove.pm_type = PM_DEAD;
@@ -803,13 +810,39 @@ but is called after each death and level change in deathmatch
 ==============
 */
 // Non-static: CTF re-initialises a client on a team change (R-CORE-13).
-void InitClientPersistant(gclient_t *client)
+// `full` is OSP's (R-OSP-1): a partial reset keeps the client's identity --
+// userinfo, netname and the referee "green name" -- and clears everything else,
+// which is what a team change or a match reset wants.
+//
+// The donor computes it as `sizeof(userinfo) + sizeof(netname) +
+// sizeof(greenname)` and memsets from that offset onward, which is only correct
+// while those three are the FIRST members of client_persistant_t.  In this tree
+// they are not: R-CORE-6's union put Ground Zero's ammo maxima and CTF's fields
+// in between, so the donor's arithmetic would clear the identity it means to
+// keep and preserve three unrelated ints.  Saved and restored by name instead
+// (doc/reconciliation.md R-80).
+void InitClientPersistant(gclient_t *client, bool full)
 {
     const gitem_t   *item;
+    char            userinfo[MAX_INFO_STRING];
+    char            netname[16];
+    char            greenname[16];
 
 //  gi.dprintf("InitClientPersistant()\n");
 
+    if (!full) {
+        memcpy(userinfo, client->pers.userinfo, sizeof(userinfo));
+        memcpy(netname, client->pers.netname, sizeof(netname));
+        memcpy(greenname, client->pers.greenname, sizeof(greenname));
+    }
+
     memset(&client->pers, 0, sizeof(client->pers));
+
+    if (!full) {
+        memcpy(client->pers.userinfo, userinfo, sizeof(userinfo));
+        memcpy(client->pers.netname, netname, sizeof(netname));
+        memcpy(client->pers.greenname, greenname, sizeof(greenname));
+    }
 
     item = FindItem("Blaster");
     client->pers.selected_item = ITEM_INDEX(item);
@@ -851,7 +884,7 @@ void InitClientPersistant(gclient_t *client)
     client->pers.connected = true;
 }
 
-static void InitClientResp(gclient_t *client)
+void InitClientResp(gclient_t *client)
 {
     // Two fields outlive a respawn under ctf: the team you are on, and whether
     // you asked for the player-id display.  Both live in resp rather than pers
@@ -940,6 +973,15 @@ float PlayersRangeFromSpot(edict_t *spot)
             continue;
 
         if (player->health <= 0)
+            continue;
+
+        // An arena observer is alive, noclipping and usually parked over the
+        // spawn points; counting it makes the "farthest from any player" spawn
+        // choose by where the audience is (R-RA-4, uGladQ2 v0.98.1u).  baseq2's
+        // own spectators have the same quirk and keep it: q2pro has not fixed
+        // it and sec 7 rule 1 says q2pro wins on behaviour that is not a
+        // donor's feature.
+        if (G_Ruleset() == RULESET_ARENA && G_IsObserver(player))
             continue;
 
         VectorSubtract(spot->s.origin, player->s.origin, v);
@@ -1440,7 +1482,7 @@ void PutClientInServer(edict_t *ent)
     // deathmatch wipes most client data every spawn
     if (deathmatch->value) {
         resp = client->resp;
-        InitClientPersistant(client);
+        InitClientPersistant(client, true);
     } else if (coop->value) {
 //      int         n;
 
@@ -1467,7 +1509,7 @@ void PutClientInServer(edict_t *ent)
     memset(client, 0, sizeof(*client));
     client->pers = saved;
     if (client->pers.health <= 0)
-        InitClientPersistant(client);
+        InitClientPersistant(client, true);
     client->resp = resp;
 
     // copy some data from the client to the entity
@@ -1600,6 +1642,18 @@ void PutClientInServer(edict_t *ent)
     } else
 
         client->resp.spectator = false;
+
+    if (G_Ruleset() == RULESET_ARENA) {
+        // R-RA-4: a new client lands in observer mode with the menu up, and one
+        // that already has a team is put back into its arena.  Both paths do
+        // their own placement, which is why they run instead of the KillBox
+        // below rather than after it.
+        if (ent->client->resp.teamnum >= 0)
+            reinit_player(ent);
+        else
+            init_player(ent);
+        return;
+    }
 
     if (!KillBox(ent)) {
         // could't spawn in?
@@ -1780,6 +1834,13 @@ void ClientUserinfoChanged(edict_t *ent, char *userinfo)
     // bot-model bug lived (R-CTF-7).
     if (G_Ruleset() == RULESET_CTF)
         CTFAssignSkin(ent, s);
+    else if (G_Ruleset() == RULESET_ARENA && ent->client->resp.teamnum != -1 &&
+             ((team_t *)teams[ent->client->resp.teamnum].it)->skin != -1)
+        // RA2 does the same thing for the same reason: on a team, the skin is
+        // the team's.  Its `/nullxxx` placeholder branch is not carried -- that
+        // string is written by RA2's own menu and means "no skin chosen", and
+        // nothing in this tree writes it.
+        setteamskin(ent, userinfo, ((team_t *)teams[ent->client->resp.teamnum].it)->skin);
     else
         gi.configstring(game.csr.playerskins + playernum, va("%s\\%s", ent->client->pers.netname, s));
 
@@ -1840,8 +1901,10 @@ qboolean ClientConnect(edict_t *ent, char *userinfo)
     value = Info_ValueForKey(userinfo, "spectator");
 //  if (deathmatch->value && strcmp(value, "0"))
     // Same gate as ClientUserinfoChanged's, and for the same reason: under ctf
-    // the spectator password and limit guard a state no client can enter.
-    if (deathmatch->value && G_Ruleset() != RULESET_CTF && *value && strcmp(value, "0")) {
+    // and arena the spectator password and limit guard a state no client can
+    // enter -- both donors deleted baseq2's spectator and have their own.
+    if (deathmatch->value && G_Ruleset() != RULESET_CTF &&
+        G_Ruleset() != RULESET_ARENA && *value && strcmp(value, "0")) {
         int i, numspec;
 
         if (*spectator_password->string &&
@@ -1887,7 +1950,7 @@ qboolean ClientConnect(edict_t *ent, char *userinfo)
         }
         InitClientResp(ent->client);
         if (!game.autosaved || !ent->client->pers.weapon)
-            InitClientPersistant(ent->client);
+            InitClientPersistant(ent->client, true);
     }
 
     ClientUserinfoChanged(ent, userinfo);
@@ -2043,6 +2106,23 @@ void ClientThink(edict_t *ent, usercmd_t *ucmd)
         //  client->ps.pmove.gravity = sv_gravity->value;
         client->ps.pmove.gravity = sv_gravity->value * ent->gravity;
         //PGM
+
+        if (G_Ruleset() == RULESET_ARENA) {
+            RA_ZBotSample(ent, ucmd);
+
+            if (client->resp.track_target &&
+                client->resp.fightstate == FIGHT_SPECTATING) {
+                // TRACKCAM and EYECAM drive the view from the tracked player,
+                // so this client's own movement must not (R-EXTRA-6).
+                client->ps.pmove.pm_type = PM_FREEZE;
+                client->ps.pmove.gravity = 0;
+
+                if (client->resp.omode == OMODE_TRACKCAM)
+                    track_think(ent, ucmd);
+                else if (client->resp.omode == OMODE_EYECAM)
+                    eyecam_think(ent, ucmd);
+            }
+        }
         pm.s = client->ps.pmove;
 
         for (i = 0; i < 3; i++) {
@@ -2141,12 +2221,30 @@ void ClientThink(edict_t *ent, usercmd_t *ucmd)
     // monster sighting AI
     ent->light_level = ucmd->lightlevel;
 
+    if (G_Ruleset() == RULESET_ARENA) {
+        if (client->resp.fightstate == FIGHT_SPECTATING &&
+            (client->resp.omode == OMODE_TRACKCAM ||
+             client->resp.omode == OMODE_EYECAM) && ucmd->upmove != 0) {
+            // jump/crouch cycles who you are watching; the latch stops one
+            // press cycling once per frame.
+            if (!(client->resp.omode_buttons & 2)) {
+                if (ucmd->upmove > 0)
+                    track_next(ent);
+                else
+                    track_prev(ent);
+                client->resp.omode_buttons |= 2;
+            }
+        } else if (ucmd->upmove == 0) {
+            client->resp.omode_buttons &= ~2;
+        }
+    }
+
     // fire weapon from final position if needed
     if (client->latched_buttons & BUTTON_ATTACK) {
         // G_IsObserver, not resp.spectator: under ctf an observer is a
         // CTF_NOTEAM player, so the inherited test would let him shoot
         // (R-CTF-3's "observers cannot fire it", R-CTF-5).
-        if (G_IsObserver(ent)) {
+        if (G_IsObserver(ent) && G_Ruleset() != RULESET_ARENA) {
             client->latched_buttons = 0;
 
             if (client->chase_target) {
@@ -2160,7 +2258,7 @@ void ClientThink(edict_t *ent, usercmd_t *ucmd)
         }
     }
 
-    if (G_IsObserver(ent)) {
+    if (G_IsObserver(ent) && G_Ruleset() != RULESET_ARENA) {
         if (ucmd->upmove >= 10) {
             if (!(client->ps.pmove.pm_flags & PMF_JUMP_HELD)) {
                 client->ps.pmove.pm_flags |= PMF_JUMP_HELD;
@@ -2246,7 +2344,7 @@ void ClientBeginServerFrame(edict_t *ent)
 
             if ((client->latched_buttons & buttonMask) ||
                 (deathmatch->value && ((int)dmflags->value & DF_FORCE_RESPAWN)) ||
-                CTFMatchOn()) {
+                CTFMatchOn() || G_Ruleset() == RULESET_ARENA) {
                 respawn(ent);
                 client->latched_buttons = 0;
             }

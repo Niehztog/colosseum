@@ -80,3 +80,18 @@ Not yet in the tree; recorded so the Phase 3–5 imports do not discover them la
 | `statsfile` | RA2 and tourney, **same default** | not a collision — an idiomatic re-obtain. R-COMPAT-6 names it as one; see `reconciliation.md` §3.3 |
 | `minimumplayers` vs `bots_minplayers` | Gladiator vs tourney | both registered, authority is per ruleset (R-OSP-11) |
 | `botfile` vs `bots_botfile` | Gladiator vs tourney | ditto |
+
+## Rocket Arena 2 — added in spec 1.17
+
+Registered unconditionally so that a config naming one is not rejected, but only
+`arena` reads them (R-RA-1a, R-OSP-10).
+
+| cvar | default | meaning |
+|---|---|---|
+| `netlog` | `""` | UDP destination for the RA2 event log. **The only socket user in the tree**; empty means no socket is opened |
+| `logfile` | `0` | the engine's own console-logging cvar, re-obtained: RA2 gates its stdlog on it rather than adding a second switch |
+| `hostname`, `port` | engine's | re-obtained for the round log's header |
+| `public` | `1` | a private server clears `netlog` rather than forwarding |
+
+`statsfile` / `statsname` are R-COMPAT-6's pair and arrive with Phase 5, where
+the collision with tourney's is resolved.

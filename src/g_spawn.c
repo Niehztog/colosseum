@@ -17,6 +17,7 @@ with this program; if not, write to the Free Software Foundation, Inc.,
 */
 
 #include "g_local.h"
+#include "arena/arena.h"
 
 typedef struct {
     char    *name;
@@ -419,6 +420,9 @@ static const spawn_field_t spawn_fields[] = {
     {"combattarget", FOFS(combattarget), F_LSTRING},
     {"message", FOFS(message), F_LSTRING},
     {"team", FOFS(team), F_LSTRING},
+    // RA2's own key, not a baseq2 one: on worldspawn it holds the map's arena
+    // count, on every other entity the arena that entity belongs to.
+    {"arena", FOFS(arena), F_INT},
     {"wait", FOFS(wait), F_FLOAT},
     {"delay", FOFS(delay), F_FLOAT},
     {"random", FOFS(random), F_FLOAT},
@@ -986,6 +990,9 @@ void SpawnEntities(const char *mapname, const char *entities, const char *spawnp
         i++, ent++;
     }
 #endif
+
+    if (G_Ruleset() == RULESET_ARENA)
+        arena_init(g_edicts);
 
     G_FindTeams();
 

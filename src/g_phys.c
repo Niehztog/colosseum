@@ -18,6 +18,7 @@ with this program; if not, write to the Free Software Foundation, Inc.,
 // g_phys.c
 
 #include "g_local.h"
+#include "arena/arena.h"
 
 /*
 
@@ -846,7 +847,6 @@ static void SV_Physics_Step(edict_t *ent)
 
     if (ent->velocity[2] || ent->velocity[1] || ent->velocity[0]) {
         // apply friction
-        // let dead monsters who aren't completely onground slide
         if ((wasonground) || (ent->flags & (FL_SWIM | FL_FLY)))
             if (!(ent->health <= 0.0f && !M_CheckBottom(ent))) {
                 vel = ent->velocity;
@@ -884,10 +884,12 @@ static void SV_Physics_Step(edict_t *ent)
         if (!ent->inuse)
             return;
 
-        if (ent->groundentity)
-            if (!wasonground)
-                if (hitsound)
-                    gi.sound(ent, 0, gi.soundindex("world/land.wav"), 1, 1, 0);
+        if (G_Ruleset() != RULESET_ARENA || !ent->client ||
+            ent->client->resp.fightstate == FIGHT_ALIVE)
+            if (ent->groundentity)
+                if (!wasonground)
+                    if (hitsound)
+                        gi.sound(ent, 0, gi.soundindex("world/land.wav"), 1, 1, 0);
     }
 
     if (!ent->inuse)        // PGM g_touchtrigger free problem

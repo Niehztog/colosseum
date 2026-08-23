@@ -99,6 +99,8 @@ PARSERS = {
     'gates.py': _gates,
     'units.py': _bang,
     'allocpairs.py': _bang,
+    'lostref.py': _bang,
+    'donorgate.py': _bang,
     'encoding.py': _bang,
     'dsweep.py': _bang,
     'keycontract.py': _bang,
@@ -165,6 +167,19 @@ def main():
     # (R-55, R-63).
     results.append(run('allocpairs.py', ['--tree', tree], 'allocpairs'))
     results.append(run('allocpairs.py', ['--selftest'], 'allocpairs/controls'))
+    # lostref: R-26's sixth rule (R-VER-24).  Three donors delete the monster set
+    # and Colosseum replays none of those deletions -- but RA2 deletes monster
+    # code from inside the SHARED files too, where the five merge rules cannot
+    # tell a feature deletion from that one and the compiler sees nothing
+    # because the callee still exists (R-64).
+    results.append(run('lostref.py', ['--tree', tree], 'lostref'))
+    results.append(run('lostref.py', ['--selftest'], 'lostref/controls'))
+    # donorgate: a donor's own fields and functions, used in a SHARED file, must
+    # be inside that donor's gate (R-VER-25).  gates.py asks whether a ruleset is
+    # chosen by testing a cvar; this asks whether one donor's state is read under
+    # another donor's ruleset, which is what R-70's six sites did.
+    results.append(run('donorgate.py', ['--tree', tree], 'donorgate'))
+    results.append(run('donorgate.py', ['--selftest'], 'donorgate/controls'))
     # encoding: every source file is valid UTF-8.  Trivial, and it has bitten
     # twice -- grep in a UTF-8 locale returns NOTHING for a file it cannot
     # decode, so a census can silently report zero (R-60).

@@ -17,6 +17,8 @@ with this program; if not, write to the Free Software Foundation, Inc.,
 */
 
 #include "g_local.h"
+#include "arena/arena.h"
+#include "arena/ra2stats.h"
 
 game_locals_t   game;
 level_locals_t  level;
@@ -47,6 +49,9 @@ cvar_t  *g_select_empty;
 cvar_t  *g_protocol_extensions;
 cvar_t  *dedicated;
 
+cvar_t  *hostname;
+cvar_t  *hostport;
+
 cvar_t  *filterban;
 
 cvar_t  *sv_maxvelocity;
@@ -65,6 +70,15 @@ cvar_t  *bob_pitch;
 cvar_t  *bob_roll;
 
 cvar_t  *sv_cheats;
+
+// RA2's two logging cvars (R-RA-1a, R-OSP-10).  `netlog` is the only socket
+// user left in the tree after the GameSpy SDK was dropped and defaults to
+// empty, so nothing opens one unless a server operator asks.  `logfile` is the
+// ENGINE's own console-logging cvar, re-obtained: RA2 gates its stdlog on it
+// rather than adding a second switch, which is an idiomatic re-obtain and not
+// R-COMPAT-6's collision case.
+cvar_t  *logfile;
+cvar_t  *netlog;
 
 cvar_t  *flood_msgs;
 cvar_t  *flood_persecond;
@@ -92,6 +106,14 @@ static void ShutdownGame(void)
 {
     gi.dprintf("==== ShutdownGame ====\n");
 
+    if (G_Ruleset() == RULESET_ARENA) {
+        GSLogShutdown();
+        RA2_Stats_Shutdown();
+#ifdef _WIN32
+        GSNetShutdown();
+#endif
+    }
+
     memset(&game, 0, sizeof(game));
 
     gi.FreeTags(TAG_LEVEL);
@@ -111,7 +133,7 @@ static void InitGame(void)
 {
     int features = G_FEATURES;
 
-    gi.dprintf("==== InitGame ====\n");
+    gi.dprintf("==== InitGame %s====\n", GAMEVERSION);
 
     Q_srand(time(NULL));
 
@@ -138,6 +160,9 @@ static void InitGame(void)
 
     // latched vars
     sv_cheats = gi.cvar("cheats", "0", CVAR_SERVERINFO | CVAR_LATCH);
+
+    logfile = gi.cvar("logfile", "0", CVAR_SERVERINFO);
+    netlog = gi.cvar("netlog", "", CVAR_SERVERINFO);
     gi.cvar("gamename", GAMEVERSION, CVAR_SERVERINFO | CVAR_LATCH);
     gi.cvar("gamedate", __DATE__, CVAR_SERVERINFO | CVAR_LATCH);
 
@@ -201,6 +226,23 @@ static void InitGame(void)
     // the first map load.
     G_InitRuleset();
 
+    // RA2's two writers (R-RA-1a, R-OSP-10).  After resolution, because both
+    // are per-ruleset and only one owner may be live at a time; `hostname` and
+    // `port` are the engine's own cvars, re-obtained for the log header.
+    if (G_Ruleset() == RULESET_ARENA) {
+        cvar_t *publicserver;       // RA2 called this local `public`
+
+        hostname = gi.cvar("hostname", "", CVAR_SERVERINFO);
+        hostport = gi.cvar("port", "27910", CVAR_SERVERINFO | CVAR_NOSET);
+
+        publicserver = gi.cvar("public", "1", 0);
+        if (publicserver->value == 0)
+            gi.cvar_set("netlog", "");
+
+        GSLogStartup();
+        RA2_Stats_Init();
+    }
+
     InitItems();
 
 //======
@@ -239,6 +281,22 @@ static void InitGame(void)
     // initialize all clients for this game
     game.maxclients = maxclients->value;
     game.clients = gi.TagMalloc(game.maxclients * sizeof(game.clients[0]), TAG_GAME);
+
+    if (G_Ruleset() == RULESET_ARENA) {
+        // RA2 pre-initialises every client slot, because its menus and its
+        // team lists are walked for slots nobody has connected to yet.
+        for (int i = 0; i < game.maxclients; i++) {
+            InitClientPersistant(&game.clients[i], true);
+            InitClientResp(&game.clients[i]);
+            game.clients[i].resp.entered = false;
+        }
+
+#ifdef _WIN32
+        if (!GSNetStartup())
+            gi.cvar_set("netlog", "");
+#endif
+    }
+
     globals.num_edicts = game.maxclients + 1;
 }
 
@@ -341,7 +399,7 @@ CreateTargetChangeLevel
 Returns the created target changelevel
 =================
 */
-static edict_t *CreateTargetChangeLevel(char *map)
+edict_t *CreateTargetChangeLevel(char *map)
 {
     edict_t *ent;
 
@@ -491,7 +549,8 @@ static void ExitLevel(void)
         return;
 
     Q_snprintf(command, sizeof(command), "gamemap \"%s\"\n", level.changemap);
-    gi.AddCommandString(command);
+    if (G_Ruleset() != RULESET_ARENA)
+        gi.AddCommandString(command);
     level.changemap = NULL;
 
     // clear some things before going to next level
@@ -501,8 +560,12 @@ static void ExitLevel(void)
             continue;
         if (ent->health > ent->client->pers.max_health)
             ent->health = ent->client->pers.max_health;
+        if (G_Ruleset() == RULESET_ARENA)
+            InitClientResp(ent->client);
     }
 
+    if (G_Ruleset() == RULESET_ARENA)
+        gi.AddCommandString(command);
 }
 
 /*

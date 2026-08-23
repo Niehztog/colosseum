@@ -73,10 +73,12 @@ static const ruleset_ops_t ops_sp = {
     .name = "sp",
 };
 
+extern const ruleset_ops_t ops_arena;    // src/arena/arena.c
+
 static const ruleset_ops_t *ruleset_ops[RULESET_COUNT] = {
     [RULESET_DM]      = &ops_dm,
     [RULESET_CTF]     = &ops_ctf,   // src/ctf/g_ctf.c
-    [RULESET_ARENA]   = NULL,       // Phase 4
+    [RULESET_ARENA]   = &ops_arena, // src/arena/arena.c
     [RULESET_TOURNEY] = NULL,       // Phase 5
     [RULESET_SP]      = &ops_sp,
 };

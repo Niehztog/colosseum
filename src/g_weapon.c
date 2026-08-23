@@ -331,6 +331,9 @@ void blaster_touch(edict_t *self, edict_t *other, cplane_t *plane, csurface_t *s
     if (other == self->owner)
         return;
 
+    if (!other->solid)
+        return;
+
     if (surf && (surf->flags & SURF_SKY)) {
         G_FreeEdict(self);
         return;
@@ -517,6 +520,9 @@ void Grenade_Touch(edict_t *ent, edict_t *other, cplane_t *plane, csurface_t *su
     if (other == ent->owner)
         return;
 
+    if (!other->solid)
+        return;
+
     if (surf && (surf->flags & SURF_SKY)) {
         G_FreeEdict(ent);
         return;
@@ -631,6 +637,9 @@ void rocket_touch(edict_t *ent, edict_t *other, cplane_t *plane, csurface_t *sur
     int         n;
 
     if (other == ent->owner)
+        return;
+
+    if (!other->solid)
         return;
 
     if (surf && (surf->flags & SURF_SKY)) {
@@ -818,6 +827,9 @@ void bfg_touch(edict_t *self, edict_t *other, cplane_t *plane, csurface_t *surf)
     if (other == self->owner)
         return;
 
+    if (!other->solid)
+        return;
+
     if (surf && (surf->flags & SURF_SKY)) {
         G_FreeEdict(self);
         return;
@@ -869,6 +881,9 @@ void bfg_think(edict_t *self)
     ent = NULL;
     while ((ent = findradius(ent, self->s.origin, 256)) != NULL) {
         if (ent == self)
+            continue;
+
+        if (!ent->solid)
             continue;
 
         if (ent == self->owner)

@@ -19,6 +19,7 @@ with this program; if not, write to the Free Software Foundation, Inc.,
 
 #include "g_local.h"
 #include "m_player.h"
+#include "arena/arena.h"
 
 static bool is_quad;
 // RAFAEL
@@ -511,6 +512,13 @@ static void Weapon_Generic2(edict_t *ent, int FRAME_ACTIVATE_LAST, int FRAME_FIR
 {
     int     n;
 
+    // RA2: a player who is not fighting has no weapon animation to run -- it is
+    // waiting in the queue or watching.  fightstate is 0 for every client under
+    // every other ruleset, so the test is the ruleset's.
+    if (G_Ruleset() == RULESET_ARENA && ent->client &&
+        ent->client->resp.fightstate != FIGHT_ALIVE)
+        return;
+
 
     if (ent->client->weaponstate == WEAPON_DROPPING) {
         if (ent->client->ps.gunframe == FRAME_DEACTIVATE_LAST) {
@@ -533,9 +541,13 @@ static void Weapon_Generic2(edict_t *ent, int FRAME_ACTIVATE_LAST, int FRAME_FIR
     }
 
     if (ent->client->weaponstate == WEAPON_ACTIVATING) {
-        // CTF's `instantweap`: no raise animation.  The cvar is registered in
-        // every ruleset and defaults to 0, so this reads as baseq2 elsewhere.
-        if (ent->client->ps.gunframe == FRAME_ACTIVATE_LAST || instantweap->value) {
+        // No raise animation.  Threewave spells it `instantweap` (a cvar,
+        // registered in every ruleset and 0 by default, so this reads as baseq2
+        // elsewhere); RA2 spells it `fastswitch` and makes it a per-arena
+        // setting -- R-RA-4's `ra_fastswitch`.  One concept, one owner at a time.
+        if (ent->client->ps.gunframe == FRAME_ACTIVATE_LAST || instantweap->value ||
+            (G_Ruleset() == RULESET_ARENA &&
+             arenas[ent->client->resp.context].fastswitch)) {
             ent->client->weaponstate = WEAPON_READY;
             ent->client->ps.gunframe = FRAME_IDLE_FIRST;
             return;

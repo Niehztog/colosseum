@@ -47,11 +47,35 @@ typedef enum {
 // that does not use baseq2's STAT_CHASE/STAT_SPECTATOR semantics (clause 2) --
 // Threewave qualifies, having no baseq2 spectator flag at all (R-CTF-5).
 //
-// arena and tourney inherit dm's numbering for now, exactly as they inherit
-// dm's dispatch rows (R-MODE-6).  Their own numbering arrives with their own
-// bars in Phases 4 and 5; R-OSP-7's table records where it will go (RA2 26/27,
-// tourney 29/30 for the timer pair).  A half-wired column -- a map that renumbers
-// a slot while the bar still says 18 -- would be worse than inheriting.
+// A half-wired column -- a map that renumbers a slot while the bar still says
+// 18 -- would be worse than inheriting, which is why each ruleset's column and
+// its bar landed in the same commit.
+//
+// TOURNEY's timer pair goes to 29/30, where R-OSP-7's table put it, its five
+// runes to 22..26 and the popup-menu layout to 27.  It keeps 16 as the chase/ID
+// name -- the same meaning and the same SK_CS kind baseq2 gives STAT_CHASE, so
+// there is nothing to claim -- but it DOES claim 17, which baseq2 uses as the
+// spectator flag and tourney draws with `stat_string`.  Clause 2 permits that
+// for a ruleset that does not use baseq2's spectator semantics, and tourney
+// has its own observer and camera (R-EXTRA-6).
+//
+// 18..21 are four more status lines the donor addresses by bare number.  Their
+// names here are neutral on purpose: the reconstruction did not name them and
+// inventing a meaning would be a guess, the same reasoning client_respawn_t's
+// osp_rNNN fields get.
+//
+// ARENA claims 16 and 17, which clause 2 permits only for a ruleset that does
+// not use baseq2's STAT_CHASE/STAT_SPECTATOR semantics.  RA2 qualifies the same
+// way Threewave does and for a stronger reason: it ships its own four-mode
+// observer inside arena.c (R-EXTRA-6), so there is no chase-cam name to draw and
+// no spectator flag to test.  Its own block runs 16..25 and the shared second
+// powerup timer therefore goes to 26/27, which is where R-OSP-7's table put it.
+//
+// The kinds below are read off RA2's own statusbar literal rather than off the
+// field names, because two of the names lie: STAT_QUEUE1_ICON and
+// STAT_QUEUE2_ICON are drawn with `stat_string`, not `pic`, and are written as
+// `game.csr.items + game.num_items + N` -- configstring indices.  That is
+// exactly the confusion clause 7's kind check exists to catch.
 //
 // CTF's timer pair at 32/33 is the one place this table leaves MAX_STATS_OLD.
 // It is legal under clause 6 *because* it is content a ruleset can drop: the
@@ -63,10 +87,10 @@ typedef enum {
 //
 //     id                        kind     dm  ctf  arena tourney  sp
 #define STATSLOT_MAP(E) \
-    E(SID_CHASE,                 SK_CS,   16,  -1,  16,  16,  16) \
-    E(SID_SPECTATOR,             SK_NUM,  17,  -1,  17,  17,  17) \
-    E(SID_TIMER2_ICON,           SK_PIC,  18,  32,  18,  18,  18) \
-    E(SID_TIMER2,                SK_NUM,  19,  33,  19,  19,  19) \
+    E(SID_CHASE,                 SK_CS,   16,  -1,  -1,  16,  16) \
+    E(SID_SPECTATOR,             SK_NUM,  17,  -1,  -1,  -1,  17) \
+    E(SID_TIMER2_ICON,           SK_PIC,  18,  32,  26,  29,  18) \
+    E(SID_TIMER2,                SK_NUM,  19,  33,  27,  30,  19) \
     E(SID_CTF_TEAM1_PIC,         SK_PIC,  -1,  17,  -1,  -1,  -1) \
     E(SID_CTF_TEAM1_CAPS,        SK_NUM,  -1,  18,  -1,  -1,  -1) \
     E(SID_CTF_TEAM2_PIC,         SK_PIC,  -1,  19,  -1,  -1,  -1) \
@@ -81,6 +105,27 @@ typedef enum {
     E(SID_CTF_MATCH,             SK_CS,   -1,  28,  -1,  -1,  -1) \
     E(SID_CTF_ID_VIEW_COLOR,     SK_PIC,  -1,  29,  -1,  -1,  -1) \
     E(SID_CTF_TEAMINFO,          SK_CS,   -1,  30,  -1,  -1,  -1) \
+    E(SID_RA_COUNTDOWN,          SK_NUM,  -1,  -1,  16,  -1,  -1) \
+    E(SID_RA_ARENASTATUS,        SK_CS,   -1,  -1,  17,  -1,  -1) \
+    E(SID_RA_ROUNDINFO,          SK_CS,   -1,  -1,  18,  -1,  -1) \
+    E(SID_RA_LINEPOSITION,       SK_NUM,  -1,  -1,  19,  -1,  -1) \
+    E(SID_RA_ID_VIEW,            SK_CS,   -1,  -1,  20,  -1,  -1) \
+    E(SID_RA_QUEUE1,             SK_NUM,  -1,  -1,  21,  -1,  -1) \
+    E(SID_RA_QUEUE2,             SK_NUM,  -1,  -1,  22,  -1,  -1) \
+    E(SID_RA_SHOWQUEUE,          SK_NUM,  -1,  -1,  23,  -1,  -1) \
+    E(SID_RA_QUEUE1_ICON,        SK_CS,   -1,  -1,  24,  -1,  -1) \
+    E(SID_RA_QUEUE2_ICON,        SK_CS,   -1,  -1,  25,  -1,  -1) \
+    E(SID_OSP_RUNE_RESIST,       SK_NUM,  -1,  -1,  -1,  22,  -1) \
+    E(SID_OSP_RUNE_STRENGTH,     SK_NUM,  -1,  -1,  -1,  23,  -1) \
+    E(SID_OSP_RUNE_HASTE,        SK_NUM,  -1,  -1,  -1,  24,  -1) \
+    E(SID_OSP_RUNE_REGEN,        SK_NUM,  -1,  -1,  -1,  25,  -1) \
+    E(SID_OSP_RUNE_VAMPIRE,      SK_NUM,  -1,  -1,  -1,  26,  -1) \
+    E(SID_OSP_LAYOUT1,           SK_CS,   -1,  -1,  -1,  27,  -1) \
+    E(SID_OSP_MATCHSTATE,        SK_CS,   -1,  -1,  -1,  17,  -1) \
+    E(SID_OSP_STATUS1,           SK_CS,   -1,  -1,  -1,  18,  -1) \
+    E(SID_OSP_STATUS2,           SK_CS,   -1,  -1,  -1,  19,  -1) \
+    E(SID_OSP_STATUS3,           SK_CS,   -1,  -1,  -1,  20,  -1) \
+    E(SID_OSP_STATUS4,           SK_CS,   -1,  -1,  -1,  21,  -1) \
 
 #define STATSLOT_ENUM(id, kind, dm, ctf, arena, tourney, sp)    id,
 typedef enum {
@@ -146,6 +191,12 @@ void sb_ustat_string(statusbar_t *sb, int slot);
 // Compose the active ruleset's bar and install it.  Replaces baseq2's two
 // string literals and CTF's third (R-OSP-7a).
 void G_SetStatusbar(void);
+
+// The composed bar as text.  RA2's menu engine draws its menu INTO the
+// statusbar configstring, unicast per client, and has to put the real bar back
+// when the menu closes -- it cannot use a literal any more, because there is no
+// literal (R-OSP-7a).
+const char *G_Statusbar(void);
 
 // `sv slots` -- the resolved map and the composed bar, for the same reason
 // R-VER-18 gave `sv ruleset`: a slot number that only exists inside the library

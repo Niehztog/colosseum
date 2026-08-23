@@ -18,6 +18,7 @@ with this program; if not, write to the Free Software Foundation, Inc.,
 // g_misc.c
 
 #include "g_local.h"
+#include "arena/arena.h"
 
 extern void M_WorldEffects(edict_t *ent);
 
@@ -1033,7 +1034,6 @@ health (80), and dmg (150).
 */
 
 void barrel_touch(edict_t *self, edict_t *other, cplane_t *plane, csurface_t *surf)
-
 {
     float   ratio;
     vec3_t  v;
@@ -2010,6 +2010,17 @@ void teleporter_touch(edict_t *self, edict_t *other, cplane_t *plane, csurface_t
 
     if (!other->client)
         return;
+
+    if (G_Ruleset() == RULESET_ARENA && self->arena > 0) {
+        if (other->client->resp.teamnum != -1) {
+            AddtoArena(other, self->arena, 1, 0);
+            return;
+        }
+
+        menu_centerprint(other, "You must join or create a team first");
+        return;
+    }
+
     dest = G_Find(NULL, FOFS(targetname), self->target);
     if (!dest) {
         gi.dprintf("Couldn't find destination\n");
@@ -2033,8 +2044,11 @@ void teleporter_touch(edict_t *self, edict_t *other, cplane_t *plane, csurface_t
     other->client->ps.pmove.pm_flags |= PMF_TIME_TELEPORT;
 
     // draw the teleport splash at source and on the player
-    self->owner->s.event = EV_PLAYER_TELEPORT;
-    other->s.event = EV_PLAYER_TELEPORT;
+    if (G_Ruleset() != RULESET_ARENA ||
+        other->client->resp.fightstate == FIGHT_ALIVE) {
+        self->owner->s.event = EV_PLAYER_TELEPORT;
+        other->s.event = EV_PLAYER_TELEPORT;
+    }
 
     // set angles
     for (i = 0; i < 3; i++)
@@ -2057,7 +2071,7 @@ void SP_misc_teleporter(edict_t *ent)
 {
     edict_t     *trig;
 
-    if (!ent->target) {
+    if (!ent->target && ent->arena < 1) {
         gi.dprintf("teleporter without a target.\n");
         G_FreeEdict(ent);
         return;
@@ -2078,6 +2092,7 @@ void SP_misc_teleporter(edict_t *ent)
     trig->touch = teleporter_touch;
     trig->solid = SOLID_TRIGGER;
     trig->target = ent->target;
+    trig->arena = ent->arena;
     trig->owner = ent;
     VectorCopy(ent->s.origin, trig->s.origin);
     VectorSet(trig->mins, -8, -8, 8);
@@ -2093,7 +2108,14 @@ void SP_misc_teleporter_dest(edict_t *ent)
 {
     gi.setmodel(ent, "models/objects/dmspot/tris.md2");
     ent->s.skinnum = 0;
-    ent->solid = SOLID_BBOX;
+    if (G_Ruleset() == RULESET_ARENA) {
+        // RA2 hides the destination pad: its teleporters are arena doors and a
+        // visible model in the middle of one is scenery in the way.
+        ent->svflags |= SVF_NOCLIENT;
+        ent->solid = SOLID_NOT;
+    } else {
+        ent->solid = SOLID_BBOX;
+    }
 //  ent->s.effects |= EF_FLIES;
     ent->s.renderfx |= RF_NOSHADOW;
     VectorSet(ent->mins, -32, -32, -24);
@@ -2197,6 +2219,8 @@ void SP_trigger_teleport(edict_t *self)
 {
     if (G_Ruleset() == RULESET_CTF)
         ctf_SP_trigger_teleport(self);
+    else if (G_Ruleset() == RULESET_ARENA)
+        ra_SP_trigger_teleport(self);
     else
         rogue_SP_trigger_teleport(self);
 }

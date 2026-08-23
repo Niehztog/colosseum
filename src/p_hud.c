@@ -17,6 +17,7 @@ with this program; if not, write to the Free Software Foundation, Inc.,
 */
 
 #include "g_local.h"
+#include "arena/arena.h"
 
 /*
 ===============================================================================
@@ -43,8 +44,10 @@ void G_MenuClose(edict_t *ent)
     case MENU_CTF:
         ctf_PMenu_Close(ent);
         break;
+    case MENU_ARENA:
+        ra_MenuClose(ent);
+        break;
     case MENU_TOURNEY:      // Phase 5
-    case MENU_ARENA:        // Phase 4
     case MENU_BOT:          // Phase 6
     case MENU_NONE:
         break;
@@ -77,6 +80,10 @@ bool G_IsObserver(edict_t *ent)
         return false;
     if (G_Ruleset() == RULESET_CTF)
         return ent->client->resp.ctf_team == CTF_NOTEAM;
+    // RA2 has a third spelling: it deleted baseq2's spectator too, and expresses
+    // watching as fightstate.  Same question, third answer, still one predicate.
+    if (G_Ruleset() == RULESET_ARENA)
+        return ent->client->resp.fightstate == FIGHT_SPECTATING;
     return ent->client->resp.spectator;
 }
 
@@ -336,7 +343,10 @@ Note that it isn't that hard to overflow the 1400 byte message limit!
 void DeathmatchScoreboard(edict_t *ent)
 {
     G_ScoreboardMessage(ent, ent->enemy);
-    gi.unicast(ent, true);
+    // RA2 redraws the arena board every 32 frames, so it goes out unreliably;
+    // only the server-wide board, which is a one-off, is worth a reliable slot.
+    gi.unicast(ent, G_Ruleset() != RULESET_ARENA ||
+               ent->client->scoremode == 2);
 }
 
 /*
@@ -360,6 +370,22 @@ void Cmd_Score_f(edict_t *ent)
 
     if (!deathmatch->value && !coop->value)
         return;
+
+    if (G_Ruleset() == RULESET_ARENA) {
+        // RA2's `score` cycles: arena board -> server-wide -> off.  A client
+        // with no arena has only the server-wide one, so it toggles that.
+        if (ent->client->scoremode == 2)
+            ent->client->scoremode = 0;
+        else if (!ent->client->resp.context)
+            ent->client->scoremode = 2;
+        else
+            ent->client->scoremode++;
+        ent->client->update_chase = true;
+        if (!ent->client->scoremode)
+            return;
+        DeathmatchScoreboard(ent);
+        return;
+    }
 
     if (ent->client->showscores) {
         ent->client->showscores = false;
@@ -459,6 +485,8 @@ void G_SetStats(edict_t *ent)
     // health
     //
     ent->client->ps.stats[STAT_HEALTH_ICON] = level.pic_health;
+    if (G_Ruleset() == RULESET_ARENA)
+        ent->client->ps.stats[STAT_HEALTH_ICON] = RA_SkinIcon(ent);
     ent->client->ps.stats[STAT_HEALTH] = ent->health;
 
     //
@@ -568,6 +596,9 @@ void G_SetStats(edict_t *ent)
     // and CTF had nowhere at all).  It asks the slot map where its pair landed
     // and does not care; where the ruleset has no pair, both writes and the bar
     // items vanish together and the pent falls back to timer 1 below.
+    if (G_Ruleset() == RULESET_ARENA)
+        RA_SetQueueStats(ent);
+
     G_SetStat(ent, SID_TIMER2_ICON, 0);
     G_SetStat(ent, SID_TIMER2, 0);
     if (ent->client->invincible_framenum > level.framenum) {

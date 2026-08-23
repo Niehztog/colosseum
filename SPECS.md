@@ -9,7 +9,7 @@ base, and restores full Gladiator Bot command and botlib support on top of it.
 | **Project name** | Colosseum |
 | **Artifact** | `game<cpu>.so` / `game<cpu>.dll` (Q2PRO game API), gamedir `colosseum` |
 | **Working directory** | `<workspace>/colosseum` |
-| **Spec version** | 1.15 — 2026-08-22 |
+| **Spec version** | 1.19 — 2026-08-23 |
 | **Status** | Draft for review. No code written yet. |
 | **Amendment 1.1** | Re-measured against the three replay bundles (§3.2), the two donor port write-ups and `q2pro/doc/mission-packs.md`. Changed: §3, §3.1, new §3.2, D8–D9, R-CORE-8, R-CORE-10, R-CORE-11, new R-CORE-12/13, R-MODE-5, R-MP-5, new R-KEY group, R-SAVE-3, R-OSP-7, new R-SEC-8/9, R-CONV-1, new R-TOOL group, §7 rules 1/6/9, §9 phase order, §10, §11, Q1/Q2/Q9 closed |
 | **Amendment 1.2** | Thirty-one design decisions settled with the author; §12 closed and emptied. **Scope cut:** Colored Hitman and `sp_dm` dropped entirely. **Posture:** public server software, released by staged exposure. **§7 rule 6 gains four exemptions** — observers, map rotation, stats logging and menus are per-ruleset. Eleven corrections of fact, the largest being that `gladq2_src` is *not* `gladiator-bot-restored/game` and that the harness scratchpad was never lost. Changed: §1.1, §2, §3, §3.2, §5.2, R-CORE-14, R-MODE-2/4/5/7, R-BOT-1/4/6/29, R-MENU-1/2, R-EXTRA-6, R-SP-6 struck, §6.7 struck, R-OSP-7, R-COMPAT-6, R-BUILD-5, §7 rule 6, §9 re-cut to nine phases, §10, §11, §12, Appendix B |
@@ -26,6 +26,10 @@ base, and restores full Gladiator Bot command and botlib support on top of it.
 | **Amendment 1.13** | **Real Threewave assets, and the first check that waits rather than counts.** All nine shipped CTF maps boot with both flags at base, all four techs spawned, team spawn points and banners present — R-CTF-1 observed rather than argued. Getting there found the **worst defect in the tree**: `nextthink` is an `int` frame count and `src/g_phys.c`'s `SV_RunThink` compares it against `level.time` in *seconds*, so **every think in the game fires ten times late** — doors, plats, item respawns, trigger delays, every monster animation frame. Measured exactly: a spawner with `nextthink = 20` fired at frame ~200. It is **upstream's**, live in the shipped Ground Zero pack (`q2pro/src/rogue`), and Colosseum inherited it at `d3c6d83`; `port_ctf` and `port_xatrix` both have the correct version, so the CTF merge did not cause it and §7 rule 1 would have refused it. A second, opposite upstream defect collides with it: Xatrix has 43 `nextthink = level.time + N` sites, identical in `q2pro/src/xatrix`, which are correct only under the reverted comparison. **Recorded, not patched** — fixing one half moves the breakage, so it wants one pass with the full matrix behind it. And it explains a gap in the whole evidence base: every check here is static or a spawn-time census, and all of Phase 2's observations remain true with all timing 10× wrong. Changed: R-VER-1, R-VER-2, new R-VER-20, §9 Phase 3 evidence, §11 new risk 20. |
 | **Amendment 1.14** | **Upstream's bugfix commit imported (`q2pro@38873740`), and it found more of the class than 1.13 did.** 32 files, 111 hunks, mapped hunk-by-hunk because upstream ships four separate libraries and this is one merged tree — a fix to `src/xatrix/g_func.c` lands in our `src/g_func.c`. **R-54 is fixed**: `SV_RunThink` restored *and* Xatrix's 43 `nextthink = level.time` sites converted with `tools/nextthink.py`, whose output is byte-identical to upstream's. Beyond it: `trail_framenum` read against seconds at five sites, plat2's `last_move_framenum`, the trap's `timestamp` (read **and** both writes), the intermittent `trigger_push` fed from two clocks at once, the intermission wait at 0.5s, the drowning gasp at 1.1s, two `/ FRAMETIME` quad-drop timeouts, and a `8000 / speed * BASE_FRAMERATE` precedence bug in three projectiles. **Three corrections of our own work.** Phase 2 *silenced* six `abs()`-on-float defects with an `(int)` cast rather than fixing them — the cast truncates before taking the magnitude, which was the bug. Phase 3 kept `BecomeExplosion1`'s wrong-team message under §7 rule 2; §7 rule 7 makes q2pro's fix cumulative, so it is ours. And Phase 3's `CTFObserver` fix is replaced by upstream's, which restores the braces, message and `return` the 1.52 release had — a better reading of the original than my inference. **One defect the import could not contain**, because it exists only in a merged tree: `attack_finished` is `float` here (rogue's declaration won R-CORE-6's union) while three Gekk sites write frames, agreeing with each other and disagreeing with the shared `M_CheckAttack` every monster reaches. New `tools/units.py` (R-VER-21) is upstream's two greps plus that third, merged-tree check, with three controls; new `tools/encoding.py` because writing files as latin-1 broke `grep` silently — twice. R-VER-20 is now two real temporal assertions: techs at frame 31 not 221, and `base1`'s gib freed by frame 331. Changed: R-VER-1, new R-VER-21, §9 Phase 3 evidence, §11 risk 20. |
 | **Amendment 1.15** | **The harness has a client, and the first run of it dropped the server.** Every phase so far recorded "needs a client" as a property of the machine; it was a property of nobody having tried. q2pro's own client runs under `Xvfb` on Mesa's software GLX, `cl_beginmapcmd` executes a console script the moment the map loads, `wait N` paces it in frames and `viewpos` makes movement observable — a driven player went from `(1744 480 686)` to `(1528 480 654)` on `q2ctf1` having joined the RED team on the way. `tools/play.sh` is that, parameterised (new R-VER-23). **Its first run found `ERROR: PF_configstring: bad index: 13118`** — `CS_GENERAL` exactly. This library is compiled with the protocol extensions so the constant is 13118, but their *use* is negotiated at runtime and `g_protocol_extensions` **defaults to 0**, where the engine's end is 2080: so a stock `ctf` server died on the first client connect, on every connect, and three phases of static checks and boots could not see it because none of them was ever a player. Three sites fixed to `game.csr.general`, the runtime remap the line four above already used; a fourth of the same kind found by reading — `CONFIG_CTF_MATCH`/`CONFIG_CTF_TEAMINFO` compile to 57/58 and land inside the old model table — fixed to `game.csr.airaccel`. All four are upstream's verbatim, and the control that would have settled it by running cannot be run: upstream's own CTF still segfaults on `+map` (R-42, unchanged by the `38873740` import). And Phase 3's last mechanised residue lands: `tools/allocpairs.py` (new R-VER-22), the matched-pair allocator audit R-55 asked for, shaped like `units.py` because the unit that has to agree is the pointer — a libc ban would fail the build on `g_main.c`'s correct inherited `strdup`/`free` pair, and a file-level check describes that same one file. Changed: R-CTF-6, new R-VER-22, new R-VER-23, R-VER-3, §9 Phase 3 evidence, §11 risk 21. `doc/reconciliation.md` R-62..R-63. |
+| **Amendment 1.16** | **Phase 4 opens: R-26 gains a sixth rule, and the slots land first again.** RA2 is the first donor that **deletes**, and R-26's five rules are complete only for donors that add — rule 2 ("base equals ours, take theirs") silently took RA2's removal of `M_walkmove`, `M_CheckBottom` and the turret driver's two `infantry_*` calls, all of which **link and run and are wrong**, because Colosseum keeps the monsters RA2 dropped (R-CORE-8) and the callee still exists. New `tools/lostref.py` (R-VER-24) is the sixth rule mechanised, with the three real deletions as its controls, and it only works because it strips comments first — RA2's `barrel_touch` explains the removal in a comment that names the function. **The merge is 141 conflicts before normalisation and 91 after**: 1,284 asm-matching address comment lines and a stripped GPL header are not RA2's feature and are removed before `git merge-file` sees them (new `tools/donorprep.py`), which is Phase 5's pass too. Eight of the 24 shared files turn out to carry **no RA2 feature at all** — pure monster-deletion residue — and are decided by R-CORE-8 alone. `src/arena/` is imported (5,300 lines, GameSpy already gone upstream at `789895b`), the pin moves to `d20e1ce` for its `-Wall` fixes with **one of them refused** because it is a consequence of the deletion we do not replay, and six symbol collisions are resolved by rule: RA2's 283-line grapple **deleted** (§7 rule 6, R-50 — it is Threewave's fork), `stuffcmd` moved to `g_utils.c`, `showmenu` replaced by R-MENU-2a's single owner field. R-OSP-7 gains ten arena rows measured off the donor's own bar rather than its field names — **two of which lie**, `STAT_QUEUE*_ICON` being drawn with `stat_string` — and the composed arena bar is **token-identical** to RA2's literal plus the second powerup timer at 26/27 that a literal could not carry. Factoring the composition so `sv slots` cannot print a bar the server does not install made `slotkind.py` go quiet, which its own control caught. Changed: R-CORE-8, R-OSP-7, R-OSP-7a, R-EXTRA-6, R-MENU-1, new R-VER-24, §3 RA2 pin, §5.2, §9 Phase 4, §11 risk 22. `doc/reconciliation.md` R-64..R-69. **Not done: the sixteen shared-file behaviour merges, so `arena` still plays as `dm`.** |
+| **Amendment 1.17** | **All sixteen shared-file merges landed; `arena` stops inheriting `dm`.** The 91 conflicts were decided by one fact about the merged struct: **`FIGHT_SPECTATING` is 0**, so `resp.fightstate == FIGHT_ALIVE` is false for every client under `dm`, `ctf` and `sp`. RA2 tests it in a dozen shared places, and six of those, inherited ungated, *delete* behaviour from the whole game rather than adding any to arena — the teleport splash, the landing sound, falling damage, footsteps, every weapon animation, and telefragging. The sharpest is `KillBox`, which RA2 opens with `if (!ent->client) return true;` because in RA2 only clients telefrag: this tree calls it from **eight non-client sites**. **A donor's `if` is a claim about that donor's world**, and none of these arrives as a conflict — they sit inside hunks the five rules resolve cleanly. **Four things RA2 asked for are refused**: `deathmatch` registered `CVAR_NOSET` (the dispatch already forces deathmatch for every ruleset but sp, and RA2's registration would make coop unreachable *everywhere*), dropping the `showscores` descriptor (RA2 replaced the field; both rulesets still need theirs), deleting easy mode and the dmflags friendly-fire avoidance, and RA2's whole `ClientObituary` — a stale fork of id's with announcer sounds bolted on, which §7 rule 1 decides. **R-OSP-9 is fixed by placement rather than by a check**: `maploop.c` is the arena `EndLevel` row, so only one rotation is reachable, where the donor's port put `get_next_map()` inside `EndDMLevel` and had both. Six RA2 functions moved out of the spine files into `src/arena/` — the three scoreboards, the skin icon, the queue stats, the ZBot sampler — and `RA_ScoreboardMessage` is a **dispatch row**, not a gate. Three command names collided (`admin`, `playerlist`, `score`) and each got a ruleset arm rather than a rename. **Two defects found by reading the donor**: `menu_centerprint` dereferences a possibly-null `ent->client` on any `G_UseTargets` message, and `grhurt.wav` is played by `CTFGrapplePull()` and precached by nobody — §7 rule 7 puts the precache on Threewave's row. And **the boot matrix caught what no static check could**: `multi_arena_think()` wired before `arena_init()` had a call site walked a NULL team list and segfaulted all four arena rows, compiling and linking clean. `arena` now boots `q2dm1` at 37 edicts against `dm`'s 120. Changed: R-RA-1/2/6, R-ARENA-2, R-EXTRA-6, R-MENU-1/4, R-OSP-9, R-SAVE-3a, §9 Phase 4, §11 risk 22. `doc/reconciliation.md` R-70..R-74. **Not done: R-RA-3's round state machine is still `CheckDMRules`, and no arena match has been played.** |
+| **Amendment 1.18** | **R-RA-3 and R-RA-4 discharged, and "no RA2 specifics ungated" became a check rather than a claim.** R-70's six ungated sites were found by reading, which is not a method, so the question is now `tools/donorgate.py` (new R-VER-25): a donor's own field or function, used in a **shared** file, must be inside that donor's gate. `gates.py` cannot see this class — those sites test a *field*, and the field is legitimately in R-CORE-6's union. The donor's surface is computed rather than listed, so `stuffcmd` moving into `g_utils.c` stopped being reported without an edit. **77 uses, 0 ungated — after one real finding**: `G_UseTargets` called `menu_centerprint` with no gate, and though it is *transparent* (it falls back to `gi.centerprintf`), "it happens to be transparent" is not a gate, so the exemption list stayed empty. **R-RA-3's seven states were never missing** — `arena_think()` has all of them — what was missing is that RA2's port calls `multi_arena_think()` from `G_RunFrame` beside `CheckDMRules()` with no statement of how two match-rule systems compose. `RA_CheckRules` is now the `CheckRules` row and says it: the round machine runs a **round**, `CheckDMRules` ends the **level**, and the order is fixed by the row instead of by insertion point — the same correction R-72 made to the map rotation. **R-RA-4 is thirteen of seventeen already true**, three Phase 7's, and one real gap: uGladQ2 v0.98.1u's *"observers ignored for spawn points"* is **not** fixed in RA2, and an arena observer is alive, noclipping and usually parked over the spawns, so "farthest from any player" was choosing by where the audience stood. Fixing it made `G_IsObserver()` answer for `arena` — a third spelling of one question — which in turn made two baseq2 chase-cam blocks reachable for observers who have their own four modes, so both are now excluded under `arena`: two observer systems live at once is the bug §7 rule 6 names, and the third answer is what would have made them live. Changed: R-RA-3, R-RA-4, R-ARENA-2, R-CTF-5, R-EXTRA-6, R-MODE-5, new R-VER-25, §9 Phase 4, §11 risk 23. `doc/reconciliation.md` R-75..R-77. **Still not claimed: no arena round has been played.** |
+| **Amendment 1.19** | **Phase 4's programming closed; Phase 5 opens with the tourney import.** R-RA-2 measured rather than quoted: **all 39 RA2 client commands and all 48 cvars are present** — 48, not the 47 §3 claims, and the tool is the authority (R-TOOL-2). `counts.py --duplicates` also found R-COMPAT-6's real instance: the `game` cvar re-obtained with two different defaults across four translation units, now one. **Then osp-tourney.** 71 files, 27 shared, 171 conflicts after normalisation and 128 by hand — and the normalisation itself was the first finding: `donorprep.py` reported **zero** asm-matching comments and was wrong, because the two reconstructions spell them differently (`/* gamei386.so 0x... */` versus `// gamei386.so: ...`) and tourney has **1,910** of the second form. A tool that reports zero is indistinguishable from one that found nothing. **`client_respawn_t` arrives with 80 members named by byte offset**, 62 of them referenced 692 times, and they are carried verbatim — the opposite of R-67's decision on RA2's padding, and the difference is measurable: RA2's were never referenced. **R-58's class hit three times in one import**: `pers.spectator` is a bool here and tourney's *speed-cheat strike counter* (so the first strike would have made the player a spectator), `resp.entered` is RA2's bool and tourney's four-state enum, and `InitClientPersistant`'s partial reset computes its memset offset from the assumption that userinfo/netname/greenname are the **first** members of the struct — which R-CORE-6's union made false. The compiler caught the first two only because `-Wbool-compare` can see them; the third is arithmetic that is right in the donor and wrong here, and **no check in this project can see that**. **Eleven configstrings hardcoded as `0x620..0x62a`**, which is `CS_GENERAL_OLD` — R-62 in a third donor and the only one spelled in hex, so no grep for `CS_` would have found it; all 71 sites now go through `game.csr`. **R-CORE-14 was read wrong in Phase 2**: R-18 called `FL_BOTCLIENT`/`FL_OSP_BOT`/`FL_OSP_NOCMD` aliases of `FL_BOT`, and measuring the donor that defines all five shows they are aliases of **two different bits**; four names become two, not one. `src/tourney/` compiles and is **not linked** — it cannot be until the shared merges land — so `make check-tourney` compiles all twenty units instead (new R-VER-26), on R-MP-5's precedent. Changed: R-RA-2, R-COMPAT-6, R-CORE-14, R-CORE-6, R-OSP-5, R-OSP-7, new R-VER-26, §9 Phase 4 and 5, §11 risk 24. `doc/reconciliation.md` R-78..R-86. **Not done: the 26 shared-file merges, so no tourney code runs.** |
 
 **Why "Colosseum".** The Colosseum is the arena the gladiators fought in, and it
 was one venue that hosted many different kinds of games. That is exactly this
@@ -403,6 +407,7 @@ colosseum/
                m_widow.c/.h  m_widow2.c/.h
     arena/     arena.c  arena.h  maploop.c  menu.c  menu.h
                ra2menus.c  ra2stats.c  ra2stats.h
+               gslog.c  net_compat.h      # added in 1.16: R-RA-1a keeps them
     tourney/   p_menu.c  p_menu.h
                osp_main.c  osp_cmds.c  osp_config.c  osp_detect.c  osp_display.c
                osp_hiscore.c  osp_hook.c  osp_maps.c  osp_menus.c  osp_observe.c
@@ -475,6 +480,15 @@ anyway. There is no `src/ch/` — Colored Hitman is out of scope (N7).
      restored, and R-BASE-1/R-MP-1 are the checks.
 
   A fourth consequence is large enough to be its own requirement: R-CORE-12.
+
+  *1.16 measures the deletion set exactly, because R-VER-24 needs it.* RA2
+  deletes **46 files**: 24 `.c` — the 22 monster translation units, `m_move.c`
+  and `g_chase.c` — and 22 `.h`. §3.2 reads "the 44 monster TUs, `m_move.c` and
+  `g_chase.c`", which is the right total counted the wrong way: 44 is monster
+  *files*, half of them headers. And the requirement's scope needed widening in
+  a way nothing had noticed: a donor that deletes whole files is harmless here,
+  but RA2 also deletes monster **code from inside the shared files**, which is
+  what R-VER-24 exists for.
 * **R-CORE-9.** Engine headers under `inc/` are vendored verbatim from
   `q2pro/inc` and never edited; `config.h` carries the build switches, the way
   `osp-tourney/config.h` does. The source commit is recorded in
@@ -1734,6 +1748,15 @@ struck through and kept.
   at once** — `maploop.c` and the q2pro-inherited `sv_maplist` path it really
   reads at `g_main.c:369-370`. That is a bug and is fixed as part of the merge.
   OSP registers `sv_maplist` and never reads it, which is correct and stays.
+
+  *Resolved in 1.17, by placement rather than by a check.* RA2's `maploop.c` is
+  the arena ruleset's **`EndLevel` dispatch row**, so only one rotation is
+  reachable at all and which one is a property of the ruleset. The donor's own
+  q2pro port put `get_next_map()` inside `EndDMLevel`, which is the double
+  rotation this requirement names: `sv_maplist` still ran when maploop had
+  nothing to say, and both had already decided where to go. Falling back to
+  `EndDMLevel()` for an empty maploop is now one choice made in one place.
+  Tourney's `osp_maps.c` takes the same row in Phase 5.
 * **R-OSP-10.** *Stats logging is per ruleset* — the fourth exemption. There are
   **four** subsystems, not the two 1.0–1.1 assumed: RA2's `ra2stats.c` (428
   lines, one JSON object per round) and `gslog.c` (339, StdLog, server-wide and
@@ -1838,7 +1861,7 @@ becomes a cvar, none is compiled out.
   |---|---|---|
   | `dm`, `sp`, `ctf` | `gladiator-bot-restored/game/p_observer.c` + `camera_t` in `gclient_t` | 2,386 |
   | `tourney` | `osp_observe.c` + `p_camera.c` | 335 + 929 |
-  | `arena` | RA2's four modes — `NORMAL`, `FREEFLYING`, `TRACKCAM`, `EYECAM` — with `ChangeOMode`, `track_think`, `eyecam_think` | in `arena.c` |
+  | `arena` | RA2's four modes — `NORMAL`, `FREEFLYING`, `TRACKCAM`, `EYECAM` — with `ChangeOMode`, `track_think`, `eyecam_think` | in `arena.c`. *Live as of 1.17*, as `OMODE_*`: the bare names were global identifiers far too broad for a shared tree. `ClientThink` drives the two camera modes and jump/crouch cycles the subject; `p_view.c` keeps the observer's own body out of both the view origin and the screen blend |
 
   The Gladiator implementation comes from the **reconstruction**, not
   `gladq2_src` (which has only `p_observer.h`, with `OBSERVER` commented out) and
@@ -2092,6 +2115,17 @@ decision is made twice or by taste.
 
 ## 8. Conventions
 
+
+  *Corrected again in 1.19, against the donor that defines all five names.* 1.7
+  found it was six names on two bits rather than four; R-18 then read
+  `FL_BOTCLIENT`, `FL_OSP_BOT` and `FL_OSP_NOCMD` as aliases of `FL_BOT` and
+  dropped all three. Measured in `osp-tourney`, they are aliases of **two
+  different bits**: `FL_BOT` is `BIT(13)` and so is `FL_OSP_NOCMD`, while
+  `FL_BOTCLIENT` is `BIT(16)` and so is `FL_OSP_BOT` — the SDK's "this entity is
+  a bot" and the mod's "this client is a bot", tested in different places for
+  different reasons. Four names become **two**, not one: `FL_BOTCLIENT` is
+  defined at `BIT(21)`. The instruction to remove duplicate aliases stands; what
+  changes is which names were duplicates of what.
 * **R-CONV-1.** Style follows Q2PRO's post-astyle form — 4 spaces, K&R braces,
   `bool`/`true`/`false`, LF endings, no trailing whitespace. `src/bot/`'s
   `bl_*` files, `botlib.h` and `anorms.h` are **excluded from reformatting** and
@@ -2422,11 +2456,65 @@ modes, the uGladQ2 fix list verified item by item, the local round log. Fix the
 double map rotation (R-OSP-9).
 **Exit:** R-RA-1..6, R-ARENA-1..4.
 
+**In progress as of 1.16.** *The slots landed first again*, for the reason
+Phase 3 found and this header states: a map that renumbers a slot while the bar
+still says 18 is worse than inheriting, so arena's column and arena's bar had to
+land together. Done: R-OSP-7's ten arena rows measured off the donor's own
+statusbar literal, R-OSP-7a's arena bar **token-identical** to that literal plus
+the second powerup timer at 26/27; `src/arena/` imported and building — 5,300
+lines across six translation units — with the six symbol collisions of
+`doc/reconciliation.md` R-67 resolved by rule rather than preference; the
+`g_local.h` union; and R-26's sixth rule mechanised as R-VER-24 after four
+monster-API calls crossed the merge undetected.
+
+*All sixteen shared-file merges landed in 1.17*, along with the `arena` spawn
+key, `arena_init()`, the savegame descriptors, two dispatch rows (`EndLevel` and
+`ScoreboardMessage`) and R-OSP-9's fix. `arena` no longer inherits `dm`: it
+frees every pickup item, enforces team skins, runs its own scoreboard and its
+own four observer modes, and boots `q2dm1` at 37 edicts against `dm`'s 120.
+
+*R-RA-3 and R-RA-4 discharged in 1.18.* `RA_CheckRules` is the `CheckRules` row
+and drives the seven-state round machine ahead of the level-scope limits;
+R-RA-4's seventeen items are verified one at a time in `doc/regression.md` --
+thirteen already true, three Phase 7's, one real gap fixed (observers were
+counted when choosing a spawn point). And **no RA2 specific is ungated**, which
+is a check now rather than a claim: `tools/donorgate.py`, 77 uses, 0 ungated.
+
+*R-RA-2 measured in 1.19*: **all 39 client commands and all 48 cvars resolve in
+this tree**, compared name by name against the donor rather than against the
+readme. 48, not 47 — R-TOOL-2 makes the tool the authority and §3's counting-
+method note already warned that every published donor figure has disagreed.
+
+**Remaining.** R-RA-5, R-ARENA-3 and the three bot items of R-RA-4 belong to
+Phase 7 with the bot layer. And **no arena round has been played** -- the machine
+runs, the menus build, the queues fill, and none of it has had two clients in it,
+which needs the same drive scripts R-VER-23 is waiting on.
+
 ### Phase 5 — OSP Tourney DM
 `src/tourney/`, tourney onto the dispatch, its own observer/camera, menu engine
 and map rotation kept per-ruleset rather than reconciled away, the
 `statsfile`/`statsname` collision resolved (R-COMPAT-6).
 **Exit:** R-OSP-1..13, R-VER-16.
+
+**In progress as of 1.19 — the import, not the merge.** Done: 20 donor-only
+files into `src/tourney/` (17,300 lines) plus the SDK headers into `src/bot/`;
+the `g_local.h` union, including 80 offset-named `client_respawn_t` members that
+are carried verbatim because they are live state rather than padding (R-79);
+R-OSP-7's eleven tourney rows with the runes at 22–26 and the timer pair at
+29/30; R-CORE-14's flag allocation corrected; and five defects the import
+surfaced — three of R-58's class, eleven hardcoded configstrings and a lost
+timer scale (R-80, R-81).
+
+**Remaining, and it is the bulk: 26 shared-file merges, 171 conflicts of which
+128 need a hand resolution** — `p_client.c` (+1450 lines), `g_local.h`'s
+behaviour half, `g_cmds.c` (+533), `g_main.c` (+502), `g_items.c` (+472),
+`g_spawn.c` (+401) and twenty smaller. Until they land **`src/tourney/` is
+compiled but not linked** (R-VER-26) and no tourney code runs: `g_ruleset
+tourney` boots and plays as `dm`. Also outstanding: the dispatch rows, tourney's
+four statusbars (R-OSP-1's four `m_mode` values, R-OSP-12), R-COMPAT-6's
+`statsname` collision with RA2's, R-OSP-5's `botglobals` check, R-OSP-6's fifth
+spawn key, and R-OSP-2's 259 cvars and 137 commands measured the way R-RA-2's
+were.
 
 ### Phase 6 — Bot layer
 `src/bot/` from `osp-tourney`'s ported `bl_*` plus `p_menulib.c`/`p_botmenu.c`
@@ -2603,6 +2691,74 @@ no analytical release gate (R-SEC-2).
   `SVF_MONSTER` plus `EF_GIB` for a gib, and both correctly spawn in every
   ruleset — which had made `dm` report a live monster on `base1` and the gate look
   leaky while it was working.
+* **R-VER-26.** *A donor's files are compiled even before they are linked.*
+  `make check-tourney`.
+
+  `src/tourney/` is imported and cannot be linked: its twenty translation units
+  reference `match_paused`, `pause_time`, `endlvl_frame`, three armor tables,
+  four statusbar literals and two `static` helpers in `g_cmds.c`, every one of
+  them defined by a **shared** file whose merge has not landed. Linking would
+  mean half-applying those merges, which is worse than not linking.
+
+  R-MP-5 set the precedent — `rogue/m_move2.c` ships as a reference and is not
+  built — but a file nothing builds is a file nothing checks, and twenty of them
+  is not one. So they are compiled `-fsyntax-only` against the merged
+  `g_local.h` on every `make check`. That is the only thing standing between the
+  union header and twenty files the linker never sees: a field rename would
+  otherwise break them silently until the next increment.
+
+  R-61's mechanical count of unbuilt files goes from 1 to 21, with
+  `doc/reconciliation.md` R-83 as the reason. **When the merges land, this target
+  goes away** rather than becoming a permanent second build.
+* **R-VER-25.** *A donor's own surface, used in a shared file, is inside that
+  donor's gate.* `tools/donorgate.py`, in `make check`.
+
+  One library, one `gclient_t`: a donor's fields exist for every client and its
+  functions link into every build. Nothing stops a shared file reading RA2's
+  `resp.fightstate` under `sp` — the field is there, it compiles, and it is
+  **zero**, which is `FIGHT_SPECTATING`, which is not `FIGHT_ALIVE`, which makes
+  the test false. Six sites in the Phase 4 merge did exactly that and each one
+  *deleted* behaviour from the whole game rather than adding any to arena
+  (`doc/reconciliation.md` R-70). None was a merge conflict; none was visible to
+  a compiler, an audit or a boot.
+
+  R-MODE-5 already says a gate is a dispatch row or a named predicate. This is
+  that rule enforced from the other end: not "is the ruleset chosen properly?"
+  — which is `gates.py`'s question and cannot see a field test — but **"is this
+  donor's state read under another donor's ruleset?"**
+
+  A gate is `G_Ruleset() == RULESET_<DONOR>` anywhere in the statement, on an
+  enclosing block, on a braceless `if` above, or on a `case` arm; and a test
+  that is true for exactly one ruleset counts, of which `menu_owner ==
+  MENU_ARENA` is one and `G_IsObserver()` deliberately is not.
+
+  The donor's surface is **computed**, not listed: everything its headers
+  declare at top level, minus anything `g_local.h` also declares or a spine file
+  defines. A helper promoted into the shared tree stops being reported without
+  an edit, which is what makes this usable for tourney in Phase 5 rather than a
+  list that rots.
+* **R-VER-24.** *A merge may not drop a call to a symbol the donor deleted.*
+  `tools/lostref.py`, in `make check`. R-26's sixth rule.
+
+  Three donors delete the whole monster set and Colosseum replays none of it
+  (R-CORE-8). For CTF that cost nothing: its deletions were whole **files**, and
+  a file the merge never opens cannot lose anything. RA2 deletes monster code
+  from inside the **shared** files as well, and there R-26's five rules are
+  blind — where our copy of a spine file happens to equal the base, rule 2 takes
+  the donor's version of the hunk, deletion and all.
+
+  **The compiler cannot see it.** `m_move.c` is still in the tree and
+  `M_walkmove` is still exported, so nothing is undefined; the call site is
+  simply gone. A barrel stops shifting when you walk into it. Nothing in §10
+  looks at that, and nothing will.
+
+  So: every function defined in the files a donor deletes, counted in each
+  shared file against `q2pro/src/game`, and a count that went **down** fails the
+  build. Comments are stripped first, and that clause is load-bearing rather
+  than tidy — RA2's `barrel_touch` carries a comment naming `M_walkmove` to
+  explain why the call is gone, which keeps the raw count level and puts the
+  check to sleep exactly where it is needed. Risk 2d's shape, avoided by
+  construction rather than by luck.
 * **R-VER-23.** *At least one check must be a player.* `tools/play.sh`, driving
   q2pro's own client headlessly against a local server.
 
@@ -2775,6 +2931,9 @@ no analytical release gate (R-SEC-2).
 | 17 | Re-expressing the 17 live TOURNEY blocks (R-BOT-29) breaks bot behaviour under `tourney`, which currently works | High | Enumerate all 17 with their gate targets before touching any; R-VER-3 bot matrix run under `tourney` before and after; the `bots_*` namespace preserved per R-OSP-11 |
 | 18 | Staged exposure means the first real players are the security test (R-SEC-2) | High | Accepted deliberately. R-SEC-1..9 all still stand and the inherited upstream fixes are the floor; the mitigation is that exposure widens only after the private stage holds |
 | 19 | Development host and player host diverge: everything is written and *run* on **aarch64** (R-BUILD-6) while Q2 players are on x86-64 and win32 | Low–Medium | Reduced in 1.4 from Medium: all four player-facing targets now **cross-build from the dev host** (R-BUILD-5), so a compile or link regression on any of them fails here rather than in the field, and all five are gating in R-VER-8. What is left is narrow but real — nothing x86 is *executed* here, so anything that survives compilation and differs at runtime (pointer width, struct padding, the by-value `bsp_trace_t` of R-BOT-5, the botlib bitness handshake of R-BOT-4) is caught only when the user runs it. Endianness is not the exposure: all five targets are little-endian and R-BASE-7 already forbids `Swap_Init`. Mitigation is to make the 32-bit PE build part of the routine build set rather than an occasional check, since it exercises the widest gap from the host in one artifact |
+| 24 | **A donor's ARITHMETIC can assume a struct layout that R-CORE-6's union makes false, and nothing can see it.** Realised in 1.19. Tourney's `InitClientPersistant(client, false)` clears from `sizeof(userinfo) + sizeof(netname) + sizeof(greenname)` onward, which keeps the client's identity **only while those three are the first members**; in this tree they are not, so it would have cleared the identity and preserved three unrelated ints. Both the donor's version and ours compile, both run, and the difference is silent. R-58's type-collision half is at least visible when the types differ (`-Wbool-compare` caught two of three this phase); an offset assumption is not visible at all | **Medium** | None mechanised, and none proposed: the check would have to know that a piece of arithmetic *means* a struct layout. What limits it is that R-CORE-6 puts every merged field in one header with its donor named, so a reviewer reading a `sizeof`-sum against `client_persistant_t` has the layout in front of them — which is how this one was found |
+| 23 | **A donor's `if` is a claim about that donor's world.** Realised in 1.17. RA2 tests `resp.fightstate == FIGHT_ALIVE` in a dozen shared places; `FIGHT_SPECTATING` is 0, so the test is false for every client under every other ruleset, and six of those sites inherited ungated *delete* behaviour from the whole game — teleport splash, landing sound, falling damage, footsteps, weapon animation, telefragging. None of the six is a merge conflict, none is visible to a compiler or an audit, and none is reached by a boot. The class is wide open for Phase 5, which brings a donor with its own `m_mode` and its own observer state | **Medium** | *Reduced in 1.18: there is a mechanical check after all.* `tools/donorgate.py` (R-VER-25) asks it from the other end -- not "is the ruleset chosen properly?", which `gates.py` asks and which cannot see a field test, but **"is this donor's state read under another donor's ruleset?"**. 77 donor-surface uses in shared files, 0 ungated, three controls. What it still cannot judge is whether a *gated* test is the right one; that stays a reading job |
+| 22 | **A donor's deletions are as dangerous as its additions, and only one of the two has a check.** Realised in 1.16. Every merge rule, tool and review habit in this project is built around what a donor *adds*; RA2 is the first that also removes, and four removals crossed the merge, linked cleanly and would have shipped. The class is wide open for Phase 5 — `osp-tourney` deletes the same 44 monster files | Medium | R-VER-24 and `tools/lostref.py`, which covers the monster set specifically. What it does **not** cover is a donor deleting anything else a shared file needs, and no check does |
 | 21 | **Everything verified so far is state the server reaches on its own.** Realised in 1.15 and the sibling of risk 20: R-VER-20 fixed "no check advances the clock", but every check still ran with nobody playing, so nothing a *player* triggers had ever executed — and a defect on the first line of the connect path survived three phases, a boot matrix of 32 combinations and an upstream bugfix import. Doors walked into, items picked up and respawned, flags carried, userinfo sent, menus opened, the grapple fired: all unexecuted | **High** | R-VER-23 and `tools/play.sh`. The capability exists and is proven; what is left is drive scripts, and the rows in `doc/reconciliation.md` R-61 that read "needs a client" are re-scoped to "needs a drive script" |
 | 20 | A pin in this spec silently stops resolving, as all three donor pins did between 1.3 and 1.4 | Medium | §3.3's re-pin plus R-PROV-6: the bundles are the durable half of the provenance and their refs cannot drift. A pin check belongs in the R-TOOL-3 build audits, so the failure is loud rather than discovered by a re-read |
 

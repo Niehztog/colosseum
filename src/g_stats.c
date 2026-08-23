@@ -276,15 +276,35 @@ void sb_ustat_string(statusbar_t *sb, int slot)
 // Slots 0..15: health, ammo, armour, selected item, pickup, powerup timer,
 // help/weapon icon.  Every ruleset draws this and every donor shipped its own
 // copy of it -- which is why three complete bars existed to disagree.
-static void sb_universal(statusbar_t *sb)
-{
-    sb_layout(sb, "yb", -24);
+// Two shape differences between the donors' copies of the block above.  They
+// are coordinates and an ordering, not content, but R-OSP-7a asks the emitter
+// to reproduce each donor's bar rather than approximate it, so they are
+// parameters instead of a second copy of sixty lines.
+typedef struct {
+    bool    icon_above;     // RA2 lifts the health icon to its own row at -32
+    int     timer1_x;       // 262 in baseq2 and Threewave, 246 in RA2
+} sb_shape_t;
 
+static const sb_shape_t sb_shape_baseq2 = { false, 262 };
+static const sb_shape_t sb_shape_arena  = { true,  246 };
+
+static void sb_universal(statusbar_t *sb, const sb_shape_t *shape)
+{
     // health
-    sb_layout(sb, "xv", 0);
-    sb_raw(sb, "hnum");
-    sb_layout(sb, "xv", 50);
-    sb_upic(sb, STAT_HEALTH_ICON);
+    if (shape->icon_above) {
+        sb_layout(sb, "yb", -32);
+        sb_layout(sb, "xv", 50);
+        sb_upic(sb, STAT_HEALTH_ICON);
+        sb_layout(sb, "yb", -24);
+        sb_layout(sb, "xv", 0);
+        sb_raw(sb, "hnum");
+    } else {
+        sb_layout(sb, "yb", -24);
+        sb_layout(sb, "xv", 0);
+        sb_raw(sb, "hnum");
+        sb_layout(sb, "xv", 50);
+        sb_upic(sb, STAT_HEALTH_ICON);
+    }
 
     // ammo
     sb_uif(sb, STAT_AMMO_ICON);
@@ -322,7 +342,7 @@ static void sb_universal(statusbar_t *sb)
 
     // timer 1 (quad, quadfire, double, enviro, breather, sphere, ir)
     sb_uif(sb, STAT_TIMER_ICON);
-    sb_layout(sb, "xv", 262);
+    sb_layout(sb, "xv", shape->timer1_x);
     sb_unum(sb, 2, STAT_TIMER);
     sb_layout(sb, "xv", 296);
     sb_upic(sb, STAT_TIMER_ICON);
@@ -462,6 +482,61 @@ static void sb_ctf_tail(statusbar_t *sb)
     sb_endif(sb);
 }
 
+// Rocket Arena's own blocks.  The countdown/status/roundinfo panel and the
+// pickup-queue panel are drawn ABOVE the health row in RA2's literal, so they
+// are a head rather than a tail; the id view is the only thing that follows.
+//
+// The queue panel's two `stat_string` slots are the ones whose names say _ICON:
+// RA2 writes them as `game.csr.items + game.num_items + N`, which is a
+// configstring index, and the map records SK_CS so the kind check agrees with
+// the bar rather than with the name (R-OSP-7 clause 7).
+static void sb_arena_head(statusbar_t *sb)
+{
+    // countdown, arena status line and round info
+    sb_if(sb, SID_RA_COUNTDOWN);
+    sb_layout(sb, "xv", 150);
+    sb_layout(sb, "yt", 60);
+    sb_num(sb, 2, SID_RA_COUNTDOWN);
+    sb_layout(sb, "xv", 20);
+    sb_layout(sb, "yt", 50);
+    sb_stat_string(sb, SID_RA_ARENASTATUS);
+    sb_layout(sb, "xv", 140);
+    sb_layout(sb, "yt", 40);
+    sb_stat_string(sb, SID_RA_ROUNDINFO);
+    sb_endif(sb);
+
+    // the two pickup-team queues
+    sb_if(sb, SID_RA_SHOWQUEUE);
+    sb_layout(sb, "xr", -34);
+    sb_layout(sb, "yt", 32);
+    sb_num(sb, 2, SID_RA_QUEUE1);
+    sb_layout(sb, "xr", -34);
+    sb_layout(sb, "yt", 62);
+    sb_num(sb, 2, SID_RA_QUEUE2);
+    sb_layout(sb, "xr", -64);
+    sb_layout(sb, "yt", 40);
+    sb_stat_string(sb, SID_RA_QUEUE1_ICON);
+    sb_layout(sb, "xr", -64);
+    sb_layout(sb, "yt", 70);
+    sb_stat_string(sb, SID_RA_QUEUE2_ICON);
+    sb_endif(sb);
+}
+
+// RA2 draws the frag counter and one more line: the name of whoever the
+// crosshair or the tracking camera is on.  It has no spectator banner and no
+// chase-cam element, because slots 16 and 17 are its own and its observer is
+// arena.c's (R-EXTRA-6).
+static void sb_arena_tail(statusbar_t *sb)
+{
+    sb_frags(sb);
+
+    sb_if(sb, SID_RA_ID_VIEW);
+    sb_layout(sb, "xv", 0);
+    sb_layout(sb, "yb", -58);
+    sb_stat_string(sb, SID_RA_ID_VIEW);
+    sb_endif(sb);
+}
+
 // Counts `if` against `endif` in the finished program.  Cheap, and it is the
 // only check that sees the *result* rather than the intent.
 static bool sb_unbalanced(const statusbar_t *sb)
@@ -480,25 +555,51 @@ static bool sb_unbalanced(const statusbar_t *sb)
     return depth != 0 || sb->skip != 0;
 }
 
-void G_SetStatusbar(void)
+// The whole composition, in one place.  `sv slots` prints the bar it is going
+// to install, and it can only do that honestly if it runs the same code -- when
+// arena's head block landed, a duplicated switch here would have installed one
+// bar and reported another (R-VER-19).
+static void sb_compose(statusbar_t *sb, ruleset_t r)
 {
-    statusbar_t sb;
+    sb_init(sb);
 
-    sb_init(&sb);
-    sb_universal(&sb);
+    // arena is the one ruleset whose own block precedes the shared one.
+    if (r == RULESET_ARENA)
+        sb_arena_head(sb);
 
-    switch (G_Ruleset()) {
+    sb_universal(sb, r == RULESET_ARENA ? &sb_shape_arena : &sb_shape_baseq2);
+
+    switch (r) {
     case RULESET_CTF:
-        sb_ctf_tail(&sb);
+        sb_ctf_tail(sb);
+        break;
+    case RULESET_ARENA:
+        sb_arena_tail(sb);
         break;
     case RULESET_SP:
         // The campaign has no frag counter, no spectators and no chase cam --
         // baseq2 installs single_statusbar alone here and so does this.
         break;
     default:
-        sb_dm_tail(&sb);
+        sb_dm_tail(sb);
         break;
     }
+}
+
+// The installed bar, kept so that G_Statusbar() hands out the same bytes the
+// engine holds rather than recomposing and risking a difference.
+static statusbar_t  g_installed;
+
+const char *G_Statusbar(void)
+{
+    return g_installed.data;
+}
+
+void G_SetStatusbar(void)
+{
+    statusbar_t sb;
+
+    sb_compose(&sb, G_Ruleset());
 
     // The invariant the suppression above exists to keep, checked rather than
     // assumed: a bar with an unbalanced `endif` draws a HUD with a hole in it
@@ -518,6 +619,7 @@ void G_SetStatusbar(void)
                    G_RulesetName(G_Ruleset()), MAX_STATUSBAR);
     }
 
+    g_installed = sb;
     gi.configstring(CS_STATUSBAR, sb.data);
 }
 
@@ -556,18 +658,7 @@ void G_Svcmd_Slots_f(void)
                    slotnames[i], slotdefs[i].slot[r]);
     }
 
-    sb_init(&sb);
-    sb_universal(&sb);
-    switch (r) {
-    case RULESET_CTF:
-        sb_ctf_tail(&sb);
-        break;
-    case RULESET_SP:
-        break;
-    default:
-        sb_dm_tail(&sb);
-        break;
-    }
+    sb_compose(&sb, r);
 
     gi.cprintf(NULL, PRINT_HIGH,
                "mapped       %d stat(s), highest slot %d\n"

@@ -18,6 +18,7 @@ with this program; if not, write to the Free Software Foundation, Inc.,
 
 #include "g_local.h"
 #include "m_player.h"
+#include "arena/arena.h"
 
 static  edict_t     *current_player;
 static  gclient_t   *current_client;
@@ -507,6 +508,10 @@ static void P_FallingDamage(edict_t *ent)
     int     damage;
     vec3_t  dir;
 
+    if (G_Ruleset() == RULESET_ARENA && ent->client &&
+        ent->client->resp.fightstate != FIGHT_ALIVE)
+        return;
+
     if (ent->s.modelindex != MODELINDEX_PLAYER)
         return;     // not in the player model
 
@@ -564,7 +569,11 @@ static void P_FallingDamage(edict_t *ent)
             damage = 1;
         VectorSet(dir, 0, 0, 1);
 
-        if (!deathmatch->value || !((int)dmflags->value & DF_NO_FALLING))
+        // RA2 makes falling damage a per-arena setting rather than a dmflag
+        // (R-RA-1's per-arena settings); everywhere else DF_NO_FALLING decides.
+        if (G_Ruleset() == RULESET_ARENA
+            ? arenas[ent->client->resp.context].fallingdamage != 0
+            : (!deathmatch->value || !((int)dmflags->value & DF_NO_FALLING)))
             T_Damage(ent, world, world, dir, ent->s.origin, vec3_origin, damage, 0, 0, MOD_FALLING);
     } else {
         ent->s.event = EV_FALLSHORT;
@@ -833,6 +842,10 @@ static void G_SetClientEvent(edict_t *ent)
     if (ent->s.event)
         return;
 
+    if (G_Ruleset() == RULESET_ARENA &&
+        (!ent->client || ent->client->resp.fightstate != FIGHT_ALIVE))
+        return;
+
     if (ent->groundentity && xyspeed > 225) {
         if ((int)(current_client->bobtime + bobmove) != bobcycle)
             ent->s.event = EV_FOOTSTEP;
@@ -996,9 +1009,15 @@ void ClientEndServerFrame(edict_t *ent)
     // If it wasn't updated here, the view position would lag a frame
     // behind the body position when pushed -- "sinking into plats"
     //
-    for (i = 0; i < 3; i++) {
-        current_client->ps.pmove.origin[i] = COORD2SHORT(ent->s.origin[i]);
-        current_client->ps.pmove.velocity[i] = COORD2SHORT(ent->velocity[i]);
+    // R-EXTRA-6: an arena observer in TRACKCAM or EYECAM has its view driven by
+    // arena.c from the tracked player, so its own body position must not be
+    // written over the top of it.
+    if (G_Ruleset() != RULESET_ARENA ||
+        !ent->client->resp.track_target || ent->client->resp.fightstate) {
+        for (i = 0; i < 3; i++) {
+            current_client->ps.pmove.origin[i] = COORD2SHORT(ent->s.origin[i]);
+            current_client->ps.pmove.velocity[i] = COORD2SHORT(ent->velocity[i]);
+        }
     }
 
     //
@@ -1076,7 +1095,15 @@ void ClientEndServerFrame(edict_t *ent)
     // accurately determined
     // FIXME: with client prediction, the contents
     // should be determined by the client
-    SV_CalcBlend(ent);
+    if (G_Ruleset() == RULESET_ARENA &&
+        ent->client->resp.track_target && !ent->client->resp.fightstate) {
+        // EYECAM: arena.c has copied the tracked player's blend in already, so
+        // recomputing it from this client's own contents would undo that.
+        ent->client->ps.blend[0] = ent->client->ps.blend[1] =
+            ent->client->ps.blend[2] = ent->client->ps.blend[3] = 0;
+    } else {
+        SV_CalcBlend(ent);
+    }
 
     // chase cam stuff.  G_IsObserver() rather than resp.spectator: under ctf an
     // observer is a CTF_NOTEAM player and resp.spectator is never set, so the
@@ -1103,8 +1130,15 @@ void ClientEndServerFrame(edict_t *ent)
     VectorClear(ent->client->kick_origin);
     VectorClear(ent->client->kick_angles);
 
-    // if the scoreboard is up, update it
-    if (ent->client->showscores && !(level.framenum & 31)) {
+    if (G_Ruleset() == RULESET_ARENA && MenuThink(ent))
+        return;
+
+    // if the scoreboard is up, update it.  `scoremode` is RA2's replacement for
+    // baseq2's `showscores` bool and the merged struct keeps both (sec 7 rule
+    // 3), so this asks whichever field the running ruleset writes.
+    if ((G_Ruleset() == RULESET_ARENA ? ent->client->scoremode != 0
+                                      : ent->client->showscores) &&
+        !(level.framenum & 31)) {
         // The menu shares the layout channel with the scoreboard -- which is
         // exactly why every engine sets showscores when it opens (R-MENU-2a) --
         // so the owner decides which of the two is redrawn.

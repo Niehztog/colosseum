@@ -95,12 +95,28 @@ and produces byte-identical output, so it is not needed).
 | `Makefile`, `meson.build` | written for this tree | GPL-2-or-later |
 | `tools/*.py`, `tools/*.sh` | `q2pro-mission-pack-tools`, with the path repairs of R-TOOL-1 | GPL-2-or-later |
 | `tools/{divergence,counts,coverage,audit}.py` | written for this tree (R-TOOL-5) | GPL-2-or-later |
+| `src/arena/*.{c,h}` | `rocketarena2-public@d20e1ce`, asm-matching comments stripped and the GPL header restored (`doc/reconciliation.md` R-65, R-67) | GPL-2-or-later, id-derived (R-LIC-1) |
+| `src/tourney/*.{c,h}` | `osp-tourney@1d8427e`, same treatment (R-78, R-84) | GPL-2-or-later, id-derived (R-LIC-1) |
+| `src/bot/{botlib,bl_main,bl_botcfg}.h` | `osp-tourney@1d8427e` — **headers only** in Phase 5, because R-OSP-5 needs `botglobals` declared exactly once; the implementations arrive in Phase 6 (R-86) | GPL-2-or-later, Gladiator SDK (R-LIC-2) |
 | `vendor/replay/*.bundle` | the replay harness (R-PROV-1) | contains id-derived GPL-2 sources |
 | `vendor/harness/**` | rescued harness scratchpad (R-PROV-2a) | mixed; see its `MANIFEST.md` |
 | `LICENSE` | `q2pro/LICENSE`, GPL-2 verbatim | — |
 
-Nothing from `gladq2_src`, `gladiator-bot-restored`, `ugladq2`,
-`rocketarena2-public` or `osp-tourney` is in the tree yet. Those arrive in
+**RA2's pin moves in spec 1.16, from `cd0708b` to `d20e1ce`** — one commit, *"Build
+with -Wall, and clear what it reports"*. Colosseum builds `-Wall -Wextra -Werror`,
+so its four fixes are needed here or they get rediscovered, and §7 rule 7 makes
+them ours. One of the four is **refused**: `barrel_touch`'s dead locals are
+removed there because RA2 ships no `M_walkmove`, and this tree does
+(`doc/reconciliation.md` R-66).
+
+**Tourney's pin moves in spec 1.19, from `a8e30d0` to `1d8427e`** — two commits,
+*"Fix the timer-unit defects the -w build hid, and turn -Wall on"* and *"Bound the
+bot network message buffer"*. Both were named in §3.3 as work to carry, and §7
+rule 7 makes them ours; taking the tip is cheaper and more honest than
+cherry-picking their halves.
+
+Nothing from `gladq2_src`, `gladiator-bot-restored` or `ugladq2` is in the tree
+yet. Those arrive in
 Phases 2–6, each with its own row and its own licence note — R-LIC-2 (Gladiator,
 non-commercial, attribution block reproduced in `README.md`) and R-LIC-3 (the
 RA2 Bot Support Routines, which R-ARENA-1 does not carry).

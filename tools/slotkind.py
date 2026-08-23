@@ -130,7 +130,13 @@ def classify(rhs, idx=None):
     # CONFIG_* is q2pro's name for a configstring index carved out of the
     # CS_ space -- CTF's g_ctf.h defines CONFIG_CTF_MATCH as (CS_AIRACCEL-1) --
     # so it is a configstring index by construction, same as a bare CS_ name.
-    if re.search(r'\bCS_\w+|\bCONFIG_\w+|game\.csr\.\w+|configstring', rhs): return 'cs'
+    # OSP_CS(n) is tourney's spelling of the same thing -- (game.csr.general + n)
+    # -- and OSP_setID/OSP_changeID return a playerskins index.  A helper that
+    # RETURNS a configstring index is one by construction, exactly as CONFIG_*
+    # is one by definition; without these three the check reports twelve
+    # kind mismatches that are all the tool not knowing the donor's spelling.
+    if re.search(r'\bCS_\w+|\bCONFIG_\w+|game\.csr\.\w+|configstring'
+                 r'|\bOSP_CS\s*\(|\bOSP_(set|change)ID\b', rhs): return 'cs'
     if re.match(r'^\s*0\s*$', rhs):                              return None   # clearing is kind-neutral
     if idx:
         for name, kind in idx.items():
@@ -245,32 +251,56 @@ def parse_emitter(text):
                     drawn.append((op, sid.group(1)))
                 elif stat:
                     raw.append((op, stat.group(1)))
-        for c in re.finditer(r'\b(sb_\w+)\s*\(\s*&sb\s*\)', body):
-            callees.append(c.group(1))
-        for c in re.finditer(r'\b(sb_[a-z_]+)\s*\(\s*sb\s*\)', body):
+        # A callee is any sb_* taking the bar as its first argument, with or
+        # without further arguments -- sb_universal grew a shape parameter and
+        # sb_compose takes the ruleset, and a pattern anchored on `)` saw
+        # neither.
+        for c in re.finditer(r'\b(sb_[a-z_]+)\s*\(\s*&?sb\s*[,)]', body):
             if c.group(1) not in ('sb_endif', 'sb_init'):
                 callees.append(c.group(1))
         fns[name] = dict(drawn=drawn, raw=raw, callees=callees, body=body)
     return fns
 
 
+# `sb_x(&sb)`, `sb_x(sb)`, `sb_x(sb, shape)` -- the emitter grew arguments when
+# arena's bar needed two coordinates of the shared block to differ, and a
+# pattern that only matched `(&sb)` stopped seeing the composition entirely.
+EMIT_CALL = re.compile(r'\bsb_(\w+)\s*\(\s*&?sb\s*[,)]')
+
+
+def compose_body(fns):
+    """The function holding the per-ruleset switch.
+
+    It was G_SetStatusbar itself until `sv slots` needed to print the bar it
+    would install; composing in two places is how the printed bar and the
+    installed one drift, so the switch moved into a helper and this follows it
+    rather than assuming a name.
+    """
+    top = fns.get('G_SetStatusbar', {})
+    if 'case RULESET_' in top.get('body', ''):
+        return top['body']
+    for f in top.get('callees', []):
+        b = fns.get(f, {}).get('body', '')
+        if 'case RULESET_' in b:
+            return b
+    return top.get('body', '')
+
+
 def bars_per_ruleset(fns):
     """ruleset label -> the emitter functions its bar is composed from."""
-    top = fns.get('G_SetStatusbar', {}).get('body', '')
-    always = re.findall(r'\bsb_(\w+)\s*\(\s*&sb\s*\)', top.split('switch')[0])
+    top = compose_body(fns)
+    always = EMIT_CALL.findall(top.split('switch')[0])
     out, seen_cases = {}, []
     sw = top[top.find('switch'):] if 'switch' in top else ''
     for case in re.finditer(r'case\s+RULESET_(\w+)\s*:(.*?)break;', sw, re.S):
         label = case.group(1).lower()
         seen_cases.append(label)
         out[label] = ['sb_' + a for a in always] + \
-                     ['sb_' + f for f in re.findall(r'\bsb_(\w+)\s*\(\s*&sb\s*\)',
-                                                    case.group(2))]
+                     ['sb_' + f for f in EMIT_CALL.findall(case.group(2))]
     dm = re.search(r'default\s*:(.*?)break;', sw, re.S)
     if dm:
         out['default'] = ['sb_' + a for a in always] + \
-                         ['sb_' + f for f in re.findall(r'\bsb_(\w+)\s*\(\s*&sb\s*\)',
-                                                        dm.group(1))]
+                         ['sb_' + f for f in EMIT_CALL.findall(dm.group(1))]
     return out, seen_cases
 
 

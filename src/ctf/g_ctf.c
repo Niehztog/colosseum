@@ -105,12 +105,9 @@ static char *tnames[] = {
     NULL
 };
 
-void stuffcmd(edict_t *ent, char *s)
-{
-    gi.WriteByte(svc_stufftext);
-    gi.WriteString(s);
-    gi.unicast(ent, true);
-}
+// stuffcmd() moved to g_utils.c: RA2 ships a byte-identical copy and needs it
+// too, and a generic engine helper should not live in one donor's file
+// (sec 7 rule 6).
 
 /*--------------------------------------------------------------------------*/
 
@@ -3307,7 +3304,7 @@ void CTFObserver(edict_t *ent)
     ent->client->ps.gunindex = 0;
     ent->client->resp.score = 0;
     memcpy(userinfo, ent->client->pers.userinfo, sizeof(userinfo));
-    InitClientPersistant(ent->client);
+    InitClientPersistant(ent->client, true);
     ClientUserinfoChanged(ent, userinfo);
     gi.linkentity(ent);
     CTFOpenJoinMenu(ent);

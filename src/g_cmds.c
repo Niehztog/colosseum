@@ -16,6 +16,7 @@ with this program; if not, write to the Free Software Foundation, Inc.,
 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
 */
 #include "g_local.h"
+#include "arena/arena.h"
 #include "m_player.h"
 
 static char *ClientTeam(edict_t *ent)
@@ -71,6 +72,8 @@ static void SelectNextItem(edict_t *ent, int itflags)
     if (G_MenuActive(ent)) {
         if (cl->menu_owner == MENU_CTF)
             ctf_PMenu_Next(ent);
+        else if (cl->menu_owner == MENU_ARENA)
+            MenuNext(ent);
         return;
     }
 
@@ -110,6 +113,8 @@ static void SelectPrevItem(edict_t *ent, int itflags)
     if (G_MenuActive(ent)) {
         if (cl->menu_owner == MENU_CTF)
             ctf_PMenu_Prev(ent);
+        else if (cl->menu_owner == MENU_ARENA)
+            MenuPrev(ent);
         return;
     }
 
@@ -504,6 +509,16 @@ static void Cmd_Inven_f(edict_t *ent)
         return;
     }
 
+    if (G_Ruleset() == RULESET_ARENA) {
+        // R-RA-4's "arena menu on connect and on `inven`".  G_MenuActive above
+        // has already handled the close; this is the reopen.
+        if (cl->curmenulink) {
+            G_MenuOpen(ent, MENU_ARENA);
+            DisplayMenu(ent);
+        }
+        return;
+    }
+
     if (cl->showinventory) {
         cl->showinventory = false;
         return;
@@ -538,6 +553,9 @@ static void Cmd_InvUse_f(edict_t *ent)
     if (G_MenuActive(ent)) {
         if (ent->client->menu_owner == MENU_CTF)
             ctf_PMenu_Select(ent);
+        else if (ent->client->menu_owner == MENU_ARENA &&
+                 !level.intermission_framenum)
+            UseMenu(ent, 1);
         return;
     }
 
@@ -704,6 +722,14 @@ Cmd_InvDrop_f
 static void Cmd_InvDrop_f(edict_t *ent)
 {
     const gitem_t   *it;
+
+    if (G_Ruleset() == RULESET_ARENA && G_MenuActive(ent) &&
+        ent->client->menu_owner == MENU_ARENA) {
+        // RA2 binds the menu's "back" to `drop`, the way it binds "select" to
+        // `invuse`; there is nothing droppable in an arena anyway.
+        UseMenu(ent, 0);
+        return;
+    }
 
     ValidateSelectedItem(ent);
 
@@ -913,7 +939,7 @@ bool FloodProtect(edict_t *ent)
 Cmd_Say_f
 ==================
 */
-static void Cmd_Say_f(edict_t *ent, bool team, bool arg0)
+static void Cmd_Say_f(edict_t *ent, bool team, bool arg0, bool bcast)
 {
     int     j;
     edict_t *other;
@@ -930,6 +956,10 @@ static void Cmd_Say_f(edict_t *ent, bool team, bool arg0)
 
     if (team)
         Q_snprintf(text, sizeof(text), "(%s): ", ent->client->pers.netname);
+    else if (bcast)
+        // RA2's `say_world`: reaches everyone even when teamplay would have
+        // confined it, and marks itself so the other team knows why it heard.
+        Q_snprintf(text, sizeof(text), "W:%s: ", ent->client->pers.netname);
     else
         Q_snprintf(text, sizeof(text), "%s: ", ent->client->pers.netname);
 
@@ -1033,7 +1063,7 @@ void ClientCommand(edict_t *ent)
         return;
     }
     if (Q_stricmp(cmd, "say") == 0) {
-        Cmd_Say_f(ent, false, false);
+        Cmd_Say_f(ent, false, false, false);
         return;
     }
     if (Q_stricmp(cmd, "say_team") == 0 || Q_stricmp(cmd, "steam") == 0) {
@@ -1043,7 +1073,7 @@ void ClientCommand(edict_t *ent)
         if (G_Ruleset() == RULESET_CTF)
             CTFSay_Team(ent, gi.args());
         else
-            Cmd_Say_f(ent, true, false);
+            Cmd_Say_f(ent, true, false, false);
         return;
     }
     if (Q_stricmp(cmd, "score") == 0) {
@@ -1143,10 +1173,39 @@ void ClientCommand(edict_t *ent)
         else
             Cmd_PlayerList_f(ent);
     }
+    // Rocket Arena's own commands (R-RA-2).  `admin` and `playerlist` collide
+    // with names that already mean something else here, so the ruleset picks
+    // which meaning is live rather than either being renamed.
+    else if (G_Ruleset() == RULESET_ARENA && Q_stricmp(cmd, "say_world") == 0)
+        Cmd_Say_f(ent, false, false, true);
+    else if (G_Ruleset() == RULESET_ARENA && Q_stricmp(cmd, "admin") == 0)
+        Cmd_admin_f(ent);
+    else if (G_Ruleset() == RULESET_ARENA && Q_stricmp(cmd, "arenaadmin") == 0)
+        Cmd_arenaadmin_f(ent, 0);
+    else if (G_Ruleset() == RULESET_ARENA && Q_stricmp(cmd, "menuhelp") == 0)
+        Cmd_menuhelp_f(ent);
+    else if (G_Ruleset() == RULESET_ARENA && Q_stricmp(cmd, "grap_on") == 0)
+        ent->client->ctf_hookstate = CTF_HOOK_STATE_ON;
+    else if (G_Ruleset() == RULESET_ARENA && Q_stricmp(cmd, "grap_off") == 0)
+        ent->client->ctf_hookstate = 0;
+    else if (G_Ruleset() == RULESET_ARENA && Q_stricmp(cmd, "listkeys") == 0)
+        list_keys(ent);
+    else if (G_Ruleset() == RULESET_ARENA && Q_stricmp(cmd, "listmaps") == 0)
+        print_map_loop(ent);
+    else if (G_Ruleset() == RULESET_ARENA && Q_stricmp(cmd, "nextmap") == 0)
+        gi.cprintf(ent, PRINT_MEDIUM, "Next map is %s\n",
+                   get_next_map(level.mapname));
+    // Three RA2 commands that are `return;` in the donor too -- clients bind
+    // them and the server is expected to swallow them silently.
+    else if (G_Ruleset() == RULESET_ARENA &&
+             (Q_stricmp(cmd, "getdebugcode") == 0 ||
+              Q_stricmp(cmd, "pcount") == 0 ||
+              Q_stricmp(cmd, "play") == 0))
+        return;
     else if (Q_stricmp(cmd, "entcount") == 0)       // PGM
         Cmd_Ent_Count_f(ent);                       // PGM
     else if (Q_stricmp(cmd, "disguise") == 0) {     // PGM
         ent->flags |= FL_DISGUISED;
     } else  // anything that doesn't match a command will be a chat
-        Cmd_Say_f(ent, false, true);
+        Cmd_Say_f(ent, false, true, false);
 }

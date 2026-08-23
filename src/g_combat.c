@@ -18,6 +18,8 @@ with this program; if not, write to the Free Software Foundation, Inc.,
 // g_combat.c
 
 #include "g_local.h"
+#include "arena/arena.h"
+#include "arena/ra2stats.h"
 
 void M_SetEffects(edict_t *self);
 
@@ -564,6 +566,9 @@ void T_Damage(edict_t *targ, edict_t *inflictor, edict_t *attacker, const vec3_t
                 mod |= MOD_FRIENDLY_FIRE;
         }
     }
+    if (G_Ruleset() == RULESET_ARENA && attacker->client && (attacker != targ))
+        targ->enemy = attacker;
+
     meansOfDeath = mod;
 
 //ROGUE
@@ -729,6 +734,24 @@ void T_Damage(edict_t *targ, edict_t *inflictor, edict_t *attacker, const vec3_t
         } else
             SpawnDamage(te_sparks, point, normal, take);
 //PGM
+
+        // R-RA-1's score-by-damage, a per-arena setting.  Scored before the
+        // health is applied, because the points are what this hit actually took
+        // off rather than what it asked for.
+        if (G_Ruleset() == RULESET_ARENA &&
+            targ->client && attacker->client && (attacker != targ) &&
+            !OnSameTeam(targ, attacker) &&
+            arenas[attacker->client->resp.context].scorebydamage) {
+            int hit = targ->health < take ? targ->health : take;
+            int points = (asave < 0 ? 0 : asave) + (hit < 0 ? 0 : hit);
+
+            attacker->client->resp.damagedealt += points > 500 ? 100 : points;
+            attacker->client->resp.score = attacker->client->resp.damagedealt / 100;
+
+            RA2_Stats_Set(arenas[attacker->client->resp.context].stats,
+                          attacker - g_edicts, RA2_STAT_SCORE,
+                          attacker->client->resp.score);
+        }
 
         // CTF match setup freezes the players while captains pick teams, so no
         // damage lands.  CTFMatchSetup() is false in every other ruleset.

@@ -16,6 +16,7 @@ with this program; if not, write to the Free Software Foundation, Inc.,
 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
 */
 #include "g_local.h"
+#include "arena/arena.h"
 
 //PGM - some of these are mine, some id's. I added the define's.
 #define TRIGGER_MONSTER     0x01
@@ -48,6 +49,14 @@ static void multi_trigger(edict_t *ent)
 {
     if (ent->nextthink)
         return;     // already been triggered
+
+    if (G_Ruleset() == RULESET_ARENA && ent->arena) {
+        if (ent->message)
+            gi.TagFree(ent->message);
+        ent->message = gi.TagMalloc(ARENA_MESSAGE_SIZE, TAG_LEVEL);
+        Q_snprintf(ent->message, ARENA_MESSAGE_SIZE, "Go to Arena %d (%s)",
+                   ent->arena, getarenaname(ent->arena));
+    }
 
     G_UseTargets(ent, ent->activator);
 

@@ -181,7 +181,10 @@ ELF_SHLIBLDFLAGS = -shared -Wl,--no-undefined
 # __USE_MINGW_ANSI_STDIO makes MinGW's printf take the C99 length modifiers the
 # format attributes are checked against.
 PE_CFLAGS       = -D__USE_MINGW_ANSI_STDIO=1
-PE_LDFLAGS      = -lm -static-libgcc
+# -lws2_32: src/arena/gslog.c forwards the RA2 event log over UDP when `netlog`
+# is set, and on Windows that is winsock rather than libc.  It is the only
+# socket user in the tree (R-RA-1a), and the ELF side needs no extra library.
+PE_LDFLAGS      = -lm -lws2_32 -static-libgcc
 PE_SHLIBCFLAGS  =
 PE_SHLIBLDFLAGS = -shared
 
@@ -212,7 +215,33 @@ GAME_SRC = \
 	rogue/dm_ball.c rogue/dm_tag.c rogue/g_newai.c rogue/g_newdm.c \
 	rogue/g_newfnc.c rogue/g_newtarg.c rogue/g_newtrig.c rogue/g_newweap.c \
 	rogue/g_sphere.c rogue/m_carrier.c rogue/m_stalker.c rogue/m_turret.c \
-	rogue/m_widow.c rogue/m_widow2.c
+	rogue/m_widow.c rogue/m_widow2.c \
+	\
+	arena/arena.c arena/gslog.c arena/maploop.c arena/menu.c \
+	arena/ra2menus.c arena/ra2stats.c \
+
+
+
+# src/tourney/ is imported and compiles, but is NOT linked yet.  It cannot be:
+# its 21 translation units reference `match_paused`, `pause_time`,
+# `endlvl_frame`, the three armor tables, four statusbar literals and two static
+# g_cmds.c helpers -- every one of which is defined by a SHARED file that Phase
+# 5's merges have not landed yet.  Linking it would need those merges to be
+# half-applied, which is worse than not linking it.
+#
+# So it is compiled instead: `make check-tourney` runs -fsyntax-only over all 21
+# against the merged g_local.h, which is what catches a field rename or a type
+# collision breaking them.  R-MP-5 set the precedent with rogue/m_move2.c --
+# shipped as a reference, not built -- and R-61 counts the unbuilt files
+# mechanically rather than trusting a memory.
+TOURNEY_SRC = \
+	tourney/osp_botseam.c tourney/osp_cmds.c tourney/osp_config.c \
+	tourney/osp_detect.c tourney/osp_display.c tourney/osp_hiscore.c \
+	tourney/osp_hook.c tourney/osp_main.c tourney/osp_maps.c \
+	tourney/osp_menus.c tourney/osp_observe.c tourney/osp_players.c \
+	tourney/osp_plist.c tourney/osp_runes.c tourney/osp_stats.c \
+	tourney/osp_teams.c tourney/p_camera.c tourney/p_menu.c \
+	tourney/sl_write.c tourney/stdlog.c
 
 # Every .c that genptr.py must scan.  The generated g_ptrs.c is not an input to
 # itself.
@@ -225,7 +254,7 @@ TARGET = $(BUILDDIR)/game$(CPU).$(SHLIBEXT)
 # ---------------------------------------------------------------- goals
 
 .PHONY: all everything native linux64 linux32 win32 win64 windows \
-	check check-ptrs check-audits clean distclean help
+	check check-ptrs check-audits check-tourney clean distclean help
 
 all: native
 
@@ -286,7 +315,16 @@ $(BUILDDIR)/%.o: src/%.c
 
 # ---------------------------------------------------------------- checks
 
-check: check-ptrs check-audits
+check: check-ptrs check-audits check-tourney
+
+# R-VER-26.  src/tourney/ is not linked yet (see TOURNEY_SRC above), so nothing
+# else would notice it breaking.  Syntax-only, against the merged g_local.h.
+check-tourney:
+	@for f in $(TOURNEY_SRC); do \
+		$(CC_NATIVE) -DHAVE_CONFIG_H $(INCLUDES) -std=gnu99 \
+			-fno-strict-aliasing -fwrapv -fsyntax-only src/$$f || exit 1; \
+	done; echo "[ok  ] tourney/compiles ($(words $(TOURNEY_SRC)) unit(s), not linked)"
+
 
 # R-SAVE-2 / R-BUILD-4: genptr.py runs over the whole tree as a build step and a
 # stale g_ptrs.c is a build failure, not a warning.  The committed file must be

@@ -67,3 +67,23 @@ Three baseq2 commands change meaning under `ctf` and keep it elsewhere:
 * tourney's mode-gated commands, which R-VER-16 checks accept and reject per
   `match_mode`: `highscores` only in mode 0, `queue`/`line`/`order` only in
   mode 3, `captain`/`invite`/`lockteam` only in mode 2
+
+## Rocket Arena 2 — added in spec 1.17
+
+All gated on `g_ruleset arena`; a command named here does nothing under any
+other ruleset.
+
+| command | notes |
+|---|---|
+| `arenaadmin` | the per-arena settings menu |
+| `admin` | **third meaning of this name.** CTF's is the election; RA2's is the arena admin login. One ruleset is live at a time, so each keeps the bare name |
+| `playerlist` | **third implementation.** baseq2's reports `resp.spectator`, CTF's adds team and ghost code, RA2's is arena-scoped |
+| `score` | not a new command: under `arena` it *cycles* arena board → server-wide → off, where every other ruleset toggles |
+| `menuhelp` | the menu key legend |
+| `say_world` | reaches everyone even under teamplay, prefixed `W:` |
+| `grap_on`, `grap_off` | the offhand grapple latch. Mapped onto `ctf_hookstate`, because there is one grapple (§7 rule 6) |
+| `listkeys`, `listmaps`, `nextmap` | the map loop's reporting |
+| `getdebugcode`, `pcount`, `play` | accepted and ignored, as in the donor: clients bind them and expect the server to swallow them |
+
+`invnext`, `invprev`, `inven`, `invuse` and `invdrop` gain arena arms rather than
+new commands — R-MENU-4 gives the menu owner first claim on that input.
