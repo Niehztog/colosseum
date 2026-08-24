@@ -17,7 +17,10 @@ with this program; if not, write to the Free Software Foundation, Inc.,
 */
 
 #include "g_local.h"
+#include "tourney/osp_hooks.h"
 #include "arena/arena.h"
+#include "tourney/osp_types.h"
+#include "tourney/osp_stats.h"
 
 typedef struct {
     char    *name;
@@ -472,6 +475,15 @@ static const spawn_field_t temp_fields[] = {
     {"minpitch", STOFS(minpitch), F_FLOAT},
     {"maxpitch", STOFS(maxpitch), F_FLOAT},
     {"nextmap", STOFS(nextmap), F_LSTRING},
+
+    // R-OSP-6: tourney's five extra keys -- the bot library to load, and the
+    // four a `bot` entity carries.  Frozen key text (R-KEY-1): these are what a
+    // tourney .bsp contains.
+    {"botlib", STOFS(botlib), F_LSTRING},
+    {"name", STOFS(name), F_LSTRING},
+    {"skin", STOFS(skin), F_LSTRING},
+    {"charfile", STOFS(charfile), F_LSTRING},
+    {"charname", STOFS(charname), F_LSTRING},
     {"musictrack", STOFS(musictrack), F_LSTRING},
 
     {NULL}
@@ -994,6 +1006,15 @@ void SpawnEntities(const char *mapname, const char *entities, const char *spawnp
     if (G_Ruleset() == RULESET_ARENA)
         arena_init(g_edicts);
 
+    if (G_Ruleset() == RULESET_TOURNEY) {
+        // The rune spawners and the round's stats file (R-OSP-1, R-OSP-3).
+        if (runes_enable && runes_enable->value)
+            OSP_setupRuneSpawn(0);
+        OSP_Stats_GameInit();
+        sl_GameStart(&gi, level);
+        OSP_levelSpawned();
+    }
+
     G_FindTeams();
 
     PlayerTrail_Init();
@@ -1146,6 +1167,14 @@ void SP_worldspawn(edict_t *ent)
         gi.configstring(CS_CDTRACK, va("%i", ent->sounds));
 
     gi.configstring(game.csr.maxclients, va("%i", game.maxclients));
+
+    // R-OSP-1: tourney's own level state -- the hi-score table, the MOTD, the
+    // team name and banner configstrings, the overtime counters.  Before
+    // G_SetStatusbar() rather than after, because the bar it composes reads
+    // `m_mode`, which this re-reads from `match_mode` so that a referee's
+    // change takes effect on the map that follows it.
+    if (G_Ruleset() == RULESET_TOURNEY)
+        OSP_worldspawn();
 
     // status bar program -- composed, not stored (R-OSP-7a)
     G_SetStatusbar();

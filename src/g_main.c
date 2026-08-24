@@ -17,8 +17,10 @@ with this program; if not, write to the Free Software Foundation, Inc.,
 */
 
 #include "g_local.h"
+#include "tourney/osp_hooks.h"
 #include "arena/arena.h"
 #include "arena/ra2stats.h"
+#include "tourney/osp_types.h"
 
 game_locals_t   game;
 level_locals_t  level;
@@ -80,6 +82,14 @@ cvar_t  *sv_cheats;
 cvar_t  *logfile;
 cvar_t  *netlog;
 
+// OSP Tourney's three match-state globals (R-OSP-1).  They live here because
+// the donor defines them in its g_main.c and because the match clock is read by
+// the composed statusbar, which is g_stats.c's -- putting them in src/tourney/
+// would make a spine file depend on a donor's translation unit for its own bar.
+int     match_paused;
+float   pause_time;
+int     endlvl_frame;
+
 cvar_t  *flood_msgs;
 cvar_t  *flood_persecond;
 cvar_t  *flood_waitdelay;
@@ -112,6 +122,20 @@ static void ShutdownGame(void)
 #ifdef _WIN32
         GSNetShutdown();
 #endif
+    }
+
+    // R-OSP-3: both tourney logs are closed with a REASON, and the reason is
+    // the console command that caused it -- `map`, `gamemap`, a `quit`, or
+    // nothing at all when the server is going down on its own.  A stats file
+    // that does not say why it ended cannot be told from one that was
+    // truncated.
+    if (G_Ruleset() == RULESET_TOURNEY) {
+        const char *reason = gi.argc() ? gi.argv(0) : "server";
+
+        sl_GameEnd(&gi, level);
+        OSP_Stats_Shutdown(reason);
+        if (server_log)
+            OSP_logAdminLog("Shutdown: %s", reason);
     }
 
     memset(&game, 0, sizeof(game));
@@ -225,6 +249,15 @@ static void InitGame(void)
     // what the first draft did -- dereferences a NULL cvar_t and segfaults on
     // the first map load.
     G_InitRuleset();
+
+    // OSP Tourney's own init: the map list, the match system's globals and the
+    // Standard Log (R-OSP-1, R-OSP-3).  After resolution for the same reason
+    // RA2's is -- both are per-ruleset writers and only one owner may be live.
+    if (G_Ruleset() == RULESET_TOURNEY) {
+        OSP_loadMaps();
+        OSP_gameInit();
+        sl_Logging(&gi, "Colosseum tourney");
+    }
 
     // RA2's two writers (R-RA-1a, R-OSP-10).  After resolution, because both
     // are per-ruleset and only one owner may be live at a time; `hostname` and
@@ -376,7 +409,11 @@ void Com_Error(error_type_t type, const char *fmt, ...)
 ClientEndServerFrames
 =================
 */
-static void ClientEndServerFrames(void)
+// Not static: tourney's restart-in-place path (OSP_exitLevel) has to flush one
+// set of playerstates after clearing the intermission and before beginning the
+// clients again, or every client spends that frame looking at the scoreboard of
+// a match that no longer exists.
+void ClientEndServerFrames(void)
 {
     int     i;
     edict_t *ent;
@@ -580,14 +617,33 @@ static void G_RunFrame(void)
     int     i;
     edict_t *ent;
 
+    // R-OSP-1's pause is a frozen WORLD, not a frozen match: no entity thinks,
+    // no time passes, and the only thing that moves is the countdown.  It has
+    // to be here rather than inside the rules row, because everything below --
+    // the clock, the entity loop, the rules check -- is what must not happen.
+    // Clients still get their playerstates, so the banner is drawn and a menu
+    // still answers.
+    if (G_Ruleset() == RULESET_TOURNEY && match_paused >= 2) {
+        OSP_pauseFrame();
+        ClientEndServerFrames();
+        return;
+    }
+
     level.framenum++;
     level.time = level.framenum * FRAMETIME;
+
+    if (G_Ruleset() == RULESET_TOURNEY)
+        OSP_frameStart();
 
     // choose a client for monsters to target this frame
     AI_SetSightClient();
 
     // exit intermissions
     if (level.exitintermission) {
+        // Tourney can restart the match in place instead of changing level;
+        // true means it did, and ExitLevel must not also run.
+        if (G_Ruleset() == RULESET_TOURNEY && OSP_exitLevel())
+            return;
         ExitLevel();
         return;
     }
@@ -624,6 +680,8 @@ static void G_RunFrame(void)
 
     // exit intermission right now to avoid annoying fov change
     if (level.exitintermission) {
+        if (G_Ruleset() == RULESET_TOURNEY && OSP_exitLevel())
+            return;
         ExitLevel();
         return;
     }
@@ -640,4 +698,9 @@ static void G_RunFrame(void)
 
     // build the playerstate_t structures for all players
     ClientEndServerFrames();
+
+    // A pause asked for during this frame takes effect after it: freezing
+    // mid-frame would leave half the entities thought and half not.
+    if (G_Ruleset() == RULESET_TOURNEY)
+        OSP_frameEnd();
 }

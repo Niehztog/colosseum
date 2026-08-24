@@ -31,6 +31,13 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #ifndef OSP_TYPES_H
 #define OSP_TYPES_H
 
+#include "tourney/osp_hooks.h"
+
+// The four statusbar literals the donor keeps are NOT here and are not anywhere:
+// R-OSP-7a composes the bar from the slot map, and tourney is the ruleset that
+// proves why -- its four bars differ only in where two panels sit, which two
+// booleans express and four literals cannot share.
+
 // The donor defines this below hs_player_t, which uses it; here the struct
 // and the macro are in one file, so the macro comes first.
 #define OSP_HS_FIELD    16
@@ -144,8 +151,7 @@ typedef struct {
 #define RUNE_VAMPIRE            16
 
 // The rune item class -- id CTF's own IT_TECH value.
-#define IT_RUNE         64
-
+// IT_RUNE is g_local.h's now: it is an item class, shared with the item code.
     // OSP: five more, appended.  The last four are the Gladiator Bot SDK's;
     // `botlib` is this mod's own.
 
@@ -227,6 +233,12 @@ extern  int     sync_stat;
 extern  int     active_clients;
 extern  int     start_count;
 extern  p_acc_t p_acc[256];
+
+// osp_acc.c -- the two entry points the spine calls instead of writing p_acc
+// at fifteen sites.  `mod` is the means of death the shot or the damage was
+// tagged with; the ACC_ column is derived here.
+void     OSP_accShot(edict_t *self, int mod, int count);
+void     OSP_accDamage(edict_t *targ, edict_t *attacker, int mod, int take);
 
 // Not id CTF's 34.
 
@@ -312,11 +324,6 @@ extern  map_t   *map;
 
 extern  int     end_timeout;
 extern  int     ot_count;
-extern const char   single_statusbar[];
-extern const char   dm_statusbar[];
-extern const char   dm_statusbar_alt[];
-extern const char   team_statusbar[];
-extern const char   team_statusbar_alt[];
 extern  int     conf_size;
 extern  int     blink_on_count;
 extern  int     blink_off_count;
@@ -609,6 +616,7 @@ void     OSP_zeroRuneStats(edict_t *ent);
 void     OSP_removeRunes(void);
 int      OSP_findMinRune(void);
 void     OSP_checkMinRunes(void);
+void     OSP_runesShell(edict_t *ent);
 bool OSP_checkMaxRunes(void);
 int     sl_Logging(game_import_t *import, char *patch);
 int     sl_OpenLogFile(game_import_t *import);
@@ -706,6 +714,7 @@ bool CameraCmd(edict_t *ent, bool force);
 int     OSP_votePercent(edict_t *ent, int what);
 void     EntityListAdd(edict_t *ent);
 void     EntityListRemove(edict_t *ent);
+void    EnitityListClean(void);
 bool OSP_1v1AllowJoin(edict_t *ent);
 void     OSP_1v1Remove(edict_t *ent, int mode);
 bool OSP_addTeamMember(edict_t *ent, int team);
@@ -882,5 +891,10 @@ void    sl_LogPlayerRename(game_import_t *import, char *oldname, char *newname,
                            float time);
 void    sl_LogScore(game_import_t *import, char *player, char *other,
                     char *event, char *weapon, int score, float time, int ping);
+
+// The delegated client-command dispatcher (R-OSP-2).
+bool OSP_ClientCommand(edict_t *ent);
+void OSP_CheckRules(void);
+void OSP_EndLevel(void);
 
 #endif // OSP_TYPES_H

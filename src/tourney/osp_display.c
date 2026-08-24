@@ -53,7 +53,7 @@ void OSP_setMOTD(void)
     // as plain statements the temp comes after every declared local instead,
     // and real's ELF puts it fourth of five.  The literal is repeated rather
     // than cached -- real's PE pushes two distinct .rdata copies.
-    cvar_t  *gamedir = gi.cvar("gamedir", "ospdm", CVAR_SERVERINFO);
+    cvar_t  *gamedir = gi.cvar("gamedir", "tourney", CVAR_SERVERINFO);
     cvar_t  *basedir = gi.cvar("basedir", ".", 0);
     cvar_t  *motdfile = gi.cvar("motd_file", "motd.txt", 0);
     cvar_t  *center = gi.cvar("motd_center", "0", 0);
@@ -170,7 +170,7 @@ void OSP_setShowParams(void)
     cvar_t  *host;
     int     x;
 
-    host = gi.cvar("hostname", "noname", 0);
+    host = gi.cvar("hostname", "", 0);
 
     if (m_mode == 1) {
         Q_snprintf(buf, sizeof(buf), "xv 2 yv 0 string \"Match: %s\"", host->string);
@@ -912,4 +912,132 @@ void OSP_showPlayer(edict_t *ent)
 
     gi.WriteByte(svc_layout);
     gi.WriteString(buf);
+}
+
+/*
+==================
+OSP_ScoreboardMessage
+
+Tourney's ScoreboardMessage row (R-MODE-5, R-OSP-1).
+
+The donor writes this dispatch inside DeathmatchScoreboardMessage in the shared
+p_hud.c, which is where its scoreboard would collide with three other donors'.
+Here it is one row of ruleset_ops_t and lives with the six writers it chooses
+between, so p_hud.c keeps exactly one scoreboard -- baseq2's.
+
+The order is the donor's and each arm is a different SCREEN, not a variant of
+one: `resp.osp_r24c` is which alternate page the player asked for (player card,
+MOTD, match parameters, previous match's scores), then the match mode decides
+between the team board, the 1-vs-1 board and the deathmatch board, and finally
+the hi-score table alternates with the deathmatch board during intermission on
+a timer so both get seen.
+==================
+*/
+void OSP_ScoreboardMessage(edict_t *ent, edict_t *killer)
+{
+    int     sorted[MAX_CLIENTS];
+    int     sortedscores[MAX_CLIENTS];
+    int     i, j, k, total, score;
+    edict_t *cl_ent;
+
+    // The alternate pages, in the donor's order.
+    switch (ent->client->resp.osp_r24c) {
+    case 8:
+        OSP_showPlayer(ent);
+        return;
+    case 2:
+        OSP_showMOTD();
+        return;
+    case 4:
+        OSP_showParams();
+        return;
+    case 1:
+        OSP_oldscores_cmd(ent);
+        return;
+    default:
+        break;
+    }
+
+    if (m_mode == 2) {
+        OSP_showTeamScores(ent);
+        return;
+    }
+    if (m_mode == 3) {
+        OSP_show1v1Scores(ent);
+        return;
+    }
+
+    // At intermission the hi-score table and the deathmatch board alternate:
+    // 4 seconds on the board, 10 on the table, flipped by osp_r034.
+    if (hs_mode && (int)client_highscores->value &&
+        level.intermission_framenum) {
+        if (level.framenum > ent->client->resp.osp_r244) {
+            ent->client->resp.osp_r244 = level.framenum +
+                                         (ent->client->resp.osp_r034 ? 40 : 100);
+            ent->client->resp.osp_r034 = 1 - ent->client->resp.osp_r034;
+        }
+        if (!ent->client->resp.osp_r034) {
+            OSP_showHighScores();
+            return;
+        }
+    }
+
+    total = 0;
+    if (sync_stat < 4) {
+        // Before the match is live there are no scores to sort by, so the order
+        // is "players who have entered, then everyone else" -- which is what
+        // the warmup board shows.
+        for (i = 0; i < game.maxclients; i++) {
+            cl_ent = g_edicts + i + 1;
+            if (!cl_ent->inuse || !cl_ent->client)
+                continue;
+
+            for (j = 0; j < total; j++) {
+                if (!cl_ent->client->resp.osp_r20c && cl_ent->osp_e39c != 1)
+                    break;
+                if (cl_ent->osp_e39c == 1 &&
+                    (g_edicts[sorted[j] + 1].osp_e39c == 1 ||
+                     game.clients[sorted[j]].resp.osp_r20c))
+                    break;
+            }
+
+            for (k = total; k > j; k--)
+                sorted[k] = sorted[k - 1];
+            sorted[j] = i;
+            total++;
+        }
+    } else {
+        // Live: score first, then the two tie-breaks, both lower-is-better.
+        for (i = 0; i < game.maxclients; i++) {
+            cl_ent = g_edicts + i + 1;
+            if (!cl_ent->inuse || !cl_ent->client)
+                continue;
+
+            score = cl_ent->client->resp.score;
+            for (j = 0; j < total; j++) {
+                if (score > sortedscores[j])
+                    break;
+                if (score == sortedscores[j]) {
+                    if (game.clients[i].resp.osp_r014 <
+                        game.clients[sorted[j]].resp.osp_r014)
+                        break;
+                    if (game.clients[i].resp.osp_r014 ==
+                        game.clients[sorted[j]].resp.osp_r014 &&
+                        game.clients[i].resp.osp_r2c0 <
+                        game.clients[sorted[j]].resp.osp_r2c0)
+                        break;
+                }
+            }
+
+            for (k = total; k > j; k--) {
+                sorted[k] = sorted[k - 1];
+                sortedscores[k] = sortedscores[k - 1];
+            }
+            sorted[j] = i;
+            sortedscores[j] = score;
+            total++;
+        }
+    }
+
+    OSP_showScores(sorted, total, ent);
 }

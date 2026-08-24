@@ -27,7 +27,10 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "ctf/g_ctf.h"
 #include "arena/ra2stats.h"
 
-extern int  votetries_setting;
+// R-OSP-5: no local `extern` of a donor object.  arena.h already declares
+// `votetries_setting`, and a second declaration in a .c file is the shape that
+// let the donor's `extern int botglobals;` resolve a four-byte int over the
+// first member of a struct.  Found by donorgate.py's stray-extern pass.
 bool    allow_grapple;
 bool    broken = false;
 
@@ -1043,6 +1046,14 @@ void check_teams(int arenanum)
 
 void init_player(edict_t *ent)
 {
+    // A client slot is reused, and the menu queue is TAG_LEVEL memory that
+    // belonged to whoever had this slot before.  ra_MenuClose() deliberately
+    // does not drop it -- closing a menu is hiding it -- so the one place that
+    // must is here, where a client starts from nothing.
+    ent->client->curmenulink = NULL;
+    ent->client->selected = NULL;
+    ent->client->menuqueue.next = NULL;
+
     ent->client->resp.teammember.it = ent;
     ent->client->resp.fightstate = FIGHT_SPECTATING;
     ent->client->resp.context = 0;

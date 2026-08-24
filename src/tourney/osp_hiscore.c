@@ -224,7 +224,7 @@ void OSP_loadHighScores(void)
 
     gamedir = gi.cvar("gamedir", "tourney", 0);
     basedir = gi.cvar("basedir", ".", 0);
-    port = gi.cvar("port", ".", 0);
+    port = gi.cvar("port", "27910", 0);
     hsdir = gi.cvar("client_highscoredir", "highscores", 0);
 
     if (gamedir && basedir) {
@@ -290,7 +290,7 @@ void OSP_writeHighScores(void)
 
     gamedir = gi.cvar("gamedir", "tourney", 0);
     basedir = gi.cvar("basedir", ".", 0);
-    port = gi.cvar("port", ".", 0);
+    port = gi.cvar("port", "27910", 0);
     hsdir = gi.cvar("client_highscoredir", "highscores", 0);
 
     if (gamedir && basedir) {
@@ -332,7 +332,7 @@ bool OSP_makeHSDir(char *base)
     cvar_t  *port;
     cvar_t  *hsdir;
 
-    port = gi.cvar("port", ".", 0);
+    port = gi.cvar("port", "27910", 0);
     hsdir = gi.cvar("client_highscoredir", "highscores", 0);
 
     Q_snprintf(dir, sizeof(dir), "%s/%s", base, hsdir->string);

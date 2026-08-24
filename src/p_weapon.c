@@ -18,6 +18,7 @@ with this program; if not, write to the Free Software Foundation, Inc.,
 // g_weapon.c
 
 #include "g_local.h"
+#include "tourney/osp_hooks.h"
 #include "m_player.h"
 #include "arena/arena.h"
 
@@ -638,8 +639,16 @@ static void Weapon_Generic2(edict_t *ent, int FRAME_ACTIVATE_LAST, int FRAME_FIR
                         gi.sound(ent, CHAN_ITEM, gi.soundindex("items/damage3.wav"), 1, ATTN_NORM, 0);
                     else if (ent->client->double_framenum > level.framenum)
                         gi.sound(ent, CHAN_ITEM, gi.soundindex("misc/ddamage3.wav"), 1, ATTN_NORM, 0);
+                    // R-OSP-1's strength rune is the fourth claimant on the same
+                    // channel and takes the same place in the chain as CTF's
+                    // tech: after quad, because it is the rarer thing to hear.
+                    else if (G_Ruleset() == RULESET_TOURNEY &&
+                             (rune_stat & RUNE_STRENGTH))
+                        OSP_runesApplyStrengthSound(ent);
                 }
                 CTFApplyHasteSound(ent);
+                if (G_Ruleset() == RULESET_TOURNEY && (rune_stat & RUNE_HASTE))
+                    OSP_runesApplyHasteSound(ent);
 
                 fire(ent);
                 break;
@@ -681,7 +690,15 @@ void Weapon_Generic(edict_t *ent, int FRAME_ACTIVATE_LAST, int FRAME_FIRE_LAST, 
     if (grapple && ent->client->weaponstate == WEAPON_FIRING)
         return;
 
-    if ((CTFApplyHaste(ent) || grapple)
+    // R-OSP-1's haste rune is the same concept as Threewave's haste tech and
+    // shares this one implementation (sec 7 rule 6): run the state machine a
+    // second time in the same frame, but only if the first pass left the state
+    // alone -- which doubles the rate of whatever the weapon was doing rather
+    // than skipping it ahead.  Each predicate is a no-op in a ruleset that does
+    // not have its pickup.
+    if ((CTFApplyHaste(ent) || grapple ||
+         (G_Ruleset() == RULESET_TOURNEY && (rune_stat & RUNE_HASTE) &&
+          OSP_runesHasHaste(ent)))
         && oldstate == ent->client->weaponstate) {
         Weapon_Generic2(ent, FRAME_ACTIVATE_LAST, FRAME_FIRE_LAST,
                         FRAME_IDLE_LAST, FRAME_DEACTIVATE_LAST, pause_frames,

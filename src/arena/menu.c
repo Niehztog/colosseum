@@ -349,22 +349,29 @@ MenuThink(edict_t *ent)
     return false;
 }
 
-// The engine's own teardown.  G_MenuClose() calls THIS; nothing here may call
-// G_MenuClose(), or the arbiter and the engine recurse into each other.  The
-// queue nodes are TAG_LEVEL, so dropping the list is not a leak past the level
-// -- which is the reasoning the donor recorded for the same code.
+// The engine's own close.  G_MenuClose() calls THIS; nothing here may call
+// G_MenuClose(), or the arbiter and the engine recurse into each other.
+//
+// CLOSING IS HIDING, NOT DESTROYING, and the difference is the whole function.
+// RA2 splits the two: `showmenu` is whether the menu is on screen, and
+// `curmenulink` + `menuqueue` are the menu itself, which `inven` toggles back
+// into view and which FinishMenu(show=false) builds without displaying.  Only
+// clear_menus() -- intermission -- destroyed both, and this is not that.
+// Tearing the content down here instead made three things unreachable at once:
+// `inven` could not reopen the arena menu after `score` had closed it, because
+// its reopen tests curmenulink; FinishMenu(ent, m, false) destroyed the menu it
+// had just built; and a menu popped off the queue took the rest of the queue
+// with it.
+//
+// What the close MUST do is repaint.  An RA2 menu *is* the client's statusbar,
+// drawn by overwriting CS_STATUSBAR for that one client, so a close that does
+// not write the real bar back leaves the player looking at a menu the game has
+// already forgotten.  G_MenuClose has set menu_owner to MENU_NONE by the time
+// this runs, which is what makes DisplayMenu take its "put the real bar back"
+// branch.
 void
 ra_MenuClose(edict_t *ent)
 {
-    ent->client->curmenulink = NULL;
-    ent->client->selected = NULL;
-    ent->client->menuqueue.next = NULL;
-}
-
-void
-clear_menus(edict_t *ent)
-{
-    G_MenuClose(ent);       // clears the owner field and calls ra_MenuClose
-    DisplayMenu(ent);       // and puts the composed bar back
+    DisplayMenu(ent);
 }
 

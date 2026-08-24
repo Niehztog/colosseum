@@ -16,6 +16,7 @@ with this program; if not, write to the Free Software Foundation, Inc.,
 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
 */
 #include "g_local.h"
+#include "tourney/osp_hooks.h"
 #include "m_player.h"
 #include "arena/arena.h"
 #include "arena/ra2stats.h"
@@ -319,7 +320,11 @@ void ClientObituary(edict_t *self, edict_t *inflictor, edict_t *attacker)
         }
         if (message) {
             gi.bprintf(PRINT_MEDIUM, "%s %s.\n", self->client->pers.netname, message);
-            if (deathmatch->value)
+            // R-OSP-1: tourney refuses score changes during the countdown and
+            // updates its team totals and rank order on every one that lands.
+            if (G_Ruleset() == RULESET_TOURNEY)
+                OSP_scoreChange(self, -1);
+            else if (deathmatch->value)
                 self->client->resp.score--;
             self->enemy = NULL;
             return;
@@ -487,7 +492,9 @@ void ClientObituary(edict_t *self, edict_t *inflictor, edict_t *attacker)
                 }
 //ROGUE
 
-                if (deathmatch->value) {
+                if (G_Ruleset() == RULESET_TOURNEY)
+                    OSP_scoreChange(attacker, ff ? -1 : 1);
+                else if (deathmatch->value) {
                     if (ff)
                         attacker->client->resp.score--;
                     else
@@ -510,7 +517,9 @@ void ClientObituary(edict_t *self, edict_t *inflictor, edict_t *attacker)
 //  }
 //ROGUE
 
-    if (deathmatch->value)
+    if (G_Ruleset() == RULESET_TOURNEY) {
+        OSP_scoreChange(self, -1);
+    } else if (deathmatch->value)
 //ROGUE
     {
         if (gamerules && gamerules->value) {
@@ -672,7 +681,23 @@ void player_die(edict_t *self, edict_t *inflictor, edict_t *attacker, int damage
         // nothing outside ctf.
         CTFFragBonuses(self, inflictor, attacker);
 
-        TossClientWeapon(self);
+        // R-OSP-3: both logs record the death, and only while a match is live
+        // -- a warmup death is not a statistic.
+        if (G_Ruleset() == RULESET_TOURNEY) {
+            if (sync_stat > 2)
+                sl_WriteStdLogDeath(&gi, level, self, inflictor, attacker);
+            OSP_Stats_Death(self, inflictor, attacker);
+        }
+
+        // `client_deathweapdrop` decides whether a tourney player drops the
+        // weapon they were holding; everywhere else it is unconditional.
+        if (G_Ruleset() != RULESET_TOURNEY ||
+            (int)client_deathweapdrop->value)
+            TossClientWeapon(self);
+
+        // ...and the rune goes with the body, into the rune pool.
+        if (G_Ruleset() == RULESET_TOURNEY && rune_stat)
+            OSP_deadDropRune(self);
 
         // ...and the grapple, the flag and the tech go with the body.  All three
         // are no-ops when there is nothing to drop.
@@ -680,9 +705,17 @@ void player_die(edict_t *self, edict_t *inflictor, edict_t *attacker, int damage
         CTFDeadDropFlag(self);
         CTFDeadDropTech(self);
         // CTF adds `&& !showscores`: Cmd_Help_f toggles, so a player who already
-        // had the scoreboard up got it turned OFF by his own death.
-        if (deathmatch->value && !self->client->showscores)
+        // had the scoreboard up got it turned OFF by their own death.
+        //
+        // Tourney does the same thing through its own flag rather than through
+        // the help computer: `osp_r2dc` is "this client is dead and looking at
+        // the board", which p_view.c reads to stop pushing HUD panels at them.
+        if (G_Ruleset() == RULESET_TOURNEY) {
+            if (sync_stat != 2 && !(self->flags & FL_BOT))
+                self->client->resp.osp_r2dc = 1;
+        } else if (deathmatch->value && !self->client->showscores) {
             Cmd_Help_f(self);       // show scores
+        }
 
         // clear inventory
         // this is kind of ugly, but it's how we want to handle keys in coop
@@ -880,6 +913,12 @@ void InitClientPersistant(gclient_t *client, bool full)
     // `max_rounds` sat behind #ifndef KILL_DISRUPTOR, which Ground Zero
     // #defines to 1, so it was already dead in the donor (R-CORE-3).
 //ROGUE
+
+    // R-OSP-1: tourney seeds its own per-player state here -- the ammo ceilings
+    // a referee has set, the accuracy row, the rune counters -- which is the
+    // one place that runs on both a fresh connect and a respawn.
+    if (G_Ruleset() == RULESET_TOURNEY)
+        OSP_seedPlayer(client);
 
     client->pers.connected = true;
 }
@@ -1465,6 +1504,7 @@ void PutClientInServer(edict_t *ent)
     client_respawn_t    resp;
     vec3_t temp, temp2;
     trace_t tr;
+    int     arenanum;
 
     // find a spawn point
     // do it before setting health back up, so farthest
@@ -1545,6 +1585,18 @@ void PutClientInServer(edict_t *ent)
     // R-MENU-3: spawning ends whatever menu was open.  Threewave leaves the
     // handle live and relies on the join menu being reopened over it.
     G_MenuClose(ent);
+
+    // R-OSP-1: before the match is live a player spawns with the warmup
+    // loadout rather than a blaster, so that warmup is practice rather than a
+    // different game; and the grapple is let go, the accuracy row is opened and
+    // the HUD panels are pointed at their configstrings.
+    if (G_Ruleset() == RULESET_TOURNEY) {
+        if (sync_stat < 2)
+            OSP_warmupItems(ent);
+        OSP_setSingleAccuracy(ent);
+        OSP_hookoff_cmd(ent);
+        OSP_restartStats(ent);
+    }
 
     // clear playerstate values
     memset(&ent->client->ps, 0, sizeof(client->ps));
@@ -1648,10 +1700,38 @@ void PutClientInServer(edict_t *ent)
         // that already has a team is put back into its arena.  Both paths do
         // their own placement, which is why they run instead of the KillBox
         // below rather than after it.
-        if (ent->client->resp.teamnum >= 0)
+        //
+        // The tail below is the donor's, in the donor's order, and it is not
+        // decoration: init_player() sets `fightstate` and opens the menu but
+        // touches neither movetype nor solid, so the free-flying observer body
+        // comes from SetObserverMode() *inside* move_to_arena().  Without this
+        // call a connecting player was left standing at a deathmatch spawn as a
+        // solid, visible, PM_NORMAL body in a ruleset that has no such thing --
+        // found by a headless client reading back its own pmove type, which is
+        // the one question about observing that a mod's own HUD cannot fake.
+        client->resp.spawn_recheck = 0;
+
+        gi.linkentity(ent);
+
+        // ChangeWeapon before placement, as the donor has it: move_to_arena()
+        // can centerprint and stuff a sound at the destination, and the weapon
+        // must already be up when it does.
+        client->newweapon = client->pers.weapon;
+        ChangeWeapon(ent);
+
+        if (client->resp.teamnum >= 0)
             reinit_player(ent);
         else
             init_player(ent);
+
+        gi.linkentity(ent);
+
+        // `context` is the arena this client belongs to; it is consumed here so
+        // that a later menu action starts from arena 0 rather than repeating
+        // this one.
+        arenanum = client->resp.context;
+        client->resp.context = 0;
+        move_to_arena(ent, arenanum, 1);
         return;
     }
 
@@ -1700,6 +1780,11 @@ static void ClientBeginDeathmatch(edict_t *ent)
     }
     //PGM
 
+    // R-OSP-1/2: the four things tourney asks a connecting client for, and the
+    // entered/active bookkeeping that has to happen before placement.
+    if (G_Ruleset() == RULESET_TOURNEY)
+        OSP_clientBeginPre(ent);
+
     // locate ent at a spawn point
     PutClientInServer(ent);
 
@@ -1719,6 +1804,12 @@ static void ClientBeginDeathmatch(edict_t *ent)
 
     gi.bprintf(PRINT_HIGH, "%s entered the game\n", ent->client->pers.netname);
 
+    // R-OSP-1: and everything after placement, including the one arm that can
+    // refuse the connection outright -- a match already running with
+    // `match_latejoin` off.  True means the client is gone.
+    if (G_Ruleset() == RULESET_TOURNEY && OSP_clientBegunPost(ent))
+        return;
+
     // make sure all view stuff is valid
     ClientEndServerFrame(ent);
 }
@@ -1736,6 +1827,13 @@ void ClientBegin(edict_t *ent)
     int     i;
 
     ent->client = game.clients + (ent - g_edicts - 1);
+
+    // R-OSP-1: the per-LEVEL half -- a client id, a place back on their team,
+    // and the 1-vs-1 queue.  Before ClientBeginDeathmatch rather than inside
+    // it, because it also has to run for a client who was already here when
+    // the level changed.
+    if (G_Ruleset() == RULESET_TOURNEY)
+        OSP_clientBeginLevel(ent);
 
     if (deathmatch->value) {
         ClientBeginDeathmatch(ent);
@@ -1802,6 +1900,13 @@ void ClientUserinfoChanged(edict_t *ent, char *userinfo)
     if (!Info_Validate(userinfo)) {
         strcpy(userinfo, "\\name\\badinfo\\skin\\male/grunt");
     }
+
+    // R-OSP-1: tourney edits the userinfo it was handed -- refusing a forbidden
+    // or too-frequent rename, forcing a qualifier skin -- and everything below
+    // reads the edited copy, which is what makes the edit take effect.  It also
+    // owns the rename logging and the green-text copy of the name.
+    if (G_Ruleset() == RULESET_TOURNEY)
+        OSP_userinfoChanged(ent, userinfo);
 
     // set name
     s = Info_ValueForKey(userinfo, "name");
@@ -1934,8 +2039,19 @@ qboolean ClientConnect(edict_t *ent, char *userinfo)
         }
     }
 
+    // R-OSP-1: the player list gets a veto, with its own reason in `rejmsg`.
+    if (G_Ruleset() == RULESET_TOURNEY && !OSP_clientAllowed(ent, userinfo))
+        return false;
+
     // they can connect
     ent->client = game.clients + (ent - g_edicts - 1);
+
+    // A player who dropped mid-match gets their seat, score and team back if
+    // they come back inside `team_recovertime` -- which is what the pause in
+    // ClientDisconnect is waiting for.  Before InitClientResp, because that is
+    // what it has to survive.
+    if (G_Ruleset() == RULESET_TOURNEY)
+        OSP_recoverClient(ent, userinfo);
 
     // if there is already a body waiting for us (a loadgame), just
     // take it, otherwise spawn one from scratch
@@ -1958,6 +2074,9 @@ qboolean ClientConnect(edict_t *ent, char *userinfo)
     if (game.maxclients > 1)
         gi.dprintf("%s connected\n", ent->client->pers.netname);
 
+    if (G_Ruleset() == RULESET_TOURNEY)
+        OSP_clientConnected(ent, userinfo);
+
     ent->svflags = 0; // make sure we start with known default
     ent->client->pers.connected = true;
     return true;
@@ -1974,11 +2093,19 @@ Will not be called between levels.
 void ClientDisconnect(edict_t *ent)
 {
     //int     playernum;
+    int     osp_team = 2;
 
     if (!ent->client)
         return;
 
-    gi.bprintf(PRINT_HIGH, "%s disconnected\n", ent->client->pers.netname);
+    if (G_Ruleset() == RULESET_TOURNEY) {
+        // Tourney announces the departure itself, at the end and with the
+        // client count -- "wimped out and left. (clients = 3)" -- so the plain
+        // line here would be a duplicate.
+        OSP_clientLeaving(ent, &osp_team);
+    } else {
+        gi.bprintf(PRINT_HIGH, "%s disconnected\n", ent->client->pers.netname);
+    }
 
     // The flag and the tech stay in the world.  No-ops when the player holds
     // neither, so no gate.
@@ -2029,6 +2156,12 @@ void ClientDisconnect(edict_t *ent)
     ent->classname = "disconnected";
     ent->client->pers.connected = false;
 
+    // R-OSP-1: the half that needs the slot already free -- the recount, the
+    // recover seat, the chase cams that were watching this player, and the
+    // pause that waits for the last member of a team to come back.
+    if (G_Ruleset() == RULESET_TOURNEY && OSP_clientLeft(ent, osp_team))
+        return;
+
     // FIXME: don't break skins on corpses, etc
     //playernum = ent-g_edicts-1;
     //gi.configstring (CS_PLAYERSKINS+playernum, "");
@@ -2078,6 +2211,12 @@ void ClientThink(edict_t *ent, usercmd_t *ucmd)
             level.exitintermission = true;
         return;
     }
+
+    // R-OSP-1/R-EXTRA-6: tourney's autocam is not a chase cam -- it picks its
+    // own subject and its own position -- so it takes the whole frame, before
+    // either the chase-cam branch or pmove.
+    if (G_Ruleset() == RULESET_TOURNEY && OSP_clientThink(ent, ucmd))
+        return;
 
     if (ent->client->chase_target) {
         client->resp.cmd_angles[0] = SHORT2ANGLE(ucmd->angles[0]);
@@ -2135,6 +2274,15 @@ void ClientThink(edict_t *ent, usercmd_t *ucmd)
             //      gi.dprintf ("pmove changed!\n");
         }
 
+        // R-OSP-4: the aimbot detector, which watches the view-angle deltas in
+        // the usercmd for the signature a ZBOT leaves.  It returns true when it
+        // has KICKED the client, and the frame ends there rather than running a
+        // pmove for an edict that is on its way out -- the corrupt unicast
+        // R-OSP-4 names came from doing it the other way round.
+        if (G_Ruleset() == RULESET_TOURNEY && bot_watch &&
+            !(ent->flags & FL_BOT) && OSP_botDetect(ent, ucmd))
+            return;
+
         pm.cmd = *ucmd;
 
         pm.trace = PM_trace;    // adds default parms
@@ -2186,10 +2334,21 @@ void ClientThink(edict_t *ent, usercmd_t *ucmd)
             VectorCopy(pm.viewangles, client->ps.viewangles);
         }
 
-        // CTF: the grapple pulls from the post-pmove position, so it runs here
-        // rather than as an entity think.  NULL for everyone else.
-        if (client->ctf_grapple)
-            CTFGrapplePull(client->ctf_grapple);
+        // The grapple pulls from the post-pmove position, so it runs here
+        // rather than as an entity think.  NULL for everyone who is not on one.
+        //
+        // ONE field, TWO pulls.  Threewave's hook and tourney's are the same
+        // mechanic with different physics -- tourney's is faster, does its own
+        // damage and lets go on its own timer -- so sec 7 rule 6 keeps one
+        // `ctf_grapple` edict and the ruleset chooses which one moves the
+        // player on it.  A single pull with tunables would have to reconcile
+        // two different state machines, which is the merit choice R-50 refused.
+        if (client->ctf_grapple) {
+            if (G_Ruleset() == RULESET_TOURNEY)
+                GrapplePull(client->ctf_grapple);
+            else
+                CTFGrapplePull(client->ctf_grapple);
+        }
 
         gi.linkentity(ent);
 
@@ -2274,6 +2433,10 @@ void ClientThink(edict_t *ent, usercmd_t *ucmd)
     // CTF regeneration tech.  A no-op without it.
     CTFApplyRegeneration(ent);
 
+    // Tourney's regeneration rune is the same concept on the same frame.
+    if (G_Ruleset() == RULESET_TOURNEY && (rune_stat & RUNE_REGEN))
+        OSP_runesApplyRegeneration(ent);
+
     // R-CTF-3's offhand hook fires from here rather than from a weapon think,
     // which is what makes it offhand.
     CTFHookThink(ent);
@@ -2315,7 +2478,14 @@ void ClientBeginServerFrame(edict_t *ent)
 
     client = ent->client;
 
-    if (deathmatch->value &&
+    // R-OSP-4: the speed-cheat detector, which samples what the client claims
+    // it moved against what the server let it move.  `pers.spectator` is
+    // tourney's strike counter for it and NOT baseq2's spectator flag -- the
+    // two share a name in the merged struct and the first strike would
+    // otherwise have made the player a spectator (SPECS.md 1.19, R-58).
+    if (G_Ruleset() == RULESET_TOURNEY) {
+        OSP_speedDetect(ent);
+    } else if (deathmatch->value &&
 
         client->pers.spectator != client->resp.spectator &&
 

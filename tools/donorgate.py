@@ -80,6 +80,16 @@ EXEMPT_FILES = ('g_local.h', 'g_ptrs.c', 'g_ptrs.h')
 # field so that the savegame writer can find it; it does not read it.
 DESCRIPTOR = re.compile(r'^\s*[A-Z]\((?:resp\.|pers\.)?\w+\),\s*$')
 
+# ...and a DESIGNATED INITIALISER row names a function so that a table can hold
+# it: `.pickup = OSP_Pickup_Rune,` in itemlist[], `.CheckRules = OSP_CheckRules,`
+# in a ruleset_ops_t.  The docstring has always said dispatch tables are data
+# rather than behaviour; before the runes landed, DESCRIPTOR was the only line
+# shape that said so, because CTF's techs are the one other case and CTF is not
+# in DONORS.  A row like this is reached only through whatever spawns or invokes
+# the table entry, and THAT is where the gate belongs -- for an item, the gate
+# is whether the item is in the world at all (R-CORE-2, R-OSP-6).
+INITIALISER = re.compile(r'^\s*\.\w+\s*=\s*[A-Za-z_]\w*,\s*$')
+
 # Top-level only -- column 0.  Without that anchor this collects every STRUCT
 # MEMBER in the donor's typedefs, and arena.h has members called `value`,
 # `name` and `count`, which then match half the tree.
@@ -127,6 +137,12 @@ def donor_surface(tree, donor):
         for m in re.finditer(r'^(?:static\s+)?(?:const\s+)?[A-Za-z_][\w \t*]*?'
                              r'\b([A-Za-z_]\w*)\s*(?:\[[^\]]*\])?\s*=', body, re.M):
             shared.add(m.group(1))
+        # ...including TENTATIVE definitions, which have no initialiser.  Once a
+        # spine file defines `int match_paused;` the symbol is the tree's, and
+        # the line that defines it is not a read under the wrong ruleset.
+        for m in re.finditer(r'^(?:static\s+)?(?:const\s+)?[A-Za-z_][\w \t*]+'
+                             r'\b([A-Za-z_]\w*)\s*(?:\[[^\]]*\])?\s*;', body, re.M):
+            shared.add(m.group(1))
     return names - shared
 
 
@@ -156,6 +172,12 @@ def group(lines):
 
 COND = re.compile(r'^\s*(?:\}\s*)?(?:else\s+)?if\s*\(.*\)\s*$')
 CASE = re.compile(r'^\s*(?:case\s+\w+|default)\s*:')
+
+# `} else if (G_Ruleset() == RULESET_TOURNEY) {` opens the block its body is in,
+# but it closes one too, so the outward walk's brace arithmetic nets to zero and
+# sails straight past it -- the gate is right there on the line and the tool
+# reports the body as ungated.  An else-arm opener is recognised explicitly.
+ELSEARM = re.compile(r'^\s*\}\s*else\b.*\{\s*$')
 
 
 def gate_lines(lines, groups, ruleset, i):
@@ -188,6 +210,8 @@ def gate_lines(lines, groups, ruleset, i):
     j = start - 1
     while j >= 0:
         line = lines[j]
+        if depth == 0 and ELSEARM.match(line) and rx.search(stmt(j)):
+            return True
         if depth == 0 and not seen_case and CASE.match(line):
             seen_case = True
             if rx.search(line):
@@ -219,7 +243,7 @@ def run(tree, override=None):
             groups = group(lines)
             for i, line in enumerate(lines):
                 m = rx.search(line)
-                if not m or DESCRIPTOR.match(line):
+                if not m or DESCRIPTOR.match(line) or INITIALISER.match(line):
                     continue
                 checked += 1
                 if not gate_lines(lines, groups, ruleset, i):
@@ -228,8 +252,41 @@ def run(tree, override=None):
                                % (name, i + 1, m.group(1), donor, ruleset,
                                   line.strip()[:60]))
                     bad += 1
+    # R-OSP-5's shape, which is not a gate question but is the same INPUT: a
+    # donor's own object re-declared `extern` somewhere other than the header
+    # that defines it.  The bug it is named for is `extern int botglobals;` in
+    # the donor's g_spawn.c against a `bot_globals_t botglobals;` elsewhere --
+    # the linker resolved a four-byte int over the first member of a struct and
+    # zeroed numbits, and nothing warned.  A local extern of a donor object is
+    # never right here: every one of them has a header.
+    redecl = 0
+    for donor in DONORS:
+        if not os.path.isdir(os.path.join(tree, donor)):
+            continue
+        objs = set()
+        for h in sorted(glob.glob(os.path.join(tree, donor, '*.h'))):
+            for m in re.finditer(r'^extern\s+[A-Za-z_][\w \t*]*?\b(\w+)\s*[;\[]',
+                                 strip(read(h)), re.M):
+                objs.add(m.group(1))
+        if not objs:
+            continue
+        for f in sorted(glob.glob(os.path.join(tree, '*.c')) +
+                        glob.glob(os.path.join(tree, '*.h')) +
+                        glob.glob(os.path.join(tree, donor, '*.c'))):
+            name = os.path.relpath(f, tree)
+            raw = (override or {}).get(os.path.basename(f)) or read(f)
+            for i, line in enumerate(strip(raw).split('\n')):
+                m = re.match(r'^extern\s+[A-Za-z_][\w \t*]*?\b(\w+)\s*[;\[]', line)
+                if m and m.group(1) in objs:
+                    out.append('  !! %s:%d: `%s` is %s\'s and is re-declared '
+                               'extern outside its own header (R-OSP-5): %s'
+                               % (name, i + 1, m.group(1), donor,
+                                  line.strip()[:60]))
+                    redecl += 1
+    bad += redecl
+
     out.insert(0, 'donorgate.py: %d donor-surface use(s) in spine files; '
-                  '%d ungated' % (checked, bad))
+                  '%d ungated; %d stray extern(s)' % (checked, bad - redecl, redecl))
     if not bad:
         out.append('  every donor-private field and function in a shared file '
                    'is inside its own ruleset\'s gate')
@@ -247,6 +304,25 @@ SELFTESTS = [
       '        // RA2 telefrags only between fighting players.',
       '    if (1) {\n'
       '        // RA2 telefrags only between fighting players.')),
+    # R-OSP-5's own bug, in its shape: a local `extern` of a donor object where
+    # the donor's own header already declares it.  `m_mode` is tourney's match
+    # mode and an `extern int` of it in a shared file is exactly what
+    # `extern int botglobals;` was.
+    ('stray extern', 'g_spawn.c',
+     ('#include "tourney/osp_hooks.h"',
+      '#include "tourney/osp_hooks.h"\nextern int m_mode;')),
+    # An else-arm gate is a gate.  Removing the ruleset test from the `} else
+    # if (...) {` that opens the block must be reported -- before this control
+    # existed the tool could not see that line at all.
+    ('else-arm gate', 'g_items.c',
+     ('} else if (G_Ruleset() == RULESET_TOURNEY) {',
+      '} else if (master->item) {')),
+    # The initialiser exemption must not swallow a real call.  `.pickup =`
+    # rows are data; `OSP_Pickup_Rune(ent, other);` in a function body is not,
+    # and turning one into the other has to be reported.
+    ('rune pickup call', 'g_items.c',
+     ('    taken = ent->item->pickup(ent, other);',
+      '    taken = OSP_Pickup_Rune(ent, other);')),
     ('weapon think', 'p_weapon.c',
      ('if (G_Ruleset() == RULESET_ARENA && ent->client &&\n'
       '        ent->client->resp.fightstate != FIGHT_ALIVE)',

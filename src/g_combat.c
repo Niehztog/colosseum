@@ -18,6 +18,7 @@ with this program; if not, write to the Free Software Foundation, Inc.,
 // g_combat.c
 
 #include "g_local.h"
+#include "tourney/osp_hooks.h"
 #include "arena/arena.h"
 #include "arena/ra2stats.h"
 
@@ -173,6 +174,12 @@ static void Killed(edict_t *targ, edict_t *inflictor, edict_t *attacker, int dam
         targ->touch = NULL;
         monster_death_use(targ);
     }
+
+    // R-EXTRA-6: a player who dies stops being a camera subject, and every
+    // camera watching them has to be told before the body is turned into a
+    // corpse -- afterwards there is nothing left to hand the next subject.
+    if (G_Ruleset() == RULESET_TOURNEY)
+        PlayerDied(targ);
 
     targ->die(targ, inflictor, attacker, damage, point);
 }
@@ -569,7 +576,46 @@ void T_Damage(edict_t *targ, edict_t *inflictor, edict_t *attacker, const vec3_t
     if (G_Ruleset() == RULESET_ARENA && attacker->client && (attacker != targ))
         targ->enemy = attacker;
 
+    // R-OSP-1: tourney decides friendly fire and self damage per TEAM and per
+    // match mode rather than from dmflags, because both are things a referee
+    // changes mid-match.  It is an addition to the block above, not a
+    // replacement for it: the donor deleted baseq2's easy-mode halving and its
+    // dmflags friendly-fire arm outright, and R-CORE-8 keeps both -- under
+    // every other ruleset they are the only rules there are, and under tourney
+    // dmflags teamplay is off, so the inherited arm cannot fire.
+    if (G_Ruleset() == RULESET_TOURNEY && targ->client) {
+        // A client who has not finished entering is not in the match yet, and
+        // is where the donor returns rather than damaging.
+        if (targ->client->resp.entered != ENTERED_ENTERED)
+            return;
+
+        if (m_mode > 1 && targ != attacker && attacker->client &&
+            targ->client->resp.team == attacker->client->resp.team) {
+            if (!OSP_teamFriendlyFire(targ->client->resp.team) &&
+                !(dflags & DAMAGE_NO_PROTECTION))
+                damage = 0;
+            else
+                mod |= MOD_FRIENDLY_FIRE;
+        }
+
+        if (targ == attacker) {
+            if (m_mode > 1) {
+                if (!OSP_teamSelfDamage(targ->client->resp.team))
+                    damage = 0;
+            } else if (!(int)ffa_hurtself->value) {
+                damage = 0;
+            }
+        }
+    }
+
     meansOfDeath = mod;
+
+    // R-OSP-1's strength rune multiplies the damage the CARRIER deals, which
+    // is why it reads the attacker and runs before any of the target's
+    // reductions.  A no-op unless the rune set is on and the attacker has it,
+    // in the same shape as CTFApplyStrength below.
+    if (G_Ruleset() == RULESET_TOURNEY && (rune_stat & RUNE_STRENGTH))
+        damage = OSP_runesApplyStrength(attacker, damage);
 
 //ROGUE
     // allow the deathmatch game to change values
@@ -688,6 +734,17 @@ void T_Damage(edict_t *targ, edict_t *inflictor, edict_t *attacker, const vec3_t
     // CTF resistance tech.  A no-op without it, like the strength tech above.
     take = CTFApplyResistance(targ, take);
 
+    // Tourney's equivalent pair, and they are one block in the donor because
+    // vampire is fed by what resistance let through: the attacker heals from
+    // the damage that actually landed, capped at 40 so that a gib does not pay
+    // out the overkill.
+    if (G_Ruleset() == RULESET_TOURNEY && (rune_stat & (RUNE_RESIST | RUNE_VAMPIRE))) {
+        take = OSP_runesApplyResistance(targ, take);
+        if (targ != attacker)
+            OSP_runesApplyVampire(attacker,
+                                  targ->health - take < -40 ? 40 : take);
+    }
+
     // team damage avoidance
     if (!(dflags & DAMAGE_NO_PROTECTION) && CheckTeamDamage(targ, attacker))
         return;
@@ -714,6 +771,14 @@ void T_Damage(edict_t *targ, edict_t *inflictor, edict_t *attacker, const vec3_t
         }
     }
 // ROGUE
+
+    // R-OSP-1's accuracy table, credited once, here, rather than at fifteen
+    // sites across g_weapon.c and g_combat.c -- see src/tourney/osp_acc.c for
+    // what that changes and why.  This is the point every one of those sites
+    // was feeding: `take` is the damage that survived armour, powerups and the
+    // team rules, which is what the report means by damage given and taken.
+    if (G_Ruleset() == RULESET_TOURNEY)
+        OSP_accDamage(targ, attacker, mod, take);
 
 // do the damage
     if (take) {

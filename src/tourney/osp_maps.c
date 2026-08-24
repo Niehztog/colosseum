@@ -237,7 +237,13 @@ void OSP_loadMaps(void)
 
                     fclose(f);
                 } else
-                    gi.dprintf("ERROR: Could not open maps list file [%s]\n", pathptr);
+                    // Not "ERROR": a server with no maps list is a normal configuration,
+                    // not a fault -- OSP_EndLevel falls back to baseq2's rotation
+                    // (R-OSP-9).  It printed ERROR, which made R-VER-2's boot
+                    // matrix count a warning on every tourney row for a missing
+                    // optional file.
+                    gi.dprintf("Colosseum: no map list at [%s]; the tourney "
+                               "rotation falls back to sv_maplist\n", pathptr);
             }
         }
     }

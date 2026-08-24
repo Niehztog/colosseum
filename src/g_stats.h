@@ -198,6 +198,13 @@ void G_SetStatusbar(void);
 // literal (R-OSP-7a).
 const char *G_Statusbar(void);
 
+// One tourney bar variant, composed on demand.  Its `hud` client command
+// unicasts a different bar per client, which is four literals in the donor and
+// two booleans here -- the case R-OSP-7a exists for.  The buffer is static and
+// is overwritten by the next call, which is enough because the caller unicasts
+// it immediately.
+const char *G_StatusbarVariant(bool alt, bool team);
+
 // `sv slots` -- the resolved map and the composed bar, for the same reason
 // R-VER-18 gave `sv ruleset`: a slot number that only exists inside the library
 // cannot be checked from outside it, and "the HUD looks right" is not evidence

@@ -17,6 +17,7 @@ with this program; if not, write to the Free Software Foundation, Inc.,
 */
 
 #include "g_local.h"
+#include "tourney/osp_hooks.h"
 
 static void Svcmd_Test_f(void)
 {
@@ -297,6 +298,11 @@ void    ServerCommand(void)
         SVCmd_ListIP_f();
     else if (Q_stricmp(cmd, "writeip") == 0)
         SVCmd_WriteIP_f();
+    // R-OSP-2's five `sv` commands, delegated like its client commands: one
+    // gate here, the table in src/tourney/osp_cmds.c.  It is asked LAST so that
+    // it cannot shadow a name this file already owns.
+    else if (G_Ruleset() == RULESET_TOURNEY && OSP_ServerCommand(cmd))
+        ;
     else
         gi.cprintf(NULL, PRINT_HIGH, "Unknown server command \"%s\"\n", cmd);
 }

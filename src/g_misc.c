@@ -19,6 +19,7 @@ with this program; if not, write to the Free Software Foundation, Inc.,
 
 #include "g_local.h"
 #include "arena/arena.h"
+#include "tourney/osp_types.h"
 
 extern void M_WorldEffects(edict_t *ent);
 
@@ -448,6 +449,18 @@ void BecomeExplosion1(edict_t *self)
             CTFRespawnTech(self); // this frees self!
             return;
         }
+    }
+
+    // The same for tourney's runes, which are IT_RUNE rather than IT_TECH: a
+    // rune destroyed rather than picked up goes back into the pool and
+    // respawns instead of exploding, so the count stays right.  The ruleset
+    // test is belt and braces -- nothing else sets IT_RUNE -- and it keeps the
+    // r_count[] index off the path under every other ruleset.
+    if (G_Ruleset() == RULESET_TOURNEY && self->item &&
+        (self->item->flags & IT_RUNE)) {
+        r_count[self->item->quantity - SID_OSP_RUNE_RESIST]--;
+        OSP_respawnRune(self);
+        return;
     }
 
     gi.WriteByte(svc_temp_entity);

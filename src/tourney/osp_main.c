@@ -82,6 +82,10 @@ a_info_t a_info[10] = {
 };
 int motd_read = 0;
 int who_paused = -1;
+// The match-restart countdown after a timeout expires; -1 means not counting.
+int end_timeout = -1;
+// How many overtime periods this match has already played.
+int ot_count = 0;
 char    conf_info[50][64];
 char    conf_name[50][64];
 cvar_t * qualifier_numspots;
@@ -273,7 +277,12 @@ void OSP_gameInit(void)
     gi.cvar("sv_airaccelerate", "0", 0);
     resp_delay = gi.cvar("respawn_delay", "0", 0);
     console_timestamp = gi.cvar("console_timestamp", "0", 0);
-    osp_game = gi.cvar("gamename", "OSP Tourney DM v(2.75)",
+    // R-COMPAT-6: `gamename` is Colosseum's serverinfo identity, registered
+    // once in g_main.c with GAMEVERSION.  Re-obtained here with the SAME
+    // default so that a second registration cannot decide what the server calls
+    // itself; the mod's own version banner is the OSP_CS(9) configstring
+    // OSP_worldspawn writes, which is where it belongs.
+    osp_game = gi.cvar("gamename", GAMEVERSION,
                        CVAR_SERVERINFO | CVAR_NOSET);
     nextlevel_click = gi.cvar("nextlevel_click", "15.0", 0);
     nextlevel_lazy = gi.cvar("nextlevel_default", "45.0", 0);
@@ -295,7 +304,7 @@ void OSP_gameInit(void)
     bots_warmuptime = gi.cvar("bots_warmuptime", "0", 0);
 
     match_mode = gi.cvar("match_mode", "0", 0);
-    m_mode = (int)match_mode->value;
+    m_mode = OSP_clampMatchMode();
     match_type = gi.cvar("match_type", "RegularDM", CVAR_SERVERINFO);
     match_features = gi.cvar("match_info", "None", CVAR_SERVERINFO);
     match_latejoin = gi.cvar("match_latejoin", "2", 0);
@@ -2909,7 +2918,7 @@ void OSP_setupAdminLog(void)
     time_t      now;
     struct tm   *tm;
 
-    hostname = gi.cvar("hostname", "noname", CVAR_SERVERINFO);
+    hostname = gi.cvar("hostname", "", CVAR_SERVERINFO);
     port = gi.cvar("port", "27910", CVAR_SERVERINFO | CVAR_NOSET);
     logmode = gi.cvar("server_adminlog", "0", 0);
     adminname = gi.cvar("server_adminname", "serveradmin.log", 0);
@@ -3025,4 +3034,1145 @@ void OSP_parseString(const char *str, gitem_armor_t *info)
         info->normal_protection = atof(tok[2]);
         info->energy_protection = atof(tok[3]);
     }
+}
+
+/*
+=================
+OSP_CheckRules
+
+R-OSP-1's match system as the tourney ruleset's CheckRules row (R-MODE-5).
+
+The donor drives all of this from G_RunFrame directly, beside CheckDMRules,
+which is the same shape RA2 had and R-76 corrected there: two match-rule systems
+at one call site with nothing saying how they compose.  Here the row says it.
+The match clock, the vote timeout, the team frag totals and the pre-match sync
+are tourney's ROUND-scope work; CheckDMRules ends the LEVEL, and tourney keeps
+`timelimit` and `fraglimit` at that scope exactly as RA2 does.
+=================
+*/
+/*
+=================
+OSP_CheckRules
+
+Tourney's CheckRules row (R-MODE-5, R-OSP-1).  It REPLACES CheckDMRules rather
+than wrapping it, because every one of baseq2's three answers is different here:
+
+  * the clock runs from `sync_time`, the frame the match went live, not from the
+    start of the level -- warmup does not count against the timelimit
+  * a drawn team match at the timelimit goes to overtime rather than ending, as
+    many times as `OSP_overtimeWork` allows
+  * the fraglimit is per TEAM above `m_mode` 1, and sudden death (`frag_offset`)
+    ends the moment the two totals differ at all
+
+The per-frame work that used to live here -- the clock, the vote timeout, the
+team totals, the sync check -- moved to OSP_frameStart when the frame loop was
+merged: it runs every frame whether or not the rules are being checked, and
+running it from the rules row made it look like a rule.
+=================
+*/
+void OSP_CheckRules(void)
+{
+    int i;
+
+    if (level.intermission_framenum)
+        return;
+
+    if (timelimit->value && sync_stat > 2) {
+        if (level.time - sync_time >=
+            (timelimit->value + overtime_timer) * 60 && !frag_offset) {
+            if (m_mode > 1) {
+                if (OSP_teamFrags(0) == OSP_teamFrags(1) &&
+                    OSP_overtimeWork(ot_count)) {
+                    ot_count++;
+                    return;
+                }
+                OSP_findTeamWinner();
+            }
+
+            ot_count = 0;
+            gi.bprintf(PRINT_HIGH, "Timelimit hit.\n");
+            sl_SoftGameEnd(&gi, level);
+            G_EndLevel();
+            return;
+        }
+    } else if (connected_clients <= 0 && level.time > 3600) {
+        // An hour with nobody on it: end the level so the rotation moves and a
+        // server left running does not sit on one map for ever.
+        ot_count = 0;
+        gi.bprintf(PRINT_HIGH, "Inactive client timelimit hit.\n");
+        sl_SoftGameEnd(&gi, level);
+        G_EndLevel();
+        return;
+    }
+
+    if (!fraglimit->value && !frag_offset)
+        return;
+
+    if (m_mode < 2) {
+        for (i = 0; i < game.maxclients; i++) {
+            if (!g_edicts[i + 1].inuse)
+                continue;
+            if (game.clients[i].resp.score >= fraglimit->value) {
+                gi.bprintf(PRINT_HIGH, "Fraglimit hit.\n");
+                sl_SoftGameEnd(&gi, level);
+                G_EndLevel();
+                return;
+            }
+        }
+    } else if (frag_offset) {
+        if (OSP_teamFrags(0) != OSP_teamFrags(1)) {
+            OSP_findTeamWinner();
+            gi.bprintf(PRINT_HIGH, "We have a sudden-death winner!\n");
+            sl_SoftGameEnd(&gi, level);
+            G_EndLevel();
+        }
+    } else if (OSP_teamFrags(0) >= fraglimit->value + frag_offset ||
+               OSP_teamFrags(1) >= fraglimit->value + frag_offset) {
+        OSP_findTeamWinner();
+        gi.bprintf(PRINT_HIGH, "Team fraglimit hit.\n");
+        sl_SoftGameEnd(&gi, level);
+        G_EndLevel();
+    }
+}
+
+/*
+=================
+OSP_EndLevel
+
+R-OSP-9's third rotation, and the third time the answer is the EndLevel row
+rather than a second rotation inside EndDMLevel.  `osp_maps.c`'s list decides;
+an empty list falls back to baseq2's, which is one choice made in one place.
+=================
+*/
+void OSP_EndLevel(void)
+{
+    edict_t *next;
+
+    // Every camera and every entity the camera system was tracking goes now:
+    // the level is over and the lists point at edicts that are about to be
+    // reused.
+    EnitityListClean();
+    endlvl_frame = level.framenum;
+
+    if (hs_mode && !manual_map)
+        OSP_updateHighScores();
+
+    next = NextMap();
+    if (next) {
+        BeginIntermission(next);
+        return;
+    }
+
+    EndDMLevel();
+}
+
+const ruleset_ops_t ops_tourney = {
+    .name              = "tourney",
+    .CheckRules        = OSP_CheckRules,
+    .EndLevel          = OSP_EndLevel,
+    .ScoreboardMessage = OSP_ScoreboardMessage,
+    // BeginIntermission, SelectSpawnPoint and ClientPlaced stay dm's: tourney
+    // places players through OSP_startObserve() and its own team spawns, which
+    // p_client.c reaches directly, and its intermission is EndLevel's.
+    // R-MODE-6 makes a NULL row inherit rather than crash.
+};
+
+// R-OSP-1's fast respawn, as a function so that g_items.c's SetRespawn stays
+// one line of tourney.  The donor computes it inline there; the arithmetic and
+// the three cvars are tourney's, so they live here.
+//
+// The shape: a full-strength server (`players` at fast_maxpbound) multiplies
+// the delay by fast_respawn, an empty one leaves it alone, and everything
+// between interpolates.  fast_respawn is clamped up to 0.05 rather than
+// rejected, which is the donor's own guard against a division that would make
+// every item instant.
+float OSP_respawnDelay(float delay)
+{
+    int players;
+
+    players = active_clients;
+    if (players < (int)fast_minpbound->value)
+        players = (int)fast_minpbound->value;
+    if (players > (int)fast_maxpbound->value)
+        players = (int)fast_maxpbound->value;
+
+    if (fast_respawn->value < 0.05f)
+        gi.cvar_set("fast_respawn", "0.05");
+    if (fast_maxpbound->value < 1.0f)
+        return delay;
+
+    return delay * (1.0f - (1.0f - fast_respawn->value) *
+                    (float)players / fast_maxpbound->value);
+}
+
+// Choose which member of a respawn team comes back, skipping the ones a referee
+// has switched off (R-OSP-1).  g_items.c's DoRespawn calls this instead of
+// walking the chain itself: the skip has to happen when COUNTING as well as
+// when choosing, or the random index points past the survivors and the walk
+// runs off the end of the chain.  Returns NULL when every member is disabled,
+// which means nothing respawns.
+edict_t *OSP_pickRespawnMember(edict_t *master)
+{
+    edict_t *ent;
+    int     count, choice;
+
+    for (count = 0, ent = master; ent; ent = ent->chain)
+        if (!OSP_disableItems(ent))
+            count++;
+
+    if (!count)
+        return NULL;
+
+    choice = Q_rand_uniform(count);
+
+    for (count = 0, ent = master; ent; ent = ent->chain) {
+        if (OSP_disableItems(ent))
+            continue;
+        if (count == choice)
+            return ent;
+        count++;
+    }
+
+    return master;
+}
+
+// "Is any member of this respawn team still enabled?"  droptofloor asks it so
+// that a disabled member of a team that still has enabled members is left alone
+// -- the team respawns as a team, and taking one member out of the rotation is
+// OSP_pickRespawnMember's job, not the spawner's.
+bool OSP_teamHasEnabled(edict_t *master)
+{
+    edict_t *ent;
+
+    for (ent = master; ent; ent = ent->chain)
+        if (!OSP_disableItems(ent))
+            return true;
+
+    return false;
+}
+
+/*
+=================
+OSP_clampMatchMode
+
+R-OSP-13.  `match_mode` is the one bounded tourney cvar the donor never
+range-checks, while every neighbour is: `match_countdown` is clamped to >= 14,
+`match_readypercent` to 1..100, `qualifier_numspots` to >= 0, `damage_railgun`
+to >= 1.  The banner block's final `else` therefore catches everything outside
+0..2, so `match_mode 4` announces `*** DM 1V1 MODE ***` and sets `match_type` to
+`1-vs-1` while skipping all 34 `m_mode == 3` branches -- no queue, no forced
+`team_maxplayers 1`, team-scoped timeouts.  **The server tells clients it is a
+duel server and is not one.**  A negative value does the same.
+
+Clamped to 0..3 with one message naming both the value supplied and the one
+substituted, and the cvar itself is corrected so that anything reading it later
+-- the menus, the vote system, serverinfo -- sees the mode actually running.
+=================
+*/
+int OSP_clampMatchMode(void)
+{
+    int want = (int)match_mode->value;
+
+    if (want >= 0 && want <= 3)
+        return want;
+
+    gi.dprintf("Colosseum: match_mode %d is out of range (0..3); "
+               "using 0 (R-OSP-13)\n", want);
+    gi.cvar_forceset("match_mode", "0");
+    return 0;
+}
+
+/*
+=================
+OSP_worldspawn
+
+Everything the donor does in SP_worldspawn, in one call so that the shared file
+holds one gate rather than forty lines of tourney (R-MODE-5).
+
+Ordering inside is the donor's and two parts of it matter.  The hi-score table
+is read from disk before the MOTD is built, because the MOTD can quote it.  And
+the team name configstrings go out before OSP_teamReset(), which zeroes the
+scores those names are drawn beside -- the other order shows last match's
+numbers under this match's names for one frame.
+
+The configstring indices are OSP_CS(5), (7), (9) and (10): the donor spells them
+0x625, 0x627, 0x629 and 0x62a, which is CS_GENERAL_OLD plus the offset, and
+R-81 is why they are not spelled that way here.
+=================
+*/
+void OSP_worldspawn(void)
+{
+    char    buf[64];
+    size_t  i;
+
+    if (server_log) {
+        char date[64];
+
+        OSP_getDateInfo(date);
+        OSP_logAdminLog("Map: %s (%s)", level.mapname, date);
+    }
+
+    OSP_initHighScores();
+
+    // m_mode is decided in OSP_gameInit at InitGame; a level change re-reads it
+    // so that a referee's `match_mode` takes effect on the next map -- through
+    // the same clamp, or a referee could set 4 mid-match and get the duel
+    // announcement without the duel.
+    m_mode = OSP_clampMatchMode();
+    sync_stat = m_mode ? 0 : 8;
+
+    OSP_setMOTD();
+    overtime_timer = 0;
+    frag_offset = 0;
+
+    if (m_mode > 1) {
+        Q_snprintf(buf, sizeof(buf), "%15s", osp_teams[0].greenname);
+        gi.configstring(OSP_CS(5), buf);
+        Q_snprintf(buf, sizeof(buf), "%15s", osp_teams[1].greenname);
+        gi.configstring(OSP_CS(7), buf);
+        OSP_teamReset();
+    }
+
+    // The two banner lines the HUD draws, both in the alternate charset: Quake
+    // II renders a byte with the high bit set as the green glyph for that
+    // character, which is how the mod gets coloured text out of one font.
+    Q_strlcpy(buf, "OSP Tourney DM v(2.75)", sizeof(buf));
+    for (i = 0; i < strlen(buf); i++)
+        buf[i] |= 128;
+    gi.configstring(OSP_CS(9), buf);
+
+    Q_strlcpy(buf, match_endinfo->string, sizeof(buf));
+    for (i = 0; i < strlen(buf); i++)
+        buf[i] |= 128;
+    gi.configstring(OSP_CS(10), buf);
+}
+
+/*
+=================
+OSP_levelSpawned
+
+The tail of SpawnEntities: the parts that need the world to exist.  Called from
+the tourney arm there, beside the rune spawner and the two logs.
+=================
+*/
+void OSP_levelSpawned(void)
+{
+    console_stampcount = 0;
+
+    // `player_reload` restores the player list across a level change, which is
+    // what keeps a match's scores and team memberships through a map vote.
+    if ((int)gi.cvar("player_reload", "0", 0)->value)
+        OSP_playerlist_svcmd();
+}
+
+/*
+=================
+OSP_frameStart
+
+The per-frame work the donor does at the top of G_RunFrame, after the clock has
+advanced (R-OSP-1).  Five independent things, none of which is a rule check --
+OSP_CheckRules is the ops row for that.
+=================
+*/
+void OSP_frameStart(void)
+{
+    if ((int)console_timestamp->value && console_stampcount < level.framenum) {
+        console_stampcount = level.framenum +
+                             (int)console_timestamp->value * 600;
+        OSP_consoleStamp();
+    }
+
+    if (!level.intermission_framenum)
+        OSP_updateClock();
+
+    // A vote that nobody answered fails on its own rather than hanging.
+    if (vote_inprogress && level.framenum > vote_frametime &&
+        !level.intermission_framenum) {
+        gi.bprintf(PRINT_HIGH, "Time up. Vote failed. No changes made.\n");
+        OSP_clearVotes();
+        OSP_closeMenus();
+    }
+
+    if (m_mode > 1)
+        OSP_updateTeamFrags();
+
+    // Before the match is live, watch for the conditions that start it.
+    if (sync_stat < 4 && !level.intermission_framenum)
+        OSP_checkSync();
+}
+
+/*
+=================
+OSP_frameEnd
+
+The pause TRANSITION, which is the last thing in the donor's frame: a pause
+asked for during this frame (`match_paused == 1`) takes effect after it, so the
+frame that requested it still completes.  Freezing mid-frame would leave half
+the entities thought and half not.
+=================
+*/
+void OSP_frameEnd(void)
+{
+    edict_t *ent;
+    int     i;
+
+    if (match_paused != 1)
+        return;
+
+    match_paused = 2;
+
+    if (who_paused == -1 || who_paused == -3)
+        gi.configstring(OSP_CS(1), "Pause");
+    else if (who_paused == -2)
+        gi.configstring(OSP_CS(1), " Wait");
+
+    for (i = 1; i <= game.maxclients; i++) {
+        ent = g_edicts + i;
+        if (!ent->inuse || !ent->client)
+            continue;
+
+        ent->client->ps.pmove.pm_type = PM_FREEZE;
+        ent->client->ps.pmove.pm_flags |= PMF_NO_PREDICTION;
+    }
+}
+
+// Give every client their movement back.  Three of the four ways out of a pause
+// need it, so it is one function.
+static void OSP_unfreezeAll(void)
+{
+    edict_t *ent;
+    int     i;
+
+    for (i = 1; i <= game.maxclients; i++) {
+        ent = g_edicts + i;
+        if (!ent->inuse || !ent->client)
+            continue;
+        ent->client->ps.pmove.pm_flags &= ~PMF_NO_PREDICTION;
+    }
+}
+
+/*
+=================
+OSP_pauseFrame
+
+What happens while the world is frozen (`match_paused >= 2`): no entity thinks,
+no time passes, and the only thing that moves is the countdown.
+
+Four states, told apart by `who_paused`:
+  -1  a plain pause with no timer -- it ends when somebody unpauses
+  -2  waiting for a disconnected player to come back; the match is terminated
+      if they do not
+  -3  an admin is reading the stats; a notice every ten seconds
+  otherwise, a player's timeout, counted down and shown as "TO nn"
+
+`match_paused == 3` is the separate five-second restart countdown after a
+timeout runs out.  Reaching intermission clears all of it: a pause cannot
+survive the end of the level.
+=================
+*/
+void OSP_pauseFrame(void)
+{
+    edict_t *ent;
+    int     i, secs;
+
+    if (level.intermission_framenum) {
+        match_paused = 0;
+        who_paused = -1;
+        end_timeout = -1;
+        OSP_unfreezeAll();
+        return;
+    }
+
+    if (match_paused == 3) {
+        char    message[64];
+
+        if (end_timeout == -1)
+            end_timeout = 51;
+        end_timeout--;
+
+        if (!end_timeout) {
+            match_paused = 0;
+            who_paused = -1;
+            OSP_unfreezeAll();
+            gi.bprintf(PRINT_CHAT, "**** MATCH HAS RESTARTED!! ****\n");
+            end_timeout = -1;
+            return;
+        }
+
+        if (!(end_timeout % 10)) {
+            Q_snprintf(message, sizeof(message), "Match restarting in %d %s\n",
+                       end_timeout / 10,
+                       end_timeout / 10 == 1 ? "second!" : "seconds.");
+            for (i = 1; i <= game.maxclients; i++) {
+                ent = g_edicts + i;
+                if (!ent->inuse || !ent->client)
+                    continue;
+                gi.centerprintf(ent, "%s", message);
+                stuffcmd(ent, "play misc/secret.wav\n");
+            }
+        }
+        return;
+    }
+
+    if (who_paused == -1)
+        return;
+
+    if (who_paused == -3) {
+        secs = (int)pause_time;
+        if (pause_time - secs < FRAMETIME && !(secs % 10)) {
+            for (i = 1; i <= game.maxclients; i++) {
+                ent = g_edicts + i;
+                if (!ent->inuse || !ent->client)
+                    continue;
+                gi.centerprintf(ent, "Admin is viewing stats.  Please Wait.\n");
+            }
+        }
+        pause_time -= FRAMETIME;
+        return;
+    }
+
+    if (who_paused == -2) {
+        secs = (int)pause_time;
+        if (pause_time - secs < FRAMETIME && !(secs % 10)) {
+            char message[128];
+
+            Q_snprintf(message, sizeof(message),
+                       "Waiting for %s to reconnect.\n(%d seconds)\n",
+                       reconn_player, secs);
+            for (i = 1; i <= game.maxclients; i++) {
+                ent = g_edicts + i;
+                if (!ent->inuse || !ent->client)
+                    continue;
+                gi.centerprintf(ent, "%s", message);
+            }
+        }
+        pause_time -= FRAMETIME;
+        if (pause_time < FRAMETIME) {
+            match_paused = 0;
+            who_paused = -1;
+            OSP_unfreezeAll();
+            gi.bprintf(PRINT_HIGH, "No reconnect. Match terminated.\n");
+            OSP_checkHalt(reconn_index);
+        }
+        return;
+    }
+
+    // A player's timeout: "TO nn" in the match-state panel, ticking down.
+    secs = (int)pause_time;
+    if (pause_time - secs < FRAMETIME) {
+        char message[8];
+
+        Q_snprintf(message, sizeof(message), "TO %.2d", secs);
+        gi.configstring(OSP_CS(1), message);
+    }
+    pause_time -= FRAMETIME;
+    if (pause_time < FRAMETIME)
+        match_paused = 3;
+}
+
+/*
+=================
+OSP_exitLevel
+
+The exit-intermission path.  True means "handled, do not call ExitLevel".
+
+Two of its three arms restart the match in place rather than changing level, so
+that a `dmflags` same-level match or a server that has emptied out does not have
+to reload the map: OSP_endClean() puts the match state back to warmup and every
+client is begun again.  The third is the ordinary exit, which still needs
+OSP_endClean() first so the next level does not inherit this match's state.
+=================
+*/
+bool OSP_exitLevel(void)
+{
+    edict_t *ent;
+    int     i;
+
+    OSP_serverbotsRemove();
+
+    // Same level again, with somebody still on the server: restart in place.
+    if (((int)dmflags->value & DF_SAME_LEVEL) && manual_map != 1 &&
+        level.framenum < 64000 && connected_clients > 0) {
+        OSP_endClean();
+        level.changemap = NULL;
+        level.exitintermission = 0;
+        level.intermission_framenum = 0;
+        ClientEndServerFrames();
+        OSP_Stats_GameInit();
+        sl_GameStart(&gi, level);
+        OSP_consoleStamp();
+
+        for (i = 0; i < game.maxclients; i++) {
+            ent = g_edicts + 1 + i;
+            if (!ent->inuse)
+                continue;
+            if (ent->health > ent->client->pers.max_health)
+                ent->health = ent->client->pers.max_health;
+            ent->client->resp.score = ent->client->pers.score = 0;
+            ent->client->resp.osp_r030 = 0;
+            CTFPlayerResetGrapple(ent);
+            ClientBegin(ent);
+        }
+
+        // Everything that thinks gets one frame to put itself back, which is
+        // how the items return without a map reload.  A disabled item class
+        // stays disabled.
+        ent = g_edicts + game.maxclients + 1;
+        for (i = game.maxclients + 1; i < globals.num_edicts; i++, ent++) {
+            if (!ent->inuse || !ent->think)
+                continue;
+            if ((!ent->team || ent == ent->teammaster) && !OSP_disableItems(ent))
+                ent->nextthink = level.framenum - 1;
+        }
+        return true;
+    }
+
+    // Empty server on a voted config: go back to the default one.
+    if ((int)vote_config_default->value &&
+        vote_config_defaultname->string[0] &&
+        strcmp(vote_config_defaultname->string, "default") &&
+        strcmp(__current_config->string, "default") &&
+        !connected_clients) {
+        OSP_endClean();
+        gi.cvar_set("__current_config", "default");
+        gi.dprintf("Changing back to default config: %s\n",
+                   vote_config_defaultname->string);
+        gi.AddCommandString(va("exec %s\n", vote_config_defaultname->string));
+        gi.AddCommandString(va("map %s\n", level.mapname));
+        return true;
+    }
+
+    OSP_endClean();
+    return false;
+}
+
+/*
+=================
+OSP_clientBeginPre
+
+Everything the donor does in ClientBeginDeathmatch BEFORE the client is placed
+(R-OSP-1, R-OSP-2).
+
+Most of it is stufftext: the mod asks the client for four things it cannot know
+otherwise -- whether they hold a referee password, their default team name and
+skin, their default join code, and the hook aliases.  Each is a `cmd _...`
+whose answer arrives back as a client command.  A bot answers none of them,
+which is why every one is guarded by FL_BOT.
+
+`resp.osp_r210` is "this client is coming back to a slot they already had", set
+by OSP_recoverClient at connect time.  Almost everything here is conditional on
+it being CLEAR -- a returning player keeps their score, their team and their
+place in the queue.
+=================
+*/
+void OSP_clientBeginPre(edict_t *ent)
+{
+    gclient_t *cl = ent->client;
+
+    if (m_mode > 0 && !ent->osp_e39c && !(ent->flags & FL_BOT))
+        stuffcmd(ent, "cmd _is_referee $ref_status $ref_passwd\n");
+
+    if (m_mode > 1 && !cl->resp.osp_r210 && !ent->osp_e3a0[0] &&
+        !(ent->flags & FL_BOT)) {
+        ent->osp_e3a0[0] = 0;
+        ent->osp_e3b0[0] = 0;
+        if (!(int)team_lockskin->value)
+            stuffcmd(ent, "cmd _default_team_info "
+                     "$default_teamname $default_teamskin\n");
+        OSP_observerTeamFrags(ent);
+    }
+
+    if (m_mode == 2 && !cl->resp.osp_r210 && !(ent->flags & FL_BOT)) {
+        cl->resp.osp_r07d[0] = 0;
+        stuffcmd(ent, "cmd _default_join_code $default_joincode\n");
+    }
+
+    if (!(ent->flags & FL_BOT))
+        OSP_hookAliases(ent);
+
+    if (!cl->resp.osp_r210) {
+        cl->resp.entered = ENTERED_OBSERVER;
+        cl->resp.osp_r240 = 0;
+    } else if (cl->resp.entered == ENTERED_ENTERED) {
+        active_clients++;
+        OSP_DoRankSort();
+    }
+}
+
+/*
+=================
+OSP_clientBegunPost
+
+Everything after placement.  True means the client has been DISCONNECTED and the
+caller must return without touching it again -- which happens when a match is
+already running and `match_latejoin` forbids joining it.  The player is told how
+much time is left before the connection is closed, so the answer is "come back
+in four minutes" rather than a silent drop.
+=================
+*/
+bool OSP_clientBegunPost(edict_t *ent)
+{
+    gclient_t *cl = ent->client;
+
+    connected_clients++;
+    cl->resp.osp_r0a0 = -1;
+    cl->resp.osp_r2ac = -1;
+    cl->resp.osp_r09c = 0;
+    cl->resp.osp_r0b0 = (int)client_muzzlemode->value;
+
+    if (!cl->resp.osp_r210) {
+        // -100 rather than 0: a player who has not entered the match sorts
+        // below everyone who has, and the scoreboard shows a blank instead of
+        // a score.
+        cl->resp.score = -100;
+        cl->resp.osp_r248 = 0;
+        cl->resp.osp_r0ac = level.framenum;
+        cl->resp.osp_r24c = 0;
+        cl->showscores = false;
+        if (m_mode > 1)
+            cl->resp.team = 2;          // 2 is "no team", 0 and 1 are the teams
+        cl->resp.osp_r204 = OSP_initID();
+
+        if (m_mode == 3 && OSP_teamCount(0) && OSP_teamCount(1))
+            cl->resp.osp_r02c = 1;
+    }
+
+    if (m_mode < 2) {
+        OSP_DoRankSort();
+        OSP_showFrags(ent);
+    }
+    sl_WriteStdLogPlayerEntered(&gi, level, ent);
+
+    if (sync_stat == 4 && !(int)match_latejoin->value &&
+        !ent->osp_e39c && !(ent->flags & FL_BOT)) {
+        int mins, secs;
+
+        mins = (int)(timelimit->value + overtime_timer -
+                     (level.framenum - sync_frame) / 600) - 1;
+        secs = (int)((overtime_timer + timelimit->value) * 60 -
+                     (level.framenum - sync_frame) / 10) - mins * 60 - 1;
+        if (secs == 60) {
+            secs = 0;
+            mins++;
+        } else if (mins < 0) {
+            secs = 0;
+            mins = 0;
+        }
+        gi.cprintf(ent, PRINT_HIGH,
+                   "Match already started.\nTime left in match: %d:%.2d\n",
+                   mins, secs);
+        gi.WriteByte(svc_disconnect);
+        gi.unicast(ent, true);
+        ClientDisconnect(ent);
+        return true;
+    }
+
+    OSP_setShowParams();
+    cl->resp.osp_r210 = 0;
+    OSP_zeroRuneStats(ent);
+
+    // The ping and framerate checks only apply to real clients, and a value of
+    // -1 is how the donor spells "not being watched".
+    cl->resp.osp_r1fc = (((int)client_minping->value ||
+                          (int)client_maxping->value) &&
+                         !(ent->flags & FL_BOTCLIENT)) ? 0 : -1;
+    cl->resp.osp_r024 = (client_maxframes &&
+                         !(ent->flags & FL_BOTCLIENT)) ? 0 : -1;
+
+    cl->resp.osp_r0d4 = level.framenum + 60;
+    return false;
+}
+
+/*
+=================
+OSP_clientBeginLevel
+
+The ClientBegin half: a client that is already connected and is arriving on a
+new level, or coming back after a disconnect.  Separate from the two above
+because it runs on EVERY level load, where those run once per connection.
+=================
+*/
+void OSP_clientBeginLevel(edict_t *ent)
+{
+    gclient_t *cl = ent->client;
+
+    if (!cl->resp.osp_r210) {
+        OSP_giveClientID(ent);
+    } else {
+        // R-OSP-3: a player who took their seat back is a reconnect, not a new
+        // player -- the log has to say so or the report counts them twice.
+        OSP_Stats_PlayerReconnect(ent);
+    }
+
+    if (cl->resp.entered == ENTERED_ENTERED) {
+        if (m_mode == 2) {
+            OSP_readdTeamMember(ent);
+            OSP_initTeamFrags(ent);
+        } else if (m_mode == 3) {
+            OSP_readdTeamMember(ent);
+        }
+
+        // A player rejoining a live team match pauses it: the other side has
+        // been playing a man down and gets to see them come back.
+        if (m_mode > 1 && sync_stat > 2 && who_paused == -2)
+            match_paused = 3;
+    }
+
+    if (m_mode == 3)
+        OSP_1v1Add(ent);
+}
+
+/*
+=================
+OSP_clientLeaving / OSP_clientLeft
+
+The two halves of tourney's disconnect (R-OSP-1), split where the SPINE has to
+do its own work in between: the first runs before the edict is torn down and
+needs the client still linked and still on its team, the second after, and
+recounts the server.
+
+The recount at the end is not bookkeeping for its own sake.  `active_clients`
+drives the fast-respawn scaling, the ready percentage and the match-halt check,
+and the donor recomputes it by walking every slot rather than decrementing --
+which is what makes it survive a client that left without ever entering.
+
+Returns true from the first half when the match has been PAUSED to wait for the
+player to come back, which is a state the caller must not disturb.
+=================
+*/
+void OSP_clientLeaving(edict_t *ent, int *out_team)
+{
+    gclient_t *cl = ent->client;
+    int       state, tno;
+
+    if (server_log) {
+        char when[64];
+
+        OSP_getDateInfo(when);
+        OSP_logAdminLog("Disconnect: %s (%s)%s", cl->pers.netname, when,
+                        (ent->flags & FL_BOTCLIENT) ? " [SERVER_BOT]" : "");
+    }
+
+    state = cl->resp.entered;
+    if (m_mode == 3)
+        OSP_1v1Remove(ent, 1);
+    if (rune_stat)
+        OSP_deadDropRune(ent);
+
+    if (state == ENTERED_ENTERED) {
+        EntityListRemove(ent);
+        tno = cl->resp.team;
+        active_clients--;
+        if (active_clients < 0)
+            active_clients = 0;
+
+        if (m_mode > 1) {
+            if (tno != 2)
+                OSP_removeTeamMember(ent, true);
+            if (cl->resp.osp_r20c)
+                OSP_notready_cmd(ent, true);
+        }
+    } else {
+        tno = 2;
+    }
+
+    sl_LogPlayerDisconnect(&gi, level, ent);
+    OSP_Stats_PlayerLeave(ent);
+    OSP_playerAnnounce(ent, 10);
+
+    *out_team = tno;
+}
+
+bool OSP_clientLeft(edict_t *ent, int tno)
+{
+    gclient_t *cl = ent->client;
+    edict_t   *p;
+    int       i, connected, active;
+
+    cl->osp_t00c = 0;
+    cl->osp_t040 = 0;
+    cl->resp.osp_r0f4[0] = 0;
+
+    // A player who leaves mid-match can be held a seat, name and score for
+    // `team_recovertime` seconds -- that is what makes the pause below worth
+    // having.  Otherwise every trace of them goes now.
+    if ((int)client_recover->value && cl->resp.entered == ENTERED_ENTERED &&
+        sync_stat > 2 && !cl->resp.osp_r07c[0] &&
+        !level.intermission_framenum && !(ent->flags & FL_BOTCLIENT)) {
+        Q_strlcpy(cl->resp.osp_r214, cl->pers.netname, sizeof(cl->resp.osp_r214));
+        cl->resp.osp_r018 = level.framenum;
+        OSP_saveClient(ent);
+    } else {
+        cl->resp.entered = ENTERED_OBSERVER;
+        cl->resp.score = 0;
+        cl->resp.team = 2;
+        cl->resp.osp_r214[0] = 0;
+        cl->resp.osp_r018 = 12345678;
+        cl->resp.osp_r07d[0] = 0;
+        ent->osp_e3a0[0] = 0;
+        ent->osp_e3b0[0] = 0;
+    }
+
+    if (m_mode == 3 && (int)team_nextuptime->value)
+        cl->resp.team = 2;
+
+    for (i = 1; i <= game.maxclients; i++) {
+        p = g_edicts + i;
+        if (!p->inuse || !p->client || p->client->chase_target != ent)
+            continue;
+        gi.cprintf(p, PRINT_HIGH, "Target disconnected.\n");
+        OSP_removeChaseCam(p);
+    }
+
+    OSP_DoRankSort();
+
+    // The last player on one side of a live team match leaving pauses it,
+    // rather than handing the other side a win they did not play for.
+    if (sync_stat > 2 && !level.intermission_framenum &&
+        !(ent->flags & FL_BOTCLIENT) && (int)client_recover->value &&
+        (int)team_duelrecover->value && (int)team_recovertime->value &&
+        m_mode > 1 && tno != 2 && !cl->resp.osp_r07c[0] &&
+        !OSP_teamCount(tno) && OSP_teamCount(1 - tno)) {
+        char message[64];
+
+        who_paused = -2;
+        Q_strlcpy(reconn_player, cl->pers.netname, sizeof(reconn_player));
+        reconn_index = tno;
+        pause_time = team_recovertime->value;
+        match_paused = 1;
+        Q_snprintf(message, sizeof(message),
+                   "Waiting for %s to reconnect.\n(%d seconds)\n",
+                   reconn_player, (int)pause_time);
+
+        for (i = 1; i <= game.maxclients; i++) {
+            p = g_edicts + i;
+            if (!p->inuse || !p->client || p == ent ||
+                (p->flags & FL_BOTCLIENT))
+                continue;
+            gi.centerprintf(p, "%s", message);
+        }
+        return true;
+    }
+
+    // A vote about the player who just left is over.
+    if (vote_inprogress && !level.intermission_framenum &&
+        !(ent->flags & FL_BOTCLIENT)) {
+        if (vote_item == 0x1000 &&
+            cl->resp.clientid == Q_atoi(vote_value)) {
+            gi.bprintf(PRINT_HIGH, "%s left on own accord.  Vote terminated.\n",
+                       cl->pers.netname);
+            OSP_clearVotes();
+            OSP_closeMenus();
+        } else {
+            OSP_checkVote();
+        }
+    }
+
+    // Recount rather than decrement: a slot that never entered, a bot, and a
+    // client still in the connect handshake all have to come out the same way.
+    connected = active = 0;
+    for (i = 1; i <= game.maxclients; i++) {
+        p = g_edicts + i;
+        if (p->inuse && p->client && p->client->pers.connected) {
+            connected++;
+            if (p->client->resp.entered == ENTERED_ENTERED)
+                active++;
+        }
+    }
+    connected_clients = connected;
+    active_clients = active;
+
+    gi.bprintf(PRINT_HIGH, "%s wimped out and left. (clients = %i)\n",
+               cl->pers.netname, active_clients);
+    cl->pers.netname[0] = 0;
+    Info_SetValueForKey(cl->pers.userinfo, "skin", "");
+
+    if (m_mode > 1)
+        OSP_checkHalt(tno);
+    else if (m_mode == 1)
+        OSP_checkHalt(2);
+
+    return false;
+}
+
+/*
+=================
+OSP_userinfoChanged
+
+Tourney's half of ClientUserinfoChanged (R-OSP-1, R-OSP-4), run before the spine
+copies the name and skin out of the userinfo it is handed -- because what this
+does is EDIT that userinfo in place, and the spine reading it afterwards is what
+makes the edit stick.
+
+Four things, and each is a rule about what a player may call themselves:
+
+  * a name the player list forbids, or a name changed again inside
+    `client_infochange` seconds, is refused and the old one put back.  The
+    second is not vanity policing: a player who renames every frame makes the
+    scoreboard unreadable for everyone else, and the userinfo-key-order auto-ban
+    R-OSP-4 names came from the same place.
+  * a real rename is written to both logs and to the admin log.
+  * `pers.greenname` is the name with the high bit set on every byte, which is
+    how the mod draws it in the alternate charset; it is rebuilt here so that
+    nothing else has to remember to.
+  * in 1-vs-1 a player IS their team, so the team name and its configstring
+    follow the rename.
+=================
+*/
+void OSP_userinfoChanged(edict_t *ent, char *userinfo)
+{
+    gclient_t *cl = ent->client;
+    char      *s;
+    char      newnick[16];
+    size_t    i;
+    int       tnum;
+
+    s = Info_ValueForKey(userinfo, "name");
+
+    // Refused: keep what they had.
+    if (OSP_playerAllow(s, userinfo) ||
+        (!m_mode && ent->charname && (size_t)ent->charname > level.framenum)) {
+        Info_SetValueForKey(userinfo, "name", cl->pers.netname);
+        s = Info_ValueForKey(userinfo, "name");
+    }
+
+    if (cl->pers.netname[0]) {
+        Q_strlcpy(newnick, s, sizeof(newnick));
+        if (Q_stricmp(cl->pers.netname, newnick) && cl->resp.osp_r2a8) {
+            OSP_Stats_PlayerRename(ent, cl->pers.netname);
+            sl_LogPlayerRename(&gi, cl->pers.netname, s, level.time);
+            if (server_log)
+                OSP_logAdminLog("Rename: %s -> %s", cl->pers.netname, s);
+        }
+    }
+
+    if (Q_stricmp(cl->pers.netname, s)) {
+        // The rename cooldown is stamped on `charname`, which the donor uses as
+        // a frame number rather than as a pointer.  Carried as-is (R-79).
+        if ((int)client_infochange->value)
+            ent->charname = (char *)(uintptr_t)(level.framenum +
+                                                (int)client_infochange->value * 10);
+        else
+            ent->charname = NULL;
+
+        Q_strlcpy(cl->pers.netname, s, sizeof(cl->pers.netname));
+
+        if (cl->resp.clientid >= 0 &&
+            cl->resp.clientid < (int)q_countof(p_acc)) {
+            Q_strlcpy(p_acc[cl->resp.clientid].netname, s,
+                      sizeof(p_acc[cl->resp.clientid].netname));
+        }
+
+        memset(cl->pers.greenname, 0, sizeof(cl->pers.greenname));
+        for (i = 0; i < strlen(cl->pers.netname) &&
+             i < sizeof(cl->pers.greenname) - 1; i++)
+            cl->pers.greenname[i] = cl->pers.netname[i] + 128;
+
+        tnum = cl->resp.team;
+        if (m_mode == 3 && cl->resp.entered == ENTERED_ENTERED &&
+            !cl->resp.osp_r210 && !level.intermission_framenum &&
+            tnum >= 0 && tnum < (int)q_countof(osp_teams)) {
+            char buf[24];
+
+            Q_strlcpy(osp_teams[tnum].netname, cl->pers.netname,
+                      sizeof(osp_teams[tnum].netname));
+            Q_strlcpy(osp_teams[tnum].greenname, cl->pers.greenname,
+                      sizeof(osp_teams[tnum].greenname));
+
+            Q_snprintf(buf, sizeof(buf), "%15s", osp_teams[tnum].greenname);
+            gi.configstring(OSP_CS(5) + tnum * 2, buf);
+
+            if (ent->inuse && !(ent->flags & FL_BOT)) {
+                Q_snprintf(buf, sizeof(buf), "%15s", osp_teams[tnum].netname);
+                OSP_clientConfigString(ent, OSP_CS(5) + tnum * 2, buf);
+            }
+        }
+    }
+
+    // A qualifier match can force every player onto one skin so that the round
+    // is watched rather than the models.
+    if (sync_stat == 4 && m_mode == 1 && (int)qualifier_forceskins->value) {
+        Info_SetValueForKey(userinfo, "skin", qualifier_skinname->string);
+        Q_strlcpy(cl->resp.osp_r0f4, qualifier_skinname->string,
+                  sizeof(cl->resp.osp_r0f4));
+    }
+}
+
+/*
+=================
+OSP_clientAllowed
+
+The player-list check on the connect path (R-OSP-1, R-OSP-4).  False means the
+connection is refused and `rejmsg` says why.
+
+The four refusals are the donor's and they are the reason the mod has a player
+list at all: a name already on the server, a name that is not allowed to play, a
+wrong password for a reserved name, and a banned address.  Each gets its own
+message, because "connection refused" with no reason is what makes a player try
+again forever.
+
+R-OSP-4's `strcpy` of the client address is fixed here rather than carried: the
+donor copies an unbounded `ip` userinfo value into a 1024-byte stack buffer and
+then into `ent->osp_e37c`, which is 32.
+=================
+*/
+bool OSP_clientAllowed(edict_t *ent, char *userinfo)
+{
+    char        msg[128];
+    const char  *name;
+    int         idx;
+
+    name = Info_ValueForKey(userinfo, "name");
+    idx = OSP_playerAllow((char *)name, userinfo);
+    if (!idx)
+        return true;
+
+    if (idx < 0)
+        Q_snprintf(msg, sizeof(msg), "%s is already connected.", name);
+    else if (idx == 1)
+        Q_snprintf(msg, sizeof(msg), "%s is not allowed to play.", name);
+    else if (idx == 2)
+        Q_snprintf(msg, sizeof(msg), "Incorrect password/address for %s", name);
+    else
+        Q_strlcpy(msg, "Your address has been banned!", sizeof(msg));
+
+    Info_SetValueForKey(userinfo, "rejmsg", msg);
+    return false;
+}
+
+/*
+=================
+OSP_clientConnected
+
+The tail of the connect path: remember where they came from, and say so on the
+console and in the admin log.  `osp_e37c` is the address with the port stripped,
+which is what the player list matches a reserved name against.
+=================
+*/
+void OSP_clientConnected(edict_t *ent, char *userinfo)
+{
+    char *colon;
+
+    if (ent->flags & FL_BOTCLIENT) {
+        Q_strlcpy(ent->osp_e37c, "SERVER_BOT", sizeof(ent->osp_e37c));
+    } else {
+        Q_strlcpy(ent->osp_e37c, Info_ValueForKey(userinfo, "ip"),
+                  sizeof(ent->osp_e37c));
+        colon = strchr(ent->osp_e37c, ':');
+        if (colon)
+            *colon = 0;
+    }
+
+    gi.dprintf("(%s connected from %s)\n", ent->client->pers.netname,
+               ent->osp_e37c);
+
+    if (server_log) {
+        char date[64];
+
+        OSP_getDateInfo(date);
+        OSP_logAdminLog("Connect: %s - %s (%s)", ent->osp_e37c,
+                        ent->client->pers.netname, date);
+    }
+
+    ent->osp_e39c = 0;
 }

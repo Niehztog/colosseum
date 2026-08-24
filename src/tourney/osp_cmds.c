@@ -1796,17 +1796,10 @@ void OSP_hud_cmd(edict_t *ent)
         ent->client->resp.osp_r00c = 0;
     ent->client->resp.osp_r00c = 1 - ent->client->resp.osp_r00c;
 
-    if (m_mode < 2) {
-        if (!ent->client->resp.osp_r00c)
-            OSP_clientConfigString(ent, CS_STATUSBAR, dm_statusbar);
-        else
-            OSP_clientConfigString(ent, CS_STATUSBAR, dm_statusbar_alt);
-    } else {
-        if (!ent->client->resp.osp_r00c)
-            OSP_clientConfigString(ent, CS_STATUSBAR, team_statusbar);
-        else
-            OSP_clientConfigString(ent, CS_STATUSBAR, team_statusbar_alt);
-    }
+    // Four literals in the donor; one emitter and two booleans here (R-OSP-7a).
+    OSP_clientConfigString(ent, CS_STATUSBAR,
+                           G_StatusbarVariant(ent->client->resp.osp_r00c != 0,
+                                              m_mode >= 2));
 }
 
 void OSP_oldscores_cmd(edict_t *ent)
@@ -2449,4 +2442,38 @@ void OSP_playerlist_svcmd(void)
         OSP_loadPlayers(gi.argv(2));
     else
         OSP_loadPlayers(pfile->string);
+}
+
+/*
+=================
+OSP_ServerCommand
+
+Tourney's five `sv` commands (R-OSP-2), delegated the same way its 63 client
+commands are: one gate in the shared file, the table here.
+
+`sv` is how a referee who is not in the game controls a match -- an admin on the
+console rather than a player -- so these are the same actions as the client
+commands `allready`, `notready`, `pause` and `stopmatch` with no player behind
+them.  `playerlist` has no client equivalent at all.
+
+Returns true when it handled the command, which is what lets ServerCommand fall
+through to its own list and then to "Unknown server command".
+=================
+*/
+bool OSP_ServerCommand(const char *cmd)
+{
+    if (Q_stricmp(cmd, "allready") == 0)
+        OSP_allready_svcmd();
+    else if (Q_stricmp(cmd, "allnotready") == 0)
+        OSP_allnotready_svcmd(true);
+    else if (Q_stricmp(cmd, "mpause") == 0)
+        OSP_rmpause_cmd();
+    else if (Q_stricmp(cmd, "stopmatch") == 0)
+        OSP_rstopmatch_cmd(NULL);
+    else if (Q_stricmp(cmd, "playerlist") == 0)
+        OSP_playerlist_svcmd();
+    else
+        return false;
+
+    return true;
 }

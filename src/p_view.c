@@ -17,6 +17,7 @@ with this program; if not, write to the Free Software Foundation, Inc.,
 */
 
 #include "g_local.h"
+#include "tourney/osp_hooks.h"
 #include "m_player.h"
 #include "arena/arena.h"
 
@@ -818,6 +819,14 @@ static void G_SetClientEffects(edict_t *ent)
         ent->s.renderfx |= (RF_SHELL_RED | RF_SHELL_GREEN | RF_SHELL_BLUE);
     }
 
+    // R-OSP-1's runes announce themselves on the carrier's model: a shell for
+    // the rune just picked up, and a colour per rune when `runes_flash` is on.
+    // The colours are the donor's and are not arbitrary -- they are what a
+    // tourney player reads across a room to know which rune the other player
+    // is carrying.
+    if (G_Ruleset() == RULESET_TOURNEY)
+        OSP_runesShell(ent);
+
 //PGM
     /*
         if (ent->client->torch_framenum > level.framenum)
@@ -1029,6 +1038,19 @@ void ClientEndServerFrame(edict_t *ent)
         current_client->ps.blend[3] = 0;
         current_client->ps.fov = 90;
         G_SetStats(ent);
+        // R-OSP-1: tourney's HUD panels are configstring indices held in its
+        // own stat slots, so intermission has to blank them or the match clock
+        // and team columns stay on screen over the end-of-level board.  The
+        // second half is the hi-score board, which is the ONLY scoreboard that
+        // keeps refreshing during intermission (R-OSP-9's `hs_mode`).
+        if (G_Ruleset() == RULESET_TOURNEY) {
+            OSP_clearStats(ent);
+            if (ent->client->showscores && !(level.framenum & 31) &&
+                hs_mode && !(ent->flags & FL_BOT)) {
+                G_ScoreboardMessage(ent, ent->enemy);
+                gi.unicast(ent, false);
+            }
+        }
         return;
     }
 
@@ -1114,6 +1136,77 @@ void ClientEndServerFrame(edict_t *ent)
         G_SetStats(ent);
 
     G_CheckChaseStats(ent);
+
+    // R-OSP-1 and R-OSP-7: tourney owns the upper half of its own stat map --
+    // the match clock, the frag/rank columns, the team panels and the id line
+    // -- and writes them as configstring INDICES rather than values, which is
+    // why it is a second pass rather than a replacement for G_SetStats.  The
+    // guards are the donor's and each one means something: a client that is
+    // observing gets the panels blanked, a client in its first ten frames does
+    // not get them at all (the configstrings it would point at are still being
+    // built), and a bot never gets a unicast.
+    if (G_Ruleset() == RULESET_TOURNEY) {
+        if (ent->client->resp.osp_r2dc)
+            OSP_clearStats(ent);
+        else if (level.framenum - ent->client->resp.enterframe > 10 &&
+                 !(ent->client->resp.osp_r01c & 0x10) &&
+                 !(ent->flags & FL_BOT))
+            OSP_setStats(ent);
+
+        // A player being watched hands their whole stat array to every watcher,
+        // which is how tourney's cameras show the tracked player's HUD instead
+        // of the watcher's own.  resp.osp_r000 is the cached count of watchers
+        // and is recomputed here, so a viewer who left stops being copied to.
+        if (ent->client->resp.entered == ENTERED_ENTERED &&
+            ent->client->resp.osp_r000 && !level.intermission_framenum) {
+            int count = 0;
+
+            for (i = 1; i <= game.maxclients &&
+                 count < ent->client->resp.osp_r000; i++) {
+                edict_t *watcher = g_edicts + i;
+
+                if (!watcher->inuse || !watcher->client ||
+                    (watcher->client->chase_target != ent &&
+                     watcher->client->osp_t03c != ent))
+                    continue;
+
+                count++;
+                memcpy(watcher->client->ps.stats, ent->client->ps.stats,
+                       sizeof(watcher->client->ps.stats));
+                watcher->client->ps.stats[STAT_LAYOUTS] = LAYOUTS_LAYOUT;
+                watcher->client->ps.stats[STAT_FRAGS] = 0;
+                watcher->client->ps.stats[STAT_HELPICON] = 0;
+                if (watcher->client->osp_t03c && m_mode < 2)
+                    G_SetStat(watcher, SID_OSP_STATUS3, 0);
+            }
+            ent->client->resp.osp_r000 = count;
+        }
+
+        // R-OSP-3: a powerup running out is a logged event, because the report
+        // wants to know how long the player actually held it -- `osp_r200` is
+        // the frame they picked it up on and is cleared once BOTH powerups are
+        // gone, so a player holding quad and invulnerability at once does not
+        // lose the second one's start time to the first one's expiry.
+        if (ent->client->resp.osp_r200) {
+            if (ent->client->quad_framenum &&
+                ent->client->quad_framenum < level.framenum) {
+                OSP_Stats_ItemExpire("Quad", ent, ent->client->resp.osp_r200);
+                if (!ent->client->invincible_framenum)
+                    ent->client->resp.osp_r200 = 0;
+                ent->client->quad_framenum = 0;
+            }
+
+            if (ent->client->resp.osp_r200 &&
+                ent->client->invincible_framenum &&
+                ent->client->invincible_framenum < level.framenum) {
+                OSP_Stats_ItemExpire("Invulnerability", ent,
+                                     ent->client->resp.osp_r200);
+                if (!ent->client->quad_framenum)
+                    ent->client->resp.osp_r200 = 0;
+                ent->client->invincible_framenum = 0;
+            }
+        }
+    }
 
     G_SetClientEvent(ent);
 

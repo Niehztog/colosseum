@@ -98,7 +98,7 @@ bool OSP_Pickup_Rune(edict_t *ent, edict_t *other)
     other->client->resp.osp_r23c = 0;
     other->client->pers.inventory[ITEM_INDEX(ent->item)]++;
     other->client->osp_t06c = level.time;
-    other->client->ps.stats[ent->item->quantity] = 1;
+    G_SetStat(other, ent->item->quantity, 1);
     other->client->resp.osp_r200 = ent - g_edicts;
 
     item = FindItemByClassname(ent->classname);
@@ -666,4 +666,71 @@ void OSP_runeSpawnThink(edict_t *self)
 {
     OSP_checkMinRunes();
     G_FreeEdict(self);
+}
+
+// The carrier's shell, drawn from p_view.c's G_SetClientEffects.
+//
+// It lives here rather than in the spine because every field it reads is
+// tourney's: `osp_r23c` is the just-picked-up flash that OSP_Pickup_Rune sets,
+// and `osp_t074..osp_t084` are the five per-rune flash timers the apply
+// functions above stamp.  Putting the branch in p_view.c would have put five
+// offset-named members of `client_respawn_t` into a shared file for no gain --
+// R-MODE-5's rule is one gate per concept, and this is that gate.
+//
+// The colours are the donor's, and a tourney player reads them across a room:
+//   blue          resistance      red           strength
+//   red+green     haste           green         regeneration
+//   blue+red      vampire
+void OSP_runesShell(edict_t *ent)
+{
+    gclient_t *cl = ent->client;
+
+    if (!cl)
+        return;
+
+    // Just picked one up: two frames of yellow, whichever rune it was.
+    if (cl->resp.osp_r23c > level.framenum) {
+        ent->s.effects |= EF_COLOR_SHELL;
+        ent->s.renderfx |= (RF_SHELL_RED | RF_SHELL_GREEN);
+    }
+
+    if (!runes_flash || !(int)runes_flash->value)
+        return;
+
+    if (cl->osp_t074 > level.time) {
+        ent->s.effects |= EF_COLOR_SHELL;
+        ent->s.renderfx |= RF_SHELL_BLUE;
+    } else if (cl->osp_t078 > level.time) {
+        ent->s.effects |= EF_COLOR_SHELL;
+        ent->s.renderfx |= RF_SHELL_RED;
+    } else if (cl->osp_t07c > level.time) {
+        ent->s.effects |= EF_COLOR_SHELL;
+        ent->s.renderfx |= (RF_SHELL_RED | RF_SHELL_GREEN);
+    } else if (cl->osp_t080 > level.time) {
+        ent->s.effects |= EF_COLOR_SHELL;
+        ent->s.renderfx |= RF_SHELL_GREEN;
+    } else if (cl->osp_t084 > level.time) {
+        ent->s.effects |= EF_COLOR_SHELL;
+        ent->s.renderfx |= (RF_SHELL_BLUE | RF_SHELL_RED);
+    }
+}
+
+// "Does a rune this player is carrying hold their overhealth?"  MegaHealth_think
+// asks it once instead of testing two runes and two ceilings itself: the
+// regeneration rune holds up to `runes_regen_hmax`, the vampire rune up to
+// `runes_vampire_max`, and both are cvars a referee sets.
+bool OSP_runesHoldHealth(edict_t *ent)
+{
+    if (!(rune_stat & RUNE_REGEN) || !ent->client)
+        return false;
+
+    if (OSP_runesHasRegeneration(ent) &&
+        ent->health <= (int)runes_regen_hmax->value)
+        return true;
+
+    if (OSP_runesHasVampire(ent) &&
+        ent->health <= (int)runes_vampire_max->value)
+        return true;
+
+    return false;
 }

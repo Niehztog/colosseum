@@ -16,6 +16,7 @@ with this program; if not, write to the Free Software Foundation, Inc.,
 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
 */
 #include "g_local.h"
+#include "tourney/osp_hooks.h"
 
 void UpdateChaseCam(edict_t *ent)
 {
@@ -109,15 +110,34 @@ void UpdateChaseCam(edict_t *ent)
     // "Threewave draws this differently" -- see doc/reconciliation.md R-43.
     // Elsewhere STAT_CHASE and the bar's `stat_string 16` do the job and this
     // block would fight them for the layout channel.
-    if (G_Ruleset() == RULESET_CTF &&
+    if ((G_Ruleset() == RULESET_CTF || G_Ruleset() == RULESET_TOURNEY) &&
         ((!ent->client->showscores && !G_MenuActive(ent) &&
           !ent->client->showinventory && !ent->client->showhelp &&
           !(level.framenum & 31)) || ent->client->update_chase)) {
         char s[MAX_STRING_CHARS];
 
         ent->client->update_chase = false;
-        Q_snprintf(s, sizeof(s), "xv 0 yb -68 string2 \"Chasing %s\"",
-                   targ->client->pers.netname);
+
+        // Tourney names the team and, in a live team match, the score --
+        // R-OSP-1's observer is meant to be able to follow a match, and
+        // "Chasing Bob" alone does not say which side Bob is on.  Its slot 16
+        // is the crosshair-id line, not this one, so the two do not collide.
+        if (G_Ruleset() == RULESET_TOURNEY && m_mode == 2 && sync_stat > 2)
+            Q_snprintf(s, sizeof(s),
+                       "xv 44 yb -59 string \"Chasing `%s' [%d] (%s)\"",
+                       targ->client->pers.netname, targ->client->resp.score,
+                       OSP_teamName(targ->client->resp.team));
+        else if (G_Ruleset() == RULESET_TOURNEY && m_mode == 2)
+            Q_snprintf(s, sizeof(s), "xv 44 yb -59 string \"Chasing `%s' (%s)\"",
+                       targ->client->pers.netname,
+                       OSP_teamName(targ->client->resp.team));
+        else if (G_Ruleset() == RULESET_TOURNEY)
+            Q_snprintf(s, sizeof(s), "xv 44 yb -59 string \"Chasing `%s'\"",
+                       targ->client->pers.netname);
+        else
+            Q_snprintf(s, sizeof(s), "xv 0 yb -68 string2 \"Chasing %s\"",
+                       targ->client->pers.netname);
+
         gi.WriteByte(svc_layout);
         gi.WriteString(s);
         gi.unicast(ent, false);

@@ -16,6 +16,7 @@ with this program; if not, write to the Free Software Foundation, Inc.,
 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
 */
 #include "g_local.h"
+#include "tourney/osp_hooks.h"
 
 // RotatePointAroundVector() lives in the engine's math.c, which the game library
 // does not link against; the mission pack needs its own copy.
@@ -298,6 +299,13 @@ pistols, rifles, etc....
 */
 void fire_bullet(edict_t *self, vec3_t start, vec3_t aimdir, int damage, int kick, int hspread, int vspread, int mod)
 {
+    // R-OSP-1's accuracy report counts shots fired as well as shots that hit,
+    // and only the weapon knows it fired.  One line per weapon here, against
+    // fifteen inline p_acc[] writes in the donor -- src/tourney/osp_acc.c has
+    // the reasoning.  Damage credit is not here: it is one hook in T_Damage.
+    if (G_Ruleset() == RULESET_TOURNEY)
+        OSP_accShot(self, mod, 1);
+
     fire_lead(self, start, aimdir, damage, kick, TE_GUNSHOT, hspread, vspread, mod);
 }
 
@@ -310,6 +318,9 @@ Shoots shotgun pellets.  Used by shotgun and super shotgun.
 */
 void fire_shotgun(edict_t *self, vec3_t start, vec3_t aimdir, int damage, int kick, int hspread, int vspread, int count, int mod)
 {
+    if (G_Ruleset() == RULESET_TOURNEY)
+        OSP_accShot(self, mod, count);
+
     int     i;
 
     for (i = 0; i < count; i++)
@@ -369,6 +380,9 @@ void blaster_touch(edict_t *self, edict_t *other, cplane_t *plane, csurface_t *s
 
 void fire_blaster(edict_t *self, vec3_t start, vec3_t dir, int damage, int speed, int effect, bool hyper)
 {
+    if (G_Ruleset() == RULESET_TOURNEY)
+        OSP_accShot(self, hyper ? MOD_HYPERBLASTER : MOD_BLASTER, 1);
+
     edict_t *bolt;
     trace_t tr;
 
@@ -546,6 +560,9 @@ void Grenade_Touch(edict_t *ent, edict_t *other, cplane_t *plane, csurface_t *su
 
 void fire_grenade(edict_t *self, vec3_t start, vec3_t aimdir, int damage, int speed, float timer, float damage_radius)
 {
+    if (G_Ruleset() == RULESET_TOURNEY)
+        OSP_accShot(self, MOD_GRENADE, 1);
+
     edict_t *grenade;
     vec3_t  dir;
     vec3_t  forward, right, up;
@@ -582,6 +599,9 @@ void fire_grenade(edict_t *self, vec3_t start, vec3_t aimdir, int damage, int sp
 
 void fire_grenade2(edict_t *self, vec3_t start, vec3_t aimdir, int damage, int speed, float timer, float damage_radius, bool held)
 {
+    if (G_Ruleset() == RULESET_TOURNEY)
+        OSP_accShot(self, MOD_HANDGRENADE, 1);
+
     edict_t *grenade;
     vec3_t  dir;
     vec3_t  forward, right, up;
@@ -681,6 +701,9 @@ void rocket_touch(edict_t *ent, edict_t *other, cplane_t *plane, csurface_t *sur
 
 void fire_rocket(edict_t *self, vec3_t start, vec3_t dir, int damage, int speed, float damage_radius, int radius_damage)
 {
+    if (G_Ruleset() == RULESET_TOURNEY)
+        OSP_accShot(self, MOD_ROCKET, 1);
+
     edict_t *rocket;
 
     rocket = G_Spawn();
@@ -718,6 +741,9 @@ fire_rail
 */
 void fire_rail(edict_t *self, vec3_t start, vec3_t aimdir, int damage, int kick)
 {
+    if (G_Ruleset() == RULESET_TOURNEY)
+        OSP_accShot(self, MOD_RAILGUN, 1);
+
     vec3_t      from;
     vec3_t      end;
     trace_t     tr;
@@ -953,6 +979,9 @@ void bfg_think(edict_t *self)
 
 void fire_bfg(edict_t *self, vec3_t start, vec3_t dir, int damage, int speed, float damage_radius)
 {
+    if (G_Ruleset() == RULESET_TOURNEY)
+        OSP_accShot(self, MOD_BFG_BLAST, 1);
+
     edict_t *bfg;
 
     bfg = G_Spawn();

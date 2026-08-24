@@ -353,3 +353,86 @@ void OSP_removeChaseCam(edict_t *ent)
 
     OSP_Stats_PlayerMode(ent, "Observe");
 }
+
+/*
+=================
+OSP_clientThink
+
+Tourney's arms of ClientThink, in one call (R-OSP-1, R-EXTRA-6).  True means the
+frame is CONSUMED: the client is on a camera or has just been moved to one, and
+neither the spine's pmove nor its chase-cam code may also run.
+
+Three arms, in the donor's order:
+
+  * a client who died and is looking at the board goes back to a live HUD half a
+    second after respawning
+  * a client on the autocam has its own input handling: attack switches to the
+    chase cam, jump toggles between the camera's two modes, and CameraThink
+    drives the view.  It is here rather than in g_chase.c because the autocam is
+    not a chase cam -- it picks its own subject and its own position
+  * a client with no one left to watch is told so and put back in free-fly
+=================
+*/
+bool OSP_clientThink(edict_t *ent, usercmd_t *ucmd)
+{
+    gclient_t *client = ent->client;
+
+    // Dead, showing the board, and now alive again: put the HUD back.
+    if (client->resp.osp_r2dc == 1 &&
+        client->resp.entered == ENTERED_ENTERED &&
+        level.framenum > client->respawn_framenum + 5) {
+        OSP_clearStats(ent);
+        client->resp.osp_r2dc = 0;
+        client->showscores = false;
+        Cmd_Score_f(ent);
+    }
+
+    if (!client->osp_t040)
+        return false;
+
+    if (!active_clients) {
+        gi.cprintf(ent, PRINT_HIGH,
+                   "No clients to track. Switching to OBSERVE mode.\n");
+        OSP_startObserve(ent);
+        return true;
+    }
+
+    client->oldbuttons = client->buttons;
+    client->buttons = ucmd->buttons;
+    client->latched_buttons = client->buttons & ~client->oldbuttons;
+
+    if ((client->latched_buttons & BUTTON_ATTACK) &&
+        client->resp.osp_r010 <= level.framenum) {
+        if (G_MenuActive(ent)) {
+            Cmd_InvUse_f(ent);
+        } else {
+            client->resp.score = client->resp.osp_r248;
+            OSP_ChaseCam(ent);
+            if (client->chase_target) {
+                if (sync_stat > 2 && m_mode < 2)
+                    G_SetStat(ent, SID_OSP_STATUS3, OSP_CS(4));
+                gi.cprintf(ent, PRINT_HIGH, "Changing to CHASECAM mode.\n");
+            } else {
+                // Nothing to chase: back to the score that says "observing".
+                client->resp.score = -100;
+            }
+        }
+        client->resp.osp_r010 = level.framenum + 2;
+        return true;
+    }
+
+    if (ucmd->upmove && !G_MenuActive(ent) &&
+        client->resp.osp_r010 <= level.framenum) {
+        if (client->osp_t038 == 1) {
+            gi.cprintf(ent, PRINT_HIGH, "Switching to Autocam FOLLOW mode.\n");
+            client->osp_t038 = 0;
+        } else {
+            gi.cprintf(ent, PRINT_HIGH, "Switching to Autocam NORMAL mode.\n");
+            client->osp_t038 = 1;
+        }
+        client->resp.osp_r010 = level.framenum + 8;
+    }
+
+    CameraThink(ent);
+    return true;
+}

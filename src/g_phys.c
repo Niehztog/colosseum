@@ -554,7 +554,10 @@ static void SV_Physics_Pusher(edict_t *ent)
                 break;  // move was blocked
         }
     }
-    if (pushed_p > &pushed[MAX_EDICTS])
+    // `>=`, not `>`.  pushed[] has MAX_EDICTS entries, so pushed_p == the end
+    // is already one past the last, and vanilla's `>` lets that one write out
+    // of bounds before it complains.  OSP fixed it; sec 7 rule 7 keeps it fixed.
+    if (pushed_p >= &pushed[MAX_EDICTS])
         gi.error("pushed_p > &pushed[MAX_EDICTS], memory corrupted");
 
     if (part) {

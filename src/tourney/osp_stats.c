@@ -29,8 +29,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "tourney/osp_types.h"
 #include "tourney/osp_stats.h"
 
-cvar_t  *statsfile;
-cvar_t  *statsname;
+
 cvar_t  *stats_logchat;
 cvar_t  *stats_logallpickups;
 
@@ -185,8 +184,6 @@ void OSP_Stats_Init(void)
     cvar_t  *port;
     cvar_t  *hostname;
 
-    statsfile = gi.cvar("statsfile", "1", 0);
-    statsname = gi.cvar("statsname", "osptourney.jsonl", 0);
     stats_logchat = gi.cvar("stats_logchat", "0", 0);
     stats_logallpickups = gi.cvar("stats_logallpickups", "0", 0);
 
@@ -196,7 +193,7 @@ void OSP_Stats_Init(void)
     }
     stats_path[0] = 0;
 
-    if (!(int)statsfile->value || !statsname->string[0]) {
+    if (!(int)g_statsfile->value || !g_statsname->string[0]) {
         gi.dprintf("Local stats logging disabled.\n");
         return;
     }
@@ -206,7 +203,7 @@ void OSP_Stats_Init(void)
 
     if (Q_snprintf(stats_path, sizeof(stats_path), "%s/%s/%s",
                    basedir->string, gamedir->string,
-                   statsname->string) >= sizeof(stats_path)) {
+                   g_statsname->string) >= sizeof(stats_path)) {
         gi.dprintf("Stats log path too long, logging disabled.\n");
         stats_path[0] = 0;
         return;
@@ -223,7 +220,7 @@ void OSP_Stats_Init(void)
     gi.dprintf("Stats log for server is \"%s\".\n", stats_path);
 
     port = gi.cvar("port", "27910", CVAR_NOSET);
-    hostname = gi.cvar("hostname", "noname", CVAR_SERVERINFO);
+    hostname = gi.cvar("hostname", "", CVAR_SERVERINFO);
 
     fprintf(stats_f, "{\"event\":\"init\",\"time\":%lld,\"version\":%d",
             (long long)time(NULL), OSP_STATS_VERSION);

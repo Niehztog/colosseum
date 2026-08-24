@@ -17,6 +17,7 @@ with this program; if not, write to the Free Software Foundation, Inc.,
 */
 #include "g_local.h"
 #include "arena/arena.h"
+#include "tourney/osp_hooks.h"
 #include "m_player.h"
 
 static char *ClientTeam(edict_t *ent)
@@ -59,7 +60,8 @@ bool OnSameTeam(edict_t *ent1, edict_t *ent2)
     return false;
 }
 
-static void SelectNextItem(edict_t *ent, int itflags)
+// Non-static: tourney's delegated dispatcher calls it (R-88).
+void SelectNextItem(edict_t *ent, int itflags)
 {
     gclient_t   *cl;
     int         i, index;
@@ -74,6 +76,8 @@ static void SelectNextItem(edict_t *ent, int itflags)
             ctf_PMenu_Next(ent);
         else if (cl->menu_owner == MENU_ARENA)
             MenuNext(ent);
+        else if (cl->menu_owner == MENU_TOURNEY)
+            osp_PMenu_Next(ent);
         return;
     }
 
@@ -100,7 +104,8 @@ static void SelectNextItem(edict_t *ent, int itflags)
     cl->pers.selected_item = -1;
 }
 
-static void SelectPrevItem(edict_t *ent, int itflags)
+// Non-static: tourney's delegated dispatcher calls it (R-88).
+void SelectPrevItem(edict_t *ent, int itflags)
 {
     gclient_t   *cl;
     int         i, index;
@@ -115,6 +120,8 @@ static void SelectPrevItem(edict_t *ent, int itflags)
             ctf_PMenu_Prev(ent);
         else if (cl->menu_owner == MENU_ARENA)
             MenuPrev(ent);
+        else if (cl->menu_owner == MENU_TOURNEY)
+            osp_PMenu_Prev(ent);
         return;
     }
 
@@ -162,7 +169,7 @@ Cmd_Give_f
 Give items to a client
 ==================
 */
-static void Cmd_Give_f(edict_t *ent)
+void Cmd_Give_f(edict_t *ent)
 {
     char        *name;
     const gitem_t   *it;
@@ -314,7 +321,7 @@ Sets client to godmode
 argv(0) god
 ==================
 */
-static void Cmd_God_f(edict_t *ent)
+void Cmd_God_f(edict_t *ent)
 {
     if ((deathmatch->value || coop->value) && !sv_cheats->value) {
         gi.cprintf(ent, PRINT_HIGH, "You must run the server with '+set cheats 1' to enable this command.\n");
@@ -337,7 +344,7 @@ Sets client to notarget
 argv(0) notarget
 ==================
 */
-static void Cmd_Notarget_f(edict_t *ent)
+void Cmd_Notarget_f(edict_t *ent)
 {
     if ((deathmatch->value || coop->value) && !sv_cheats->value) {
         gi.cprintf(ent, PRINT_HIGH, "You must run the server with '+set cheats 1' to enable this command.\n");
@@ -358,7 +365,7 @@ Cmd_Noclip_f
 argv(0) noclip
 ==================
 */
-static void Cmd_Noclip_f(edict_t *ent)
+void Cmd_Noclip_f(edict_t *ent)
 {
     if ((deathmatch->value || coop->value) && !sv_cheats->value) {
         gi.cprintf(ent, PRINT_HIGH, "You must run the server with '+set cheats 1' to enable this command.\n");
@@ -382,7 +389,7 @@ Use an inventory item
 ==================
 */
 
-static void Cmd_Use_f(edict_t *ent)
+void Cmd_Use_f(edict_t *ent)
 {
     int         index;
     const gitem_t   *it;
@@ -434,7 +441,7 @@ Cmd_Drop_f
 Drop an inventory item
 ==================
 */
-static void Cmd_Drop_f(edict_t *ent)
+void Cmd_Drop_f(edict_t *ent)
 {
     int         index;
     const gitem_t   *it;
@@ -491,7 +498,7 @@ static void Cmd_Drop_f(edict_t *ent)
 Cmd_Inven_f
 =================
 */
-static void Cmd_Inven_f(edict_t *ent)
+void Cmd_Inven_f(edict_t *ent)
 {
     int         i;
     gclient_t   *cl;
@@ -546,7 +553,8 @@ static void Cmd_Inven_f(edict_t *ent)
 Cmd_InvUse_f
 =================
 */
-static void Cmd_InvUse_f(edict_t *ent)
+// Non-static: tourney's menus bind `invuse` (R-MENU-4).
+void Cmd_InvUse_f(edict_t *ent)
 {
     const gitem_t   *it;
 
@@ -556,6 +564,8 @@ static void Cmd_InvUse_f(edict_t *ent)
         else if (ent->client->menu_owner == MENU_ARENA &&
                  !level.intermission_framenum)
             UseMenu(ent, 1);
+        else if (ent->client->menu_owner == MENU_TOURNEY)
+            osp_PMenu_Select(ent);
         return;
     }
 
@@ -580,7 +590,7 @@ Cmd_WeapPrev_f
 =================
 */
 
-static void Cmd_WeapPrev_f(edict_t *ent)
+void Cmd_WeapPrev_f(edict_t *ent)
 {
     gclient_t   *cl;
     int         i, index;
@@ -621,7 +631,7 @@ Cmd_WeapNext_f
 =================
 */
 #if 0
-static void Cmd_WeapNext_f(edict_t *ent)
+void Cmd_WeapNext_f(edict_t *ent)
 {
     gclient_t   *cl;
     int         i, index;
@@ -692,7 +702,7 @@ void Cmd_WeapNext_f(edict_t *ent)
 Cmd_WeapLast_f
 =================
 */
-static void Cmd_WeapLast_f(edict_t *ent)
+void Cmd_WeapLast_f(edict_t *ent)
 {
     gclient_t   *cl;
     int         index;
@@ -719,7 +729,7 @@ static void Cmd_WeapLast_f(edict_t *ent)
 Cmd_InvDrop_f
 =================
 */
-static void Cmd_InvDrop_f(edict_t *ent)
+void Cmd_InvDrop_f(edict_t *ent)
 {
     const gitem_t   *it;
 
@@ -751,7 +761,8 @@ static void Cmd_InvDrop_f(edict_t *ent)
 Cmd_Kill_f
 =================
 */
-static void Cmd_Kill_f(edict_t *ent)
+// Non-static: tourney's match system kills a player on a team change.
+void Cmd_Kill_f(edict_t *ent)
 {
     // An observer has nothing to kill.  Threewave tests `solid != SOLID_NOT`,
     // which also catches a dead player -- who should be able to re-suicide.
@@ -783,7 +794,7 @@ static void Cmd_Kill_f(edict_t *ent)
 Cmd_PutAway_f
 =================
 */
-static void Cmd_PutAway_f(edict_t *ent)
+void Cmd_PutAway_f(edict_t *ent)
 {
     ent->client->showscores = false;
     ent->client->showhelp = false;
@@ -814,7 +825,8 @@ static int PlayerSort(void const *a, void const *b)
 Cmd_Players_f
 =================
 */
-static void Cmd_Players_f(edict_t *ent)
+// Non-static: tourney's delegated dispatcher calls it (R-88).
+void Cmd_Players_f(edict_t *ent)
 {
     int     i;
     int     count;
@@ -855,7 +867,7 @@ static void Cmd_Players_f(edict_t *ent)
 Cmd_Wave_f
 =================
 */
-static void Cmd_Wave_f(edict_t *ent)
+void Cmd_Wave_f(edict_t *ent)
 {
     int     i;
 
@@ -939,7 +951,8 @@ bool FloodProtect(edict_t *ent)
 Cmd_Say_f
 ==================
 */
-static void Cmd_Say_f(edict_t *ent, bool team, bool arg0, bool bcast)
+// Non-static: tourney's delegated dispatcher calls it (R-88).
+void Cmd_Say_f(edict_t *ent, bool team, bool arg0, bool bcast)
 {
     int     j;
     edict_t *other;
@@ -1013,7 +1026,7 @@ void Cmd_Ent_Count_f(edict_t *ent)
 //ROGUE
 //======
 
-static void Cmd_PlayerList_f(edict_t *ent)
+void Cmd_PlayerList_f(edict_t *ent)
 {
     int i;
     char st[80];
@@ -1057,6 +1070,14 @@ void ClientCommand(edict_t *ent)
         return;     // not fully in game yet
 
     cmd = gi.argv(0);
+
+    // OSP Tourney has 137 client commands (R-OSP-2).  Threewave's twelve are
+    // arms in the chain below and that reads fine at twelve; 137 would triple
+    // this file and put a donor's whole command surface in a spine file.  One
+    // gate, one question: it returns true if it handled the command
+    // (doc/reconciliation.md R-88).
+    if (G_Ruleset() == RULESET_TOURNEY && OSP_ClientCommand(ent))
+        return;
 
     if (Q_stricmp(cmd, "players") == 0) {
         Cmd_Players_f(ent);

@@ -687,6 +687,7 @@ extern void gladiator_search(edict_t *);
 extern void gladiator_sight(edict_t *, edict_t *);
 extern void gladiator_stand(edict_t *);
 extern void gladiator_walk(edict_t *);
+extern void GrappleTouch(edict_t *, edict_t *, cplane_t *, csurface_t *);
 extern void Grenade_Explode(edict_t *);
 extern void Grenade_Touch(edict_t *, edict_t *, cplane_t *, csurface_t *);
 extern void gunner_attack(edict_t *);
@@ -813,6 +814,8 @@ extern void object_repair_fx(edict_t *);
 extern void object_repair_sparks(edict_t *);
 extern void old_teleporter_touch(edict_t *, edict_t *, cplane_t *, csurface_t *);
 extern void orb_think(edict_t *);
+extern void OSP_runeSpawnThink(edict_t *);
+extern void OSP_runeThink(edict_t *);
 extern void parasite_attack(edict_t *);
 extern void parasite_die(edict_t *, edict_t *, edict_t *, int, vec3_t);
 extern void parasite_idle(edict_t *);
@@ -1108,6 +1111,8 @@ const save_ptr_t save_ptrs[] = {
 { P_think, object_repair_fx },
 { P_think, object_repair_sparks },
 { P_think, orb_think },
+{ P_think, OSP_runeSpawnThink },
+{ P_think, OSP_runeThink },
 { P_think, plat2_go_down },
 { P_think, plat2_go_up },
 { P_think, plat_go_down },
@@ -1188,6 +1193,7 @@ const save_ptr_t save_ptrs[] = {
 { P_touch, func_object_touch },
 { P_touch, gekk_jump_touch },
 { P_touch, gib_touch },
+{ P_touch, GrappleTouch },
 { P_touch, Grenade_Touch },
 { P_touch, hint_path_touch },
 { P_touch, hunter_touch },

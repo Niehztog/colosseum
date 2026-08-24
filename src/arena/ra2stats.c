@@ -30,8 +30,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "arena/arena.h"
 #include "arena/ra2stats.h"
 
-static cvar_t   *statsfile;
-static cvar_t   *statsname;
+
 
 static char     stats_path[MAX_OSPATH];
 
@@ -53,18 +52,16 @@ void RA2_Stats_Init(void)
     cvar_t  *gamedir;
     FILE    *f;
 
-    statsfile = gi.cvar("statsfile", "1", 0);
-    statsname = gi.cvar("statsname", "ra2stats.jsonl", 0);
 
     stats_path[0] = 0;
 
-    if (!statsfile->value || !statsname->string[0])
+    if (!g_statsfile->value || !g_statsname->string[0])
         return;
 
     gamedir = gi.cvar("game", "", CVAR_LATCH);
 
     if (Q_snprintf(stats_path, sizeof(stats_path), "%s/%s",
-                   gamedir->string, statsname->string) >= sizeof(stats_path)) {
+                   gamedir->string, g_statsname->string) >= sizeof(stats_path)) {
         gi.dprintf("RA2_Stats_Init: stats path too long, logging disabled\n");
         stats_path[0] = 0;
         return;

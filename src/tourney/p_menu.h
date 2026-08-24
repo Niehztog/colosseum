@@ -1,3 +1,6 @@
+#ifndef OSP_P_MENU_H
+#define OSP_P_MENU_H
+
 /*
 Copyright (C) 1997-2001 Id Software, Inc.
 
@@ -47,3 +50,5 @@ void osp_PMenu_Update(edict_t *ent);
 void osp_PMenu_Next(edict_t *ent);
 void osp_PMenu_Prev(edict_t *ent);
 void osp_PMenu_Select(edict_t *ent);
+
+#endif // OSP_P_MENU_H

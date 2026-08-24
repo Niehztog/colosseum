@@ -53,11 +53,14 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 typedef struct bot_library_s
 {
     char path[MAX_PATH];                //path to the library
-#if defined(WIN32) || defined(_WIN32)
-    HANDLE handle;                      //Win32 handle to the bot library
-#else
-    void *handle;
-#endif
+    // The donor writes `HANDLE` on Win32 and `void *` elsewhere, which needs
+    // <windows.h> in every translation unit that includes this header -- and
+    // <windows.h> redefines MAX_PATH four lines above, so under -Werror the
+    // include is not free.  Win32's HANDLE *is* `void *` (`typedef PVOID
+    // HANDLE`), so one member serves both and the #if disappears with it; the
+    // loader casts, which it would have had to do anyway for dlsym's return.
+    // Caught by the PE targets: `make native` alone never compiles this.
+    void *handle;                       //dlopen/LoadLibrary handle
     bot_export_t funcs;             //functions exported from the bot library
     int users;                          //number of bots using the library
     struct bot_library_s *prev; //links in the library list

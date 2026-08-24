@@ -346,6 +346,10 @@ typedef struct {
 // R-CORE-14's treatment applies rather than §7 rule 4's: the bit moves and the
 // allocation is recorded (doc/reconciliation.md R-40).
 #define IT_TECH         BIT(8)
+// Tourney spells its runes IT_RUNE and gives them id CTF's IT_TECH value; here
+// IT_TECH is Threewave's and already taken, so the runes get a bit of their own
+// (sec 7 rule 3: two donors adding different content both get added).
+#define IT_RUNE         BIT(9)
 // ROGUE
 
 // gitem_t->weapmodel for weapons indicates model index
@@ -564,6 +568,22 @@ typedef struct {
     float       maxyaw;
     float       minpitch;
     float       maxpitch;
+
+    // R-OSP-6's five extra keys, and all five are PARSED now -- including
+    // `botlib`, whose consumer is the bot layer and lands in Phase 6.  A key
+    // that is not in temp_fields[] is rejected outright with "not a field", so
+    // deferring the row would REJECT every tourney map that names a bot library
+    // rather than ignoring the setting: storing the string and not yet reading
+    // it is the difference between a map that loads and one that does not.
+    //
+    // These four share their names with four members of edict_t that tourney
+    // also owns, which is legal and is the donor's own shape: the entity parser
+    // writes here, and OSP_userinfoChanged writes there.
+    char        *botlib;
+    char        *name;
+    char        *skin;
+    char        *charfile;
+    char        *charname;
 } spawn_temp_t;
 
 typedef struct {
@@ -924,6 +944,26 @@ char    *G_CopyString(char *in);
 // Threewave and RA2 each shipped a byte-identical copy; it is a generic
 // engine helper and lives in g_utils.c (doc/reconciliation.md R-67).
 void stuffcmd(edict_t *ent, char *s);
+// Six of g_cmds.c's own handlers, reached by tourney's delegated dispatcher.
+void Cmd_Say_f(edict_t *ent, bool team, bool arg0, bool bcast);
+void Cmd_Players_f(edict_t *ent);
+void Cmd_Help_f(edict_t *ent);
+void SelectNextItem(edict_t *ent, int itflags);
+void SelectPrevItem(edict_t *ent, int itflags);
+void Cmd_Use_f(edict_t *ent);
+void Cmd_InvDrop_f(edict_t *ent);
+void Cmd_WeapPrev_f(edict_t *ent);
+void Cmd_WeapNext_f(edict_t *ent);
+void Cmd_WeapLast_f(edict_t *ent);
+void Cmd_Drop_f(edict_t *ent);
+void Cmd_Inven_f(edict_t *ent);
+void Cmd_Give_f(edict_t *ent);
+void Cmd_God_f(edict_t *ent);
+void Cmd_Notarget_f(edict_t *ent);
+void Cmd_Noclip_f(edict_t *ent);
+void Cmd_Wave_f(edict_t *ent);
+void Cmd_PlayerList_f(edict_t *ent);
+void Cmd_PutAway_f(edict_t *ent);
 
 float vectoyaw(vec3_t vec);
 void vectoangles(vec3_t vec, vec3_t angles);
@@ -1153,6 +1193,12 @@ void DeathmatchScoreboardMessage(edict_t *client, edict_t *killer);
 //
 void PlayerNoise(edict_t *who, vec3_t where, int type);
 void P_ProjectSource(gclient_t *client, vec3_t point, vec3_t distance, vec3_t forward, vec3_t right, vec3_t result);
+// R-COMPAT-6: the one registration of the statistics-log pair, in g_ruleset.c,
+// shared by RA2's ra2stats.c and tourney's osp_stats.c.
+extern cvar_t *g_statsfile;
+extern cvar_t *g_statsname;
+
+void ClientEndServerFrames(void);
 void Weapon_Generic(edict_t *ent, int FRAME_ACTIVATE_LAST, int FRAME_FIRE_LAST, int FRAME_IDLE_LAST, int FRAME_DEACTIVATE_LAST, const int *pause_frames, const int *fire_frames, void (*fire)(edict_t *ent));
 void ChangeWeapon(edict_t *ent);
 
@@ -1924,9 +1970,10 @@ struct edict_s {
     int             osp_e408;
     byte            osp_e40c[20];
     int             osp_e420;
-    // Four of R-OSP-6's five extra spawn keys.  The fifth, `botlib`, is the
-    // bot layer's and lands in Phase 6; these four are read by the entity
-    // parser now so that a tourney map carrying them is not rejected.
+    // Tourney's four per-CLIENT strings of the same names as R-OSP-6's spawn
+    // keys.  They are a different thing in a different struct -- `charname`
+    // here is the rename cooldown stamp OSP_userinfoChanged writes -- and the
+    // spawn keys themselves are in spawn_temp_t, where the entity parser looks.
     char            *name;
     char            *skin;
     char            *charfile;

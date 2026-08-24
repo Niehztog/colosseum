@@ -3,6 +3,7 @@
 // accessors and the emitter.
 
 #include "g_local.h"
+#include "tourney/osp_types.h"
 
 // ---------------------------------------------------------------- the map
 
@@ -285,8 +286,9 @@ typedef struct {
     int     timer1_x;       // 262 in baseq2 and Threewave, 246 in RA2
 } sb_shape_t;
 
-static const sb_shape_t sb_shape_baseq2 = { false, 262 };
-static const sb_shape_t sb_shape_arena  = { true,  246 };
+static const sb_shape_t sb_shape_baseq2  = { false, 262 };
+static const sb_shape_t sb_shape_arena   = { true,  246 };
+static const sb_shape_t sb_shape_tourney = { false, 246 };
 
 static void sb_universal(statusbar_t *sb, const sb_shape_t *shape)
 {
@@ -537,6 +539,131 @@ static void sb_arena_tail(statusbar_t *sb)
     sb_endif(sb);
 }
 
+// OSP Tourney's tail.  The donor ships FOUR complete bars and they differ only
+// in where two panels sit: `client_hud` moves the match clock, and `m_mode >= 2`
+// (team play and 1v1) replaces the frags/rank pair with a team layout.  Four
+// literals in the donor, two booleans here -- which is the case R-OSP-7a was
+// written for and the reason a literal bar cannot express a per-client option
+// at all.
+static void sb_tourney_tail(statusbar_t *sb, bool alt, bool team)
+{
+    // popup menu / layout line
+    sb_layout(sb, "xl", 4);
+    sb_if(sb, SID_OSP_LAYOUT1);
+    sb_layout(sb, "yb", -34);
+    sb_stat_string(sb, SID_OSP_LAYOUT1);
+    sb_endif(sb);
+
+    // the id / chase name
+    sb_if(sb, SID_CHASE);
+    sb_layout(sb, "xv", 44);
+    sb_layout(sb, "yb", -67);
+    sb_stat_string(sb, SID_CHASE);
+    sb_endif(sb);
+
+    if (!team) {
+        // frags
+        sb_if(sb, SID_OSP_STATUS1);
+        sb_layout(sb, "xr", -44);
+        sb_layout(sb, "yt", 2);
+        sb_raw(sb, "string2 \"Frags\"");
+        sb_layout(sb, "xr", -68);
+        sb_layout(sb, "yt", 10);
+        sb_stat_string(sb, SID_OSP_STATUS1);
+        sb_layout(sb, "yt", 18);
+        sb_stat_string(sb, SID_OSP_STATUS2);
+        sb_endif(sb);
+
+        // the match clock, which `client_hud` moves out of the corner
+        sb_if(sb, SID_OSP_MATCHSTATE);
+        if (alt) {
+            sb_layout(sb, "xv", 180);
+            sb_layout(sb, "yb", -38);
+            sb_stat_string(sb, SID_OSP_MATCHSTATE);
+            sb_layout(sb, "xv", 188);
+            sb_layout(sb, "yb", -46);
+            sb_raw(sb, "string2 \"Time\"");
+        } else {
+            sb_layout(sb, "xr", -44);
+            sb_layout(sb, "yt", 66);
+            sb_stat_string(sb, SID_OSP_MATCHSTATE);
+            sb_layout(sb, "xr", -36);
+            sb_layout(sb, "yt", 58);
+            sb_raw(sb, "string2 \"Time\"");
+        }
+        sb_endif(sb);
+
+        // rank
+        sb_if(sb, SID_OSP_STATUS3);
+        if (alt)
+            sb_layout(sb, "xr", -36);
+        sb_layout(sb, "yt", 34);
+        sb_raw(sb, "string2 \"Rank\"");
+        sb_layout(sb, "xr", -44);
+        sb_layout(sb, "yt", 42);
+        sb_stat_string(sb, SID_OSP_STATUS3);
+        sb_endif(sb);
+    } else {
+        // the clock first in the team layout, and `client_hud` moves it the
+        // same way it does above
+        sb_if(sb, SID_OSP_MATCHSTATE);
+        if (alt) {
+            sb_layout(sb, "xv", 180);
+            sb_layout(sb, "yb", -38);
+            sb_stat_string(sb, SID_OSP_MATCHSTATE);
+            sb_layout(sb, "xv", 188);
+            sb_layout(sb, "yb", -46);
+            sb_raw(sb, "string2 \"Time\"");
+        } else {
+            sb_layout(sb, "xr", -36);
+            sb_layout(sb, "yt", 50);
+            sb_raw(sb, "string2 \"Time\"");
+            sb_layout(sb, "xr", -44);
+            sb_layout(sb, "yt", 58);
+            sb_stat_string(sb, SID_OSP_MATCHSTATE);
+        }
+        sb_endif(sb);
+
+        // both teams' score lines
+        sb_if(sb, SID_OSP_STATUS1);
+        sb_layout(sb, "xr", -124);
+        sb_layout(sb, "yt", 2);
+        sb_stat_string(sb, SID_OSP_STATUS1);
+        sb_layout(sb, "xr", -108);
+        sb_layout(sb, "yt", 10);
+        sb_stat_string(sb, SID_OSP_STATUS2);
+        sb_endif(sb);
+
+        sb_if(sb, SID_OSP_STATUS3);
+        sb_layout(sb, "xr", -124);
+        sb_layout(sb, "yt", 26);
+        sb_stat_string(sb, SID_OSP_STATUS3);
+        sb_layout(sb, "xr", -108);
+        sb_layout(sb, "yt", 34);
+        sb_stat_string(sb, SID_OSP_STATUS4);
+        sb_endif(sb);
+    }
+
+    // the five rune indicators
+    sb_layout(sb, "xr", -68);
+    sb_layout(sb, "yt", 90);
+    sb_if(sb, SID_OSP_RUNE_RESIST);
+    sb_raw(sb, "string \"  RESIST\"");
+    sb_endif(sb);
+    sb_if(sb, SID_OSP_RUNE_STRENGTH);
+    sb_raw(sb, "string \"STRENGTH\"");
+    sb_endif(sb);
+    sb_if(sb, SID_OSP_RUNE_HASTE);
+    sb_raw(sb, "string \"   HASTE\"");
+    sb_endif(sb);
+    sb_if(sb, SID_OSP_RUNE_REGEN);
+    sb_raw(sb, "string \"   REGEN\"");
+    sb_endif(sb);
+    sb_if(sb, SID_OSP_RUNE_VAMPIRE);
+    sb_raw(sb, "string \" VAMPIRE\"");
+    sb_endif(sb);
+}
+
 // Counts `if` against `endif` in the finished program.  Cheap, and it is the
 // only check that sees the *result* rather than the intent.
 static bool sb_unbalanced(const statusbar_t *sb)
@@ -567,7 +694,9 @@ static void sb_compose(statusbar_t *sb, ruleset_t r)
     if (r == RULESET_ARENA)
         sb_arena_head(sb);
 
-    sb_universal(sb, r == RULESET_ARENA ? &sb_shape_arena : &sb_shape_baseq2);
+    sb_universal(sb, r == RULESET_ARENA   ? &sb_shape_arena
+                 : r == RULESET_TOURNEY ? &sb_shape_tourney
+                 : &sb_shape_baseq2);
 
     switch (r) {
     case RULESET_CTF:
@@ -575,6 +704,14 @@ static void sb_compose(statusbar_t *sb, ruleset_t r)
         break;
     case RULESET_ARENA:
         sb_arena_tail(sb);
+        break;
+    case RULESET_TOURNEY:
+        // `client_hud` is per-CLIENT in the donor and the bar is one
+        // configstring for everyone, so it is read here as a server default --
+        // which is what the donor does too, installing one of its four at
+        // SpawnEntities and unicasting another only from `hud`.
+        sb_tourney_tail(sb, client_hud && client_hud->value != 0,
+                        m_mode >= 2);
         break;
     case RULESET_SP:
         // The campaign has no frag counter, no spectators and no chase cam --
@@ -593,6 +730,16 @@ static statusbar_t  g_installed;
 const char *G_Statusbar(void)
 {
     return g_installed.data;
+}
+
+const char *G_StatusbarVariant(bool alt, bool team)
+{
+    static statusbar_t sb;
+
+    sb_init(&sb);
+    sb_universal(&sb, &sb_shape_tourney);
+    sb_tourney_tail(&sb, alt, team);
+    return sb.data;
 }
 
 void G_SetStatusbar(void)

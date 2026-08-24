@@ -1706,6 +1706,13 @@ void OSP_teamReset(void)
     for (i = 0; i < strlen(osp_teams[1].greenname); i++)
         osp_teams[1].greenname[i] += 128;
 
+    // R-OSP-3: the names a match is played under are the first thing the stats
+    // file needs, and a reset is where they are decided -- a report that only
+    // learns them from a later RENAME cannot label the match that was not
+    // renamed.
+    OSP_Stats_TeamName(osp_teams[0].netname);
+    OSP_Stats_TeamName(osp_teams[1].netname);
+
     if (m_mode == 2) {
         gi.cvar_set("Score_A", "WARMUP");
         gi.cvar_set("Score_B", "WARMUP");
@@ -1848,4 +1855,76 @@ bool OSP_overtimeWork(int count)
         start_count = 0;
 
     return true;
+}
+
+// The two per-team damage switches, asked by name so that g_combat.c does not
+// need osp_team_t.  Both are set by the team menu and by a referee, which is
+// why they are per team rather than a server cvar: in a tourney match one side
+// can be practising with friendly fire on while the other is not.
+bool OSP_teamFriendlyFire(int team)
+{
+    if (team < 0 || team >= (int)q_countof(osp_teams))
+        return false;
+    return osp_teams[team].osp_m11c != 0;
+}
+
+bool OSP_teamSelfDamage(int team)
+{
+    if (team < 0 || team >= (int)q_countof(osp_teams))
+        return false;
+    return osp_teams[team].osp_m120 != 0;
+}
+
+// A team's display name, asked by index so that a shared file does not need
+// osp_team_t.  Out-of-range answers "" rather than reading past the array: the
+// only caller is the chase-cam banner, and a banner is not worth a crash.
+const char *OSP_teamName(int team)
+{
+    if (team < 0 || team >= (int)q_countof(osp_teams))
+        return "";
+    return osp_teams[team].netname;
+}
+
+/*
+=================
+OSP_scoreChange
+
+One frag scored, lost or refused (R-OSP-1).
+
+The donor writes this three times in ClientObituary, once at each scoring site,
+and each copy is the same three steps: refuse the change during the countdown,
+apply it, then tell the team totals and the rank order about it.  `sync_stat`
+of 2 is the countdown -- the seconds between "match starting" and the match
+being live -- and a frag taken then is a frag taken before the match, which is
+why it is dropped rather than banked.
+
+The rank sort is what feeds the frags/place panel and the scoreboard's tie
+breaks, so it has to run on every change rather than on a timer, or the panel
+lags the kill by up to a second.
+=================
+*/
+void OSP_scoreChange(edict_t *who, int delta)
+{
+    if (!who || !who->client)
+        return;
+
+    if (sync_stat == 2)
+        return;
+
+    who->client->resp.score += delta;
+
+    if (sync_stat > 2) {
+        if (m_mode == 2)
+            OSP_playerTeamFrags(who);
+        OSP_DoRankSort();
+    }
+}
+
+// A team's frag total, asked by index for the same reason as the two switches
+// above: the rules row should not need osp_team_t to compare two numbers.
+int OSP_teamFrags(int team)
+{
+    if (team < 0 || team >= (int)q_countof(osp_teams))
+        return 0;
+    return osp_teams[team].osp_m0f8;
 }

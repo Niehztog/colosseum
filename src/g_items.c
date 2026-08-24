@@ -16,6 +16,7 @@ with this program; if not, write to the Free Software Foundation, Inc.,
 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
 */
 #include "g_local.h"
+#include "tourney/osp_hooks.h"
 #include "arena/arena.h"
 
 bool        Pickup_Weapon(edict_t *ent, edict_t *other);
@@ -52,9 +53,13 @@ void Weapon_ProxLauncher(edict_t *ent);
 //Rogue Weapons
 //=========
 
-static const gitem_armor_t jacketarmor_info = { 25,  50, .30f, .00f, ARMOR_JACKET};
-static const gitem_armor_t combatarmor_info = { 50, 100, .60f, .30f, ARMOR_COMBAT};
-static const gitem_armor_t bodyarmor_info   = {100, 200, .80f, .60f, ARMOR_BODY};
+// Not `static const`: OSP Tourney rewrites all three from its `armor_*` cvars
+// (R-OSP-1's per-match settings), so they have to be addressable and mutable.
+// Every other ruleset leaves them at these values, which are baseq2's, and the
+// only writer is OSP_parseString() -- gated, in src/tourney/.
+gitem_armor_t jacketarmor_info = { 25,  50, .30f, .00f, ARMOR_JACKET};
+gitem_armor_t combatarmor_info = { 50, 100, .60f, .30f, ARMOR_COMBAT};
+gitem_armor_t bodyarmor_info   = {100, 200, .80f, .60f, ARMOR_BODY};
 
 static int  jacket_armor_index;
 static int  combat_armor_index;
@@ -149,6 +154,14 @@ void DoRespawn(edict_t *ent)
             ((int)dmflags->value & DF_WEAPONS_STAY) &&
             master->item && (master->item->flags & IT_WEAPON)) {
             ent = master;
+        } else if (G_Ruleset() == RULESET_TOURNEY) {
+            // R-OSP-1: a referee can switch item classes off mid-match, and a
+            // switched-off member of a respawn team must not be the one that
+            // comes back.  The choice is tourney's because the thing being
+            // skipped is tourney's.
+            ent = OSP_pickRespawnMember(master);
+            if (!ent)
+                return;
         } else {
             for (count = 0, ent = master; ent; ent = ent->chain, count++)
                 ;
@@ -187,6 +200,17 @@ void DoRespawn(edict_t *ent)
 
 void SetRespawn(edict_t *ent, float delay)
 {
+    // R-OSP-1's fast respawn: everything except the two timed powerups comes
+    // back sooner on a busy server, scaled by the live player count clamped to
+    // [fast_minpbound, fast_maxpbound].  Quad and Invulnerability keep their
+    // fixed time -- a powerup whose respawn moved with the population would be
+    // a different game every round, which is the opposite of what a tourney
+    // ruleset is for.
+    if (G_Ruleset() == RULESET_TOURNEY && ent->classname &&
+        strcmp(ent->classname, "item_invulnerability") &&
+        strcmp(ent->classname, "item_quad"))
+        delay = OSP_respawnDelay(delay);
+
     ent->flags |= FL_RESPAWN;
     ent->svflags |= SVF_NOCLIENT;
     ent->solid = SOLID_NOT;
@@ -310,30 +334,46 @@ static bool Pickup_Bandolier(edict_t *ent, edict_t *other)
     return true;
 }
 
+// baseq2's ceilings: a pack raises each maximum TO AT LEAST its own number and
+// never lowers one.  Lifted out of Pickup_Pack so that the tourney arm, which
+// SETS the ceilings from cvars and may legally set them lower, is one line
+// beside one line rather than a branch wrapped round forty.
+static void pack_raise_ceilings(gclient_t *cl)
+{
+    if (cl->pers.max_bullets < 300)
+        cl->pers.max_bullets = 300;
+    if (cl->pers.max_shells < 200)
+        cl->pers.max_shells = 200;
+    if (cl->pers.max_rockets < 100)
+        cl->pers.max_rockets = 100;
+    if (cl->pers.max_grenades < 100)
+        cl->pers.max_grenades = 100;
+    if (cl->pers.max_cells < 300)
+        cl->pers.max_cells = 300;
+    if (cl->pers.max_slugs < 100)
+        cl->pers.max_slugs = 100;
+    // RAFAEL
+    if (cl->pers.max_magslug < 100)
+        cl->pers.max_magslug = 100;
+    //PMM
+    if (cl->pers.max_flechettes < 200)
+        cl->pers.max_flechettes = 200;
+    //pmm
+
+}
+
 static bool Pickup_Pack(edict_t *ent, edict_t *other)
 {
     const gitem_t   *item;
     int     index;
 
-    if (other->client->pers.max_bullets < 300)
-        other->client->pers.max_bullets = 300;
-    if (other->client->pers.max_shells < 200)
-        other->client->pers.max_shells = 200;
-    if (other->client->pers.max_rockets < 100)
-        other->client->pers.max_rockets = 100;
-    if (other->client->pers.max_grenades < 100)
-        other->client->pers.max_grenades = 100;
-    if (other->client->pers.max_cells < 300)
-        other->client->pers.max_cells = 300;
-    if (other->client->pers.max_slugs < 100)
-        other->client->pers.max_slugs = 100;
-    // RAFAEL
-    if (other->client->pers.max_magslug < 100)
-        other->client->pers.max_magslug = 100;
-    //PMM
-    if (other->client->pers.max_flechettes < 200)
-        other->client->pers.max_flechettes = 200;
-    //pmm
+    // R-OSP-1: under tourney the pack's ceilings are cvars (`pack_items`), so a
+    // referee can set what a pack is worth -- including lower than baseq2's,
+    // which is why it REPLACES the block above rather than adding to it.
+    if (G_Ruleset() == RULESET_TOURNEY)
+        OSP_packPlayer(other);
+    else
+        pack_raise_ceilings(other->client);
 
     item = FindItem("Bullets");
     if (item) {
@@ -860,9 +900,13 @@ static void Drop_Ammo(edict_t *ent, const gitem_t *item)
 
 void MegaHealth_think(edict_t *self)
 {
-    // CTF regeneration tech holds the overhealth instead of bleeding it off.
+    // CTF regeneration tech holds the overhealth instead of bleeding it off,
+    // and so do two of tourney's runes -- each up to its own ceiling, which is
+    // why this asks the ruleset rather than one predicate: `runes_regen_hmax`
+    // and `runes_vampire_max` are different numbers.
     if (self->owner->health > self->owner->max_health
-        && !CTFHasRegeneration(self->owner)) {
+        && !CTFHasRegeneration(self->owner)
+        && !(G_Ruleset() == RULESET_TOURNEY && OSP_runesHoldHealth(self->owner))) {
         self->nextthink = level.framenum + 1 * BASE_FRAMERATE;
         self->owner->health -= 1;
         return;
@@ -1099,6 +1143,12 @@ void Touch_Item(edict_t *ent, edict_t *other, cplane_t *plane, csurface_t *surf)
     if (CTFMatchSetup())
         return;
 
+    // Tourney's equivalent: nothing is pickable until the match is actually
+    // under way (`sync_stat` 4).  Warmup hands out its own loadout instead --
+    // OSP_warmupItems -- so a player cannot bank items before the countdown.
+    if (G_Ruleset() == RULESET_TOURNEY && sync_stat < 4)
+        return;
+
     taken = ent->item->pickup(ent, other);
 
     if (taken) {
@@ -1159,6 +1209,17 @@ void drop_temp_touch(edict_t *ent, edict_t *other, cplane_t *plane, csurface_t *
 void drop_make_touchable(edict_t *ent)
 {
     ent->touch = Touch_Item;
+
+    // A dropped rune lives a minute and then goes back into the rune pool
+    // rather than being freed: there are a fixed number of runes in a match and
+    // freeing one would take it out of the game (R-OSP-1).
+    if (G_Ruleset() == RULESET_TOURNEY && rune_stat &&
+        ent->item && (ent->item->flags & IT_RUNE)) {
+        ent->nextthink = level.framenum + 60 * BASE_FRAMERATE;
+        ent->think = OSP_runeThink;
+        return;
+    }
+
     if (deathmatch->value) {
         ent->nextthink = level.framenum + 29 * BASE_FRAMERATE;
         ent->think = G_FreeEdict;
@@ -1180,7 +1241,13 @@ edict_t *Drop_Item(edict_t *ent, const gitem_t *item)
     dropped->s.renderfx = RF_GLOW | RF_IR_VISIBLE;      // PGM
     VectorSet(dropped->mins, -15, -15, -15);
     VectorSet(dropped->maxs, 15, 15, 15);
-    gi.setmodel(dropped, dropped->item->world_model);
+    // All five runes share one mesh and are told apart by colour shell, so the
+    // model is a cvar rather than the item's own (R-OSP-1).
+    if (G_Ruleset() == RULESET_TOURNEY && rune_stat &&
+        (item->flags & IT_RUNE) && runes_model && runes_model->string[0])
+        gi.setmodel(dropped, runes_model->string);
+    else
+        gi.setmodel(dropped, dropped->item->world_model);
     dropped->solid = SOLID_TRIGGER;
     dropped->movetype = MOVETYPE_TOSS;
     dropped->touch = drop_temp_touch;
@@ -1295,6 +1362,16 @@ void droptofloor(edict_t *ent)
     }
 
     gi.linkentity(ent);
+
+    // R-OSP-1: an item class a referee has switched off is not freed, it is put
+    // on a respawn far past the end of any match -- which is what lets the same
+    // referee switch it back on and have it appear.  Freeing it would need the
+    // map reloaded.  A member of a respawn team goes away only if EVERY member
+    // is disabled, or the team would come back one item short.
+    if (G_Ruleset() == RULESET_TOURNEY && OSP_disableItems(ent)) {
+        if (!ent->team || !OSP_teamHasEnabled(ent->teammaster))
+            SetRespawn(ent, 65000);
+    }
 }
 
 /*
@@ -3118,6 +3195,120 @@ const gitem_t itemlist[] = {
         .flags              = IT_TECH,
         .precaches          = (const char *const[]) {
             "ctf/tech4.wav",
+            NULL
+        },
+    },
+
+    //
+    // OSP Tourney's five runes (R-OSP-1).  They are itemlist entries rather
+    // than a parallel system for the same reason CTF's techs are: a rune is
+    // picked up, carried in the inventory, dropped on death and respawned by
+    // the item code, and every one of those verbs already exists here.
+    //
+    // Two things are deliberate.  All five share one world model -- the donor
+    // draws them apart by colour shell rather than by mesh, which is why
+    // `runes_model` can override it at spawn time (Drop_Item) -- and the
+    // `quantity` values 22..26 are the donor's rune ids, which osp_runes.c
+    // indexes by, not a count.  IT_RUNE is the flag that keeps them out of
+    // every inventory sweep that means "weapons and ammo".
+    //
+
+    /*QUAKED item_rune1 (.3 .3 1) (-16 -16 -16) (16 16 16)
+    Resistance rune: takes less damage.
+    */
+    {
+        .classname          = "item_rune1",
+        .pickup             = OSP_Pickup_Rune,
+        .drop               = OSP_Drop_Rune,
+        .pickup_sound       = "items/pkup.wav",
+        .world_model        = "models/items/c_head/tris.md2",
+        .world_model_flags  = EF_ROTATE | EF_COLOR_SHELL,
+        .pickup_name        = "Resist_Rune",
+        .count_width        = 2,
+        .quantity           = 22,
+        .flags              = IT_RUNE,
+        .precaches          = (const char *const[]) {
+            "world/force2.wav",
+            NULL
+        },
+    },
+
+    /*QUAKED item_rune2 (.3 .3 1) (-16 -16 -16) (16 16 16)
+    Strength rune: deals more damage.
+    */
+    {
+        .classname          = "item_rune2",
+        .pickup             = OSP_Pickup_Rune,
+        .drop               = OSP_Drop_Rune,
+        .pickup_sound       = "items/pkup.wav",
+        .world_model        = "models/items/c_head/tris.md2",
+        .world_model_flags  = EF_ROTATE | EF_COLOR_SHELL,
+        .pickup_name        = "Strength_Rune",
+        .count_width        = 2,
+        .quantity           = 23,
+        .flags              = IT_RUNE,
+        .precaches          = (const char *const[]) {
+            "items/damage3.wav",
+            NULL
+        },
+    },
+
+    /*QUAKED item_rune3 (.3 .3 1) (-16 -16 -16) (16 16 16)
+    Haste rune: fires faster.
+    */
+    {
+        .classname          = "item_rune3",
+        .pickup             = OSP_Pickup_Rune,
+        .drop               = OSP_Drop_Rune,
+        .pickup_sound       = "items/pkup.wav",
+        .world_model        = "models/items/c_head/tris.md2",
+        .world_model_flags  = EF_ROTATE | EF_COLOR_SHELL,
+        .pickup_name        = "Haste_Rune",
+        .count_width        = 2,
+        .quantity           = 24,
+        .flags              = IT_RUNE,
+        .precaches          = (const char *const[]) {
+            "world/x_light.wav",
+            NULL
+        },
+    },
+
+    /*QUAKED item_rune4 (.3 .3 1) (-16 -16 -16) (16 16 16)
+    Regeneration rune: heals over time, past max_health.
+    */
+    {
+        .classname          = "item_rune4",
+        .pickup             = OSP_Pickup_Rune,
+        .drop               = OSP_Drop_Rune,
+        .pickup_sound       = "items/pkup.wav",
+        .world_model        = "models/items/c_head/tris.md2",
+        .world_model_flags  = EF_ROTATE | EF_COLOR_SHELL,
+        .pickup_name        = "Regen_Rune",
+        .count_width        = 2,
+        .quantity           = 25,
+        .flags              = IT_RUNE,
+        .precaches          = (const char *const[]) {
+            "items/l_health.wav",
+            NULL
+        },
+    },
+
+    /*QUAKED item_rune5 (.3 .3 1) (-16 -16 -16) (16 16 16)
+    Vampire rune: heals the carrier by what it takes off the target.
+    */
+    {
+        .classname          = "item_rune5",
+        .pickup             = OSP_Pickup_Rune,
+        .drop               = OSP_Drop_Rune,
+        .pickup_sound       = "items/pkup.wav",
+        .world_model        = "models/items/c_head/tris.md2",
+        .world_model_flags  = EF_ROTATE | EF_COLOR_SHELL,
+        .pickup_name        = "Vampire_Rune",
+        .count_width        = 2,
+        .quantity           = 26,
+        .flags              = IT_RUNE,
+        .precaches          = (const char *const[]) {
+            "makron/pain2.wav",
             NULL
         },
     },

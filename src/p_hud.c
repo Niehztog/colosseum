@@ -18,6 +18,7 @@ with this program; if not, write to the Free Software Foundation, Inc.,
 
 #include "g_local.h"
 #include "arena/arena.h"
+#include "tourney/p_menu.h"
 
 /*
 ===============================================================================
@@ -37,22 +38,33 @@ computer -- and because neither belongs inside any one donor's engine.
 // a menu it did not open.
 void G_MenuClose(edict_t *ent)
 {
+    menu_owner_t who;
+
     if (!ent->client)
         return;
 
-    switch (ent->client->menu_owner) {
+    // The owner is cleared BEFORE the engine's own close runs, not after,
+    // because an engine that draws into the statusbar has to put the real bar
+    // back on the way out and DisplayMenu() decides which bar that is by asking
+    // this field.  With the order the other way round it would redraw the menu
+    // it was closing.
+    who = ent->client->menu_owner;
+    ent->client->menu_owner = MENU_NONE;
+
+    switch (who) {
     case MENU_CTF:
         ctf_PMenu_Close(ent);
         break;
     case MENU_ARENA:
         ra_MenuClose(ent);
         break;
-    case MENU_TOURNEY:      // Phase 5
+    case MENU_TOURNEY:
+        osp_PMenu_Close(ent);
+        break;
     case MENU_BOT:          // Phase 6
     case MENU_NONE:
         break;
     }
-    ent->client->menu_owner = MENU_NONE;
 }
 
 void G_MenuOpen(edict_t *ent, menu_owner_t who)

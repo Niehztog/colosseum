@@ -18,6 +18,10 @@
 static ruleset_t    g_active_ruleset = RULESET_DM;
 static bool         g_modifier[MOD_COUNT];
 static bool         g_layer[LAYER_COUNT];
+
+// R-COMPAT-6, and see reconcile above: one pair, two donors.
+cvar_t             *g_statsfile;
+cvar_t             *g_statsname;
 static const ruleset_ops_t *g_active_ops;
 
 static const char *ruleset_names[RULESET_COUNT] = {
@@ -74,12 +78,13 @@ static const ruleset_ops_t ops_sp = {
 };
 
 extern const ruleset_ops_t ops_arena;    // src/arena/arena.c
+extern const ruleset_ops_t ops_tourney;  // src/tourney/osp_main.c
 
 static const ruleset_ops_t *ruleset_ops[RULESET_COUNT] = {
     [RULESET_DM]      = &ops_dm,
     [RULESET_CTF]     = &ops_ctf,   // src/ctf/g_ctf.c
     [RULESET_ARENA]   = &ops_arena, // src/arena/arena.c
-    [RULESET_TOURNEY] = NULL,       // Phase 5
+    [RULESET_TOURNEY] = &ops_tourney, // src/tourney/osp_main.c
     [RULESET_SP]      = &ops_sp,
 };
 
@@ -243,6 +248,17 @@ void G_InitRuleset(void)
     // Phase 6 sets this from the bot layer.  Until then no bot can exist, so
     // claiming otherwise would make G_BotsAllowed() lie.
     g_modifier[MOD_BOTS]     = false;
+
+    // R-COMPAT-6: `statsfile` and `statsname` are registered ONCE, here, with a
+    // default chosen by the ruleset that will use them.  Both donors ship a
+    // local-file statistics log (R-RA-7, R-OSP-3) and both named their cvars
+    // the same, with different defaults -- which is a cvar whose value depends
+    // on which translation unit happened to register it first.  Resolution owns
+    // the pair because resolution is what decides which log is going to run.
+    g_statsfile = gi.cvar("statsfile", "1", 0);
+    g_statsname = gi.cvar("statsname",
+                          g_active_ruleset == RULESET_ARENA ? "ra2stats.jsonl"
+                          : "osptourney.jsonl", 0);
 
     for (int m = 0; m < MOD_COUNT; m++) {
         if (g_modifier[m] && !modifier_ok[m][g_active_ruleset]) {

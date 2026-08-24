@@ -67,7 +67,6 @@ void        MenuNext(edict_t *ent);
 void        MenuPrev(edict_t *ent);
 void        UseMenu(edict_t *ent, int arg);
 bool    MenuThink(edict_t *ent);
-void        clear_menus(edict_t *ent);
 // MENU_ARENA's row in G_MenuClose()'s switch (R-MENU-2a).
 void        ra_MenuClose(edict_t *ent);
 
