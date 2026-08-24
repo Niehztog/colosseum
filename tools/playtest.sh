@@ -32,6 +32,10 @@
 #                             /usr/share/games/quake2/baseq2
 #   $CTFDATA                  Threewave paks,      default
 #                             /usr/share/games/quake2/ctf
+#   $GLADDIR                  gladiator-bot-restored, default ../gladiator-bot-restored.
+#                             Phase 7's bot rows need a BRAIN as well as a
+#                             server: without it they are skipped, and the skip
+#                             is reported rather than silently subtracted.
 #
 # USAGE
 #   tools/playtest.sh [-r dm,ctf,arena,tourney,sp] [-l <game.so>] [extra args]
@@ -41,6 +45,7 @@ HARNESS=${HARNESS:-$HOME/.claude/skills/q2-playtest/harness}
 Q2PRO_BUILD=${Q2PRO_BUILD:-$(dirname "$0")/../../q2pro/builddir-native}
 Q2DATA=${Q2DATA:-/usr/share/games/quake2/baseq2}
 CTFDATA=${CTFDATA:-/usr/share/games/quake2/ctf}
+GLADDIR=${GLADDIR:-$(dirname "$0")/../../gladiator-bot-restored}
 LIB=release/game$(uname -m | sed -e 's/^x86_64$/x86_64/' -e 's/^aarch64$/arm64/').so
 RULESETS=dm,ctf,arena,tourney,sp
 
@@ -60,7 +65,13 @@ die() { echo "playtest.sh: $*" >&2; exit 1; }
 
 LIB=$(cd "$(dirname "$LIB")" && pwd)/$(basename "$LIB")
 
+GLAD=""
+if [ -f "$GLADDIR/release/gladiator.so" ]; then
+  GLAD=$(cd "$GLADDIR" && pwd)
+fi
+
 cd "$HARNESS"
 exec go run ./scenarios/colosseum \
   -q2proded "$(cd "$OLDPWD" && cd "$Q2PRO_BUILD" && pwd)/q2proded" \
-  -lib "$LIB" -ref "$Q2DATA" -ctf "$CTFDATA" -rulesets "$RULESETS" "$@"
+  -lib "$LIB" -ref "$Q2DATA" -ctf "$CTFDATA" -gladdir "$GLAD" \
+  -rulesets "$RULESETS" "$@"

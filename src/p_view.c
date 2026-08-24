@@ -17,6 +17,8 @@ with this program; if not, write to the Free Software Foundation, Inc.,
 */
 
 #include "g_local.h"
+#include "bot/p_menulib.h"
+#include "bot/bl_debug.h"
 #include "tourney/osp_hooks.h"
 #include "m_player.h"
 #include "arena/arena.h"
@@ -1157,7 +1159,7 @@ void ClientEndServerFrame(edict_t *ent)
         // which is how tourney's cameras show the tracked player's HUD instead
         // of the watcher's own.  resp.osp_r000 is the cached count of watchers
         // and is recomputed here, so a viewer who left stops being copied to.
-        if (ent->client->resp.entered == ENTERED_ENTERED &&
+        if (ent->client->resp.osp_entered == ENTERED_ENTERED &&
             ent->client->resp.osp_r000 && !level.intermission_framenum) {
             int count = 0;
 
@@ -1223,8 +1225,47 @@ void ClientEndServerFrame(edict_t *ent)
     VectorClear(ent->client->kick_origin);
     VectorClear(ent->client->kick_angles);
 
+    // R-BOT-27: the bounding box follows the entity it outlines, so it is
+    // re-laid every frame it is up.  Here rather than in the entity loop
+    // because the origin this reads is the one this function has just settled.
+    // Before the bot arm below, not after: the box is drawn AROUND a bot, for a
+    // human watching, so it is the one layout-adjacent thing a bot still needs.
+    if (ent->box.created)
+        SetVisibleBoundingBox(&ent->box, ent);
+
+    // R-MENU-4's second half, the v0.91 fix: "added ent->client->showscores set
+    // to false for bots in ClientEndServerFrame in p_view.c".  A bot has no
+    // screen, so every layout composed for one is a scoreboard nobody reads
+    // followed by a unicast to a fake client -- which is also why v0.91's next
+    // line removed unicast messages for bots from the redirection.
+    //
+    // The donor knew ONE layout owner and could clear ONE field.  This tree has
+    // four menu engines and RA2's `scoremode` in place of `showscores`
+    // (sec 7 rule 3), so the requirement is expressed as what it means -- a bot
+    // is never sent a layout -- rather than as the donor's single assignment.
+    // Arena is where it stops being cosmetic: init_player() opens the team menu
+    // for every connecting client, so without this every bot on an arena server
+    // repaints a menu it cannot operate every 32 frames.
+    if (ent->flags & FL_BOT) {
+        ent->client->showscores = false;
+        if (G_Ruleset() == RULESET_ARENA)
+            ent->client->scoremode = 0;
+        return;
+    }
+
     if (G_Ruleset() == RULESET_ARENA && MenuThink(ent))
         return;
+
+    // R-BOT-28: the Gladiator menu redraws on its OWN cadence -- every 16
+    // frames from bot_MenuThink, plus immediately after any cursor move -- so
+    // it is not inside the 32-frame scoreboard block below.  It writes a
+    // complete unicast of its own, which is why it comes before the block
+    // rather than inside it: two svc_layout messages in one frame would leave
+    // the client drawing whichever arrived last.
+    if (ent->client->menu_owner == MENU_BOT) {
+        bot_MenuShow(ent);
+        return;
+    }
 
     // if the scoreboard is up, update it.  `scoremode` is RA2's replacement for
     // baseq2's `showscores` bool and the merged struct keeps both (sec 7 rule

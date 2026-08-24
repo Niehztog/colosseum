@@ -209,7 +209,7 @@ PE_SHLIBLDFLAGS = -shared
 # landed the target went away rather than becoming a permanent second build,
 # which is what R-VER-26 asked for.
 TOURNEY_SRC = \
-	tourney/osp_acc.c tourney/osp_botseam.c tourney/osp_clientcmd.c \
+	tourney/osp_acc.c tourney/osp_clientcmd.c \
 	tourney/osp_cmds.c \
 	tourney/osp_config.c \
 	tourney/osp_detect.c tourney/osp_display.c tourney/osp_hiscore.c \
@@ -219,10 +219,25 @@ TOURNEY_SRC = \
 	tourney/osp_teams.c tourney/p_camera.c tourney/p_menu.c \
 	tourney/sl_write.c tourney/stdlog.c
 
+# src/bot/ -- the Gladiator Bot SDK glue (R-BOT-1..30), linked as of spec 1.22.
+# Six files are osp-tourney's already-ported bl_*.c and two are the Gladiator
+# reconstruction's menu, which osp-tourney cannot supply because it moved its
+# bot menu onto id's PMenu (R-BOT-28).
+#
+# `tourney/osp_botseam.c` is GONE, not edited: it defined BotServerCommand,
+# BotDestroy, AddRandomBot, CheckForNewBotFile, botglobals, botlist and
+# old_botcount as no-ops behind !G_BotsAllowed(), and bl_redirgi.c, bl_spawn.c
+# and bl_botcfg.c define all seven for real.  The early-out is what kept the
+# swap honest (doc/reconciliation.md R-86).
+BOT_SRC = \
+	bot/bl_botcfg.c bot/bl_cmd.c bot/bl_debug.c bot/bl_main.c \
+	bot/bl_redirgi.c bot/bl_spawn.c \
+	bot/p_botmenu.c bot/p_menulib.c
+
 GAME_SRC = \
 	g_ai.c g_chase.c g_cmds.c g_combat.c g_func.c g_items.c g_main.c \
 	g_misc.c g_monster.c g_phys.c g_ptrs.c g_save.c g_spawn.c g_svcmds.c \
-	g_ruleset.c g_stats.c \
+	g_ruleset.c g_stats.c g_fs.c \
 	g_target.c g_trigger.c g_turret.c g_utils.c g_weapon.c \
 	m_actor.c m_berserk.c m_boss2.c m_boss3.c m_boss31.c m_boss32.c \
 	m_brain.c m_chick.c m_flipper.c m_float.c m_flyer.c m_gladiator.c \
@@ -242,6 +257,8 @@ GAME_SRC = \
 	\
 	arena/arena.c arena/gslog.c arena/maploop.c arena/menu.c \
 	arena/ra2menus.c arena/ra2stats.c \
+	\
+	$(BOT_SRC) \
 	\
 	$(TOURNEY_SRC)
 
@@ -324,15 +341,20 @@ check: check-ptrs check-audits
 # R-SAVE-2 / R-BUILD-4: genptr.py runs over the whole tree as a build step and a
 # stale g_ptrs.c is a build failure, not a warning.  The committed file must be
 # exactly what the generator produces from the current sources.
+# The scratch file carries the shell's PID, because `everything` builds five
+# configurations and each one depends on `check`: under `make -j` all five run
+# this recipe at once, into one file, and read back whatever the last writer
+# left.  It reported g_ptrs.c stale against a diff that showed no differences,
+# which is the signature of the race rather than of a finding.
 check-ptrs:
-	@cd src && $(PYTHON) genptr.py $(PTR_SRC) > .g_ptrs.gen \
-		&& if cmp -s g_ptrs.c .g_ptrs.gen; then \
-			rm -f .g_ptrs.gen; \
+	@cd src && $(PYTHON) genptr.py $(PTR_SRC) > .g_ptrs.gen.$$$$ \
+		&& if cmp -s g_ptrs.c .g_ptrs.gen.$$$$; then \
+			rm -f .g_ptrs.gen.$$$$; \
 		else \
 			echo "*** g_ptrs.c is stale (R-SAVE-2).  Regenerate it:"; \
 			echo "***   cd src && python3 genptr.py $(PTR_SRC) > g_ptrs.c"; \
-			diff -u g_ptrs.c .g_ptrs.gen | head -40; \
-			rm -f .g_ptrs.gen; \
+			diff -u g_ptrs.c .g_ptrs.gen.$$$$ | head -40; \
+			rm -f .g_ptrs.gen.$$$$; \
 			exit 1; \
 		fi
 

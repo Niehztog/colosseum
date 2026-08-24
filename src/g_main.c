@@ -21,6 +21,11 @@ with this program; if not, write to the Free Software Foundation, Inc.,
 #include "arena/arena.h"
 #include "arena/ra2stats.h"
 #include "tourney/osp_types.h"
+#include "bot/bl_main.h"
+#include "bot/bl_spawn.h"
+#include "bot/bl_redirgi.h"
+#include "bot/bl_botcfg.h"
+#include "bot/p_botmenu.h"
 
 game_locals_t   game;
 level_locals_t  level;
@@ -138,6 +143,12 @@ static void ShutdownGame(void)
             OSP_logAdminLog("Shutdown: %s", reason);
     }
 
+    // R-BOT-3: every bot is destroyed and every library unloaded here, and in
+    // that order -- the brain gets a shutdown per client while its library is
+    // still mapped.  Before the FreeTags below, which would otherwise pull the
+    // bot states out from under BotDestroy.
+    BotShutdown();
+
     memset(&game, 0, sizeof(game));
 
     gi.FreeTags(TAG_LEVEL);
@@ -250,6 +261,18 @@ static void InitGame(void)
     // the first map load.
     G_InitRuleset();
 
+    // `game.maxclients` is settled HERE, not beside the allocation below, and
+    // that is R-47's ordering again rather than tidiness.  OSP_gameInit clamps
+    // `team_maxplayers` to `game.maxclients / 2` if two full teams would not
+    // fit, and the donor runs it AFTER this assignment (g_main.c:210 then 216).
+    // The merge put the tourney block above it, so the clamp read 0, set
+    // `team_maxplayers` to 0, and OSP_addTeamMember then refused every join
+    // with "Sorry, both teams are full!" -- which for a bot is BotDestroy, so
+    // a `match_mode 2` server destroyed every bot the moment it tried to join
+    // and printed the reason to nobody.  The allocation stays below because
+    // that is where `game.clients` is wanted; the int is what the init reads.
+    game.maxclients = maxclients->value;
+
     // OSP Tourney's own init: the map list, the match system's globals and the
     // Standard Log (R-OSP-1, R-OSP-3).  After resolution for the same reason
     // RA2's is -- both are per-ruleset writers and only one owner may be live.
@@ -311,8 +334,8 @@ static void InitGame(void)
     globals.edicts = g_edicts;
     globals.max_edicts = game.maxentities;
 
-    // initialize all clients for this game
-    game.maxclients = maxclients->value;
+    // initialize all clients for this game.  `game.maxclients` was settled
+    // above, before the ruleset inits that read it.
     game.clients = gi.TagMalloc(game.maxclients * sizeof(game.clients[0]), TAG_GAME);
 
     if (G_Ruleset() == RULESET_ARENA) {
@@ -331,6 +354,21 @@ static void InitGame(void)
     }
 
     globals.num_edicts = game.maxclients + 1;
+
+    // The bot layer, last: BotSetup allocates one bot state per client slot and
+    // the index tables from game.csr, so it needs both game.maxclients and the
+    // configstring remap to be settled (R-BOT-11).  The menu tree is built here
+    // rather than per level because it is TAG_GAME and because the ruleset and
+    // the content layers -- which is what chooses its submenus -- are latched
+    // (R-BOT-28).
+    BotSetup();
+    bot_MenuCreate();
+
+    // R-88's decision, last of all: the `runes` modifier is DERIVED from the
+    // switch the ruleset's own code reads, and that switch -- tourney's
+    // `runes_enable` -- is registered by OSP_gameInit above.  See
+    // G_ResolveModifiers() in g_ruleset.c for why it is a second pass.
+    G_ResolveModifiers();
 }
 
 /*
@@ -344,6 +382,13 @@ and global variables
 q_exported game_export_t *GetGameAPI(game_import_t *import)
 {
     gi = *import;
+
+    // R-BOT-9: IMMEDIATELY after `gi = *import` and before anything else.
+    // BotRedirectGameImport keeps a private copy of the engine's table and
+    // overwrites twenty slots of `gi` with interceptors, so anything that read
+    // `gi` before this line would hold the unredirected function and the bots
+    // would not observe it.  Nothing between the two lines, by construction.
+    BotRedirectGameImport();
 
     globals.apiversion = GAME_API_VERSION;
     globals.Init = InitGame;
@@ -369,6 +414,36 @@ q_exported game_export_t *GetGameAPI(game_import_t *import)
     globals.edict_size = sizeof(edict_t);
 
     return &globals;
+}
+
+/*
+=================
+GetGameAPIEx
+
+Q2PRO's extended entry point (sec 5.7).  Guaranteed to be called after
+GetGameAPI and before Init, and the structure it hands over stays valid for as
+long as the library is loaded, so it is kept by pointer rather than copied.
+
+Colosseum implements no game_export_ex_t entry point yet -- CanSave() is the
+one it will want, because R-ENG-6 forbids saving while a bot exists and the
+engine is the only thing that can be told so before the file is opened.  That
+lands with the savegame work; declaring the table now is what makes the import
+side reachable, and an all-NULL export table is what the header asks for.
+=================
+*/
+// Not static: src/g_fs.c is what reaches through it, and one entry point owning
+// a pointer that another file needs is what a declaration in g_local.h is for.
+const game_import_ex_t *gex;
+
+static const game_export_ex_t globals_ex = {
+    .apiversion = GAME_API_VERSION_EX,
+    .structsize = sizeof(globals_ex),
+};
+
+q_exported const game_export_ex_t *GetGameAPIEx(const game_import_ex_t *import)
+{
+    gex = import;
+    return &globals_ex;
 }
 
 #ifndef GAME_HARD_LINKED
@@ -635,6 +710,13 @@ static void G_RunFrame(void)
     if (G_Ruleset() == RULESET_TOURNEY)
         OSP_frameStart();
 
+    // R-BOT-20 steps 1 and 2.  A queued bot is created here rather than inside
+    // SpawnEntities or a ClientConnect (R-BOT-18), and the brain is told the
+    // frame has started before anything in the world moves.
+    AddQueuedBots();
+    if (botglobals.numbots > 0)
+        BotLib_BotStartFrame(level.time);
+
     // choose a client for monsters to target this frame
     AI_SetSightClient();
 
@@ -659,7 +741,12 @@ static void G_RunFrame(void)
 
         level.current_entity = ent;
 
-        if (!(ent->s.renderfx & RF_BEAM))
+        // R-BOT-20 step 3.  A debug line stores its far END in old_origin
+        // (bl_debug.c), so overwriting it with the origin every frame collapses
+        // every line the brain draws to a point.  RF_BEAM already covers the
+        // SDK's own lines; FL_OLDORGNOTSET is the flag it sets alongside, for
+        // anything that carries the same trick without the render flag.
+        if (!(ent->s.renderfx & RF_BEAM) && !(ent->flags & FL_OLDORGNOTSET))
             VectorCopy(ent->s.origin, ent->s.old_origin);
 
         // if the ground entity moved, make sure we are still on it
@@ -686,6 +773,13 @@ static void G_RunFrame(void)
         return;
     }
 
+    // R-BOT-20 steps 4, 5 and 6.  After the entity loop, because the brain is
+    // entitled to a complete world snapshot, and before the rules check,
+    // because a bot added by CheckMinimumPlayers this frame should be counted
+    // by the fraglimit test that follows.
+    BotRunFrame();
+    CheckMinimumPlayers();
+
     // see if it is time to end a deathmatch
     // R-MODE-5: the match-rules gate.  dm checks fraglimit and timelimit, ctf
     // adds capturelimit, arena runs its round state machine, tourney its match
@@ -701,6 +795,11 @@ static void G_RunFrame(void)
 
     // A pause asked for during this frame takes effect after it: freezing
     // mid-frame would leave half the entities thought and half not.
-    if (G_Ruleset() == RULESET_TOURNEY)
+    if (G_Ruleset() == RULESET_TOURNEY) {
+        // R-OSP-11: `bots_warmuptime` readies bots up.  After the rules check,
+        // because readying the last outstanding client starts the match and
+        // that must be this frame's last word about the match state.
+        OSP_botReady();
         OSP_frameEnd();
+    }
 }

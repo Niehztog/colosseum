@@ -140,7 +140,7 @@ typedef struct {
 
 // Two popup-menu layout slots.  <invented names>.
 
-// The values of resp.entered.
+// The values of resp.osp_entered.
 #define ENTERED_ENTERED         1
 
 // The bits of `rune_stat`, the cached `runes_enable` value.  <invented names>.
@@ -251,7 +251,6 @@ extern  cvar_t  *camera_depth;
 extern  cvar_t  *client_hud;
 extern  cvar_t  *damage_railgun;
 extern  cvar_t  *match_type;
-extern  cvar_t  *hook_enable;
 extern  cvar_t  *client_protect;
 extern  cvar_t  *team_hurtteam;
 extern  cvar_t  *team_hurtself;
@@ -328,7 +327,6 @@ extern  int     conf_size;
 extern  int     blink_on_count;
 extern  int     blink_off_count;
 extern  cvar_t  *runes_enable;  // 4-byte cvar_t* -- OSP_endClean reloads rune_stat from it
-extern  int     old_botcount;   // bl_spawn.c's CheckMinimumPlayers guard; OSP_endClean resets it
 extern  int     bots_delaytime;
 extern  int     bots_loadstat;
 extern  int     client_maxframes;
@@ -344,7 +342,6 @@ extern  int     time_update;
 extern  int     time_blink;
 extern  int     start_suddendeath;
 extern  int     vote_frametime;
-extern  int     bots_votedin;
 extern  int     vote_item;
 extern  int     vote_yea;
 extern  int     vote_nay;
@@ -590,7 +587,11 @@ void     OSP_allnotready_svcmd(bool announce);
 void     OSP_rmpause_cmd(void);
 void     OSP_rstopmatch_cmd(edict_t *ent);
 void     OSP_playerlist_svcmd(void);
-bool BotCmd(char *cmd, edict_t *ent, int server);
+// `BotCmd` was declared here, by the donor, with `char *` where the SDK's own
+// bl_cmd.h says `const char *`.  R-OSP-5's shape a third time -- a name
+// declared outside the header that owns it -- and this one had a signature that
+// disagreed as well.  Nothing in src/tourney/ calls it; the two call sites are
+// g_svcmds.c and g_cmds.c, and both include bot/bl_cmd.h.
 void     PlayerDied(edict_t *ent);
 void     PlayerResetGrapple(edict_t *ent);
 void     ResetGrapple(edict_t *self);

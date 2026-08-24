@@ -29,9 +29,12 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "tourney/osp_types.h"
 #include "bot/bl_main.h"
 #include "bot/bl_botcfg.h"
-// The two bot entry points, until Phase 6 -- see src/tourney/osp_botseam.c.
-void BotServerCommand(char *str, ...);
-void BotDestroy(edict_t *bot);
+// The two bot entry points, from the headers that own them.  Until Phase 6
+// these were re-declared here, which is the very shape R-OSP-5 names: a donor's
+// name declared outside the header that declares it.  The seam file they
+// resolved to is gone.
+#include "bot/bl_redirgi.h"
+#include "bot/bl_spawn.h"
 
 // The alternate server configs, loaded from configs.txt: conf_name[i] is the
 // .cfg filename and conf_info[i] an optional friendly description.  Either one

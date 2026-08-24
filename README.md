@@ -33,24 +33,39 @@ full Rocket Arena 2 — but the notice ships with any line of it that survives.
 
 ## Status
 
-**Phase 0 of nine.** The specification is complete and settled;
-`SPECS.md` is the specification of record and every requirement carries a stable
-ID that code, commits and review notes reference.
+**Phase 6 of nine.** `SPECS.md` is the specification of record and every
+requirement carries a stable ID that code, commits and review notes reference;
+`doc/reconciliation.md` records every decision the merges needed and why.
 
-What exists today:
+What plays today, from one library, chosen by `g_ruleset`:
 
-* `src/` — the pristine Q2PRO baseq2 game library, 72 files, byte-identical to
-  the pinned upstream tree except the regenerated `g_ptrs.c`
-* `inc/` — Q2PRO's engine headers, vendored verbatim
-* a five-target build (`Makefile`) and an in-tree Q2PRO build (`meson.build`)
-* `tools/` — the replay and audit toolchain, wired into the build so a contract
-  violation fails it
-* `vendor/` — the replay bundles and the rescued harness state that make the
-  provenance auditable
-* `doc/` — provenance, the reconciliation ledger, and the replay-coverage ledger
+| ruleset | what it is |
+|---|---|
+| `dm` | baseq2 deathmatch |
+| `ctf` | Threewave Capture The Flag 1.52 |
+| `arena` | Rocket Arena 2 v2.25 |
+| `tourney` | OSP Tourney DM v2.75 |
+| `sp` | the three campaigns — baseq2, The Reckoning, Ground Zero — single and co-op |
 
-No donor has been merged yet. There are no bots yet. It builds a game library
-that plays baseq2.
+`xatrix` and `rogue` are content layers, orthogonal to all five and valid with
+any of them.
+
+**And bots.** `src/bot/` is the game side of Mr. Elusive's botlib: it loads the
+brain dynamically, redirects twenty slots of the game import so the brain sees
+everything the game does, spawns fake clients, drives them through the frame
+loop and gives them the 1999 command set and menu. On `q2dm1` under `dm` they
+load, spawn, navigate and fight.
+
+On `q2dm1` under `dm` they load, spawn, navigate, fight and chat. Bots in `ctf`,
+`arena` and `tourney` — team assignment, arena rosters, the tourney queue — are
+Phase 7's; they do spawn and are removed cleanly in all four rulesets today.
+
+The brain is a sibling repository, `gladiator-bot-restored`, built for whichever
+platform the game targets. The interface between the two is
+`doc/botlib-contract.md`, at version 3, and `tools/botabi.py` checks it in
+`make check`: every slot, the preprocessor condition that selects `Trace`, and
+every struct size — the last by compiling a probe against the brain's own
+headers rather than trusting a number in a document.
 
 ## Building
 
@@ -77,12 +92,32 @@ in the `Makefile` with the count it silences. `_FORTIFY_SOURCE=2` is on for
 release builds under `gcc`; it cannot be used with `clang`, for a reason worth
 reading in the `Makefile` if you ever name a struct member `dprintf`.
 
-The four contract audits run as part of the build, not on request, and a finding
-fails it the way a warning does.
+The contract audits run as part of the build, not on request, and a finding
+fails it the way a warning does. Seventeen of them, each with a positive control
+that makes it fail — `tools/audit.py --help`, and §10 of `SPECS.md` for what
+each one is for.
 
 Requires: a C compiler, `python3`, and `make`. Cross targets additionally need
 `gcc-x86-64-linux-gnu`, `gcc-i686-linux-gnu`, `gcc-mingw-w64-i686` and
 `gcc-mingw-w64-x86-64`.
+
+### Running the checks that need a server
+
+`make check` is static. Four scripts drive a real `q2proded`, and none of them
+is part of the build because each needs a built engine, retail paks and a
+minute or more:
+
+```sh
+tools/bootmatrix.sh   # 20 rows: every ruleset x xatrix x rogue boots and reports back
+tools/smoke.sh        # one map per ruleset, with a savegame round trip
+tools/playtest.sh     # 139 assertions through headless clients (needs the q2-playtest skill)
+tools/botmatrix.sh    # 1 and 16 bots per ruleset, spawned, played and removed
+```
+
+Every one takes `--control`, or ships its controls inline: a check that has
+never failed is not trusted (§10, R-VER-9). `tools/botmatrix.sh` additionally
+needs a brain — `gladiator-bot-restored/botlib` built for this platform, its
+`bots.cfg`, and an `.aas` per map — and `GLADDIR` says where to find it.
 
 ## Installing
 

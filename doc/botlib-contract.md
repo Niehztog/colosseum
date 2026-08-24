@@ -3,10 +3,10 @@
 Deliverable D5. The authoritative copy of the ABI and the libvar contract;
 SPECS.md Appendix A is a quick reference and this file wins where they differ.
 
-**Nothing in this file is implemented yet.** The bot layer is Phase 6. This is
-the frozen-by-agreement description the implementation will be checked against,
-recorded now because R-BOT-1 makes the interface *versioned rather than frozen*
-and a version needs a document to be a version of.
+**Implemented in Phase 6, spec 1.22.** `src/bot/` is the game side and
+`gladiator-bot-restored/botlib` is the brain; `tools/botabi.py` compares the two
+headers in `make check` (R-VER-28), because the two mitigations this file lists
+below cannot see the one thing that went wrong.
 
 ## Versioning (R-BOT-1)
 
@@ -20,7 +20,9 @@ now that both sides compile from source.
 
 | version | change | landed |
 |---|---|---|
-| — | initial contract, taken from `osp-tourney`'s already-ported `botlib.h` including its `const`-ification of the `PointContents` slot | Phase 6 |
+| 1 | initial contract, taken from `osp-tourney`'s already-ported `botlib.h` including its `const`-ification of the `PointContents` slot | Phase 6 |
+| **3** | **the `Trace` slot's 64-bit spelling is WITHDRAWN — by value on every target, which is what the published contract always said.** Upstream removed all three branches (`gladiator-bot-restored 57ce85a3`) and the reason is better than version 2's match: the branch was only sound while both sides were the same project's, because `game/botlib.h` — the header a foreign engine builds against — was never branched. By value is also the faithful 1999 spelling and the only form that reproduces `gladi386.so`'s trace thunk. `tools/botabi.py` reported the divergence on the first run after the update, which is what R-VER-28 exists for | Phase 6, spec 1.22 |
+| **2** | *superseded by 3 after eleven hours.* **the `Trace` slot gains its 64-bit spelling.** `bsp_trace_t` is 88 bytes, so the caller always passes a hidden return buffer; on 32-bit that buffer IS the first visible argument and the two spellings are the same ABI, and on x86-64 and aarch64 it is a hidden register (`rax` / `x8`) and they are **different** ABIs. Version 1 carried only the 32-bit form, because `osp-tourney` — the port R-BOT-1 says to take it from — is a 32-bit port. Both sides now select with `#if defined(__x86_64__) \|\| defined(__aarch64__)`, and the condition is identical on both sides *by check*, not by intent | Phase 6, spec 1.22 |
 
 ## Entry point
 
@@ -45,6 +47,29 @@ library, and `BotUnloadAllLibraries` on `ShutdownGame`.
 `BotInput`, `BotClientCommand`, `Print`, `Trace`, `PointContents`, `GetMemory`,
 `FreeMemory`, `DebugLineCreate`, `DebugLineDelete`, `DebugLineShow`.
 
+`Trace` has **one** spelling, on every target — see versions 2 and 3 above for
+the eleven hours in which it had two:
+
+```c
+    bsp_trace_t (*Trace)(vec3_t start, vec3_t mins, vec3_t maxs,
+                         vec3_t end, int passent, int contentmask);
+```
+
+No `q_gameabi`, and that is a decision rather than an omission. R-BOT-5 asks for
+"the same treatment Q2PRO applies to `gi.trace`", and that treatment is
+`callee_pop_aggregate_return(0)`, which this build does not enable
+(`config.h` sets `USE_GAME_ABI_HACK 0`). The brain's side carries no attribute at
+all, so if this build ever turns the hack on, **this slot must still not get
+it** — the two sides have to agree and the contract's spelling is the plain one.
+
+Four slots differ in **return type** between the two headers and are compatible
+anyway, because every caller ignores the result: the brain declares `Print`,
+`BotClientCommand`, `DebugLineDelete` and `DebugLineShow` as returning `int`
+where the 1999 game header says `void`. `botabi.py` compares arguments and not
+return types for exactly that reason. `bot_input_t` and the brain's
+`ea_state_t` are the same thirty-six bytes member for member; the names differ
+because the brain's are offset-derived.
+
 ## Two ABI hazards (R-BOT-4, R-BOT-5)
 
 1. **`bsp_trace_t` is returned by value** from the `Trace` slot, so both sides
@@ -61,6 +86,16 @@ library, and `BotUnloadAllLibraries` on `ShutdownGame`.
    layout verification** (Risk 5a) — extend the guards to 64-bit offsets, or
    accept and record it, with the `Test()` round-trip as the fallback.
 
+**Both mitigations failed the first time they were needed, and the third time as
+well.** `BotVersion` is slot 0 so the two sides can shake hands, and it
+returns `"BotLib v0.96"` on both sides of an ABI split — the version is the
+brain's, not the convention's. `Test(int, char *, vec3_t, vec3_t)` passes no
+struct by value, so the round trip exercises none of hazard 1. A handshake that
+cannot fail is not a handshake. What found version 2's defect was a headless
+dedicated server, three bots and a minute of watching nothing happen; what would
+have found it earlier is `tools/botabi.py`, which compares the two headers and
+ships R-97 itself as one of its four positive controls.
+
 The 1999 binaries are not a target (R-BOT-4, amended in 1.2): the brain is
 compiled from `gladiator-bot-restored/botlib` for whichever platform the game is
 built for.
@@ -69,6 +104,46 @@ built for.
 
 `MAX_NETNAME` 16, `MAX_CLIENTSKINNAME` 128, `MAX_FILEPATH` 144,
 `MAX_CHARACTERNAME` 144. `BLERR_NOERROR` 0 … `BLERR_INVALIDSOUNDINDEX` 32.
+
+**And two that were missing from this list, added in spec 1.22:**
+`BOTLIB_MAX_STATS` **32** and `BOTLIB_MAX_ITEMS` **256**. The 1999 header spells
+them with the *engine's* names, `MAX_STATS` and `MAX_ITEMS`, which was safe when
+both sides included id's `q_shared.h` and is not safe now: Q2PRO's `MAX_STATS`
+is **64** under `USE_NEW_GAME_API`, so `bot_updateclient_t` was 1292 bytes here
+against the brain's 1228 and the brain's own `memcpy` read the inventory sixteen
+slots out of place. A contract array whose bound follows one side's engine is not
+a contract. `doc/reconciliation.md` R-100.
+
+## Struct sizes — the layout half of the contract
+
+Every struct here crosses the library boundary, so both sides must agree on its
+size and on every offset in it. None of them contains a pointer, which is what
+makes a number meaningful at 32 and 64 bits alike:
+
+| struct | bytes |
+|---|---|
+| `bsp_surface_t` | 24 |
+| `bsp_trace_t` | 84 |
+| `bot_settings_t` | 432 |
+| `bot_clientsettings_t` | 144 |
+| `bot_input_t` (= the brain's `ea_state_t`) | 36 |
+| `bot_updateclient_t` | 1228 |
+| `bot_updateentity_t` | 104 |
+
+`src/bot/botlib.h` asserts each of them, plus `q_offsetof` on `bsp_trace_t`'s
+`fraction` (8) and `endpos` (12) — a size cannot see a transposition — and the
+two host-side definitions the sizes turn on: `sizeof(qboolean) == 4` and
+`BOTLIB_MAX_STATS == 32`. `tools/botabi.py` (R-VER-28) does not take any of it
+on trust: it compiles a probe against
+`gladiator-bot-restored/game/{q_shared,botlib}.h` and compares what the brain's
+compiler measures.
+
+Two of the seven were wrong before that existed, and both were a type NAME rather
+than a number: `qboolean` substituted for `bool` in `osp-tourney`'s copy of the
+published header (one byte instead of four, twice, in `bsp_trace_t`), and
+`MAX_STATS`, which the 1999 header spells with the engine's name. Upstream
+asserts the same four facts on its own side as of `57ce85a3`, so a port that
+redefines either now fails to build at both ends rather than one.
 
 Action flags: `ATTACK` 1, `USE` 2, `RESPAWN` 4, `JUMP`/`MOVEUP` 8,
 `CROUCH`/`MOVEDOWN` 16, `MOVEFORWARD` 32, `MOVEBACK` 64, `MOVELEFT` 128,
@@ -92,16 +167,31 @@ brain reads the libvar and sending zero costs nothing.
 
 ### Ruleset → libvar mapping
 
-This table is the single authority for it (R-BOT-7). To be filled in Phase 6/7;
-the shape is fixed now:
+This table is the single authority for it (R-BOT-7). *Filled in Phase 6, spec
+1.22.* Every one of the 32 names is pushed on **every**
+ruleset, so the brain always sees the same set and only the values move — a
+libvar that is set on one ruleset and absent on another is a libvar whose
+default the brain would silently use, which is R-BOT-7's whole concern.
+`BotInitLibrary` in `src/bot/bl_main.c` is the single place this happens.
 
-| ruleset | libvars set |
+| ruleset | libvars that differ from the baseline |
 |---|---|
-| `dm` | baseline only |
-| `ctf` | `ctf 1`, `techs`, `usehook`/`laserhook` per `ctf_hook` |
-| `arena` | `ra 1` |
-| `tourney` | `teamplay` from `m_mode == MODE_TEAM` **only** — see below; `usehook`/`laserhook` from `hook_enable`; `runes` from `rune_stat` |
-| `sp` | none; bots do not run in single player (N6) |
+| `dm` | `usehook` from the `hook` modifier; everything else 0 |
+| `ctf` | `ctf 1`, `teamplay 1`, `usehook` from `ctf_hook`, `laserhook` from `laserhook`, `techs` from `!(dmflags & DF_CTF_NO_TECH)` |
+| `arena` | `ra 1`; `usehook` from the `hook` modifier |
+| `tourney` | `usehook`/`laserhook` both from `hook_enable`; `teamplay` from `m_mode == MODE_TEAM` **only** — see below; `runes` from `rune_stat` |
+| `sp` | unreachable: `G_BotsAllowed()` is false, so no library is ever loaded (N6) |
+
+`ch` is a constant `"0"` (N7). `xatrix` and `rogue` follow the content layers,
+not the ruleset. `assimilation` and `teamplay_shell` are pushed as `"0"`: they
+are in R-BOT-6's fixed set, no ruleset here sets them, and omitting them would
+leave the brain on its own defaults for two names the set names.
+
+`techs` is the interesting row. The brain reads it as `LibVar("runes", "0")` —
+one libvar under two names — and CTF's techs are gated by `DF_CTF_NO_TECH`
+alone, never by the `runes` modifier, so the dmflag is what the brain has to be
+told about. That is the same fact R-88 recorded as a finding and R-96 turned
+into the modifier's definition.
 
 **The `m_mode` comparison is preserved exactly as written** (R-BOT-29).
 `bl_main.c:1035` tests `m_mode == MODE_TEAM` (`0x02`) to drive `teamplay`, and

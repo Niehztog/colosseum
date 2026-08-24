@@ -17,6 +17,9 @@ with this program; if not, write to the Free Software Foundation, Inc.,
 */
 
 #include "g_local.h"
+#include "bot/bl_main.h"
+#include "bot/bl_spawn.h"
+#include "bot/bl_redirgi.h"
 #include "tourney/osp_hooks.h"
 #include "arena/arena.h"
 #include "tourney/osp_types.h"
@@ -39,6 +42,7 @@ void SP_item_health_large(edict_t *self);
 void SP_item_health_mega(edict_t *self);
 
 void SP_info_player_start(edict_t *ent);
+void SP_bot(edict_t *ent);          // src/bot/bl_spawn.c (R-BOT-26)
 void SP_info_player_deathmatch(edict_t *ent);
 void SP_info_player_coop(edict_t *ent);
 void SP_info_player_intermission(edict_t *ent);
@@ -215,6 +219,10 @@ static const spawn_func_t spawn_funcs[] = {
     {"item_health_mega", SP_item_health_mega},
 
     {"info_player_start", SP_info_player_start},
+    // The Gladiator SDK's map-placed bot.  Its four keys are spawn_temp_t's
+    // (R-OSP-6) and it only ever QUEUES -- no bot is created inside
+    // SpawnEntities (R-BOT-18).
+    {"bot", SP_bot},
     {"info_player_deathmatch", SP_info_player_deathmatch},
     {"info_player_coop", SP_info_player_coop},
     {"info_player_intermission", SP_info_player_intermission},
@@ -888,9 +896,20 @@ void SpawnEntities(const char *mapname, const char *entities, const char *spawnp
     for (int i = 0; i < game.maxclients; i++) {
         game.clients[i].menu_owner = MENU_NONE;
         game.clients[i].ctf_menu = NULL;
+        // The Gladiator tree itself is TAG_GAME and survives; the client's
+        // cursor into it does not have to, and a stale `mainmenu` here would be
+        // the one pointer in menustate_t that outlives its owner.
+        memset(&game.clients[i].menustate, 0, sizeof(game.clients[i].menustate));
+        game.clients[i].showloading = false;
     }
 
     G_FreePrecaches();
+
+    // The bot index tables hold TAG_LEVEL strings that the FreeTags above has
+    // just released, so the pointer arrays are cleared before anything
+    // precaches into them again (R-BOT-11).  ClearIndexes does NOT free the
+    // strings, for exactly that reason.
+    ClearIndexes();
 
     memset(&level, 0, sizeof(level));
     memset(g_edicts, 0, game.maxentities * sizeof(g_edicts[0]));
@@ -1038,6 +1057,18 @@ void SpawnEntities(const char *mapname, const char *entities, const char *spawnp
             DMGame.PostInitSetup();
     }
 // ROGUE
+
+    // The bot layer's level start, last, because all three steps read the
+    // index tables the precaches above have just filled:
+    //   * the muzzleflash -> soundindex map, which is how a shot the bot did
+    //     not see becomes a sound it can hear (R-BOT-10);
+    //   * the bots that were in the game before the level change, which are
+    //     re-marked in place rather than reconnected (R-BOT-14);
+    //   * the new map, handed to every loaded brain with the whole index space.
+    BotInitMuzzleFlashToSoundindex();
+    BotSpawn();
+    if (botglobals.firstbotlib)
+        BotLib_BotLoadMap(level.mapname);
 }
 
 //===================================================================

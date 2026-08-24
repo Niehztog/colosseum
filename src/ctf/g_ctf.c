@@ -347,18 +347,15 @@ void CTFAssignSkin(edict_t *ent, char *s)
 //  gi.cprintf(ent, PRINT_HIGH, "You have been assigned to %s team.\n", ent->client->pers.netname);
 }
 
-void CTFAssignTeam(gclient_t *who)
+// Split from CTFAssignTeam, which is how the Gladiator donor has it and why:
+// the balancing body is the answer to "which team is short a player", and a bot
+// needs that answer whether or not DF_CTF_FORCEJOIN is set -- a bot has no join
+// menu to be sent to instead (R-CTF-4).  Threewave 1.09 has the same pair.
+void CTFForceAssignTeam(gclient_t *who)
 {
     edict_t     *player;
     int i;
     int team1count = 0, team2count = 0;
-
-    who->resp.ctf_state = 0;
-
-    if (!((int)dmflags->value & DF_CTF_FORCEJOIN)) {
-        who->resp.ctf_team = CTF_NOTEAM;
-        return;
-    }
 
     for (i = 1; i <= game.maxclients; i++) {
         player = &g_edicts[i];
@@ -382,6 +379,18 @@ void CTFAssignTeam(gclient_t *who)
         who->resp.ctf_team = CTF_TEAM1;
     else
         who->resp.ctf_team = CTF_TEAM2;
+}
+
+void CTFAssignTeam(gclient_t *who)
+{
+    who->resp.ctf_state = 0;
+
+    if (!((int)dmflags->value & DF_CTF_FORCEJOIN)) {
+        who->resp.ctf_team = CTF_NOTEAM;
+        return;
+    }
+
+    CTFForceAssignTeam(who);
 }
 
 /*
@@ -3258,6 +3267,44 @@ bool CTFStartClient(edict_t *ent)
 {
     if (ent->client->resp.ctf_team != CTF_NOTEAM)
         return false;
+
+    // R-CTF-4.  A bot is always forced onto a team, because the alternative
+    // branch below opens a join menu and a bot has nothing to press it with:
+    // without this arm a `ctf` server with DF_CTF_FORCEJOIN clear spawns every
+    // bot as a noclipping CTF_NOTEAM observer that never fires a shot, which is
+    // what it did.  `botctfteam` is how the operator picks the team and it
+    // travels as the `ctfteam` userinfo key, set in BotAddDeathmatch -- until
+    // now it was written by the bot layer and read by nobody.
+    //
+    // The donor's arm is #ifdef BOT and sits exactly here, ahead of the
+    // FORCEJOIN test.  The `ctfgame.match` half of that test is NOT the donor's
+    // -- Threewave 1.09 has no match system, so it cannot decide this -- and
+    // gating the bot on it would leave the bot an observer holding a menu.
+    // Joining mid-match is not the thing the menu branch prevents anyway:
+    // CTFJoinTeam lets a human do it and assigns a ghost.  What a bot cannot do
+    // is type `ready`, so a bot that joins during MATCH_SETUP is ready by
+    // construction -- otherwise one bot wedges a competition server's countdown
+    // forever, and `sv addbot` was already the operator's commitment.
+    if (ent->flags & FL_BOT) {
+        char *s = Info_ValueForKey(ent->client->pers.userinfo, "ctfteam");
+        int ctfteam = Q_atoi(s);
+
+        if (ctfteam == CTF_TEAM1)
+            ent->client->resp.ctf_team = CTF_TEAM1;
+        else if (ctfteam == CTF_TEAM2)
+            ent->client->resp.ctf_team = CTF_TEAM2;
+        else
+            CTFForceAssignTeam(ent->client);
+
+        ent->client->resp.ctf_state = 0;
+        s = Info_ValueForKey(ent->client->pers.userinfo, "skin");
+        CTFAssignSkin(ent, s);
+
+        if (ctfgame.match == MATCH_SETUP)
+            ent->client->resp.ready = true;
+
+        return false;
+    }
 
     if (!((int)dmflags->value & DF_CTF_FORCEJOIN) || ctfgame.match >= MATCH_SETUP) {
         // start as 'observer'

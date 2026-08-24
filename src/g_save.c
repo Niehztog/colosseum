@@ -18,6 +18,7 @@ with this program; if not, write to the Free Software Foundation, Inc.,
 
 #include "g_local.h"
 #include "g_ptrs.h"
+#include "bot/bl_main.h"
 
 #if USE_ZLIB
 #include <zlib.h>
@@ -1027,6 +1028,11 @@ void ReadGame(const char *filename)
 
     gi.FreeTags(TAG_GAME);
 
+    // ...which has just invalidated every TAG_GAME owner in the library, and
+    // the bot layer is one of them.  Told first, set up again at the end, once
+    // `game.maxclients` has been read.
+    BotForgetGameMemory();
+
     f = gzopen(filename, "rb");
     if (!f)
         gi.error("Couldn't open %s", filename);
@@ -1070,6 +1076,31 @@ void ReadGame(const char *filename)
     }
 
     gzclose(f);
+
+    // The FreeTags(TAG_GAME) at the top of this function invalidates every
+    // TAG_GAME owner in the library, not just the two arrays re-allocated
+    // above, and the bot layer is the third one: the index tables (R-BOT-11),
+    // botstates/botinputs/botnewinput, the bots.cfg roster, the library records
+    // and the Gladiator menu tree.  Nothing re-established them, so `load`
+    // segfaulted -- SpawnEntities precached into freed memory and
+    // BotInitMuzzleFlashToSoundindex then read a string pointer out of it:
+    //
+    //   Q_strcasecmp (s1=0x6165645f6373696e <cannot access>, s2="weapons/blastf1a.wav")
+    //   BotInitMuzzleFlashToSoundindex () at src/bot/bl_redirgi.c:280
+    //   SpawnEntities () at src/g_spawn.c:1068
+    //   read_server_file () / SV_Loadgame_f ()
+    //
+    // Every `load` crashed, on every map, in the one ruleset that has
+    // savegames.  It went unseen because tools/smoke.sh read the log and never
+    // the exit status -- fixed in the same pass, because a check that cannot
+    // see a crash is the finding here and the missing call is only the cause.
+    //
+    // BotSetup() is asked rather than a narrower re-allocator, because it is
+    // the bot layer's own owner of exactly this memory and a second function
+    // covering half of it is one more thing to keep in step.  It runs after
+    // `game.maxclients` has been read from the file, which is what sizes the
+    // three per-client arrays.
+    BotSetup();
 }
 
 //==========================================================

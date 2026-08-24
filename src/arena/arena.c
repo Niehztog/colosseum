@@ -42,6 +42,8 @@ qmenu_t     *teams;
 
 motd_t      motd;
 cvar_t      *admincode;
+cvar_t      *ra_playercycle;
+cvar_t      *ra_botcycle;
 
 char        *teamskins[MAX_ARENA_SKINS] = {
     "r2red", "r2blue", "r2dgre", "r2oran", "r2yell", "r2aqua", "r2lgre"
@@ -319,6 +321,115 @@ team_t *add_to_team(edict_t *ent, char *teamname)
         t->locked = true;
 
     return t;
+}
+
+// A team name that no other team is using, in TAG_LEVEL memory because
+// add_to_team stores the POINTER rather than copying it -- the string has to
+// outlive the call and go away with the level.
+//
+// Factored out of menuNewTeam, which is also the only reason its bound is now
+// checked.  The donor uniquifies by appending "!" and restarting the scan, into
+// a 100-byte buffer, with no test that anything still fits: 256 teams named
+// alike append 256 characters.  Unreachable while a human has to type each
+// collision in by hand; Phase 7 makes team creation automatic and per bot, so
+// it stops being unreachable.  A counted suffix cannot grow without bound.
+char *RA_NewTeamName(edict_t *ent)
+{
+    char *name = gi.TagMalloc(100, TAG_LEVEL);
+    int  suffix, i;
+
+    for (suffix = 0; suffix < MAX_TEAMS; suffix++) {
+        if (suffix)
+            Q_snprintf(name, 100, "%s's Team %d", ent->client->pers.netname, suffix + 1);
+        else
+            Q_snprintf(name, 100, "%s's Team", ent->client->pers.netname);
+
+        for (i = 0; i < MAX_TEAMS; i++)
+            if (teams[i].it && !strcmp(TEAM(&teams[i])->name, name))
+                break;
+        if (i == MAX_TEAMS)
+            return name;
+    }
+
+    return name;
+}
+
+// R-ARENA-2 and R-RA-4's fifteenth row, "new bots initialised into the selected
+// arena's queue".  Both of the steps a human takes through the menus -- pick a
+// team, pick an arena -- are taken here instead, because a bot has no menu:
+// without this a bot connects, lands in arena 0 as a noclip observer with the
+// team list open, and stays there for the whole level.  That is what it did.
+//
+// The arena is the `arena` userinfo key BotAddDeathmatch wrote from the `arena`
+// cvar.  BotCreate also copies it into resp.context, and that copy is DEAD --
+// ClientBeginDeathmatch calls InitClientResp, which memsets resp before
+// PutClientInServer ever reads it.  The userinfo is the only carrier that
+// survives, which is the same thing R-CTF-4 found about `ctfteam`.
+//
+// Called after placement rather than during it, from ClientBeginDeathmatch,
+// because that is where a human's menu click lands: the bot is already a placed
+// observer in arena 0, and this moves it exactly once, through the donor's own
+// SendTeamToArena.  Doing it inside init_player() would mean either placing
+// twice or open-coding SendTeamToArena's tail minus the move (R-87's shape).
+void RA_BotJoinArena(edict_t *ent)
+{
+    int     arenanum, k;
+    team_t  *t;
+
+    if (!(ent->flags & FL_BOT))
+        return;
+    if (ent->client->resp.teamnum >= 0)     // already on a team: a level change
+        return;
+    if (num_arenas <= 0)
+        return;
+
+    arenanum = Q_atoi(Info_ValueForKey(ent->client->pers.userinfo, "arena"));
+    if (arenanum < 1 || arenanum > num_arenas)
+        arenanum = 1;
+
+    // An idarena is a deathmatch map running as one arena: it has no
+    // misc_teleporter_dest, so instead of teams it has the two pickup teams
+    // arena_init() made, both already in its waiting queue, and AddtoArena
+    // refuses it outright ("You must join a pickup team to enter that arena").
+    // The bot joins the smaller of the two, which is also rows 3 and 4 -- no
+    // third team, and no over-filling -- for free.
+    if (arenas[arenanum].idarena) {
+        if (!arenas[arenanum].pickupteam[0] || !arenas[arenanum].pickupteam[1])
+            return;
+        k = count_queue(arenas[arenanum].pickupteam[0]->arenalink.it) >
+            count_queue(arenas[arenanum].pickupteam[1]->arenalink.it);
+        if (!add_to_team(ent, arenas[arenanum].pickupteam[k]->name))
+            return;
+        ent->client->resp.fightstate = FIGHT_SPECTATING;
+        ent->takedamage = DAMAGE_NO;
+        move_to_arena(ent, arenanum, 1);
+        return;
+    }
+
+    // A real arena map: the bot gets a team of its own, which is what
+    // menuNewTeam gives a lone human, and playersperteam defaults to 1 so one
+    // bot is a whole team.  add_to_team leaves it in arena 0's waiting queue;
+    // SendTeamToArena is what moves it, and is asked for the observer form so
+    // the bot waits its turn instead of being dropped into a running round
+    // (R-ARENA-3: bots are noclip observers, never parked in a waiting room).
+    if (arenas[arenanum].locked) {
+        gi.dprintf("%s: arena %d is locked, staying in arena 0\n",
+                   ent->client->pers.netname, arenanum);
+        return;
+    }
+    if (count_queue(&arenas[arenanum].waitingteams) +
+        count_queue(&arenas[arenanum].activeteams) >= arenas[arenanum].maxteams) {
+        gi.dprintf("%s: arena %d is full, staying in arena 0\n",
+                   ent->client->pers.netname, arenanum);
+        return;
+    }
+
+    t = add_to_team(ent, RA_NewTeamName(ent));
+    if (!t)
+        return;
+
+    remove_from_queue(&t->arenalink, NULL);
+    SendTeamToArena(&teams[t->teamnum], arenanum, true, true);
 }
 
 void remove_from_team(edict_t *ent)
@@ -1059,10 +1170,15 @@ void init_player(edict_t *ent)
     ent->client->resp.context = 0;
     ent->client->resp.teamnum = -1;
 
-    if (ent->client->pers.showmotd)
-        motd_menu(ent);
-    else
-        menuRefreshTeamList(ent, NULL, NULL, 0);
+    // A bot gets neither: the motd is a message and the team list is a menu,
+    // and R-MENU-4's second half says a bot is never sent a layout.  Its two
+    // clicks are made for it in RA_BotJoinArena, after placement.
+    if (!(ent->flags & FL_BOT)) {
+        if (ent->client->pers.showmotd)
+            motd_menu(ent);
+        else
+            menuRefreshTeamList(ent, NULL, NULL, 0);
+    }
 
     ent->client->resp.track_target = NULL;
     ent->client->resp.lastomode = OMODE_FREEFLYING;
@@ -1201,6 +1317,41 @@ bool check_for_teams(int arenanum)
     return false;
 }
 
+// R-RA-5's `ra_botcycle`, and it is the half RA2 does NOT have, because RA2
+// has no bots: "no bot hogs the arena while a person waits".
+//
+// Gladiator's own arena spells it as RA2_GetLongestWaitingHuman() -- pick the
+// human who has been waiting longest, then everyone on their team, then fill
+// the other side from the queue.  RA2's queue already IS "longest waiting"
+// (fill_arena pops the front and fight_done appends the losers), so the same
+// rule here is: take the first waiting team that has a person on it, and fall
+// back to the front of the queue when none does.  A server of only bots is
+// therefore unaffected, and a person who joins never waits behind a bot.
+static bool team_has_human(qmenu_t *tnode)
+{
+    qmenu_t *mnode = (qmenu_t *)tnode->it;
+
+    while (mnode->next) {
+        mnode = mnode->next;
+        if (!(((edict_t *)mnode->it)->flags & FL_BOT))
+            return true;
+    }
+    return false;
+}
+
+static qmenu_t *pop_next_team(int arenanum, bool prefer_human)
+{
+    qmenu_t *tnode;
+
+    if (prefer_human) {
+        for (tnode = arenas[arenanum].waitingteams.next; tnode; tnode = tnode->next) {
+            if (team_has_human(tnode))
+                return remove_from_queue(tnode, &arenas[arenanum].waitingteams);
+        }
+    }
+    return remove_from_queue(NULL, &arenas[arenanum].waitingteams);
+}
+
 int fill_arena(int arenanum)
 {
     qmenu_t *popped;
@@ -1214,7 +1365,13 @@ int fill_arena(int arenanum)
     arenas[arenanum].sidepick = rand() % 2;
 
     for (count = 0; count < arenas[arenanum].numteams; count++) {
-        popped = remove_from_queue(NULL, &arenas[arenanum].waitingteams);
+        // Only the FIRST side is picked for a person: the donor's own shape,
+        // where RA2_StartMatch asks for the longest-waiting human once and
+        // then takes the longest-waiting anyone for the other side.  Doing it
+        // for every side would empty the arena of bots and there would be
+        // nothing to play against.
+        popped = pop_next_team(arenanum,
+                               count == 0 && ra_botcycle && ra_botcycle->value);
 
         if (!popped) {
             gi.dprintf("Team left during multi-round match\n");
@@ -1727,7 +1884,15 @@ void arena_think(int arenanum)
                 ((team_t *)((qmenu_t *)popped->it)->it)->fighting = false;
                 tnode = &arenas[arenanum].activeteams;
 
-                if (((team_t *)((qmenu_t *)popped->it)->it)->teamnum == winner || winner == -1)
+                // R-RA-5's `ra_playercycle`, and RA2 already implements the
+                // behaviour: "winners kept between matches" IS the winning
+                // team going to the FRONT of the waiting queue, because
+                // fill_arena pops from the front.  What was missing is the
+                // cvar, so a server could not turn it off -- with
+                // `ra_playercycle 0` a winning team queues like everybody
+                // else and the arena rotates strictly by arrival.
+                if ((((team_t *)((qmenu_t *)popped->it)->it)->teamnum == winner || winner == -1)
+                    && (!ra_playercycle || ra_playercycle->value))
                     add_to_front_queue(popped, &arenas[arenanum].waitingteams);
                 else
                     add_to_queue(popped, &arenas[arenanum].waitingteams);
@@ -1775,6 +1940,12 @@ void arena_init(edict_t *wsent)
     memset(arenas, 0, sizeof(arenas));
 
     admincode = gi.cvar("admincode", "0", 0);
+    // R-RA-5's two, defaulting on, which is RA2's own unconditional behaviour.
+    // p_botmenu.c obtains both with the same default and toggles them, which is
+    // what R-BOT-28's arena menu page is for; the default agreeing is what
+    // R-COMPAT-6 asks of a name obtained in two translation units.
+    ra_playercycle = gi.cvar("ra_playercycle", "1", 0);
+    ra_botcycle = gi.cvar("ra_botcycle", "1", 0);
 
     num_arenas = wsent->arena;  //worldspawn arena flag is # of arenas
     if (!num_arenas) {

@@ -17,35 +17,21 @@ along with this program; if not, write to the Free Software
 Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 */
-// bots.cfg, from osp-tourney@1d8427e (SPECS.md sec 5.4.6, R-BOT-26).
+// Bot commands, from osp-tourney@1d8427e (SPECS.md sec 5.4.6, R-BOT-24..25).
 //===========================================================================
 //
-// Name:                bl_botcfg.h
-// Function:        bot configuration files
-// Programmer:      Mr Elusive (MrElusive@demigod.demon.nl)
-// Last update: 1998-01-12
-// Tab Size:        3
+// Name:         bl_cmd.h
+// Function:     bot commands
+// Programmer:   Mr Elusive (MrElusive@demigod.demon.nl)
+// Last update:  1999-02-10
+// Tab Size:     3
 //===========================================================================
 
-#ifndef BL_BOTCFG_H
-#define BL_BOTCFG_H
+#ifndef BL_CMD_H
+#define BL_CMD_H
 
-typedef struct bot_s
-{
-    char name[BOT_MAX_PATH];
-    char skin[BOT_MAX_PATH];
-    char charfile[BOT_MAX_PATH];
-    char charname[BOT_MAX_PATH];
-    struct bot_s *next;
-} bot_t;
+// `server` is true when the command arrived through ServerCommand (`sv <cmd>`)
+// and false when it arrived through ClientCommand.  Returns true when handled.
+bool BotCmd(const char *cmd, edict_t *ent, int server);
 
-extern bot_t *botlist;
-
-void AppendPathSeperator(char *path, int length);
-bot_t *FindBotWithName(const char *name);
-void CheckForNewBotFile(void);
-void LoadBots(void);
-void BotListForget(void);
-int AddRandomBot(edict_t *ent);
-
-#endif // BL_BOTCFG_H
+#endif // BL_CMD_H

@@ -123,6 +123,7 @@ void SP_info_player_team2(edict_t *self);
 char *CTFTeamName(int team);
 char *CTFOtherTeamName(int team);
 void CTFAssignSkin(edict_t *ent, char *s);
+void CTFForceAssignTeam(gclient_t *who);
 void CTFAssignTeam(gclient_t *who);
 edict_t *SelectCTFSpawnPoint(edict_t *ent);
 bool CTFPickup_Flag(edict_t *ent, edict_t *other);

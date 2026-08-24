@@ -18,6 +18,7 @@ with this program; if not, write to the Free Software Foundation, Inc.,
 
 #include "g_local.h"
 #include "tourney/osp_hooks.h"
+#include "bot/bl_cmd.h"
 
 static void Svcmd_Test_f(void)
 {
@@ -302,6 +303,11 @@ void    ServerCommand(void)
     // gate here, the table in src/tourney/osp_cmds.c.  It is asked LAST so that
     // it cannot shadow a name this file already owns.
     else if (G_Ruleset() == RULESET_TOURNEY && OSP_ServerCommand(cmd))
+        ;
+    // R-BOT-24: the SDK's own set, `server` true because this is `sv <cmd>`.
+    // Also asked last, and after tourney's, so that the bot layer -- which is
+    // present in four rulesets -- cannot shadow a ruleset's own name.
+    else if (BotCmd(cmd, NULL, true))
         ;
     else
         gi.cprintf(NULL, PRINT_HIGH, "Unknown server command \"%s\"\n", cmd);

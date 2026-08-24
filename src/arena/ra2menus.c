@@ -282,24 +282,9 @@ menuAddtoTeam(edict_t *ent, qmenu_t *menu, qmenu_t *item, int arg)
 int
 menuNewTeam(edict_t *ent, qmenu_t *menu, qmenu_t *item, int arg)
 {
-    char    *name;
-    int     i = 0;
-
-    name = gi.TagMalloc(100, TAG_LEVEL);
-
-    Q_snprintf(name, 100, "%s's Team", ent->client->pers.netname);
-
-    while (i < 256) {
-        if (teams[i].it && !strcmp(((team_t *)teams[i].it)->name, name)) {
-            strcat(name, "!");
-            i = 0;
-            continue;
-        }
-
-        i++;
-    }
-
-    add_to_team(ent, name);
+    // The name and its uniquifier moved to arena.c so the bot join uses the
+    // same one; the donor's "!"-appending loop had no bound (see RA_NewTeamName).
+    add_to_team(ent, RA_NewTeamName(ent));
     show_arena_menu(ent);
 
     return 0;

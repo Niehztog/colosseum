@@ -19,6 +19,7 @@ with this program; if not, write to the Free Software Foundation, Inc.,
 #include "g_local.h"
 #include "arena/arena.h"
 #include "tourney/p_menu.h"
+#include "bot/p_botmenu.h"
 
 /*
 ===============================================================================
@@ -61,10 +62,32 @@ void G_MenuClose(edict_t *ent)
     case MENU_TOURNEY:
         osp_PMenu_Close(ent);
         break;
-    case MENU_BOT:          // Phase 6
+    case MENU_BOT:
+        bot_MenuClose(ent);
+        break;
     case MENU_NONE:
         break;
     }
+}
+
+// One undo for the layout channel.  Four menu engines and the SDK's loading
+// image all write into it and every one of them needs the same take-back; the
+// donors each open-coded it against their own idea of which statusbar to
+// repaint, which is doc/reconciliation.md R-87's defect in the small.
+//
+// An empty layout is what stops the client drawing one.  It is NOT a statusbar
+// write: CS_STATUSBAR is the composed bar R-OSP-7a already put there and it has
+// not moved -- only RA2's menu overwrites that, and ra_MenuClose is what puts
+// it back.
+void G_LayoutClear(edict_t *ent)
+{
+    if (!ent->client)
+        return;
+    if (ent->flags & FL_BOT)
+        return;     // R-BOT-10: a bot has no network connection to unicast to
+    gi.WriteByte(svc_layout);
+    gi.WriteString("");
+    gi.unicast(ent, true);
 }
 
 void G_MenuOpen(edict_t *ent, menu_owner_t who)

@@ -18,13 +18,12 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 */
 // The Gladiator Bot SDK's headers, from osp-tourney@1d8427e -- which carries a
-// working Q2PRO port of the 1999 glue (SPECS.md sec 3).  HEADERS ONLY in Phase 5:
-// src/tourney/ is written against them and R-OSP-5 requires botglobals to be
-// declared exactly once and included.  The implementations are Phase 6 (sec 9).
-// Donor-only: baseq2 has no counterpart, so it lives in src/tourney/ rather
-// than being merged into a spine file (R-CORE-7).  The reconstruction's
-// asm-matching address comments are stripped -- SPECS.md N1 makes those oracles
-// meaningless here, and they survive at the pin.
+// working Q2PRO port of the 1999 glue (SPECS.md sec 3).  The implementations
+// arrive with this header's phase (sec 9 Phase 6); Phase 5 took the
+// declarations alone so that R-OSP-5's "botglobals declared exactly once" could
+// be true before there was anything to declare it for.
+// The reconstruction's asm-matching address comments are stripped -- SPECS.md
+// N1 makes those oracles meaningless here, and they survive at the pin.
 // The SDK's own library interface.  The donor pulls it in from its g_local.h;
 // here it is included where it is needed, which keeps botlib.h off every
 // translation unit in the tree.
@@ -39,23 +38,34 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 // Tab Size:     3
 //===========================================================================
 
-#ifndef MAX_PATH
-#define MAX_PATH        144
-#endif
+#ifndef BL_MAIN_H
+#define BL_MAIN_H
+
+// The SDK's own path bound, and it needs a name of its own.  The donor writes
+// `MAX_PATH` behind `#ifndef`, which collides with the Windows constant:
+// mingw's minwindef.h defines MAX_PATH as 260 UNCONDITIONALLY, and it is a
+// system header, so gcc suppresses the redefinition warning -Werror would
+// otherwise turn into an error.  The result compiles and diverges quietly --
+// every buffer declared after a `#include <windows.h>` in the same translation
+// unit is 260 bytes and every one before it is 144 -- and moving the include
+// above this header would change `bot_library_t.path`'s size in one translation
+// unit and not the others, which is a struct-layout mismatch rather than an
+// inconsistency.  R-90 is this collision caught the other way round.
+#define BOT_MAX_PATH        144
 
 //first entity is the world, then the client entities follow
-#define DF_ENTNUMBER(x)         (x - g_edicts)
-#define DF_ENTCLIENT(x)         (x - 1 - g_edicts)
+#define DF_ENTNUMBER(x)         ((int)((x) - g_edicts))
+#define DF_ENTCLIENT(x)         ((int)((x) - 1 - g_edicts))
 #define DF_NUMBERENT(x)         (&g_edicts[x])
-#define DF_CLIENTENT(x)         (&g_edicts[x + 1])
+#define DF_CLIENTENT(x)         (&g_edicts[(x) + 1])
 
 //bot library
 typedef struct bot_library_s
 {
-    char path[MAX_PATH];                //path to the library
+    char path[BOT_MAX_PATH];                //path to the library
     // The donor writes `HANDLE` on Win32 and `void *` elsewhere, which needs
     // <windows.h> in every translation unit that includes this header -- and
-    // <windows.h> redefines MAX_PATH four lines above, so under -Werror the
+    // <windows.h> redefined the MAX_PATH this header used to define, so under
     // include is not free.  Win32's HANDLE *is* `void *` (`typedef PVOID
     // HANDLE`), so one member serves both and the #if disappears with it; the
     // loader casts, which it would have had to do anyway for dlsym's return.
@@ -85,36 +95,35 @@ typedef struct bot_globals_s
     bot_import_t gamebotimport; //bot library import functions
     bot_library_t *firstbotlib; //first bot libary
     int nocldouble;                 //no double client movement frames
-    //
-#ifdef BOT_DEBUG
+    // The donor guards the four below with `#ifdef BOT_DEBUG`, which is never
+    // defined anywhere in either tree -- so `botpause`, which R-BOT-24 requires,
+    // could not work.  They are unconditional here: sec 7 rule 6 keeps #ifdef
+    // out of the game tree, and a switch that cannot be compiled in is not a
+    // switch.  `nobotai` is what `sv botpause` toggles.
     int notest;                         //don't call the library test function
-    int framecount;
-    int timeframes;
-    clock_t starttime;
     int nobotinput;                 //true if bot input isn't processed
     int nobotai;                        //true if bots don't execute ai
-    //
-    int debug_ainet;
-    int debug_goalai;
-    int debug_moveai;
-    int debug_weapai;
-#endif //BOT_DEBUG
 } bot_globals_t;
 
-//bl_setup.c
+//bl_main.c
 extern bot_globals_t botglobals;
 
 void StringMakeGreen(char *str);
 //
 void BotSetup(void);
+// The counterpart of BotSetup, for a caller that has already freed TAG_GAME.
+void BotForgetGameMemory(void);
+void BotShutdown(void);
 void BotExecuteInput(edict_t *bot);
 //bot usage of libraries
-bot_library_t *BotUseLibrary(char *path);
+bot_library_t *BotUseLibrary(const char *path);
 void BotFreeLibrary(bot_library_t *lib);
 void BotUnloadAllLibraries(void);
 void BotLibraryDump(void);
 void BotClientDump(void);
 bool BotStarted(edict_t *bot);
+//the default botlib filename for this platform and build (R-BOT-4)
+const char *BotDefaultLibrary(void);
 //
 void BotLib_BotLoadMap(char *mapname);
 int  BotLib_BotSetupClient(edict_t *ent, char *userinfo);
@@ -131,3 +140,47 @@ void BotLib_BotAddPointLight(vec3_t origin, int ent, float radius, float r, floa
 void BotLib_BotAI(edict_t *bot, float thinktime);
 void BotLib_BotConsoleMessage(edict_t *bot, int type, char *message);
 int  BotLib_Test(int parm0, char *parm1, vec3_t parm2, vec3_t parm3);
+
+// R-BOT-20's frame section, in one function so that the order the requirement
+// fixes cannot be re-arranged by an edit to G_RunFrame.
+void BotRunFrame(void);
+
+// ---- R-BOT-29: the seventeen TOURNEY blocks, as ruleset-neutral accessors ---
+//
+// osp-tourney defines TOURNEY at g_local.h:16 -- LIVE, not `#if 0` -- and every
+// bl_*.c includes g_local.h first, so the donor's own `//#define TOURNEY` lines
+// are inert text and all seventeen blocks are active library-wide.  Neither
+// state is acceptable here: on, dm/ctf/arena lose `minimumplayers`, `botfile`
+// and the SDK's loading-screen swap; off, OSP's runes stop reaching the brain.
+// So each block becomes a branch on the ACTIVE ruleset, and the tourney state
+// the blocks read is reached through these rather than through an extern that
+// would resolve to tourney's globals in every ruleset.
+//
+// BotTourneyMode() is a VALUE accessor, not a predicate.  bl_main.c compares
+// `m_mode == MODE_TEAM` to drive the brain's `teamplay` libvar and that
+// comparison is exactly right as written: 1v1 is two teams of one, the brain
+// has no ally, and `teamplay 0` is the correct answer for m_mode 3.  An
+// accessor that generalised it to "is this a team mode" would give every duel
+// bot an imaginary teammate.  Preserve the comparison; abstract only the value.
+#define MODE_TEAM   0x02
+int  BotTourneyMode(void);          // m_mode, or -1 when not tourney
+int  BotTourneyRunes(void);         // rune_stat, or 0
+bool BotTourneyHook(void);          // hook_enable, or false
+int  BotTourneyVotedIn(void);       // bots_votedin, or 0
+// The cvar names are per ruleset (R-OSP-11): tourney's own `bots_minplayers`
+// and `bots_botfile`, everyone else's `minimumplayers` and `botfile`.
+const char *BotMinPlayersCvar(void);
+const char *BotFileCvar(void);
+// ...and the cvars themselves, obtained once with the RULESET's default.
+// R-COMPAT-6: osp_main.c registers `bots_minplayers` with a default of "4" and
+// the SDK registers `minimumplayers` with "0", so a bot-layer call site that
+// spelled its own default would be a second registration of one name with two
+// values -- the exact collision `statsfile`/`statsname` was in 1.21.
+cvar_t *BotMinPlayers(void);
+cvar_t *BotFile(void);
+// True when a client is playing rather than connecting, observing or queued.
+// Under tourney that is `resp.osp_entered == ENTERED_ENTERED`; elsewhere the
+// question has no fourth state and the answer is "it is in use".
+bool BotCountsAsPlayer(edict_t *cl_ent);
+
+#endif // BL_MAIN_H

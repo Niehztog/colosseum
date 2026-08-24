@@ -97,7 +97,10 @@ and produces byte-identical output, so it is not needed).
 | `tools/{divergence,counts,coverage,audit}.py` | written for this tree (R-TOOL-5) | GPL-2-or-later |
 | `src/arena/*.{c,h}` | `rocketarena2-public@d20e1ce`, asm-matching comments stripped and the GPL header restored (`doc/reconciliation.md` R-65, R-67) | GPL-2-or-later, id-derived (R-LIC-1) |
 | `src/tourney/*.{c,h}` | `osp-tourney@1d8427e`, same treatment (R-78, R-84) | GPL-2-or-later, id-derived (R-LIC-1) |
-| `src/bot/{botlib,bl_main,bl_botcfg}.h` | `osp-tourney@1d8427e` — **headers only** in Phase 5, because R-OSP-5 needs `botglobals` declared exactly once; the implementations arrive in Phase 6 (R-86) | GPL-2-or-later, Gladiator SDK (R-LIC-2) |
+| `src/bot/{botlib,bl_main,bl_botcfg,bl_cmd,bl_debug,bl_redirgi,bl_spawn}.h`, `src/bot/bl_*.c` | `osp-tourney@1d8427e`, same treatment as `src/tourney/`. Headers only in Phase 5, because R-OSP-5 needs `botglobals` declared exactly once (R-86); the six implementations landed in Phase 6. One slot of `botlib.h` gains a second spelling there — see `doc/botlib-contract.md` version 2 and reconciliation R-97 | GPL-2-or-later, Gladiator SDK (R-LIC-2) |
+| `src/bot/p_menulib.{c,h}`, `src/bot/p_botmenu.{c,h}` | `gladiator-bot-restored@game`, which `osp-tourney` cannot supply: it moved its bot menu into `osp_menus.c` on id's `PMenu` and ships neither file (R-BOT-28). The two reconstructions' copies are byte-identical, so there is one source of truth | non-commercial, Gladiator (R-LIC-2) |
+| `src/g_fs.c` | written for this tree — the engine's extended API as the game library sees it (§5.7, R-BOT-8, R-BOT-26, reconciliation R-95) | GPL-2-or-later |
+| `tools/{botabi.py,botmatrix.sh}` | written for this tree (R-VER-3, R-VER-28) | GPL-2-or-later |
 | `vendor/replay/*.bundle` | the replay harness (R-PROV-1) | contains id-derived GPL-2 sources |
 | `vendor/harness/**` | rescued harness scratchpad (R-PROV-2a) | mixed; see its `MANIFEST.md` |
 | `LICENSE` | `q2pro/LICENSE`, GPL-2 verbatim | — |
@@ -115,11 +118,16 @@ bot network message buffer"*. Both were named in §3.3 as work to carry, and §7
 rule 7 makes them ours; taking the tip is cheaper and more honest than
 cherry-picking their halves.
 
-Nothing from `gladq2_src`, `gladiator-bot-restored` or `ugladq2` is in the tree
-yet. Those arrive in
-Phases 2–6, each with its own row and its own licence note — R-LIC-2 (Gladiator,
-non-commercial, attribution block reproduced in `README.md`) and R-LIC-3 (the
-RA2 Bot Support Routines, which R-ARENA-1 does not carry).
+`gladiator-bot-restored` arrives in Phase 6, and only its two menu files —
+`p_menulib.c` and `p_botmenu.c`, rows above. Its `botlib/` is **not vendored**:
+R-BOT-3 loads the brain dynamically and R-BOT-4 says it is compiled from source
+for whichever platform the game targets, so it stays a sibling repository and
+`tools/botmatrix.sh` takes its path as `GLADDIR`. `tools/botabi.py` reads one
+header out of it in `make check` and skips itself with a message when it is not
+there.
+
+Nothing from `gladq2_src` or `ugladq2` is in the tree. `gladq2_src/g_arena.c` is
+refused outright by R-ARENA-1 (R-LIC-3, the RA2 Bot Support Routines).
 
 ## 3. A vendored header that is not closed under `#include`
 

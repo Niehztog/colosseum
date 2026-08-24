@@ -51,6 +51,13 @@ note() { printf '  %-46s %s\n' "$1" "$2"; }
 bad()  { fails=$((fails+1)); printf '  [FAIL] %-40s %s\n' "$1" "$2"; }
 
 # serve <log> <deathmatch> <coop> <map> <extra console lines>
+#
+# The EXIT STATUS is checked, and that is not a refinement: every boot here used
+# to be judged on what the log said, so a server that printed everything it was
+# asked for and then died on the way out passed.  It did -- `load` segfaulted at
+# ShutdownGame on every savegame in the tree, twice over, and this script said
+# "smoke test passed" for as long as it existed (doc/reconciliation.md R-108).
+# 139 is 128 + SIGSEGV; the shell prints the signal to ITS stderr, not to $log.
 serve() {
   log=$1 dm=$2 coop=$3 map=$4; shift 4
   { for line in "$@"; do echo "$line"; done; echo quit; } | \
@@ -60,6 +67,19 @@ serve() {
       +set dedicated 1 +set net_port 0 +set maxclients 8 \
       +set deathmatch "$dm" +set coop "$coop" \
       +map "$map" >"$log" 2>&1 )
+  check_exit "$log" $?
+}
+
+# The status half on its own, so that the control below can drive it with a
+# status it MANUFACTURED rather than one it hopes to provoke.
+check_exit() {
+  [ "$2" = 0 ] && return 0
+  if [ "$2" -gt 128 ] 2>/dev/null; then
+    bad "$(basename "$1" .log)/exit" "died on signal $(($2 - 128))"
+  else
+    bad "$(basename "$1" .log)/exit" "exited $2"
+  fi
+  return 1
 }
 
 inhibited() { sed -n 's/^\([0-9]*\) entities inhibited.*/\1/p' "$1" | tail -1; }
@@ -103,6 +123,32 @@ note "savegame round-trip" "saved on $s_map, loaded on $l_map, $l_inh inhibited"
 [ "$(saveerrs "$DIR/load.log")" = "0" ] || bad "savegame/load" "$(grep -m1 -E 'unknown pointer|bad index|type mismatch' "$DIR/load.log")"
 
 if [ "$CONTROL" = 1 ]; then
+  # Control 2, and it is the one the exit-status check needs: a boot that is
+  # MADE to die must be reported.  q2pro has no deliberate-abort console
+  # command in this build (`error` and `crash` are both unknown) and a bad map
+  # name exits 0, so the signal is sent from outside -- which is also the exact
+  # failure this check exists for, a server killed by SIGSEGV.
+  echo
+  echo "control: a server killed by SIGSEGV must be seen dying"
+  before=$fails
+  ( ulimit -c 0
+    timeout -s KILL 60 "$Q2PRO_BUILD/q2proded" \
+      +set basedir "$DIR" +set homedir "$DIR" +set game colosseum \
+      +set dedicated 1 +set net_port 0 +set maxclients 8 \
+      +set deathmatch 1 +set coop 0 +map q2dm1 >"$DIR/ctl.log" 2>&1 &
+    pid=$!
+    sleep 4
+    kill -SEGV $pid 2>/dev/null
+    wait $pid
+    exit $? ) 2>/dev/null
+  check_exit "$DIR/ctl.log" $?
+  if [ "$fails" -eq "$before" ]; then
+    echo "  control did NOT fire -- a dying server was not reported"
+    exit 1
+  fi
+  echo "  control fired: the exit status is being read"
+  fails=$before
+
   # The campaign's inhibited count must DIFFER from deathmatch's; asserting
   # they are equal must fail, or the comparison is not happening.
   echo

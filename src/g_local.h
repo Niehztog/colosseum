@@ -26,6 +26,10 @@ with this program; if not, write to the Free Software Foundation, Inc.,
 // because we define the full size ones in this file
 #define GAME_INCLUDE
 #include "shared/game.h"
+// The engine's extended API (sec 5.7).  Vendored with the rest of inc/shared
+// and never edited (R-CORE-9).  It carries FILESYSTEM_API_V1 and
+// DEBUG_DRAW_API_V1, which R-BOT-8 and R-BOT-27 reach through GetGameAPIEx.
+#include "shared/gameext.h"
 
 // RA2's menu engine (R-MENU-1, sec 5.2).  Included rather than forward-declared
 // because gclient_t embeds qmenu_t BY VALUE -- Threewave's ctf_pmenuhnd_t is a
@@ -37,6 +41,12 @@ with this program; if not, write to the Free Software Foundation, Inc.,
 // which osp_menus.c passes by value, and one include is cheaper than two
 // half-declarations.
 #include "tourney/p_menu.h"
+// The Gladiator menu engine (R-MENU-1, R-BOT-28) and the SDK's debug-line
+// bounding box (R-BOT-27).  Both are embedded BY VALUE -- menustate_t in
+// gclient_t, visiblebbox_t in edict_t -- which is why the types come in here
+// rather than being forward-declared.  Neither header pulls in botlib.h.
+#include "bot/p_menulib.h"
+#include "bot/bl_debug.h"
 
 // features this game supports
 #define G_FEATURES  (GMF_PROPERINUSE|GMF_WANT_ALL_DISCONNECTS|GMF_ENHANCED_SAVEGAMES)
@@ -165,7 +175,7 @@ with this program; if not, write to the Free Software Foundation, Inc.,
 // one name for "is a bot", and osp_* code that said FL_OSP_BOT or FL_OSP_NOCMD
 // uses it.
 //
-// Free after this: BIT(21)..BIT(30).  BIT(31) is FL_RESPAWN.
+// Free after this: BIT(22)..BIT(30).  BIT(31) is FL_RESPAWN.
 // ---------------------------------------------------------------------------
 
 #define FL_RESPAWN              BIT(31)     // used for item respawning
@@ -1177,6 +1187,36 @@ void G_MenuOpen(edict_t *ent, menu_owner_t who);
 void G_MenuClose(edict_t *ent);
 bool G_MenuActive(edict_t *ent);
 
+// Takes a layout back off a client.  Four engines and the SDK's loading image
+// all write into the layout channel and every one of them needs the same
+// undo; the donors each open-coded it against their own idea of which
+// statusbar to repaint, which is doc/reconciliation.md R-87's defect in the
+// small.  One function, and it asks G_Statusbar() which bar the ACTIVE ruleset
+// composed rather than choosing between dm_statusbar and single_statusbar.
+void G_LayoutClear(edict_t *ent);
+
+// ---- the engine's extended API (sec 5.7) ----------------------------------
+//
+// GetGameAPIEx is guaranteed to be called after GetGameAPI and before Init, and
+// the structure it hands over stays valid for the life of the library.  It is
+// how R-BOT-8 resolves basedir/gamedir/cddir where the cvars cannot, how
+// R-BOT-26 enumerates bots/*.cfg inside a pak, and how R-BOT-27 reaches
+// DEBUG_DRAW_API_V1.  Every one of these answers something sensible when the
+// engine offers no extension at all -- q2pro only exposes the debug-draw
+// extension in a non-dedicated debug build, so the fallback is the normal case.
+// The engine's extended import table, captured by GetGameAPIEx in g_main.c and
+// read by src/g_fs.c.  NULL until the engine calls it, and NULL forever on an
+// engine that does not.
+extern const game_import_ex_t *gex;
+
+const char *G_FsBaseDir(void);
+const char *G_FsGameDir(void);
+int         G_FsLoadFile(const char *path, void **buffer);
+void        G_FsFreeFile(void *buffer);
+char      **G_FsListFiles(const char *path, const char *ext, int *count);
+void        G_FsFreeFileList(char **list);
+const debug_draw_api_v1_t *G_DebugDraw(void);
+
 // R-CTF-5, and the one predicate that replaces thirteen `resp.spectator` tests.
 // "Is this client watching rather than playing?" has two answers in one library:
 // baseq2's `resp.spectator` under dm and sp, and Threewave's
@@ -1629,6 +1669,16 @@ struct gclient_s {
     // carried -- R-MENU-2a says the owner is one field, and that is menu_owner.
     osp_pmenuhnd_t  *osp_menu;
 
+    // MENU_BOT's state (R-BOT-28).  By value, because the Gladiator engine
+    // keeps the cursor and the current submenu per client and the tree itself
+    // is shared.  Its own `showmenu` bool is NOT carried, for the same reason
+    // RA2's was not: menu_owner is the one answer to "is a menu open".
+    menustate_t     menustate;
+    // The SDK paints a "loading" pic over the layout while a bot is being
+    // created, and the menu has to keep painting it if one is open.  Emptied
+    // under tourney (R-BOT-29), whose own bar owns that channel.
+    bool            showloading;
+
     // ---- OSP Tourney DM (R-OSP-1..13) -------------------------------------
     // Offset-named for the same reason client_respawn_t's are, and carried for
     // the same reason: they are live state, not padding.  Several DO have a
@@ -1978,11 +2028,10 @@ struct edict_s {
     char            *skin;
     char            *charfile;
     char            *charname;
-    // `visiblebbox_t box` -- the bot debug-draw bounding box -- is NOT here.
-    // Its type lives in bl_debug.h, which is the Gladiator SDK's and arrives
-    // with src/bot/ in Phase 6 (sec 5.2).  Pulling the type forward to hold a
-    // field nothing in Phase 5 reads would make the bot layer's header a
-    // dependency of every translation unit for no gain.
+    // The bot debug-draw bounding box (R-BOT-27), fourteen beam entities that
+    // outline this entity when `sv bbox` is on for it.  Not saved: the lines
+    // are TAG_LEVEL edicts and a reload rebuilds them from nothing.
+    visiblebbox_t   box;
 
     // RA2: which arena this entity belongs to.  Zero on every map that is not
     // an arena map, which is what makes the handful of `if (ent->arena)` tests

@@ -16,6 +16,8 @@ with this program; if not, write to the Free Software Foundation, Inc.,
 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
 */
 #include "g_local.h"
+#include "bot/bl_cmd.h"
+#include "bot/p_menulib.h"
 #include "arena/arena.h"
 #include "tourney/osp_hooks.h"
 #include "m_player.h"
@@ -78,6 +80,8 @@ void SelectNextItem(edict_t *ent, int itflags)
             MenuNext(ent);
         else if (cl->menu_owner == MENU_TOURNEY)
             osp_PMenu_Next(ent);
+        else if (cl->menu_owner == MENU_BOT)
+            bot_MenuNext(ent);
         return;
     }
 
@@ -122,6 +126,8 @@ void SelectPrevItem(edict_t *ent, int itflags)
             MenuPrev(ent);
         else if (cl->menu_owner == MENU_TOURNEY)
             osp_PMenu_Prev(ent);
+        else if (cl->menu_owner == MENU_BOT)
+            bot_MenuPrev(ent);
         return;
     }
 
@@ -566,6 +572,8 @@ void Cmd_InvUse_f(edict_t *ent)
             UseMenu(ent, 1);
         else if (ent->client->menu_owner == MENU_TOURNEY)
             osp_PMenu_Select(ent);
+        else if (ent->client->menu_owner == MENU_BOT)
+            bot_MenuSelect(ent);
         return;
     }
 
@@ -1227,6 +1235,13 @@ void ClientCommand(edict_t *ent)
         Cmd_Ent_Count_f(ent);                       // PGM
     else if (Q_stricmp(cmd, "disguise") == 0) {     // PGM
         ent->flags |= FL_DISGUISED;
-    } else  // anything that doesn't match a command will be a chat
+    }
+    // R-BOT-24, from a client rather than the console, so `server` is false --
+    // which is what makes the six dump commands console-only.  R-BOT-25's
+    // `serveronlybotcmds` gates the rest and defaults to 1.  Asked LAST, and
+    // before the chat fallback, so no bot name can shadow a ruleset's command.
+    else if (BotCmd(cmd, ent, false))
+        ;
+    else  // anything that doesn't match a command will be a chat
         Cmd_Say_f(ent, false, true, false);
 }

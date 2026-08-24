@@ -228,6 +228,9 @@ extern  qmenu_t     *teams;
 
 extern  motd_t      motd;
 extern  cvar_t      *admincode;
+// R-RA-5, re-expressed against RA2's queue rather than Gladiator's own arena.
+extern  cvar_t      *ra_playercycle;
+extern  cvar_t      *ra_botcycle;
 
 extern  char        *teamskins[MAX_ARENA_SKINS];
 extern  char        *vwepmodels[4];
@@ -249,6 +252,8 @@ void        set_damage(int arenanum, int state);
 void        give_ammo(edict_t *ent);
 
 team_t      *add_to_team(edict_t *ent, char *teamname);
+char        *RA_NewTeamName(edict_t *ent);
+void        RA_BotJoinArena(edict_t *ent);
 void        remove_from_team(edict_t *ent);
 
 edict_t     *SelectRandomArenaSpawnPoint(char *classn, int arenanum, int side);

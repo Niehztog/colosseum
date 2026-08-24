@@ -379,7 +379,7 @@ bool OSP_clientThink(edict_t *ent, usercmd_t *ucmd)
 
     // Dead, showing the board, and now alive again: put the HUD back.
     if (client->resp.osp_r2dc == 1 &&
-        client->resp.entered == ENTERED_ENTERED &&
+        client->resp.osp_entered == ENTERED_ENTERED &&
         level.framenum > client->respawn_framenum + 5) {
         OSP_clearStats(ent);
         client->resp.osp_r2dc = 0;

@@ -8,6 +8,14 @@
 // says so once, and continues.
 
 #include "g_local.h"
+// R-88's decision needs the two switches the runes modifier is derived FROM:
+// Threewave's DF_CTF_NO_TECH and tourney's rune_stat.  See G_ResolveModifiers.
+#include "ctf/g_ctf.h"
+#include "tourney/osp_hooks.h"
+// R-ENG-6's second half: no savegame while a bot exists.
+#include "bot/bl_main.h"
+// Phase 7's bot-placement census reads RA2's FIGHT_* and tourney's ENTERED_*.
+#include "arena/arena.h"
 
 // ---------------------------------------------------------------- state
 //
@@ -243,11 +251,18 @@ void G_InitRuleset(void)
     // the modifier and what was done instead.  It never calls gi.error.
     g_modifier[MOD_TEAMPLAY] = gi.cvar("teamplay", "0", CVAR_LATCH)->value != 0;
     g_modifier[MOD_HOOK]     = gi.cvar("hook", "0", CVAR_LATCH)->value != 0;
+    // The REQUEST, so that the refusal below still fires under dm and arena.
+    // G_ResolveModifiers() overwrites it at the end of InitGame with what the
+    // ruleset's own switch actually says -- see there.
     g_modifier[MOD_RUNES]    = gi.cvar("runes", "0", CVAR_LATCH)->value != 0;
-    // Bots are requested by minimumplayers / bots_minplayers, not by a boolean;
-    // Phase 6 sets this from the bot layer.  Until then no bot can exist, so
-    // claiming otherwise would make G_BotsAllowed() lie.
-    g_modifier[MOD_BOTS]     = false;
+    // R-88's other half.  `bots` is the operator's switch for the whole layer
+    // and DEFAULTS TO 1 where the ruleset accepts it, so a server that says
+    // nothing behaves exactly as it did before the modifier existed.  It is not
+    // a second answer to G_BotsAllowed() -- it is what G_BotsAllowed() reads,
+    // which is why there is still one question asked by name.  The reason it
+    // exists at all is R-SEC-2's staged exposure: a public server wants to be
+    // able to turn the bot layer off without turning the ruleset off.
+    g_modifier[MOD_BOTS]     = gi.cvar("bots", "1", CVAR_LATCH)->value != 0;
 
     // R-COMPAT-6: `statsfile` and `statsname` are registered ONCE, here, with a
     // default chosen by the ruleset that will use them.  Both donors ship a
@@ -423,6 +438,122 @@ void G_Svcmd_Ruleset_f(void)
                    techs, spawn1, spawn2, banners);
     }
 
+    // R-VER-19's argument, applied to Phase 7: a bot's PLACEMENT has to be
+    // observable from outside the library, or "bots play in ctf" is a claim
+    // about source rather than a fact about a server.  `sv clientdump` says
+    // which slots hold bots and which library each uses; it cannot say which
+    // team, which arena or whether the match counts them, and those are exactly
+    // what R-CTF-4, R-RA-4 and R-OSP-11 are about.
+    //
+    // Two lines: the census, then the ruleset's own placement.  Both are
+    // printed under every ruleset that accepts bots, including when there are
+    // none -- a row that prints nothing and a row that prints zero are not the
+    // same evidence.
+    if (G_BotsAllowed()) {
+        char slots[128];
+        int  nbots = 0, len = 0;
+
+        slots[0] = 0;
+        for (int i = 0; i < game.maxclients; i++) {
+            edict_t *e = &g_edicts[i + 1];
+            if (!e->inuse || !e->client || !(e->flags & FL_BOT))
+                continue;
+            nbots++;
+            if (len < (int)sizeof(slots) - 8)
+                len += Q_snprintf(slots + len, sizeof(slots) - len, "%s%d",
+                                  len ? "," : "", i);
+        }
+
+        gi.cprintf(NULL, PRINT_HIGH,
+                   "bots         %d bot(s) of %d client(s) in %d slot(s), "
+                   "at %s\n", nbots, clients, game.maxclients,
+                   nbots ? slots : "-");
+
+        // FL_BOT and FL_BOTCLIENT are two different bits (R-CORE-14) and Phase
+        // 6 sets both on every bot.  A site that tests one and means the other
+        // compiles, so the two counts are printed separately rather than
+        // assumed equal: if they ever diverge, this is where it shows.
+        int nbotclient = 0;
+        for (int i = 0; i < game.maxclients; i++) {
+            edict_t *e = &g_edicts[i + 1];
+            if (e->inuse && e->client && (e->flags & FL_BOTCLIENT))
+                nbotclient++;
+        }
+
+        switch (G_Ruleset()) {
+        case RULESET_CTF: {
+            int red = 0, blue = 0, noteam = 0;
+
+            for (int i = 0; i < game.maxclients; i++) {
+                edict_t *e = &g_edicts[i + 1];
+                if (!e->inuse || !e->client || !(e->flags & FL_BOT))
+                    continue;
+                if (e->client->resp.ctf_team == CTF_TEAM1)
+                    red++;
+                else if (e->client->resp.ctf_team == CTF_TEAM2)
+                    blue++;
+                else
+                    noteam++;
+            }
+            gi.cprintf(NULL, PRINT_HIGH,
+                       "botplace     ctf red=%d blue=%d noteam=%d, "
+                       "FL_BOTCLIENT=%d (R-CTF-4)\n",
+                       red, blue, noteam, nbotclient);
+            break;
+        }
+        case RULESET_ARENA: {
+            int placed = 0, teamed = 0, fighting = 0, arena1 = 0;
+
+            for (int i = 0; i < game.maxclients; i++) {
+                edict_t *e = &g_edicts[i + 1];
+                if (!e->inuse || !e->client || !(e->flags & FL_BOT))
+                    continue;
+                if (e->client->resp.context > 0)
+                    placed++;
+                if (e->client->resp.context == 1)
+                    arena1++;
+                if (e->client->resp.teamnum >= 0)
+                    teamed++;
+                if (e->client->resp.fightstate == FIGHT_ALIVE)
+                    fighting++;
+            }
+            gi.cprintf(NULL, PRINT_HIGH,
+                       "botplace     arena in-arena=%d (arena1=%d) on-team=%d "
+                       "fighting=%d, FL_BOTCLIENT=%d (R-RA-4)\n",
+                       placed, arena1, teamed, fighting, nbotclient);
+            break;
+        }
+        case RULESET_TOURNEY: {
+            int entered = 0, ready = 0, t0 = 0, t1 = 0;
+
+            for (int i = 0; i < game.maxclients; i++) {
+                edict_t *e = &g_edicts[i + 1];
+                if (!e->inuse || !e->client || !(e->flags & FL_BOT))
+                    continue;
+                if (e->client->resp.osp_entered == ENTERED_ENTERED)
+                    entered++;
+                if (e->client->resp.osp_r20c)
+                    ready++;
+                if (e->client->resp.team == 0)
+                    t0++;
+                else if (e->client->resp.team == 1)
+                    t1++;
+            }
+            gi.cprintf(NULL, PRINT_HIGH,
+                       "botplace     tourney m_mode=%d entered=%d ready=%d "
+                       "team0=%d team1=%d, FL_BOTCLIENT=%d (R-OSP-11)\n",
+                       m_mode, entered, ready, t0, t1, nbotclient);
+            break;
+        }
+        default:
+            gi.cprintf(NULL, PRINT_HIGH,
+                       "botplace     %s has no per-ruleset bot placement, "
+                       "FL_BOTCLIENT=%d\n", G_RulesetName(G_Ruleset()),
+                       nbotclient);
+            break;
+        }
+    }
+
     // A live monster in a ruleset that forbids them is a contradiction, and the
     // diagnostic names it rather than leaving a reader to spot an unexpected
     // number.  This is how the leak below was found: dm reported "1 live
@@ -530,13 +661,100 @@ bool G_TeamplayEnabled(void)
 
 bool G_BotsAllowed(void)
 {
-    return g_active_ruleset != RULESET_SP;      // N6, R-MODE-7
+    // N6, R-MODE-7: every ruleset but sp -- and then the operator's own switch,
+    // which is refused under sp anyway so the first test is what decides there.
+    return g_active_ruleset != RULESET_SP && g_modifier[MOD_BOTS];
+}
+
+// ---------------------------------------------------------------- R-88
+//
+// WHAT A MODIFIER IS, decided in 1.22 for the two that were not one.
+//
+// R-MODE-4 says a modifier is requested by cvar and refused where unsupported.
+// It does not say what it does where it is ACCEPTED, and for `runes` the answer
+// was "nothing": CTF's techs come from CTFSetupTechSpawn on DF_CTF_NO_TECH
+// alone and tourney's runes from the `runes_enable` BITMASK read at the call
+// site, so G_ModifierEnabled(MOD_RUNES) had exactly one caller -- `sv ruleset`,
+// printing it.  1.20 recorded that rather than choosing, because every fix
+// available then changed behaviour: gating CTF's techs on `runes` takes techs
+// out of a default CTF server, and replacing `runes_enable` with a boolean
+// loses the bitmask that selects WHICH runes spawn.  Phase 6 adds `bots` to the
+// same question and 1.21's prompt asked for both to be decided together.
+//
+// The decision is that a modifier is **the resolved answer, not the request**.
+// Both of the switches above are already the authority on whether runes or
+// techs are in play; the modifier reports what they say, and the cvar is folded
+// into them beforehand as a request that can only ever turn something ON.
+// Three properties fall out:
+//
+//   * a default server is untouched.  `runes` defaults to 0, which means "do
+//     not ask", not "turn them off", so a CTF map's techs and a tourney
+//     server's runes_enable keep deciding exactly what they decided before.
+//   * `runes 1` means something under ctf and tourney for the first time -- it
+//     clears DF_CTF_NO_TECH, or turns all five runes on where none were.  The
+//     bitmask survives: asking for runes where some are already selected
+//     changes nothing.
+//   * `sv ruleset` stops lying.  `runes=1` now means runes or techs will
+//     actually spawn, which is a fact a play test can check.
+//
+// The refusal under dm and arena is unchanged and still fires from the request,
+// which is why the request is what InitGame stores and this runs afterwards.
+//
+// `bots` is the same shape with the switch on the other side: it IS the switch,
+// it defaults to on, and G_BotsAllowed() reads it.  It is resolved in InitGame
+// rather than here because nothing has to be read back.
+//
+// Called at the END of InitGame, after the ruleset's own init: `runes_enable`
+// is registered by OSP_gameInit and `rune_stat` computed from it there, and
+// reading either earlier would be reading a cvar this file had registered first
+// with a default of its own -- R-COMPAT-6's exact trap.
+void G_ResolveModifiers(void)
+{
+    cvar_t *req = gi.cvar("runes", "0", CVAR_LATCH);
+    bool wanted = req->value != 0;
+    int flags;
+
+    switch (g_active_ruleset) {
+    case RULESET_CTF:
+        flags = (int)dmflags->value;
+        if (wanted && (flags & DF_CTF_NO_TECH)) {
+            gi.cvar_set("dmflags", va("%d", flags & ~DF_CTF_NO_TECH));
+            gi.dprintf("Colosseum: 'runes 1' clears DF_CTF_NO_TECH so the techs "
+                       "spawn (R-MODE-4, R-88)\n");
+        }
+        g_modifier[MOD_RUNES] = !((int)dmflags->value & DF_CTF_NO_TECH);
+        break;
+    case RULESET_TOURNEY:
+        if (wanted && !rune_stat) {
+            // All five bits.  Which runes is runes_enable's business and this
+            // only ever fires when it has chosen none.
+            gi.cvar_set("runes_enable", "31");
+            rune_stat = 0x1f;
+            gi.dprintf("Colosseum: 'runes 1' sets runes_enable to all five "
+                       "(R-MODE-4, R-88)\n");
+        }
+        g_modifier[MOD_RUNES] = rune_stat != 0;
+        break;
+    default:
+        // dm, arena and sp: the refusal in G_InitRuleset has already cleared it
+        // and said so.  Restating it here keeps the derived value the only
+        // thing anything reads.
+        g_modifier[MOD_RUNES] = false;
+        break;
+    }
 }
 
 bool G_SavegamesAllowed(void)
 {
-    // R-ENG-6.  The "and false whenever a bot exists" half arrives with the bot
-    // layer in Phase 6; there are no bots yet, so stating it now would be a
-    // check that cannot fail.
-    return g_active_ruleset == RULESET_SP;
+    // R-ENG-6, both halves as of 1.22.  The second is a GUARD rather than a
+    // gate and it is worth being honest about that: no bot can exist under sp,
+    // because G_BotsAllowed() is false there and every path that creates one
+    // asks -- so `botglobals.numbots` is 0 whenever the first test passes and
+    // this clause has never fired.  It is here because the requirement says so
+    // and because the day something makes a bot reachable under sp, a savegame
+    // written with a fake client in a slot is not a thing that can be reloaded:
+    // the brain is not saved, and the client it describes would come back
+    // without one.  game_export_ex_t's CanSave() is where the engine could be
+    // told BEFORE the file is opened; that hook is declared and not yet filled.
+    return g_active_ruleset == RULESET_SP && botglobals.numbots == 0;
 }

@@ -37,12 +37,20 @@ extern  int     active_clients;
 #define RUNE_REGEN              8
 #define RUNE_VAMPIRE            16
 
-// resp.entered's four states.  R-58: this is NOT baseq2's `resp.entered` bool,
+// resp.osp_entered's four states.  R-58: this is NOT baseq2's `resp.entered` bool,
 // and the two share a name in the merged struct (SPECS.md 1.19).
 #define ENTERED_NO              0
 #define ENTERED_ENTERED         1
 #define ENTERED_OBSERVER        2
 #define ENTERED_QUEUED          3
+
+// The three the BOT LAYER reads through its ruleset-neutral accessors
+// (R-BOT-29).  They are tourney's own globals; bl_main.c must never see them
+// except behind BotTourneyHook()/BotTourneyVotedIn(), because an extern here
+// resolves in every ruleset and answers with tourney's state whether or not
+// tourney is running.
+extern  cvar_t  *hook_enable;
+extern  int      bots_votedin;
 
 extern  cvar_t  *runes_model;
 extern  cvar_t  *ffa_hurtself;
@@ -110,6 +118,11 @@ void     OSP_giveClientID(struct edict_s *ent);
 void     OSP_clientBeginPre(struct edict_s *ent);
 bool     OSP_clientBegunPost(struct edict_s *ent);
 void     OSP_clientBeginLevel(struct edict_s *ent);
+// R-OSP-11's bot half: a bot has no key to press, so entering the game and
+// readying up are done for it.  The join runs from ClientBeginDeathmatch after
+// placement, the ready-up from the frame end.
+void     OSP_botJoin(struct edict_s *ent);
+void     OSP_botReady(void);
 void     OSP_userinfoChanged(struct edict_s *ent, char *userinfo);
 bool     OSP_clientAllowed(struct edict_s *ent, char *userinfo);
 void     OSP_clientConnected(struct edict_s *ent, char *userinfo);

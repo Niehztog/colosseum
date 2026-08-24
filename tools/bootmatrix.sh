@@ -59,6 +59,7 @@ run_row() {
       +set deathmatch "$dm" +set coop "$coop" +set maxclients 8 \
       +set xatrix "$xatrix" +set rogue "$rogue" \
       +map "$map" >"$log" 2>&1 )
+  rc=$?
 
   frames=$(sed -n 's/^world *frame \([0-9]*\),.*/\1/p' "$log" | tail -1)
   got_rs=$(sed -n 's/^ruleset *\([a-z]*\).*/\1/p' "$log" | tail -1)
@@ -70,6 +71,18 @@ run_row() {
   [ "$got_rs" = "$want_rs" ] || verdict="reported '$got_rs'"
   [ "$layers" = "$want_layers" ] || verdict="layers '$layers'"
   [ "$errs" -eq 0 ] || verdict="$errs error line(s)"
+  # ...and the exit status, which outranks all of them.  The frame count catches
+  # a crash BEFORE the census; a crash after it -- at ShutdownGame, say -- left
+  # every field above correct.  That is not hypothetical: it is what a savegame
+  # load did in every configuration while three scripts said ok
+  # (doc/reconciliation.md R-108).
+  if [ "$rc" != 0 ]; then
+    if [ "$rc" -gt 128 ] 2>/dev/null; then
+      verdict="died on signal $((rc - 128))"
+    else
+      verdict="exited $rc"
+    fi
+  fi
 
   printf '%-9s %-7s %-6s %-9s %-7s %s\n' "$rs" "$xatrix" "$rogue" "$map" "${frames:-0}" "$verdict"
   [ "$verdict" = ok ]
@@ -86,9 +99,38 @@ if [ "$CONTROL" = 1 ]; then
   # 2. boot with xatrix on and compare against off: the layer comparison must
   #    notice.
   run_row dm 1 0 q2dm1 1 0 dm "xatrix=0 rogue=0" && fail=$((fail+1)) || pass=$((pass+1))
+  # 3. a boot killed by SIGSEGV must be reported even though everything it
+  #    printed was right, which is what the exit-status check is for.  q2pro has
+  #    no deliberate-abort console command in this build, so the signal comes
+  #    from outside.
+  (
+    ulimit -c 0
+    printf 'wait 30\nsv ruleset\n' | \
+    timeout -s KILL 60 "$Q2PRO_BUILD/q2proded" \
+      +set basedir "$DIR" +set homedir "$DIR" +set game colosseum \
+      +set dedicated 1 +set net_port 0 +set g_ruleset dm \
+      +set deathmatch 1 +set coop 0 +set maxclients 8 \
+      +map q2dm1 >"$DIR/ctl.log" 2>&1 &
+    pid=$!
+    sleep 8
+    kill -SEGV $pid 2>/dev/null
+    wait $pid
+    exit $?
+  ) 2>/dev/null
+  rc=$?
+  frames=$(sed -n 's/^world *frame \([0-9]*\),.*/\1/p' "$DIR/ctl.log" | tail -1)
+  if [ "$rc" -gt 128 ] 2>/dev/null && [ "${frames:-0}" -ge 30 ] 2>/dev/null; then
+    printf '%-9s %-7s %-6s %-9s %-7s %s\n' dm - - q2dm1 "$frames" \
+           "died on signal $((rc - 128))"
+    pass=$((pass+1))
+  else
+    printf '%-9s %-7s %-6s %-9s %-7s %s\n' dm - - q2dm1 "${frames:-0}" \
+           "control did not produce a post-census crash (rc=$rc)"
+    fail=$((fail+1))
+  fi
   echo
-  echo "2 control(s), $pass fired, $fail did not"
-  [ "$fail" -eq 0 ] && echo "controls ok: both comparisons are live"
+  echo "3 control(s), $pass fired, $fail did not"
+  [ "$fail" -eq 0 ] && echo "controls ok: the comparisons and the exit status are live"
   exit $([ "$fail" -eq 0 ] && echo 0 || echo 1)
 fi
 

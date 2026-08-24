@@ -102,6 +102,7 @@ PARSERS = {
     'lostref.py': _bang,
     'donorgate.py': _bang,
     'encoding.py': _bang,
+    'botabi.py': _bang,
     'dsweep.py': _bang,
     'keycontract.py': _bang,
     'slotkind.py': _bang,
@@ -184,6 +185,14 @@ def main():
     # twice -- grep in a UTF-8 locale returns NOTHING for a file it cannot
     # decode, so a census can silently report zero (R-60).
     results.append(run('encoding.py', ['--tree', tree], 'encoding'))
+    # botabi: the game<->botlib contract against the BRAIN's own header
+    # (R-VER-28).  The Trace slot has two spellings and they are the same ABI at
+    # 32 bits and different ABIs at 64, so taking the 32-bit one on aarch64
+    # compiles, links, loads the library, spawns the bots and plays nothing
+    # (doc/reconciliation.md R-97).  Skips itself with a message when the brain
+    # is not beside the repository, the same rule auditems applies to q2pro.
+    results.append(run('botabi.py', [], 'botabi'))
+    results.append(run('botabi.py', ['--selftest'], 'botabi/controls'))
 
     # --- comparative audits: need a donor ---------------------------------
     # dsweep, not auditsave: both implement R-SAVE-3's "a persistent field with

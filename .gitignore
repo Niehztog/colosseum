@@ -19,7 +19,7 @@
 /build/
 
 # genptr.py scratch (tools/audit.py and the Makefile's check-ptrs target)
-src/.g_ptrs.gen
+src/.g_ptrs.gen*
 
 __pycache__/
 *.pyc

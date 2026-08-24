@@ -586,7 +586,7 @@ void T_Damage(edict_t *targ, edict_t *inflictor, edict_t *attacker, const vec3_t
     if (G_Ruleset() == RULESET_TOURNEY && targ->client) {
         // A client who has not finished entering is not in the match yet, and
         // is where the donor returns rather than damaging.
-        if (targ->client->resp.entered != ENTERED_ENTERED)
+        if (targ->client->resp.osp_entered != ENTERED_ENTERED)
             return;
 
         if (m_mode > 1 && targ != attacker && attacker->client &&

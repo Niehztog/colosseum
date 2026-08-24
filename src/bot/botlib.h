@@ -109,6 +109,20 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #define BLERR_INVALIDSOUNDINDEX         32  //BotAddSound: invalid sound index value
 
 //bsp_trace_t hit surface
+// ---------------------------------------------------------------------------
+// THE CONTRACT'S OWN ARRAY BOUNDS.
+//
+// R-BOT-1 lists MAX_NETNAME, MAX_CLIENTSKINNAME, MAX_FILEPATH and
+// MAX_CHARACTERNAME as fixed limits.  These two belong on that list and were
+// not on it, because the 1999 header spells them with the ENGINE's names --
+// which was safe in 1999, when the engine was id's, and is not safe now:
+// Q2PRO's MAX_STATS is 64 under USE_NEW_GAME_API where the brain's q_shared.h
+// has 32.  A contract array whose bound follows one side's engine is not a
+// contract.  Both values are the brain's, and `tools/botabi.py` compares the
+// _Static_asserts at the bottom of this header against the brain's own.
+#define BOTLIB_MAX_STATS        32
+#define BOTLIB_MAX_ITEMS        256
+
 typedef struct bsp_surface_s
 {
     char name[16];
@@ -120,8 +134,16 @@ typedef struct bsp_surface_s
 //a trace is returned when a box is swept through the world
 typedef struct bsp_trace_s
 {
-    bool        allsolid;   // if true, plane is not valid
-    bool        startsolid; // if true, the initial point was in a solid area
+    // `qboolean`, NOT `bool`, and the difference is four bytes each.  The 1999
+    // header says qboolean, which is `enum { qfalse, qtrue }` on both sides --
+    // Q2PRO keeps it and marks it "ABI compat only, don't use", which is
+    // precisely the use it is for here.  osp-tourney's port swept the name to
+    // `bool` along with the rest of its tree, and C99's `bool` is ONE byte, so
+    // every field from `fraction` down moved four bytes up: the brain read our
+    // endpos[0] as the trace fraction.  It compiled, it linked, the bots ran,
+    // and their navigation was running on garbage (doc/reconciliation.md R-100).
+    qboolean    allsolid;   // if true, plane is not valid
+    qboolean    startsolid; // if true, the initial point was in a solid area
     float           fraction;   // time completed, 1.0 = didn't hit anything
     vec3_t      endpos;     // final position
     cplane_t        plane;      // surface normal at impact
@@ -181,9 +203,15 @@ typedef struct bot_updateclient_s
     float       blend[4];       // rgba full screen effect
     float       fov;                // horizontal field of view
     int     rdflags;            // refdef flags
-    short       stats[MAX_STATS];
+    // BOTLIB_MAX_STATS, not the engine's MAX_STATS.  Under USE_NEW_GAME_API
+    // Q2PRO's is 64 and the brain's q_shared.h has 32, so writing the engine's
+    // name here makes the struct 64 bytes longer than the one the brain
+    // memcpy's into -- and the brain's memcpy is sized from ITS type, so the
+    // whole inventory it reads is our stats[32..63] followed by our inventory
+    // shifted sixteen slots down.  The contract's bound is the contract's.
+    short       stats[BOTLIB_MAX_STATS];
     //====================================
-    int     inventory[MAX_ITEMS];
+    int     inventory[BOTLIB_MAX_ITEMS];
     //
 } bot_updateclient_t;
 
@@ -265,7 +293,37 @@ typedef struct bot_import_s
     void        (*BotClientCommand)(int client, char *str, ...);
     //print messages from the bot library
     void        (*Print)(int type, char *fmt, ...);
-    //remove trace and point contents, we don't use them anyway?
+    // R-BOT-5's hazard, and it took two rounds to settle.  `bsp_trace_t` is 84
+    // bytes, so it is never returned in registers: the caller passes a hidden
+    // buffer.  On 32-bit that buffer IS the first visible argument, so
+    // `bsp_trace_t (*)(vec3_t start, ...)` and
+    // `bsp_trace_t *(*)(bsp_trace_t *retbuf, vec3_t start, ...)` compile to the
+    // same code; on x86-64 and aarch64 it is a hidden REGISTER (rax / x8) and
+    // they are different ABIs.
+    //
+    // Colosseum first met this as a MISMATCH: osp-tourney's copy of this header
+    // carries the by-value spelling, the brain's be_interface.h had grown an
+    // `#if __x86_64__ || __aarch64__` branch declaring the retbuf explicitly,
+    // and on aarch64 that put `start` where the brain expected the buffer and
+    // shifted every argument one place -- `passent` received a truncated
+    // pointer, every trace came back zeroed, and the bots stood still
+    // (doc/reconciliation.md R-97).  1.22 matched the branch.
+    //
+    // Upstream then withdrew it (gladiator-bot-restored 57ce85a3), and its
+    // reasoning is better than the match was: the PUBLISHED contract --
+    // game/botlib.h, the header a foreign engine builds against -- was never
+    // branched, so the branch only ever worked when both sides were theirs.
+    // By value on every target is also the faithful 1999 spelling and the only
+    // form that reproduces gladi386.so's trace thunk.  So the `#if` is gone
+    // from both sides; contract version 3.
+    //
+    // NO `q_gameabi` HERE, and that is a decision rather than an omission.
+    // R-BOT-5 asks for "the same treatment Q2PRO applies to gi.trace"; that
+    // treatment is `callee_pop_aggregate_return(0)`, which this build does not
+    // enable (config.h sets USE_GAME_ABI_HACK 0, so q_gameabi expands to
+    // nothing).  The brain's side carries no attribute at all, so if this build
+    // ever turns the hack on, this slot must still not get it -- the two sides
+    // have to agree, and the contract's spelling is the plain one.
     bsp_trace_t (*Trace)(vec3_t start, vec3_t mins, vec3_t maxs, vec3_t end, int passent, int contentmask);
     // const to match Q2PRO's gi.pointcontents, which is assigned straight
     // into this slot.  Only the pointer's type changes, not the ABI.
@@ -349,3 +407,50 @@ name:                           default:                module(s):              
 "fastchat"                  "0"                 be_ai2_dm.c             fast chatting for debugging
 
 */
+
+// ---------------------------------------------------------------------------
+// THE LAYOUT HALF OF THE CONTRACT (R-BOT-5, R-VER-28).
+//
+// Every struct above is passed BY POINTER or BY VALUE across a library
+// boundary, so both sides must agree on its size and on every offset inside it
+// -- and nothing in the 1999 design checks that.  `BotVersion` returns the
+// brain's version, not the convention's; `Test()` passes no struct by value.
+// Two mismatches were live before these asserts existed, both of them a type
+// NAME that means something different on the two sides:
+//
+//   bsp_trace_t         80 here against 84 there, because osp-tourney's port
+//                       swept `qboolean` to `bool` and C99's bool is one byte.
+//                       Every field from `fraction` down was four bytes out,
+//                       so the brain read our endpos[0] as the trace fraction.
+//   bot_updateclient_t  1292 here against 1228 there, because the array bound
+//                       was spelled MAX_STATS and Q2PRO's is 64 where the
+//                       brain's q_shared.h has 32.  The brain's memcpy is
+//                       sized from ITS type, so the inventory it read was our
+//                       stats[32..63] followed by our inventory shifted down
+//                       sixteen slots.
+//
+// The numbers are the brain's, measured against
+// gladiator-bot-restored/botlib/struct_sizes_asserts.h and its game/botlib.h.
+// They hold at 32 and 64 bits alike: not one of these structs contains a
+// pointer, which is what makes an assert on the size meaningful rather than
+// word-size noise.  `tools/botabi.py` compares these lines against the brain's
+// own, so a change on EITHER side fails `make check`.
+_Static_assert(sizeof(bsp_surface_t)        == 24,   "bsp_surface_t");
+_Static_assert(sizeof(bsp_trace_t)          == 84,   "bsp_trace_t");
+// ...and two OFFSETS, mirroring the brain's own (57ce85a3).  A size cannot see a
+// transposition, which is the one thing `tools/botabi.py` says it cannot check;
+// `fraction` at 8 and `endpos` at 12 are what the 4-byte qboolean buys, and they
+// are where the wrongness showed when it was 80 bytes -- `fraction` landed on
+// `endpos[0]`.  `q_offsetof` rather than <stddef.h>'s: it is this tree's own
+// spelling and needs no include in a header every bot TU pulls in.
+_Static_assert(q_offsetof(bsp_trace_t, fraction) == 8,  "bsp_trace_t.fraction");
+_Static_assert(q_offsetof(bsp_trace_t, endpos)   == 12, "bsp_trace_t.endpos");
+// The two host-side definitions the brain now hard-asserts against a port, so
+// that a divergence fails HERE too and not only over there.
+_Static_assert(sizeof(qboolean)             == 4,    "qboolean must stay 4 bytes");
+_Static_assert(BOTLIB_MAX_STATS             == 32,   "the contract's stat count");
+_Static_assert(sizeof(bot_settings_t)       == 432,  "bot_settings_t");
+_Static_assert(sizeof(bot_clientsettings_t) == 144,  "bot_clientsettings_t");
+_Static_assert(sizeof(bot_input_t)          == 36,   "bot_input_t");
+_Static_assert(sizeof(bot_updateclient_t)   == 1228, "bot_updateclient_t");
+_Static_assert(sizeof(bot_updateentity_t)   == 104,  "bot_updateentity_t");

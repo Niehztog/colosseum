@@ -28,6 +28,9 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 #include "g_local.h"
 #include "tourney/osp_types.h"
+// old_botcount, which OSP_endClean resets -- declared by the file that defines
+// it (R-OSP-5).
+#include "bot/bl_spawn.h"
 #include "tourney/osp_stats.h"
 #include "bot/bl_main.h"
 #include "bot/bl_botcfg.h"
@@ -3691,9 +3694,9 @@ void OSP_clientBeginPre(edict_t *ent)
         OSP_hookAliases(ent);
 
     if (!cl->resp.osp_r210) {
-        cl->resp.entered = ENTERED_OBSERVER;
+        cl->resp.osp_entered = ENTERED_OBSERVER;
         cl->resp.osp_r240 = 0;
-    } else if (cl->resp.entered == ENTERED_ENTERED) {
+    } else if (cl->resp.osp_entered == ENTERED_ENTERED) {
         active_clients++;
         OSP_DoRankSort();
     }
@@ -3785,6 +3788,119 @@ bool OSP_clientBegunPost(edict_t *ent)
 
 /*
 =================
+OSP_botJoin / OSP_botReady
+
+R-OSP-11's behaviour half, which is Phase 7's because it needs a bot to exist.
+
+A client under tourney connects as an OBSERVER -- OSP_clientBeginPre sets
+`entered` to ENTERED_OBSERVER for everyone -- and enters the game by pressing a
+key: `join` in modes 0 and 1, the team menu in mode 2, the queue in mode 3.  A
+bot presses nothing.  Neither the donor's bot layer nor the 1999 brain sends
+`join`: the brain's whole client-command vocabulary is say / say_team / use /
+drop / invuse / invdrop / wave plus EA_Command, and nothing in `bl_*.c` or
+`bots.cfg` issues one either.  So bots under `osp-tourney` connect, sit in the
+audience and are not counted -- which is what they did here too, silently,
+because R-58's `entered`/`osp_entered` split had been applied to most of the
+tree and not to CheckMinimumPlayers' accessor, and a `bool` reads ENTERED_
+OBSERVER (2) as equal to ENTERED_ENTERED (1).
+
+The join goes through the donor's own entry points rather than assigning
+`entered` here, because entering is nine other assignments as well -- the
+enterframe stamp, the score restore, the accuracy row, the team member list and
+active_clients among them -- and every one of the donor's four entry paths does
+all of them.
+
+1v1 is deliberately left alone: OSP_clientBeginLevel already calls OSP_1v1Add
+for mode 3, so a bot takes its place in the spectator queue and enters when the
+queue reaches it, which is R-OSP-12's rule and not something a bot may skip.
+=================
+*/
+void OSP_botJoin(edict_t *ent)
+{
+    if (!(ent->flags & FL_BOT))
+        return;
+    if (ent->client->resp.osp_entered != ENTERED_OBSERVER)
+        return;
+
+    // OSP_startObserve is the toggle behind the `observe` command and it is
+    // the ONE function that handles all four modes: it asks OSP_1v1AllowJoin
+    // under mode 3, OSP_addTeamMember(ent, 2) under 2 and 3 -- 2 being the
+    // donor's "pick a side for me", which balances, honours a locked or full
+    // team and consults OSP_defaultTeam -- and under 0 and 1 simply enters.
+    // Then it does the nine other assignments entering is: the enterframe
+    // stamp, the score restore, active_clients, the rank sort, the stats row.
+    //
+    // Picking the side here instead was the first attempt and it put all four
+    // bots on "Visitors": OSP_teamCount only counts clients that have ENTERED,
+    // so before the join every count is 0 and the balance always answers 0.
+    // The donor's own argument does not have that problem because it runs
+    // inside the join.
+    OSP_startObserve(ent);
+}
+
+/*
+The ready-up half.  `bots_warmuptime` is documented as "the amount of time
+before a bot will ready up in qualifier, teamplay or 1v1 modes.  If 0, a bot
+will automatically ready itself when all other real clients have moved to ready
+status."  Both halves are implemented here; the donor implements neither, and
+its `ready` command's own bot arms -- the "everybody left is a bot, start
+without waiting them out" shortcut at OSP_ready_cmd -- can only fire once
+something readies a bot, so they were unreachable.
+
+Mode 0 has no ready gate at all (`sync_stat` starts at 8), which is why this
+runs only for modes 1..3.
+*/
+void OSP_botReady(void)
+{
+    edict_t *ent;
+    int      i, humans, humansready;
+    bool     due;
+
+    if (m_mode < 1 || sync_stat >= 4)
+        return;
+    if (level.framenum & 31)
+        return;
+
+    if ((int)bots_warmuptime->value) {
+        due = level.framenum > (int)bots_warmuptime->value * 10;
+    } else {
+        // "when all other real clients have moved to ready status", which is
+        // vacuously true on a server with no humans -- and that is the right
+        // reading: OSP_ready_cmd has its own "everybody left is a bot, start
+        // without waiting them out" shortcut, so the mod already intends a
+        // bot-only match to start.  What it does about nobody being there is
+        // `bots_noclients`, which removes the bots; it is not this.
+        humans = humansready = 0;
+        for (i = 1; i <= game.maxclients; i++) {
+            ent = g_edicts + i;
+            if (!ent->inuse || !ent->client || (ent->flags & FL_BOT))
+                continue;
+            if (ent->client->resp.osp_entered != ENTERED_ENTERED)
+                continue;
+            humans++;
+            if (ent->client->resp.osp_r20c)
+                humansready++;
+        }
+        due = humans == humansready;
+    }
+
+    if (!due)
+        return;
+
+    for (i = 1; i <= game.maxclients; i++) {
+        ent = g_edicts + i;
+        if (!ent->inuse || !ent->client || !(ent->flags & FL_BOT))
+            continue;
+        if (ent->client->resp.osp_entered != ENTERED_ENTERED)
+            continue;
+        if (ent->client->resp.osp_r20c)
+            continue;
+        OSP_ready_cmd(ent, 0);
+    }
+}
+
+/*
+=================
 OSP_clientBeginLevel
 
 The ClientBegin half: a client that is already connected and is arriving on a
@@ -3804,7 +3920,7 @@ void OSP_clientBeginLevel(edict_t *ent)
         OSP_Stats_PlayerReconnect(ent);
     }
 
-    if (cl->resp.entered == ENTERED_ENTERED) {
+    if (cl->resp.osp_entered == ENTERED_ENTERED) {
         if (m_mode == 2) {
             OSP_readdTeamMember(ent);
             OSP_initTeamFrags(ent);
@@ -3853,7 +3969,7 @@ void OSP_clientLeaving(edict_t *ent, int *out_team)
                         (ent->flags & FL_BOTCLIENT) ? " [SERVER_BOT]" : "");
     }
 
-    state = cl->resp.entered;
+    state = cl->resp.osp_entered;
     if (m_mode == 3)
         OSP_1v1Remove(ent, 1);
     if (rune_stat)
@@ -3896,14 +4012,14 @@ bool OSP_clientLeft(edict_t *ent, int tno)
     // A player who leaves mid-match can be held a seat, name and score for
     // `team_recovertime` seconds -- that is what makes the pause below worth
     // having.  Otherwise every trace of them goes now.
-    if ((int)client_recover->value && cl->resp.entered == ENTERED_ENTERED &&
+    if ((int)client_recover->value && cl->resp.osp_entered == ENTERED_ENTERED &&
         sync_stat > 2 && !cl->resp.osp_r07c[0] &&
         !level.intermission_framenum && !(ent->flags & FL_BOTCLIENT)) {
         Q_strlcpy(cl->resp.osp_r214, cl->pers.netname, sizeof(cl->resp.osp_r214));
         cl->resp.osp_r018 = level.framenum;
         OSP_saveClient(ent);
     } else {
-        cl->resp.entered = ENTERED_OBSERVER;
+        cl->resp.osp_entered = ENTERED_OBSERVER;
         cl->resp.score = 0;
         cl->resp.team = 2;
         cl->resp.osp_r214[0] = 0;
@@ -3975,7 +4091,7 @@ bool OSP_clientLeft(edict_t *ent, int tno)
         p = g_edicts + i;
         if (p->inuse && p->client && p->client->pers.connected) {
             connected++;
-            if (p->client->resp.entered == ENTERED_ENTERED)
+            if (p->client->resp.osp_entered == ENTERED_ENTERED)
                 active++;
         }
     }
@@ -4069,7 +4185,7 @@ void OSP_userinfoChanged(edict_t *ent, char *userinfo)
             cl->pers.greenname[i] = cl->pers.netname[i] + 128;
 
         tnum = cl->resp.team;
-        if (m_mode == 3 && cl->resp.entered == ENTERED_ENTERED &&
+        if (m_mode == 3 && cl->resp.osp_entered == ENTERED_ENTERED &&
             !cl->resp.osp_r210 && !level.intermission_framenum &&
             tnum >= 0 && tnum < (int)q_countof(osp_teams)) {
             char buf[24];

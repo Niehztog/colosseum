@@ -88,6 +88,11 @@ typedef struct {
 // ---------------------------------------------------------------- accessors
 
 void        G_InitRuleset(void);        // once, from InitGame, before anything reads a ruleset
+// ...and once at the END of InitGame, after the ruleset's own init has
+// registered its cvars.  R-88's decision: `runes` is derived from the switch
+// the ruleset's own code reads rather than gating nothing.  See the comment on
+// the implementation.
+void        G_ResolveModifiers(void);
 ruleset_t   G_Ruleset(void);
 const char *G_RulesetName(ruleset_t r);
 const ruleset_ops_t *G_Ops(void);       // never NULL after G_InitRuleset()
@@ -138,11 +143,12 @@ bool G_IsCampaign(void);
 bool G_TeamplayEnabled(void);
 
 // May bots exist?  Every ruleset but sp (R-MODE-7, N6: the Gladiator botlib is
-// deathmatch-only).
+// deathmatch-only), AND the `bots` modifier, which defaults to on and is the
+// operator's switch for the whole layer (R-88's decision, 1.22).
 bool G_BotsAllowed(void);
 
 // May the game be saved?  sp only, and R-ENG-6 additionally forbids it whenever
-// a bot exists -- that clause lands with the bot layer in Phase 6.
+// a bot exists.
 bool G_SavegamesAllowed(void);
 
 #endif // G_RULESET_H

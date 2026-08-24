@@ -16,6 +16,9 @@ with this program; if not, write to the Free Software Foundation, Inc.,
 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
 */
 #include "g_local.h"
+#include "bot/bl_main.h"
+#include "bot/bl_spawn.h"
+#include "bot/p_menulib.h"
 #include "tourney/osp_hooks.h"
 #include "m_player.h"
 #include "arena/arena.h"
@@ -942,6 +945,33 @@ void InitClientResp(gclient_t *client)
 
     if (G_Ruleset() == RULESET_CTF && client->resp.ctf_team < CTF_TEAM1)
         CTFAssignTeam(client);
+
+    // RA2 adds ten assignments after its own memset and the Phase 4 merge kept
+    // none of them, because every one is a statement the base does not have and
+    // rule 2 takes the base where the base is unchanged.  Eight are what the
+    // memset already gives (`context` 0, `fightstate` FIGHT_SPECTATING,
+    // `omode` OMODE_NORMAL, `teammember` NULL, `isbot`, `zbotcount`,
+    // `damagedealt`), which is why nothing noticed.  Two are not:
+    //
+    //   * `teamnum` MUST be -1, because 0 is a valid team index and
+    //     PutClientInServer branches on `>= 0`.  Measured: every client
+    //     connecting under `arena` arrived with teamnum 0, took reinit_player()
+    //     instead of init_player(), and so was never given the team menu, never
+    //     had its menu queue reset for a reused slot, and claimed membership of
+    //     whatever team happens to be in slot 0 -- which on a deathmatch map is
+    //     "#N Pickup Red", allocated first by arena_init().  R-RA-4's first row
+    //     ("arena menu on connect") has been structurally false since Phase 4.
+    //   * `ra_votes` MUST be votetries_setting, or the client starts with zero
+    //     votes and menuVote refuses every one.  arena.c resets it per arena
+    //     config change, which is a top-up and not the initial grant.
+    //
+    // The other eight stay unwritten: a redundant assignment is a claim that
+    // the memset above might not do it, and R-CORE-6's union makes that claim
+    // false for a field another ruleset owns.
+    if (G_Ruleset() == RULESET_ARENA) {
+        client->resp.teamnum = -1;
+        client->resp.ra_votes = votetries_setting;
+    }
 }
 
 /*
@@ -1519,10 +1549,27 @@ void PutClientInServer(edict_t *ent)
 
     memcpy(userinfo, client->pers.userinfo, sizeof(userinfo));
 
-    // deathmatch wipes most client data every spawn
+    // deathmatch wipes most client data every spawn -- but not under tourney,
+    // where the reset is the PARTIAL one and that is what `full` exists for.
+    //
+    // The donor passes false at both of this function's two reset sites, and
+    // the merge kept baseq2's true at both, which is rule 2 taking the base
+    // where the base is unchanged.  It is not cosmetic: tourney's
+    // ClientUserinfoChanged may REFUSE a rename, and refusing means "put back
+    // what they had" -- `Info_SetValueForKey(userinfo, "name", pers.netname)`.
+    // With the full wipe, `pers.netname` is the empty string by the time the
+    // refusal reads it, so the refusal installs an empty name and the userinfo
+    // carries it from then on.  The refusal always fires here, because
+    // ClientConnect's own userinfo change stamps the `client_infochange`
+    // cooldown four seconds ahead and this runs inside it.
+    //
+    // Measured: every bot under `tourney` announced itself as " entered the
+    // game" and every scoreboard row was blank.  It is not a bot defect -- a
+    // human's first spawn takes the same path -- but a bot is what respawns
+    // often enough to make it obvious.
     if (deathmatch->value) {
         resp = client->resp;
-        InitClientPersistant(client, true);
+        InitClientPersistant(client, G_Ruleset() != RULESET_TOURNEY);
     } else if (coop->value) {
 //      int         n;
 
@@ -1549,7 +1596,7 @@ void PutClientInServer(edict_t *ent)
     memset(client, 0, sizeof(*client));
     client->pers = saved;
     if (client->pers.health <= 0)
-        InitClientPersistant(client, true);
+        InitClientPersistant(client, G_Ruleset() != RULESET_TOURNEY);
     client->resp = resp;
 
     // copy some data from the client to the entity
@@ -1788,6 +1835,13 @@ static void ClientBeginDeathmatch(edict_t *ent)
     // locate ent at a spawn point
     PutClientInServer(ent);
 
+    // R-ARENA-2 / R-RA-4 row 15.  After placement, not inside it: the bot is
+    // now the noclip observer in arena 0 that init_player() made, which is
+    // exactly the state a human is in when they pick a team off the menu, and
+    // this is the click they cannot make.
+    if (G_Ruleset() == RULESET_ARENA)
+        RA_BotJoinArena(ent);
+
     if (level.intermission_framenum) {
         MoveClientToIntermission(ent);
     } else if (!G_IsObserver(ent)) {
@@ -1809,6 +1863,14 @@ static void ClientBeginDeathmatch(edict_t *ent)
     // `match_latejoin` off.  True means the client is gone.
     if (G_Ruleset() == RULESET_TOURNEY && OSP_clientBegunPost(ent))
         return;
+
+    // R-OSP-11's bot half, and the same argument as arena's above: a tourney
+    // client connects as an OBSERVER and enters by pressing a key, which a bot
+    // cannot do.  After OSP_clientBegunPost rather than before it, because that
+    // is where `resp.team` becomes 2 ("no team") and the team join reads it --
+    // run before, the mode-2 join put every bot on team 0.
+    if (G_Ruleset() == RULESET_TOURNEY)
+        OSP_botJoin(ent);
 
     // make sure all view stuff is valid
     ClientEndServerFrame(ent);
@@ -1939,7 +2001,17 @@ void ClientUserinfoChanged(edict_t *ent, char *userinfo)
     // bot-model bug lived (R-CTF-7).
     if (G_Ruleset() == RULESET_CTF)
         CTFAssignSkin(ent, s);
+    // `teams[]` is TAG_LEVEL and arena_init() reallocates it empty on every map,
+    // while `resp.teamnum` is on the client and outlives the level -- so the
+    // slot a returning client names may be NULL, and this dereferenced it.
+    // Unreachable until Phase 7 for the usual reason (nothing was ever on an
+    // arena team) and still not reached on a deathmatch map, where arena_init
+    // rebuilds the two pickup teams into slots 0 and 1 and the stale index
+    // happens to be valid again.  On a real arena map, where each client makes
+    // a team of its own, it is a null dereference in ClientUserinfoChanged --
+    // which BotSpawn calls for every bot before ClientBegin has reset resp.
     else if (G_Ruleset() == RULESET_ARENA && ent->client->resp.teamnum != -1 &&
+             teams[ent->client->resp.teamnum].it &&
              ((team_t *)teams[ent->client->resp.teamnum].it)->skin != -1)
         // RA2 does the same thing for the same reason: on a team, the skin is
         // the team's.  Its `/nullxxx` placeholder branch is not carried -- that
@@ -2042,6 +2114,20 @@ qboolean ClientConnect(edict_t *ent, char *userinfo)
     // R-OSP-1: the player list gets a veto, with its own reason in `rejmsg`.
     if (G_Ruleset() == RULESET_TOURNEY && !OSP_clientAllowed(ent, userinfo))
         return false;
+
+    // R-BOT-15.  This edict may be a BOT's -- G_SpawnClient hands bots the high
+    // slots (R-BOT-14) but the engine hands a connecting human whichever slot
+    // it picked, and on a full-but-for-one-bot server that is the bot's.  Move
+    // the bot rather than overwriting it, and REFUSE the human if there is
+    // nowhere to move it to; stealing the slot would leave the brain talking
+    // about a client that is now somebody else.
+    //
+    // Not for a bot's own ClientConnect: BotCreate clears FL_BOT across the
+    // call precisely so this does not recurse.
+    if ((ent->flags & FL_BOT) && !BotMoveToFreeClientEdict(ent)) {
+        Info_SetValueForKey(userinfo, "rejmsg", "Server is full.");
+        return false;
+    }
 
     // they can connect
     ent->client = game.clients + (ent - g_edicts - 1);
@@ -2152,6 +2238,30 @@ void ClientDisconnect(edict_t *ent)
     ent->s.renderfx = 0;
     ent->s.solid = 0;
     ent->solid = SOLID_NOT;
+
+    // RA2 unlinks the player from its arena team here, in exactly this place --
+    // after the entity is stripped and before `inuse` goes false, because
+    // check_teams() walks the roster and a half-torn-down member must already
+    // be off it.  The merge dropped the call, so `remove_from_team` had NO
+    // caller in the tree and every client that left an arena stayed on its
+    // team's member list.
+    //
+    // Invisible until Phase 7, and then immediate: nothing ever put a client on
+    // an arena team before, because InitClientResp left `teamnum` at 0 and
+    // PutClientInServer therefore never ran init_player().  With bots joining,
+    // `sv removebot all` left sixteen dead members linked into two pickup teams
+    // and UpdateStatusBars dereferenced the first of them on the next frame:
+    //
+    //   UpdateStatusBars (arenanum=1) at src/arena/arena.c:1497
+    //   arena_think / multi_arena_think / RA_CheckRules / G_RunFrame
+    //
+    // `resp.entered = false` is the donor's next line and is NOT carried: its
+    // only reader in RA2 is a "reconnect without disconnect" arm in
+    // ClientConnect that this tree does not have, and the field is shared with
+    // tourney's four-state enum (R-58), whose owner clears it its own way.
+    if (G_Ruleset() == RULESET_ARENA)
+        remove_from_team(ent);
+
     ent->inuse = false;
     ent->classname = "disconnected";
     ent->client->pers.connected = false;
@@ -2211,6 +2321,15 @@ void ClientThink(edict_t *ent, usercmd_t *ucmd)
             level.exitintermission = true;
         return;
     }
+
+    // R-MENU-4/R-BOT-28: the Gladiator menu is driven by the movement axes, so
+    // it has to see the usercmd BEFORE pmove does and it edits the command it
+    // was given -- clearing the movement it consumed, the attack and use
+    // buttons, and the gravity, so the cursor does not also walk the player off
+    // a ledge.  Ahead of tourney's autocam for the same reason menu input is
+    // consumed first everywhere else: whichever menu is open owns the keys.
+    if (ent->client->menu_owner == MENU_BOT)
+        bot_MenuThink(ent, ucmd);
 
     // R-OSP-1/R-EXTRA-6: tourney's autocam is not a chase cam -- it picks its
     // own subject and its own position -- so it takes the whole frame, before
