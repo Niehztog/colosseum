@@ -85,22 +85,18 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #define MID_RA2_BOTARENA            37
 #define MID_RA2_PLAYERCYCLE         38
 #define MID_RA2_BOTCYCLE            39
-#define MID_RA2_SELFDAMAGE          40
-#define MID_RA2_HEALTHPROTECT       41
-#define MID_RA2_ARMORPROTECT        42
-#define MID_RA2_SHOTGUN             43
-#define MID_RA2_SUPERSHOTGUN        44
-#define MID_RA2_MACHINEGUN          45
-#define MID_RA2_CHAINGUN            46
-#define MID_RA2_GRENADELAUNCHER     47
-#define MID_RA2_ROCKETLAUNCHER      48
-#define MID_RA2_HYPERBLASTER        49
-#define MID_RA2_RAILGUN             50
-#define MID_RA2_BFG                 51
-#define MID_HELP                    52
-#define MID_CREDITS                 53
-#define MID_EXIT                    54
-#define MID_BACK                    55
+// R-CTF-8 and R-DM-1 give three rulesets one switch, so the row moves off the
+// RA2 page and onto the BOTS page, immediately below `minimum players` -- which
+// is the number it replaces.  Its label is the ruleset's own cvar name
+// (BotFillCvar()) rather than a generic word, because that is the name an
+// operator sets in a config, and the row is absent under the two rulesets that
+// have no such switch.  One concept, one row: two pages toggling one cvar is
+// what the RA2 page's own comment below argues against.
+#define MID_BOT_BOTFILL             40
+#define MID_HELP                    41
+#define MID_CREDITS                 42
+#define MID_EXIT                    43
+#define MID_BACK                    44
 // The donor gave the credits submenu MID_HELP as its item id, so
 // bot_MenuItemWithId(MID_HELP) found the help menu and "Credits" could never be
 // entered -- a duplicate id in a tree that is searched by id.
@@ -438,18 +434,17 @@ static void MenuProc(edict_t *ent, int id)
         } //end case
         case MID_RA2_PLAYERCYCLE: ToggleMenuCVarBoolean("ra_playercycle", "1", id); break;
         case MID_RA2_BOTCYCLE: ToggleMenuCVarBoolean("ra_botcycle", "1", id); break;
-        case MID_RA2_SELFDAMAGE: ToggleMenuCVarBoolean("selfdamage", "1", id); break;
-        case MID_RA2_HEALTHPROTECT: ToggleMenuCVarBoolean("healthprotect", "0", id); break;
-        case MID_RA2_ARMORPROTECT: ToggleMenuCVarBoolean("armorprotect", "0", id); break;
-        case MID_RA2_SHOTGUN: ToggleMenuCVarBoolean("shotgun", "1", id); break;
-        case MID_RA2_SUPERSHOTGUN: ToggleMenuCVarBoolean("supershotgun", "1", id); break;
-        case MID_RA2_MACHINEGUN: ToggleMenuCVarBoolean("machinegun", "1", id); break;
-        case MID_RA2_CHAINGUN: ToggleMenuCVarBoolean("chaingun", "1", id); break;
-        case MID_RA2_GRENADELAUNCHER: ToggleMenuCVarBoolean("grenadelauncher", "1", id); break;
-        case MID_RA2_ROCKETLAUNCHER: ToggleMenuCVarBoolean("rocketlauncher", "1", id); break;
-        case MID_RA2_HYPERBLASTER: ToggleMenuCVarBoolean("hyperblaster", "1", id); break;
-        case MID_RA2_RAILGUN: ToggleMenuCVarBoolean("railgun", "0", id); break;
-        case MID_RA2_BFG: ToggleMenuCVarBoolean("bfg", "0", id); break;
+        case MID_BOT_BOTFILL:
+        {
+            // The row is only built when there IS a name, so this cannot be
+            // reached with a NULL one; asked again rather than cached, because a
+            // menu built at level load outlives nothing else that could change
+            // the answer and the guard costs a compare.
+            const char *name = BotFillCvar();
+
+            if (name) ToggleMenuCVarBoolean(name, "0", id);
+            break;
+        } //end case
         case MID_BACK: //back to the parent menu
         {
             bot_MenuBack(ent);
@@ -609,6 +604,14 @@ void bot_MenuCreate(void)
     bot_MenuAppend(botmenu, MI_SUBMENU, MID_BOT_REMOVE, removemenu, "remove bot", NULL);
     bot_MenuAppend(botmenu, MI_ITEM, MID_BOT_REMOVEALL, NULL, "remove all", NULL);
     bot_MenuAppend(botmenu, MI_ITEM, MID_BOT_MINPLAYERS, NULL, MinPlayersString(), NULL);
+    // R-RA-7 / R-CTF-8 / R-DM-1's switch, under the count it replaces, and only
+    // where the ruleset has one.
+    if (BotFillCvar())
+    {
+        bot_MenuAppend(botmenu, MI_ITEM, MID_BOT_BOTFILL, NULL,
+                       OnOffString(BotFillCvar(),
+                                   (int)gi.cvar(BotFillCvar(), "0", 0)->value), NULL);
+    } //end if
     bot_MenuAppend(botmenu, MI_SEPERATOR, -1, NULL, "-----------", NULL);
     bot_MenuAppend(botmenu, MI_ITEM, MID_BACK, NULL, "back", NULL);
     //Deathmatch
@@ -652,23 +655,43 @@ void bot_MenuCreate(void)
     bot_MenuAppend(ctfmenu, MI_SEPERATOR, -1, NULL, "-----------", NULL);
     bot_MenuAppend(ctfmenu, MI_ITEM, MID_BACK, NULL, "back", NULL);
     //Rocket Arena 2
+    // *** THE RA2 PAGE IS THREE ROWS, NOT SIXTEEN, AND THE TWELVE THAT WENT
+    // BELONG TO AN ARENA THIS TREE DOES NOT HAVE. ***  (Four in 1.34; the
+    // fourth was `ra_botfill`, which 1.35 moved to the bots page.)
+    //
+    // The donor's page carried `selfdamage`, `healthprotect`, `armorprotect`
+    // and a switch per weapon.  Every one of those is a CVAR REGISTERED AND
+    // READ BY `gladq2_src/g_arena.c` -- the Gladiator SDK's own arena, which
+    // R-ARENA-1 explicitly does not carry across: its role is taken by the real
+    // Rocket Arena, where the same sixteen concepts are PER-ARENA settings read
+    // out of `arena.cfg` into `arenas[n]`.  `g_combat.c` reads
+    // `arenas[ctx].armorprotect`, `give_ammo` reads `arenas[ctx].weapons`, and
+    // nothing anywhere reads a cvar by any of those names.
+    //
+    // So the twelve rows toggled cvars with no reader: a menu that reports
+    // itself.  That is the shape sec 7 rule 6 names -- two implementations of
+    // one thing -- with the second one dead, and a row that lies about what it
+    // controls is worse than no row.  They are not re-pointed at `arenas[n]`
+    // either, because `mainmenu` is one tree shared by every client while the
+    // settings are per arena, so a single row cannot say whose value it shows.
+    //
+    // RA2's own path for changing them at runtime already exists and is the one
+    // R-RA-4 lists: `arenaadmin` opens the settings menu for the arena you are
+    // in, `allowvoting*` gates each row, and the change is proposed and voted.
+    // ra2menus.c builds exactly this list there, per arena and live.
+    //
+    // R-BOT-28's "1999 structure intact" is unaffected: it names the DM / CTF /
+    // RA2 / credits submenus, `botctfteam`, `ra_playercycle`, `ra_botcycle`,
+    // minimum players, teamplay and dmflags editing.  All of those stay.
     ra2menu = bot_MenuTreeCreate(MID_RA2, "", "m_ra2");
     Q_snprintf(buf, sizeof(buf), "%-18s%d", "bot arena", (int)gi.cvar("arena", "1", 0)->value);
     bot_MenuAppend(ra2menu, MI_ITEM, MID_RA2_BOTARENA, NULL, buf, NULL);
     bot_MenuAppend(ra2menu, MI_ITEM, MID_RA2_PLAYERCYCLE, NULL, OnOffString("ra_playercycle", (int)gi.cvar("ra_playercycle", "1", 0)->value), NULL);
     bot_MenuAppend(ra2menu, MI_ITEM, MID_RA2_BOTCYCLE, NULL, OnOffString("ra_botcycle", (int)gi.cvar("ra_botcycle", "1", 0)->value), NULL);
-    bot_MenuAppend(ra2menu, MI_ITEM, MID_RA2_SELFDAMAGE, NULL, OnOffString("selfdamage", (int)gi.cvar("selfdamage", "1", 0)->value), NULL);
-    bot_MenuAppend(ra2menu, MI_ITEM, MID_RA2_HEALTHPROTECT, NULL, OnOffString("healthprotect", (int)gi.cvar("healthprotect", "0", 0)->value), NULL);
-    bot_MenuAppend(ra2menu, MI_ITEM, MID_RA2_ARMORPROTECT, NULL, OnOffString("armorprotect", (int)gi.cvar("armorprotect", "0", 0)->value), NULL);
-    bot_MenuAppend(ra2menu, MI_ITEM, MID_RA2_SHOTGUN, NULL, OnOffString("shotgun", (int)gi.cvar("shotgun", "1", 0)->value), NULL);
-    bot_MenuAppend(ra2menu, MI_ITEM, MID_RA2_SUPERSHOTGUN, NULL, OnOffString("supershotgun", (int)gi.cvar("supershotgun", "1", 0)->value), NULL);
-    bot_MenuAppend(ra2menu, MI_ITEM, MID_RA2_MACHINEGUN, NULL, OnOffString("machinegun", (int)gi.cvar("machinegun", "1", 0)->value), NULL);
-    bot_MenuAppend(ra2menu, MI_ITEM, MID_RA2_CHAINGUN, NULL, OnOffString("chaingun", (int)gi.cvar("chaingun", "1", 0)->value), NULL);
-    bot_MenuAppend(ra2menu, MI_ITEM, MID_RA2_GRENADELAUNCHER, NULL, OnOffString("grenadelauncher", (int)gi.cvar("grenadelauncher", "1", 0)->value), NULL);
-    bot_MenuAppend(ra2menu, MI_ITEM, MID_RA2_ROCKETLAUNCHER, NULL, OnOffString("rocketlauncher", (int)gi.cvar("rocketlauncher", "1", 0)->value), NULL);
-    bot_MenuAppend(ra2menu, MI_ITEM, MID_RA2_HYPERBLASTER, NULL, OnOffString("hyperblaster", (int)gi.cvar("hyperblaster", "1", 0)->value), NULL);
-    bot_MenuAppend(ra2menu, MI_ITEM, MID_RA2_RAILGUN, NULL, OnOffString("railgun", (int)gi.cvar("railgun", "0", 0)->value), NULL);
-    bot_MenuAppend(ra2menu, MI_ITEM, MID_RA2_BFG, NULL, OnOffString("bfg", (int)gi.cvar("bfg", "0", 0)->value), NULL);
+    // `ra_botfill` had a row here in 1.34 and it is on the BOTS page now, with
+    // ctf's and dm's, because 1.35 makes the three one concept.  It is not
+    // 1999's structure and R-BOT-28 does not name it, so moving it moves
+    // nothing a donor put here.
     bot_MenuAppend(ra2menu, MI_SEPERATOR, -1, NULL, "-----------", NULL);
     bot_MenuAppend(ra2menu, MI_ITEM, MID_BACK, NULL, "back", NULL);
     //

@@ -36,7 +36,6 @@ TURRET
 #define SPAWN_INSTANT_WEAPON    0x0050
 #define SPAWN_WALL_UNIT         0x0080
 
-extern bool FindTarget(edict_t *self);
 
 void turret_run(edict_t *self);
 static void TurretAim(edict_t *self);
@@ -662,7 +661,6 @@ void turret_wake(edict_t *self)
     self->monsterinfo.aiflags &= ~AI_DO_NOT_COUNT;
 }
 
-extern void Move_Calc(edict_t *ent, vec3_t dest, void(*func)(edict_t*));
 
 void turret_activate(edict_t *self, edict_t *other, edict_t *activator)
 {

@@ -9,6 +9,23 @@
 /release-win32/
 /debug-win64/
 /release-win64/
+
+# ...and the same ten again under R-ENG-1a's `make API=old`, which builds into
+# <dir>-oldapi because the two game ABIs differ in STRUCT LAYOUT and objects
+# from one must never link against objects from the other.  Listed rather than
+# globbed to match the set above; the Makefile's BUILDDIRS is the other copy and
+# `make clean` removes both halves.
+/debug-oldapi/
+/release-oldapi/
+/debug-linux32-oldapi/
+/release-linux32-oldapi/
+/debug-linux64-oldapi/
+/release-linux64-oldapi/
+/debug-win32-oldapi/
+/release-win32-oldapi/
+/debug-win64-oldapi/
+/release-win64-oldapi/
+
 *.o
 *.so
 *.dll

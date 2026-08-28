@@ -80,10 +80,17 @@ typedef enum {
 // CTF's timer pair at 32/33 is the one place this table leaves MAX_STATS_OLD.
 // It is legal under clause 6 *because* it is content a ruleset can drop: the
 // pent countdown is a display, not a mechanic, and G_InitStats() removes any
-// slot >= MAX_STATS_OLD when the server is not running protocol extensions, so
-// the bar and the writes disappear together (R-COMPAT-5).  This is the thing
-// upstream could not do with a literal bar: under ctf the second powerup timer
-// now displays at all, for clients that negotiated the extension.
+// slot the running configuration cannot reach, so the bar and the writes
+// disappear together (R-COMPAT-5).  This is the thing upstream could not do
+// with a literal bar: under ctf the second powerup timer now displays at all,
+// for clients that negotiated the extension.
+//
+// "Cannot reach" is two conditions, not one -- see g_stats.c's stat_ceiling().
+// The wire carries 32..63 only to a client that negotiated the extension, and
+// the ARRAY only holds them on a library built against the new game API, which
+// R-ENG-1a made a build switch.  On an `API=old` build the pair is therefore
+// dropped unconditionally and ctf loses the second powerup timer, exactly as
+// upstream does; every other ruleset's column stays inside 32 and is unaffected.
 //
 //     id                        kind     dm  ctf  arena tourney  sp
 #define STATSLOT_MAP(E) \
@@ -210,5 +217,9 @@ const char *G_StatusbarVariant(bool alt, bool team);
 // cannot be checked from outside it, and "the HUD looks right" is not evidence
 // about slot 32.
 void G_Svcmd_Slots_f(void);
+// `sv extras` -- R-EXTRA-1..7 made observable from outside (R-VER-33).
+void G_Svcmd_Extras_f(void);
+// `sv census <classname>` -- R-VER-20's temporal check, twice over.
+void G_Svcmd_Census_f(void);
 
 #endif // G_STATS_H

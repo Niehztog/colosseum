@@ -29,6 +29,10 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "arena/arena.h"
 
 #define MAX_DEFS    256
+// The size of one definition's accumulated value text.  It was a bare
+// 0x400 at the allocation and nothing at all at the append, so a long
+// enough arena.cfg walked off the end of a TAG_LEVEL block (R-SEC-1).
+#define VAL_BLOCK_SIZE  0x400
 
 typedef struct definition_s {
     int             count;
@@ -108,7 +112,7 @@ int has_val(char *str, char *key)
     char    buf[1024];
     char    *tok;
 
-    strcpy(buf, str);
+    Q_strlcpy(buf, str, sizeof(buf));
     tok = strtok(buf, " ");
 
     while (tok) {
@@ -127,7 +131,7 @@ char *get_val(char *str, int index)
     char        buf[1024];
     char        *tok;
 
-    strcpy(buf, str);
+    Q_strlcpy(buf, str, sizeof(buf));
     tok = strtok(buf, " ");
 
     while (tok && index) {
@@ -138,7 +142,7 @@ char *get_val(char *str, int index)
     if (!tok)
         fnd[0] = 0;
     else
-        strcpy(fnd, tok);
+        Q_strlcpy(fnd, tok, sizeof(fnd));
 
     return fnd;
 }
@@ -497,7 +501,7 @@ char *new_val_block(void)
 {
     char    *buf;
 
-    buf = gi.TagMalloc(0x400, TAG_LEVEL);
+    buf = gi.TagMalloc(VAL_BLOCK_SIZE, TAG_LEVEL);
     buf[0] = 0;
 
     return buf;
@@ -505,8 +509,9 @@ char *new_val_block(void)
 
 void add_val(char *dest, char *token)
 {
-    strcat(dest, " ");
-    strcat(dest, token);
+    // dest is always a new_val_block(), so the bound is that block's.
+    Q_strlcat(dest, " ", VAL_BLOCK_SIZE);
+    Q_strlcat(dest, token, VAL_BLOCK_SIZE);
 }
 
 definition_t *new_def_item(definition_t *item)
@@ -621,7 +626,7 @@ definition_t *find_key(char *key, int type, definition_t *items, int count)
 
     for (i = 0; i < count; i++) {
         if (items[i].type == type) {
-            strcpy(buf, items[i].value);
+            Q_strlcpy(buf, items[i].value, sizeof(buf));
 
             for (tok = strtok(buf, " "); tok; tok = strtok(NULL, " "))
                 if (!strcmp(tok, key))
@@ -659,15 +664,15 @@ void list_keys(edict_t *ent)
     }
 
     for (i = 0; i < count; i++) {
-        strcat(path, items[i].value);
-        strcat(path, "  ");
+        Q_strlcat(path, items[i].value, sizeof(path));
+        Q_strlcat(path, "  ", sizeof(path));
 
         if (items[i].type == 1)
-            strcat(path, va("V  %s\n", (char *)items[i].value2));
+            Q_strlcat(path, va("V  %s\n", (char *)items[i].value2), sizeof(path));
         else if (items[i].type == 2)
-            strcat(path, "B\n");
+            Q_strlcat(path, "B\n", sizeof(path));
         else
-            strcat(path, "U\n");
+            Q_strlcat(path, "U\n", sizeof(path));
     }
 
     gi.cprintf(ent, PRINT_HIGH, "%s", path);
@@ -686,13 +691,13 @@ void load_config(int num_arenas)
     gamedir = gi.cvar("game", "", CVAR_LATCH);
     arenacfg = gi.cvar("arenacfg", "arena.cfg", 0);
 
-    strcpy(path, gamedir->string);
+    Q_strlcpy(path, gamedir->string, sizeof(path));
 #ifdef _WIN32
-    strcat(path, "\\");
+    Q_strlcat(path, "\\", sizeof(path));
 #else
-    strcat(path, "/");
+    Q_strlcat(path, "/", sizeof(path));
 #endif
-    strcat(path, arenacfg->string);
+    Q_strlcat(path, arenacfg->string, sizeof(path));
 
     // every block below hangs off TAG_LEVEL memory the engine has already
     // freed, so clear it before the read -- an unreadable arena.cfg returns
@@ -791,11 +796,11 @@ void load_motd(void)
 
     gamedir = gi.cvar("game", "", CVAR_LATCH);
 
-    strcpy(path, gamedir->string);
+    Q_strlcpy(path, gamedir->string, sizeof(path));
 #ifdef _WIN32
-    strcat(path, "\\motd.txt");
+    Q_strlcat(path, "\\motd.txt", sizeof(path));
 #else
-    strcat(path, "/motd.txt");
+    Q_strlcat(path, "/motd.txt", sizeof(path));
 #endif
 
     fp = fopen(path, "r");

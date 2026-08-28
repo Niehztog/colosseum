@@ -62,7 +62,6 @@ float   orig_yaw_speed;
 vec3_t flyer_mins = {-16, -16, -24};
 vec3_t flyer_maxs = {16, 16, 16};
 
-extern const mmove_t flyer_move_attack2, flyer_move_attack3, flyer_move_kamikaze;
 
 void carrier_run(edict_t *self);
 void carrier_stand(edict_t *self);

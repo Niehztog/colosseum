@@ -179,8 +179,6 @@ anything can log.
 */
 void OSP_Stats_Init(void)
 {
-    cvar_t  *gamedir;
-    cvar_t  *basedir;
     cvar_t  *port;
     cvar_t  *hostname;
 
@@ -198,12 +196,9 @@ void OSP_Stats_Init(void)
         return;
     }
 
-    gamedir = gi.cvar("gamedir", "tourney", 0);
-    basedir = gi.cvar("basedir", ".", 0);
 
-    if (Q_snprintf(stats_path, sizeof(stats_path), "%s/%s/%s",
-                   basedir->string, gamedir->string,
-                   g_statsname->string) >= sizeof(stats_path)) {
+    // R-COMPAT-6: composed by g_fs.c, which owns the two cvars' defaults.
+    if (!G_FsGamePath(stats_path, sizeof(stats_path), g_statsname->string)) {
         gi.dprintf("Stats log path too long, logging disabled.\n");
         stats_path[0] = 0;
         return;

@@ -29,6 +29,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 // Tab Size:        3
 //===========================================================================
 
+#include <time.h>
 #include "g_local.h"
 #include "bot/bl_main.h"
 #include "bot/bl_spawn.h"
@@ -38,6 +39,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "bot/p_botmenu.h"
 #include "ctf/g_ctf.h"
 #include "tourney/osp_hooks.h"
+#include "arena/arena.h"
 
 #if defined(_WIN32)
 #include <windows.h>
@@ -105,6 +107,45 @@ const char *BotMinPlayersCvar(void)
 const char *BotFileCvar(void)
 {
     return G_Ruleset() == RULESET_TOURNEY ? "bots_botfile" : "botfile";
+}
+
+// R-RA-7, R-CTF-8, R-DM-1.  The switch that replaces `minimumplayers` with a
+// target read off the game itself, and its NAME is per ruleset for R-OSP-11's
+// reason: each ruleset's own documentation and configs spell its cvars its own
+// way, and one shared `botfill` would be a name no donor's readme mentions.
+//
+// NULL is "this ruleset has no such switch", which is two of the five and both
+// for a stated reason:
+//
+//   * `sp` has no bots at all (R-MODE-7, N6).
+//   * `tourney` has the concept already and keeps it -- `bots_minplayers`
+//     defaults to 4 and `bots_autoload 4` tops the roster up regardless of the
+//     player count, and mode 3 zeroes the count because a duel has no seat for
+//     a bot.  What it has no equivalent of is a target read off the map, and it
+//     does not NEED one: `team_maxplayers` is a declared capacity that modes 2
+//     and 3 both size themselves to, which is exactly what the other three
+//     rulesets lack and this switch supplies.  R-OSP-11 says tourney's bot
+//     contract is preserved rather than redesigned; adding a fifth `bots_*`
+//     cvar to it would be redesigning it (doc/reconciliation.md R-156).
+const char *BotFillCvar(void)
+{
+    switch (G_Ruleset()) {
+    case RULESET_ARENA:
+        return "ra_botfill";
+    case RULESET_CTF:
+        return "ctf_botfill";
+    case RULESET_DM:
+        return "dm_botfill";
+    default:
+        return NULL;
+    }
+}
+
+bool BotFillEnabled(void)
+{
+    const char *name = BotFillCvar();
+
+    return name && gi.cvar(name, "0", 0)->value != 0;
 }
 
 cvar_t *BotMinPlayers(void)
@@ -198,6 +239,7 @@ void BotExecuteInput(edict_t *bot)
     usercmd_t ucmd;
     bot_input_t *bi;
     int client;
+    bool holdfire;
 
     if (botglobals.nobotinput) return;
 
@@ -236,6 +278,34 @@ void BotExecuteInput(edict_t *bot)
     //      forwardmove and sidemove are relative to the given yaw
     //      upmove is not related to the given yaw
     //
+    // R-140: a bot in an arena does not fire until the round starts.
+    //
+    // RA2 hands a fighter its ammo once per round and does not grant damage
+    // until the countdown reaches zero (RA_RoundFighting), so a shot before
+    // that is spent ammo and nothing else.  The brain cannot know this -- it
+    // has no round, and no libvar tells it about one -- so the ANSWER IS THE
+    // BUTTON, which is the one thing this side of the seam owns: the brain goes
+    // on aiming, tracking and choosing a weapon, and the usercmd_t carries no
+    // attack out of the countdown.  Reported from a play test on `ra2map9`:
+    // three bots shooting at a person for the whole of the round countdown,
+    // when a shot cannot land and the ammo is the round's only load.
+    //
+    // The grapple is fired with the same button and is MOVEMENT rather than
+    // damage, so a bot holding one is left alone -- otherwise `allow_grapple`
+    // would lose its hook for the countdown as well.
+    holdfire = false;
+    if (G_Ruleset() == RULESET_ARENA && !RA_RoundFighting(bot))
+    {
+        const gitem_t *w = bot->client->pers.weapon;
+
+        holdfire = !w || !w->classname || Q_stricmp(w->classname, "weapon_grapple");
+
+        if (bi->actionflags & ACTION_ATTACK)
+        {
+            botglobals.botstates[client].firecalls++;
+            if (holdfire) botglobals.botstates[client].firedrops++;
+        } //end if
+    } //end if
     //clear the whole structure
     memset(&ucmd, 0, sizeof(usercmd_t));
     //the duration for the user command in milli seconds
@@ -247,11 +317,17 @@ void BotExecuteInput(edict_t *bot)
         bi->actionflags &= ~ACTION_DELAYEDJUMP;
     } //end if
     //set the buttons
-    if (bi->actionflags & ACTION_RESPAWN)
+    // Both arms are gated, and the respawn one matters: it latches the button
+    // DIRECTLY rather than through the command, and ClientLagThink runs
+    // Think_Weapon on a latched attack whether the bot is dead or not.  Under
+    // arena the latch is dead weight anyway -- ClientBeginServerFrame respawns
+    // an arena client without asking for a button (p_client.c) -- so nothing is
+    // lost by holding it back with the other.
+    if ((bi->actionflags & ACTION_RESPAWN) && !holdfire)
     {
         bot->client->latched_buttons |= BUTTON_ATTACK;
     } //end if
-    if (bi->actionflags & ACTION_ATTACK)
+    if ((bi->actionflags & ACTION_ATTACK) && !holdfire)
     {
         ucmd.buttons |= BUTTON_ATTACK;
     } //end if
@@ -500,11 +576,78 @@ void BotLib_BotClientSettings(edict_t *ent)
     Q_strlcpy(settings.skin, Info_ValueForKey(ent->client->pers.userinfo, "skin"),
               sizeof(settings.skin));
 
+    // R-ARENA-2 / R-BOT-29: under arena the skin is how the brain is told about
+    // RA2's TEAMS.  "Everything the bots need from the old file, re-provided
+    // against the real RA2" is R-ARENA-2's clause, and knowing whose side a
+    // player is on is the last of it.
+    //
+    // `clientsettings[].skin` has exactly two readers inside the brain --
+    // BotSameTeam() and BotCTFTeam() -- and BotSameTeam is the whole of the
+    // brain's team sense: it decides who is a candidate enemy, and whether a
+    // team-mate in the line of fire stops the shot.  Every branch of it
+    // compares SKIN STRINGS, so a mod whose teams are not skins has no way to
+    // be heard except by answering that question in the currency it is asked
+    // in.  RA2's are not: `setteamskin` gives a team its skin only when the
+    // arena has more than one player a side, so in a 1v1 arena two opponents
+    // wearing the stock male/grunt looked to the brain like team-mates, and in
+    // a team arena the model half still differed between a male and a cyborg.
+    //
+    // So under arena the brain is shown a synthetic skin that IS the team:
+    // team-mates match exactly and nobody else can, in the model half and the
+    // skin half both, so whichever branch BotSameTeam takes gives the same
+    // answer.  A client with no team gets its own client number and is
+    // therefore on nobody's side, which is the right answer for the lobby.
+    // Nothing else in the game sees this string -- the wire skin, the
+    // configstring and the userinfo are untouched.
+    if (G_Ruleset() == RULESET_ARENA) {
+        int team = ent->client->resp.teamnum;
+
+        if (team >= 0)
+            Q_snprintf(settings.skin, sizeof(settings.skin),
+                       "ra2team%d/ra2team%d", team, team);
+        else
+            Q_snprintf(settings.skin, sizeof(settings.skin),
+                       "ra2solo%d/ra2solo%d", DF_ENTCLIENT(ent), DF_ENTCLIENT(ent));
+    }
+
     for (lib = botglobals.firstbotlib; lib; lib = lib->next)
     {
         lib->funcs.BotClientSettings(DF_ENTCLIENT(ent), &settings);
     } //end for
 } //end of the function BotLib_BotClientSettings
+//==========================================================================
+// R-137's neighbour: THE BRAIN'S CLIENT TABLE IS ONLY EVER WRITTEN.
+//
+// BotLib_UpdateAllClientSettings() skips a slot whose edict is not `inuse`,
+// and ClientDisconnect clears `inuse` -- so a client that leaves stays in the
+// brain's table with its name and its skin until somebody else takes the slot.
+// `BotNumTeamMates()` counts by `strlen(clientsettings[i].netname)` and
+// `BotSameTeam()` compares that slot's skin, so a departed team-mate goes on
+// being counted and avoided for the rest of the level.
+//
+// The Gladiator donor's `#ifdef BOT` tail on ClientDisconnect says the same
+// thing by clearing `pers.netname` and the userinfo skin and pushing the
+// result.  This pushes an empty block instead, which has the same effect on
+// the brain and does not mutate `pers` behind the back of everything that runs
+// after it -- `OSP_clientLeft` reads `pers.netname` two lines later.
+//
+// Parameter:               -
+// Returns:                 -
+// Changes Globals:     -
+//==========================================================================
+void BotLib_ClientDisconnected(edict_t *ent)
+{
+    bot_clientsettings_t settings;
+    bot_library_t *lib;
+
+    if (!ent->client) return;
+
+    memset(&settings, 0, sizeof(settings));
+    for (lib = botglobals.firstbotlib; lib; lib = lib->next)
+    {
+        lib->funcs.BotClientSettings(DF_ENTCLIENT(ent), &settings);
+    } //end for
+} //end of the function BotLib_ClientDisconnected
 //==========================================================================
 //
 // Parameter:               -
@@ -532,6 +675,323 @@ static void BotLib_UpdateAllClientSettings(void)
 void BotLib_BotSettings(edict_t *bot, bot_settings_t *settings)
 {
 } //end of the function BotLib_BotSettings
+//===========================================================================
+// R-141: THE ITEM INDEX SPACE IS THE BRAIN'S, NOT THE GAME'S.
+//
+// `bot_updateclient_t.inventory` is 256 ints and the contract says so
+// (BOTLIB_MAX_ITEMS, doc/botlib-contract.md).  What the contract did NOT say is
+// what any one of those slots MEANS, and the brain has a very definite opinion:
+// its data files are written against `inv.h` out of the 1999 asset pak, where
+// slot 10 is the Machinegun and slot 19 is Bullets.  Three places read those
+// numbers -- `weapons.c` gives every weapon a `weaponindex` and an `ammoindex`,
+// `items.c` gives every pickup an `index`, and every character's `_w.c`/`_i.c`
+// switches on them through FuzzyWeight -- so the numbering is not the brain's
+// internal business.  It is half of the contract, supplied as data.
+//
+// `inv.h`'s numbering is baseq2's itemlist with Gladiator's own additions
+// appended.  Colosseum's itemlist is FIVE donors merged into one array
+// (R-CORE-2), so it agrees for the first six rows and then diverges at the
+// seventh: `weapon_grapple` is index 7 here and the Blaster is 7 there, and
+// every weapon and every ammo type after it is off by one or more.  A straight
+// memcpy therefore showed the brain an inventory in which
+//
+//     Bullets(19)  <- weapon_hyperblaster   = 1        "one bullet left"
+//     Rockets(21)  <- weapon_plasmabeam     = 0        "no rockets"
+//     Cells(20)    <- weapon_boomer         = 0        "no cells"
+//     Shells(18)   <- weapon_rocketlauncher = 1        "one shell left"
+//     Slugs(22)    <- weapon_railgun        = 1        "one slug left"
+//
+// -- and that is a bot with 200 bullets and 50 rockets in an RA2 round.  The
+// consequence is not subtle, because `fw_weap.c` zeroes the weight of any
+// weapon whose ammo test fails: the Rocket Launcher, the HyperBlaster, the BFG
+// and the whole Xatrix/Rogue set scored zero, and the Super Shotgun's
+// `SHELLS >= 2` failed on its "one shell".  Of a nine-weapon arena loadout the
+// brain could see six -- Blaster, Shotgun, Machinegun, Chaingun, hand grenades
+// and Railgun -- and the Railgun only by accident, because slot 16 lands on
+// `weapon_grenadelauncher` and an arena that grants the GL therefore also
+// grants the brain its Railgun.  Which of the six a bot settles on is then an
+// accident of that accident: measured on q2dm1 arena 1 with three characters,
+// 631 of 879 fighting samples chose the Railgun and not one chose anything from
+// the machinegun family; with the GL left out of `weapons:`, twelve of the
+// seventeen stock weight files pick the Machinegun instead.  Either way it is
+// the same defect and it is not the character file talking.
+//
+// So the adapter translates.  The table is the brain's slot on the left and the
+// game's own classname on the right, and it is resolved through
+// FindItemByClassname() -- not written out as numbers -- because the game's
+// numbering is the thing that moves: add an item to the itemlist and this keeps
+// working, hardcode 12 and it breaks silently the next time somebody merges a
+// mission pack.  A row whose item this build does not have resolves to 0 and
+// stays 0, which is the truth ("the bot does not have one") rather than a
+// wrong number.
+//
+// Two slots are deliberately absent.  INVENTORY_HEALTH (41) is written by the
+// brain itself out of `stats[STAT_HEALTH]`, and everything from
+// ENEMY_HORIZONTAL_DIST (200) up is derived by BotUpdateInventory /
+// BotUpdateBattleInventory after this copy lands -- so the game must not put an
+// item in either, and the zero-fill below is what guarantees it.
+//===========================================================================
+static const struct {
+    int         slot;           // botfiles/inv.h
+    const char *classname;      // ...and what Colosseum calls the same item
+} botinventory[] = {
+    {  1, "item_armor_body" },
+    {  2, "item_armor_combat" },
+    {  3, "item_armor_jacket" },
+    {  4, "item_armor_shard" },
+    {  5, "item_power_screen" },
+    {  6, "item_power_shield" },
+    {  7, "weapon_blaster" },
+    {  8, "weapon_shotgun" },
+    {  9, "weapon_supershotgun" },
+    { 10, "weapon_machinegun" },
+    { 11, "weapon_chaingun" },
+    { 12, "ammo_grenades" },
+    { 13, "weapon_grenadelauncher" },
+    { 14, "weapon_rocketlauncher" },
+    { 15, "weapon_hyperblaster" },
+    { 16, "weapon_railgun" },
+    { 17, "weapon_bfg" },
+    { 18, "ammo_shells" },
+    { 19, "ammo_bullets" },
+    { 20, "ammo_cells" },
+    { 21, "ammo_rockets" },
+    { 22, "ammo_slugs" },
+    { 23, "item_quad" },
+    { 24, "item_invulnerability" },
+    { 25, "item_silencer" },
+    { 26, "item_breather" },
+    { 27, "item_enviro" },
+    { 28, "item_ancient_head" },
+    { 29, "item_adrenaline" },
+    { 30, "item_bandolier" },
+    { 31, "item_pack" },
+    { 32, "key_data_cd" },
+    { 33, "key_power_cube" },
+    { 34, "key_pyramid" },
+    { 35, "key_data_spinner" },
+    { 36, "key_pass" },
+    { 37, "key_blue_key" },
+    { 38, "key_red_key" },
+    { 39, "key_commander_head" },
+    { 40, "key_airstrike_target" },
+    // 41 is INVENTORY_HEALTH and is the brain's own.
+    { 42, "weapon_grapple" },
+    { 43, "item_flag_team1" },
+    { 44, "item_flag_team2" },
+    { 45, "item_tech1" },
+    { 46, "item_tech2" },
+    { 47, "item_tech3" },
+    { 48, "item_tech4" },
+    { 49, "weapon_boomer" },
+    { 50, "weapon_phalanx" },
+    { 51, "ammo_magslug" },
+    { 52, "ammo_trap" },
+    { 53, "item_quadfire" },
+    { 54, "key_green_key" },
+    { 55, "weapon_etf_rifle" },
+    { 56, "weapon_proxlauncher" },
+    { 57, "weapon_plasmabeam" },
+    { 58, "weapon_chainfist" },
+    { 59, "weapon_disintegrator" },
+    { 60, "ammo_flechettes" },
+    { 61, "ammo_prox" },
+    { 62, "ammo_tesla" },
+    { 63, "ammo_nuke" },
+    { 64, "ammo_disruptor" },
+    { 65, "item_ir_goggles" },
+    { 66, "item_double" },
+    { 67, "item_compass" },
+    { 68, "item_sphere_vengeance" },
+    { 69, "item_sphere_hunter" },
+    { 70, "item_sphere_defender" },
+    { 71, "item_doppleganger" },
+    // 72 is INVENTORY_TAGTOKEN.  The itemlist row has no classname -- the Tag
+    // token is never placed by a map -- so it is the one row that has to be
+    // found by pickup_name, which BotResolveInventoryMap() falls back to where
+    // the classname lookup comes back empty.
+    { 72, "Tag Token" },
+    { 73, "key_nuke_container" },
+    { 74, "key_nuke" },
+};
+
+// ENEMY_HORIZONTAL_DIST, the lowest slot the brain derives for itself.
+// Everything from here up is written by BotUpdateInventory /
+// BotUpdateBattleInventory after the game's copy lands, so the game must never
+// put an item there.
+#define BOTLIB_FIRST_DERIVED_SLOT   200
+
+// The resolved table: the game's ITEM_INDEX for each of the brain's slots, or 0
+// where this build has no such item.  itemlist is compile-time constant, so one
+// resolution serves every map -- but not one at load time, because
+// FindItemByClassname() walks `game.num_items` and InitItems() is what sets it.
+static int botinvindex[BOTLIB_MAX_ITEMS];
+static bool botinvresolved;
+
+static void BotResolveInventoryMap(void)
+{
+    const gitem_t *it;
+    int i, missing = 0;
+
+    memset(botinvindex, 0, sizeof(botinvindex));
+
+    for (i = 0; i < q_countof(botinventory); i++)
+    {
+        int slot = botinventory[i].slot;
+
+        // The derived range is the brain's to write and nobody else's, so a
+        // row that reached into it would be a silent corruption of
+        // ENEMY_HORIZONTAL_DIST or a powerup timer rather than a wrong
+        // inventory.  Refused loudly instead (R-141).
+        if (slot < 1 || slot >= BOTLIB_FIRST_DERIVED_SLOT)
+        {
+            gi.dprintf("botlib inventory map: slot %d for %s is out of range, "
+                       "dropped\n", slot, botinventory[i].classname);
+            missing++;
+            continue;
+        } //end if
+
+        it = FindItemByClassname(botinventory[i].classname);
+        if (!it) it = FindItem(botinventory[i].classname);
+        if (!it)
+        {
+            missing++;
+            continue;
+        } //end if
+        botinvindex[slot] = ITEM_INDEX(it);
+    } //end for
+
+    // Said once, because a row this build genuinely does not have is legal and
+    // a row MISSPELLED here looks exactly the same from the brain's side: it
+    // reads a slot that is always zero and quietly stops using a weapon.
+    gi.dprintf("Colosseum: botlib inventory map -- %d of %d slots resolved "
+               "(R-141)\n", (int)q_countof(botinventory) - missing,
+               (int)q_countof(botinventory));
+
+    botinvresolved = true;
+} //end of the function BotResolveInventoryMap
+
+//===========================================================================
+// Fill the brain's 256-slot inventory from the game's, one named slot at a
+// time.  The zero-fill is load-bearing twice over: it keeps the game out of the
+// derived slots at 200+, and it makes "this build has no Doppleganger" read as
+// "the bot has no Doppleganger".
+//
+// Parameter:               -
+// Returns:                 -
+// Changes Globals:     -
+//===========================================================================
+static void BotFillInventory(int *out, const int *inventory)
+{
+    int i;
+
+    if (!botinvresolved) BotResolveInventoryMap();
+
+    memset(out, 0, BOTLIB_MAX_ITEMS * sizeof(int));
+
+    for (i = 0; i < BOTLIB_MAX_ITEMS; i++)
+    {
+        if (botinvindex[i]) out[i] = inventory[botinvindex[i]];
+    } //end for
+} //end of the function BotFillInventory
+
+//===========================================================================
+// `sv botinv` -- what the brain SEES, in the brain's own numbering.
+//
+// R-141 is invisible to every other instrument, and that is the whole reason
+// this exists.  `sv inventory` prints the GAME's itemlist and its indices, which
+// were never wrong.  `sv arenadump` prints the round machine.  The bot's own HUD
+// is a person's channel and a bot has none.  None of them can say that the slot
+// the brain reads for Bullets holds the answer to a different question -- so the
+// dump is written in inv.h's terms and reads through exactly the path
+// BotLib_BotUpdateClient uses.
+//
+// The two ammo lines are the ones that decide a fight: `fw_weap.c` zeroes a
+// weapon's weight when its ammo slot reads below the threshold, so a `brain`
+// row of ones under a `game` row of hundreds is a bot that has been left with
+// two or three weapons out of nine.  The arena columns are R-140's: `hold`
+// is 1 while the round is not being fought, and `asked`/`dropped` count what
+// the brain wanted to fire then and how much of it the gate took away.
+//
+// Parameter:               -
+// Returns:                 -
+// Changes Globals:     -
+//===========================================================================
+void BotInventoryDump(void)
+{
+    static const struct { int slot; const char *name; } weapons[] = {
+        {  7, "blaster" }, {  8, "shotgun" }, {  9, "sshotgun" },
+        { 10, "mgun" },    { 11, "cgun" },    { 13, "glaunch" },
+        { 14, "rlaunch" }, { 15, "hyperbl" }, { 16, "railgun" },
+        { 17, "bfg" },     { 42, "grapple" },
+    };
+    // The ammo rows carry the game's OWN classname beside the brain's slot, so
+    // the dump can print the two answers next to each other: what the brain
+    // reads at slot 19, and how many bullets the client actually has.  One line
+    // under the other is R-141 in a form nobody has to reason about -- and
+    // the `game` line is also the record of what a countdown cost, because
+    // give_ammo() hands out a known figure and only firing takes it away
+    // (R-140).
+    static const struct { int slot; const char *name; const char *classname; } ammo[] = {
+        { 18, "shells",   "ammo_shells" },
+        { 19, "bullets",  "ammo_bullets" },
+        { 20, "cells",    "ammo_cells" },
+        { 21, "rockets",  "ammo_rockets" },
+        { 22, "slugs",    "ammo_slugs" },
+        { 12, "grenades", "ammo_grenades" },
+    };
+    static const char *states[] = {
+        "warmup", "countdown", "fighting", "roundend",
+        "intermission", "results", "nextround"
+    };
+    int inventory[BOTLIB_MAX_ITEMS];
+    edict_t *ent;
+    int i, j;
+
+    for (i = 0; i < game.maxclients; i++)
+    {
+        ent = DF_CLIENTENT(i);
+        if (!ent->inuse) continue;
+        if (!(ent->flags & FL_BOT)) continue;
+        if (!ent->client) continue;
+
+        BotFillInventory(inventory, ent->client->pers.inventory);
+
+        gi.dprintf("%3d: %-16s ", i, ent->client->pers.netname);
+        if (G_Ruleset() == RULESET_ARENA)
+        {
+            int ctx = ent->client->resp.context;
+
+            gi.dprintf("arena %-2d %-10s hold=%d ", ctx,
+                       (ctx >= 0 && ctx <= num_arenas) ? states[arenas[ctx].state] : "?",
+                       !RA_RoundFighting(ent));
+        } //end if
+        gi.dprintf("weapon %-16s fire asked %d dropped %d\n",
+                   ent->client->pers.weapon ?
+                   ent->client->pers.weapon->pickup_name : "-",
+                   botglobals.botstates[i].firecalls,
+                   botglobals.botstates[i].firedrops);
+
+        gi.dprintf("     brain   ");
+        for (j = 0; j < q_countof(weapons); j++)
+            gi.dprintf(" %s %d", weapons[j].name, inventory[weapons[j].slot]);
+        gi.dprintf("\n     brain   ");
+        for (j = 0; j < q_countof(ammo); j++)
+            gi.dprintf(" %s %d", ammo[j].name, inventory[ammo[j].slot]);
+        gi.dprintf("\n     game    ");
+        for (j = 0; j < q_countof(ammo); j++)
+        {
+            const gitem_t *it = FindItemByClassname(ammo[j].classname);
+
+            gi.dprintf(" %s %d", ammo[j].name,
+                       it ? ent->client->pers.inventory[ITEM_INDEX(it)] : -1);
+        } //end for
+        gi.dprintf("\n");
+    } //end for
+
+    gi.dprintf("%d bot%s\n", botglobals.numbots,
+               botglobals.numbots == 1 ? "" : "s");
+} //end of the function BotInventoryDump
 //==========================================================================
 // sends a client (state) update to the bot library
 //
@@ -562,8 +1022,21 @@ void BotLib_BotUpdateClient(edict_t *bot)
     VectorCopy(bot->velocity, buc.velocity);
     //pm_flags
     buc.pm_flags = bot->client->ps.pmove.pm_flags;
-    //pm_time
-    buc.pm_time = bot->client->ps.pmove.pm_time;
+    // pm_time, and the UNIT is the whole line.  `bot_updateclient_t.pm_time` is
+    // the frozen 1999 botlib ABI (botlib.h): a byte, one unit per 8 ms.
+    // `ps.pmove.pm_time` is in those same units on a plain server and in
+    // MILLISECONDS on one that negotiated protocol extensions -- which is why
+    // every hold in this tree is written `<ms> >> PM_TIME_SHIFT`.  This site
+    // reads the field instead of writing it and was missed by that conversion,
+    // so an extended server handed the Gladiator library a millisecond count to
+    // read as tics and every hold the brain saw ran EIGHT TIMES LONG: 1280 ms
+    // for a teleport, 1600 ms for a spawn.
+    //
+    // `3 - PM_TIME_SHIFT` is the inverse: 0 on a plain server, 3 on an extended
+    // one.  The clamp is not decoration -- extended pm_time is a uint16_t and
+    // the engine's own waterjump hold is 2040 ms, which does not survive the
+    // byte on its own.  From `osp-tourney@11563de`.
+    buc.pm_time = min(bot->client->ps.pmove.pm_time >> (3 - PM_TIME_SHIFT), 255);
     //gravity
     buc.gravity = sv_gravity->value;
     //delta_angles (NOTE: the bot->client->ps.pmove.delta_angles are of type short)
@@ -597,9 +1070,11 @@ void BotLib_BotUpdateClient(edict_t *bot)
     memcpy(buc.stats, bot->client->ps.stats,
            min(q_countof(buc.stats), q_countof(bot->client->ps.stats)) * sizeof(short));
     //====================================
-    //inventory
-    memcpy(buc.inventory, bot->client->pers.inventory,
-           min(q_countof(buc.inventory), q_countof(bot->client->pers.inventory)) * sizeof(int));
+    //inventory, translated into the brain's index space (R-141).  The
+    //bounded memcpy that was here answered R-100 -- two arrays of different
+    //LENGTHS -- and could not answer this one, which is two arrays of the same
+    //length whose slots mean different things.
+    BotFillInventory(buc.inventory, bot->client->pers.inventory);
     //update the client
     lib->funcs.BotUpdateClient(DF_ENTCLIENT(bot), &buc);
     //====================================
@@ -611,6 +1086,9 @@ void BotLib_BotUpdateClient(edict_t *bot)
 // Returns:                 -
 // Changes Globals:     -
 //===========================================================================
+// Defined beside BotInitLibrary, which is the other caller (R-144).
+static void BotRulesetLibVars(bot_library_t *lib);
+
 void BotLib_BotStartFrame(float time)
 {
     bot_library_t *lib;
@@ -622,6 +1100,8 @@ void BotLib_BotStartFrame(float time)
     {
         //set the dmflags
         lib->funcs.BotLibVarSet("dmflags", dmflags->string);
+        //...and everything else a person can change mid-map (R-144)
+        BotRulesetLibVars(lib);
         //start the server frame
         lib->funcs.BotStartFrame(time);
     } //end for
@@ -789,16 +1269,6 @@ void BotLib_BotConsoleMessage(edict_t *bot, int type, char *message)
 // Parameter:               -
 // Returns:                 -
 // Changes Globals:     -
-//===========================================================================
-void BotLib_BotLibVarSet(char *var_name, char *value)
-{
-    bot_library_t *lib;
-
-    for (lib = botglobals.firstbotlib; lib; lib = lib->next)
-    {
-        lib->funcs.BotLibVarSet(var_name, value);
-    } //end for
-} //end of the function BotLib_BotLibVarSet
 //===========================================================================
 //
 // Parameter:               -
@@ -1034,6 +1504,103 @@ static void BotSetPathVars(bot_library_t *lib)
     } //end if
 }
 
+//===========================================================================
+// R-144: the ruleset's own libvars, and they are asked EVERY FRAME.
+//
+// This block used to run once, inside BotInitLibrary, which is right for the
+// four that cannot move (`ctf`, `ra`, `xatrix`, `rogue` are the resolved
+// ruleset and the content layers, latched for the life of the map).  It is
+// wrong for these five, because every one of them is derived from something a
+// person can change while the map is running: `ctf_hook` and `laserhook` are
+// cvars an operator sets, tourney's `usehook`/`teamplay`/`runes` follow
+// `hook_enable`, `match_mode` and `rune_stat`, and ctf's `techs` follows a
+// DMFLAG.  The game re-reads all of them every time it uses them -- CTFHook_f
+// tests the cvar itself, which is R-138's own note -- so the brain was the only
+// party still acting on the value the map started with.
+//
+// `dmflags` was already pushed here every frame and is the precedent: the same
+// loop, four lines up.  The donor's answer was narrower and is the other half
+// of the same thought -- `ugladq2/src/p_botmenu.c` pushes `usehook` from the
+// bot menu's own hook row, through BotLib_BotLibVarSet, which this tree ported
+// and never called.  Refreshing on the frame covers that row and every other
+// way the cvar can move, so the wrapper goes.
+//
+// Parameter:               -
+// Returns:                 -
+// Changes Globals:     -
+//===========================================================================
+static void BotRulesetLibVars(bot_library_t *lib)
+{
+    //
+    // R-BOT-29's libvar block.  Under tourney these come from hook_enable and
+    // rune_stat; under ctf from Threewave's own ctf_hook/laserhook, which
+    // R-CTF-3 already registers; elsewhere from the MOD_HOOK modifier.
+    switch (G_Ruleset()) {
+    case RULESET_TOURNEY:
+        lib->funcs.BotLibVarSet("usehook", BotTourneyHook() ? "1" : "0");
+        lib->funcs.BotLibVarSet("laserhook", BotTourneyHook() ? "1" : "0");
+        // The comparison is preserved EXACTLY: 1v1 (m_mode 3) is two teams of
+        // one, the brain has no ally, and teamplay 0 is the right answer there.
+        lib->funcs.BotLibVarSet("teamplay", BotTourneyMode() == MODE_TEAM ? "1" : "0");
+        lib->funcs.BotLibVarSet("runes", BotTourneyRunes() ? "1" : "0");
+        lib->funcs.BotLibVarSet("techs", "0");
+        break;
+    case RULESET_CTF:
+        lib->funcs.BotLibVarSet("usehook", ctf_hook && ctf_hook->value ? "1" : "0");
+        lib->funcs.BotLibVarSet("laserhook", laserhook && laserhook->value ? "1" : "0");
+        // *** ZERO, AND THAT IS WHAT GIVES CTF BOTS TEAMS. ***
+        //
+        // The donor sets no `teamplay` under ctf at all -- its `#ifdef ZOID`
+        // block sets `ctf`, `usehook` and `runes` and stops -- and the omission
+        // is load-bearing rather than an oversight.  BotSameTeam() tests
+        // `teamplay` FIRST, and when it is set it compares the two clients'
+        // whole skin strings; the `ctf` branch underneath it compares only the
+        // half after the '/', which is exactly `ctf_r` against `ctf_b`.  So
+        // `teamplay 1` here made a red in `male/ctf_r` and a red in
+        // `female/ctf_r` enemies, and made two players who happened to share a
+        // model team-mates -- the brain had no CTF teams at all.  It is the
+        // opposite of R-ARENA-2's answer for the same question and for the
+        // stated reason: under arena the skin is a synthetic team id and a
+        // whole-string compare is what is wanted, under ctf the skin's own
+        // second half already IS the team.
+        lib->funcs.BotLibVarSet("teamplay", "0");
+        lib->funcs.BotLibVarSet("runes", "0");
+        // CTFSetupTechSpawn gates the techs on DF_CTF_NO_TECH alone, so that
+        // dmflag -- not the `runes` modifier -- is what the brain must be told
+        // about.  See doc/reconciliation.md R-88 and R-94.
+        lib->funcs.BotLibVarSet("techs",
+            ((int)dmflags->value & DF_CTF_NO_TECH) ? "0" : "1");
+        break;
+    case RULESET_ARENA:
+        lib->funcs.BotLibVarSet("usehook", G_ModifierEnabled(MOD_HOOK) ? "1" : "0");
+        lib->funcs.BotLibVarSet("laserhook", "0");
+        // R-ARENA-2: arena is ALWAYS teamplay to the brain, because RA2 is
+        // always played in teams -- a 1v1 arena is two teams of one.  This is
+        // the switch that makes BotSameTeam() consult the skin at all, and the
+        // synthetic skin BotLib_BotClientSettings pushes is what it consults;
+        // without the pair the brain has no teams and shoots its own side.
+        //
+        // It is NOT tourney's answer and the difference is the skin.  R-BOT-29
+        // sets tourney's `teamplay` from `m_mode == MODE_TEAM` and says why: on
+        // real skins, teamplay 1 in a duel gives both duellists an imaginary
+        // team-mate the moment they wear the same one.  Here the skin is the
+        // team, so a lone player's team has exactly one member and the
+        // comparison cannot go wrong in either direction.
+        lib->funcs.BotLibVarSet("teamplay", "1");
+        lib->funcs.BotLibVarSet("runes", "0");
+        lib->funcs.BotLibVarSet("techs", "0");
+        break;
+    default:
+        lib->funcs.BotLibVarSet("usehook", G_ModifierEnabled(MOD_HOOK) ? "1" : "0");
+        lib->funcs.BotLibVarSet("laserhook", "0");
+        lib->funcs.BotLibVarSet("teamplay", G_TeamplayEnabled() ? "1" : "0");
+        lib->funcs.BotLibVarSet("runes", "0");
+        lib->funcs.BotLibVarSet("techs", "0");
+        break;
+    }
+
+}
+
 static int BotInitLibrary(bot_library_t *lib)
 {
     int err;
@@ -1114,40 +1681,7 @@ static int BotInitLibrary(bot_library_t *lib)
     //base, game and cd directory
     BotSetPathVars(lib);
 
-    // ---- the hook, the runes and teamplay ---------------------------------
-    //
-    // R-BOT-29's libvar block.  Under tourney these come from hook_enable and
-    // rune_stat; under ctf from Threewave's own ctf_hook/laserhook, which
-    // R-CTF-3 already registers; elsewhere from the MOD_HOOK modifier.
-    switch (G_Ruleset()) {
-    case RULESET_TOURNEY:
-        lib->funcs.BotLibVarSet("usehook", BotTourneyHook() ? "1" : "0");
-        lib->funcs.BotLibVarSet("laserhook", BotTourneyHook() ? "1" : "0");
-        // The comparison is preserved EXACTLY: 1v1 (m_mode 3) is two teams of
-        // one, the brain has no ally, and teamplay 0 is the right answer there.
-        lib->funcs.BotLibVarSet("teamplay", BotTourneyMode() == MODE_TEAM ? "1" : "0");
-        lib->funcs.BotLibVarSet("runes", BotTourneyRunes() ? "1" : "0");
-        lib->funcs.BotLibVarSet("techs", "0");
-        break;
-    case RULESET_CTF:
-        lib->funcs.BotLibVarSet("usehook", ctf_hook && ctf_hook->value ? "1" : "0");
-        lib->funcs.BotLibVarSet("laserhook", laserhook && laserhook->value ? "1" : "0");
-        lib->funcs.BotLibVarSet("teamplay", "1");
-        lib->funcs.BotLibVarSet("runes", "0");
-        // CTFSetupTechSpawn gates the techs on DF_CTF_NO_TECH alone, so that
-        // dmflag -- not the `runes` modifier -- is what the brain must be told
-        // about.  See doc/reconciliation.md R-88 and R-94.
-        lib->funcs.BotLibVarSet("techs",
-            ((int)dmflags->value & DF_CTF_NO_TECH) ? "0" : "1");
-        break;
-    default:
-        lib->funcs.BotLibVarSet("usehook", G_ModifierEnabled(MOD_HOOK) ? "1" : "0");
-        lib->funcs.BotLibVarSet("laserhook", "0");
-        lib->funcs.BotLibVarSet("teamplay", G_TeamplayEnabled() ? "1" : "0");
-        lib->funcs.BotLibVarSet("runes", "0");
-        lib->funcs.BotLibVarSet("techs", "0");
-        break;
-    }
+    BotRulesetLibVars(lib);
 
     //setup the bot library
     err = lib->funcs.BotSetupLibrary();
@@ -1617,16 +2151,81 @@ void BotForgetGameMemory(void)
 // Steps 4 and 5 must not interleave: the brain is entitled to a complete world
 // snapshot before any bot thinks.  Two loops, and this comment, are why.
 //===========================================================================
+//===========================================================================
+// R-BOT-23: "with 32 bots on a loaded map the bot section of G_RunFrame stays
+// under half a 100 ms frame on the reference machine, or the shortfall is
+// reported in doc/regression.md".  A requirement with a number in it needs a
+// measurement, and the measurement has to come from inside the library:
+// nothing outside it can tell the bot section apart from the rest of the
+// frame.  CLOCK_MONOTONIC because the number is a duration.
+//===========================================================================
+static struct {
+    int64_t frames;         // frames in which the bot section ran at all
+    int64_t total_us;       // ...and what they cost
+    int64_t worst_us;
+    int     worst_bots;
+    int     worst_edicts;
+} botperf;
+
+//
+// Microseconds off a monotonic clock, or 0 if there is not one.  Two
+// implementations because there are two: MinGW does not put `clock_gettime` in
+// the default link set -- it lives in libwinpthread -- and a game DLL that
+// drags in a threading runtime to time itself is the wrong trade.  The R-BUILD-5
+// matrix is what found this: it links clean on five ELF targets and fails on
+// both PE ones, which is exactly the class of defect ten configurations exist
+// to catch.
+//
+static int64_t BotPerfNow(void)
+{
+#if defined(_WIN32)
+    LARGE_INTEGER freq, now;
+
+    if (!QueryPerformanceFrequency(&freq) || !freq.QuadPart)
+        return 0;
+    if (!QueryPerformanceCounter(&now))
+        return 0;
+    return (int64_t)(now.QuadPart / (freq.QuadPart / 1000000));
+#else
+    struct timespec ts;
+
+    if (clock_gettime(CLOCK_MONOTONIC, &ts))
+        return 0;
+    return (int64_t)ts.tv_sec * 1000000 + ts.tv_nsec / 1000;
+#endif
+}
+
+void BotPerfReset(void)
+{
+    memset(&botperf, 0, sizeof(botperf));
+}
+
+void BotPerfReport(void)
+{
+    newgameimport.dprintf("botperf frames %lld bots %d edicts %d mean %lld us "
+                          "worst %lld us budget %d us\n",
+                          (long long)botperf.frames, botglobals.numbots,
+                          globals.num_edicts,
+                          botperf.frames ? (long long)(botperf.total_us / botperf.frames) : 0LL,
+                          (long long)botperf.worst_us,
+                          BOTPERF_BUDGET_US);
+    newgameimport.dprintf("botperf worst frame had %d bot(s) and %d edict(s)\n",
+                          botperf.worst_bots, botperf.worst_edicts);
+}
+
 void BotRunFrame(void)
 {
     int i;
     edict_t *ent;
+    int64_t started;
 
     // Steps 4 and 5 cost a walk of every edict, so they are skipped entirely
     // when no bot exists -- which is R-BOT-13's transparency for the frame
     // loop, and what keeps a bot-free server paying nothing for the layer.
     if (botglobals.numbots <= 0)
         return;
+
+    started = BotPerfNow();
 
     //4: the world snapshot
     ent = &g_edicts[0];
@@ -1652,4 +2251,18 @@ void BotRunFrame(void)
     //the debug lines the brain asked for, re-issued if the engine's extension
     //is what is drawing them
     BotDebugFrame();
+
+    if (started)
+    {
+        int64_t us = BotPerfNow() - started;
+
+        botperf.frames++;
+        botperf.total_us += us;
+        if (us > botperf.worst_us)
+        {
+            botperf.worst_us = us;
+            botperf.worst_bots = botglobals.numbots;
+            botperf.worst_edicts = globals.num_edicts;
+        } //end if
+    } //end if
 } //end of the function BotRunFrame

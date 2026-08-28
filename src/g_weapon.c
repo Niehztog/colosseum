@@ -1284,7 +1284,6 @@ void fire_plasma(edict_t *self, vec3_t start, vec3_t dir, int damage, int speed,
 }
 
 // RAFAEL
-extern void SP_item_foodcube(edict_t *best);
 // RAFAEL
 void Trap_Think(edict_t *ent)
 {

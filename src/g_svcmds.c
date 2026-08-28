@@ -17,6 +17,7 @@ with this program; if not, write to the Free Software Foundation, Inc.,
 */
 
 #include "g_local.h"
+#include "arena/arena.h"
 #include "tourney/osp_hooks.h"
 #include "bot/bl_cmd.h"
 
@@ -289,6 +290,12 @@ void    ServerCommand(void)
         G_Svcmd_Ruleset_f();
     else if (Q_stricmp(cmd, "slots") == 0)
         G_Svcmd_Slots_f();
+    else if (Q_stricmp(cmd, "extras") == 0)
+        G_Svcmd_Extras_f();
+    else if (Q_stricmp(cmd, "census") == 0)
+        G_Svcmd_Census_f();
+    else if (G_Ruleset() == RULESET_ARENA && Q_stricmp(cmd, "arenadump") == 0)
+        G_Svcmd_ArenaDump_f();
     else if (Q_stricmp(cmd, "test") == 0)
         Svcmd_Test_f();
     else if (Q_stricmp(cmd, "addip") == 0)
@@ -308,6 +315,11 @@ void    ServerCommand(void)
     // Also asked last, and after tourney's, so that the bot layer -- which is
     // present in four rulesets -- cannot shadow a ruleset's own name.
     else if (BotCmd(cmd, NULL, true))
+        ;
+    // R-EXTRA-1: `openlog`, `closelog`, `writelog`.  The donor asked these in
+    // the same place and in the same shape -- a predicate that says whether it
+    // recognised the name.
+    else if (LogCmd(cmd))
         ;
     else
         gi.cprintf(NULL, PRINT_HIGH, "Unknown server command \"%s\"\n", cmd);

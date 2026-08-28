@@ -12,3 +12,11 @@ vendor/**/*.bundle binary
 # (R-CORE-9, R-CORE-5) and must stay byte-identical to the pin.
 inc/** -text
 src/** -text
+
+# The shipped gamedir set (D6).  `botcfg/bots.cfg` is the 1999 roster copied
+# from gladiator-bot-restored/assets and is CRLF as it shipped; the parser does
+# not care, but a provenance copy that git rewrites is no longer a copy.
+# `arena.cfg` is Rocket Arena 2's own arena-definition file on the same terms
+# (SPECS 1.27, doc/reconciliation.md R-129) -- 934 lines, CRLF as it shipped.
+colosseum/botcfg/bots.cfg -text
+colosseum/arena.cfg -text

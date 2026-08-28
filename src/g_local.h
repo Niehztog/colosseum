@@ -363,6 +363,26 @@ typedef struct {
 // ROGUE
 
 // gitem_t->weapmodel for weapons indicates model index
+//
+// R-142: THESE ARE POSITIONS IN A LIST, NOT NAMES.  `ChangeWeapon` puts the
+// value in the high byte of the player's `s.skinnum`, and the client draws
+// `weaponmodel[skinnum >> 8]` -- an array it fills with `weaponModels[0] =
+// "weapon.md2"` and then one entry per `#`-prefixed model in configstring
+// order.  So the number IS the ordinal of that weapon's `#w_*.md2` in
+// SP_worldspawn's precache block, and `g_spawn.c` says so above it: "THIS ORDER
+// MUST MATCH THE DEFINES IN g_local.h".
+//
+// Each donor numbered its own extra weapons from 12 because each ships a list
+// with nothing after the BFG: CTF's grapple is 12, Xatrix's phalanx is 12,
+// Rogue's disruptor is 12.  R-CORE-2 unions the CONTENT, so the precache block
+// is now one ordered list of nineteen -- and three donors' private 12s made
+// seven weapons draw somebody else's model: a phalanx or a disruptor appeared
+// as a grapple, a ripper and an ETF rifle as a phalanx, and so on down the
+// list.  The Gladiator donor met the same problem when it merged the same two
+// packs and answered it the same way, at 12..18 (`ugladq2/src/g_local.h`).
+//
+// So the numbering is the merged list's.  The only consumer is the one line in
+// `ChangeWeapon`; `tools/dupvalue.py` is what keeps the next merge honest.
 #define WEAP_BLASTER            1
 #define WEAP_SHOTGUN            2
 #define WEAP_SUPERSHOTGUN       3
@@ -374,15 +394,14 @@ typedef struct {
 #define WEAP_HYPERBLASTER       9
 #define WEAP_RAILGUN            10
 #define WEAP_BFG                11
-#define WEAP_GRAPPLE            12  // CTF
-#define WEAP_PHALANX            12
-#define WEAP_BOOMER             13
-
-#define WEAP_DISRUPTOR          12      // PGM
-#define WEAP_ETFRIFLE           13      // PGM
-#define WEAP_PLASMA             14      // PGM
-#define WEAP_PROXLAUNCH         15      // PGM
-#define WEAP_CHAINFIST          16      // PGM
+#define WEAP_GRAPPLE            12      // CTF
+#define WEAP_PHALANX            13      // XATRIX
+#define WEAP_BOOMER             14      // XATRIX
+#define WEAP_DISRUPTOR          15      // PGM
+#define WEAP_ETFRIFLE           16      // PGM
+#define WEAP_PLASMA             17      // PGM
+#define WEAP_PROXLAUNCH         18      // PGM
+#define WEAP_CHAINFIST          19      // PGM
 
 typedef struct gitem_s {
     char        *classname; // spawning name
@@ -841,7 +860,8 @@ extern  cvar_t  *maxspectators;
 
 // RA2's four (R-RA-1a).  `hostname`, `port` and `logfile` are the engine's own,
 // re-obtained for the round log's header rather than re-declared with a second
-// meaning; `netlog` is the tree's only socket user and defaults to empty.
+// meaning; `netlog` no longer opens anything (R-SEC-7) and is kept registered
+// so a legacy config still resolves.
 extern  cvar_t  *hostname;
 extern  cvar_t  *hostport;
 extern  cvar_t  *logfile;
@@ -939,6 +959,10 @@ void Touch_Item(edict_t *ent, edict_t *other, cplane_t *plane, csurface_t *surf)
 bool    KillBox(edict_t *ent);
 void    G_ProjectSource(const vec3_t point, const vec3_t distance, const vec3_t forward, const vec3_t right, vec3_t result);
 edict_t *G_Find(edict_t *from, int fieldofs, char *match);
+// The spawn points of `classname` a random selection may choose among, which is
+// two short of the map's count -- see the comment on the implementation.  Both
+// map-sized bot fills read it (R-DM-1, R-CTF-8).
+int     G_SpawnPointPool(char *classname);
 edict_t *findradius(edict_t *from, vec3_t org, float rad);
 edict_t *G_PickTarget(char *targetname);
 void    G_UseTargets(edict_t *ent, edict_t *activator);
@@ -1138,6 +1162,10 @@ void ClientObituary(edict_t *self, edict_t *inflictor, edict_t *attacker);
 float PlayersRangeFromSpot(edict_t *spot);
 edict_t *SelectRandomDeathmatchSpawnPoint(void);
 edict_t *SelectFarthestDeathmatchSpawnPoint(void);
+// R-DM-1: how many players the MAP seats, for `dm_botfill`.  Unclamped and with
+// no cvar test -- BotFillTarget() owns both.  Lives here because it is the spawn
+// selectors' own number; see the comment on the implementation.
+int  DM_BotFillSeats(void);
 void InitBodyQue(void);
 void ClientBeginServerFrame(edict_t *ent);
 void ClientBegin(edict_t *ent);
@@ -1186,6 +1214,9 @@ void DeathmatchScoreboard(edict_t *ent);
 void G_MenuOpen(edict_t *ent, menu_owner_t who);
 void G_MenuClose(edict_t *ent);
 bool G_MenuActive(edict_t *ent);
+// The layout channel's other claimant.  `showscores` under dm/ctf/tourney,
+// `scoremode` under arena -- see p_hud.c.
+bool G_ScoreboardUp(edict_t *ent);
 
 // Takes a layout back off a client.  Four engines and the SDK's loading image
 // all write into the layout channel and every one of them needs the same
@@ -1211,6 +1242,7 @@ extern const game_import_ex_t *gex;
 
 const char *G_FsBaseDir(void);
 const char *G_FsGameDir(void);
+bool G_FsGamePath(char *out, size_t size, const char *name);
 int         G_FsLoadFile(const char *path, void **buffer);
 void        G_FsFreeFile(void *buffer);
 char      **G_FsListFiles(const char *path, const char *ext, int *count);
@@ -1352,6 +1384,99 @@ void Widowlegs_Spawn(vec3_t startpos, vec3_t angles);
 //
 void RemoveAttackingPainDaemons(edict_t *self);
 
+//
+// g_log.c -- the Gladiator game log (R-EXTRA-1)
+//
+void Log_Open(const char *filename);
+void Log_Close(void);
+void Log_ShutDown(void);
+void Log_Write(const char *fmt, ...) q_printf(1, 2);
+void Log_WriteTimeStamped(const char *fmt, ...) q_printf(1, 2);
+bool LogCmd(const char *cmd);
+bool Log_IsOpen(void);
+const char *Log_Path(void);
+int Log_Writes(void);
+extern cvar_t *g_gamelog;
+
+//
+// The rest of R-EXTRA's `#define`s, as cvars.  R-EXTRA's rule is that each is
+// kept, each becomes a cvar and none is compiled out; these three are the ones
+// the requirement also says are OFF by default, which for a spawn function
+// means the entity is not created rather than created and inert.
+//
+extern cvar_t *g_clientlag;         // R-EXTRA-2, CLIENTLAG
+extern cvar_t *g_observer;          // R-EXTRA-6, OBSERVER (dm/sp/ctf only)
+
+// Is the GLADIATOR observer the implementation in force?  R-EXTRA-6 is the
+// second exemption to sec 7 rule 6 -- three implementations, one per ruleset --
+// so this is a ruleset question and not a cvar question, with the cvar folded
+// in as the operator's request the way G_ResolveModifiers does it (R-88).
+static inline bool G_GladiatorObserver(void)
+{
+    return g_observer->value &&
+           G_Ruleset() != RULESET_ARENA && G_Ruleset() != RULESET_TOURNEY;
+}
+extern cvar_t *g_triggercounting;   // R-EXTRA-3, TRIGGER_COUNTING
+extern cvar_t *g_triggerlog;        // R-EXTRA-3, TRIGGER_LOG
+extern cvar_t *g_rotatingbutton;    // R-EXTRA-4, FUNC_BUTTON_ROTATING
+
+//
+// p_lag.c -- the Gladiator client-lag simulation (R-EXTRA-2)
+//
+// The ceiling on both `lag` and `lagvariance`, in milliseconds.  The donor
+// spelled 2000 in four places and clamped the ping from the unclamped value in
+// a fifth.
+#define LAG_MAX_DELAY   2000
+
+void Lag_StoreClientInput(edict_t *ent, usercmd_t *ucmd, vec3_t origin, vec3_t v_angle);
+bool Lag_GetClientInput(edict_t *ent, usercmd_t *laggeducmd, vec3_t origin, vec3_t v_angle);
+void Lag_BeginGame(edict_t *ent);
+void Lag_SetClientLag(edict_t *ent, int delay);
+void Lag_SetClientLagVariance(edict_t *ent, int lagvariance);
+void Lag_SetClientPing(edict_t *ent);
+void Lag_ForgetGameMemory(void);
+int Lag_PoolBlocks(void);
+void Lag_ClientState(edict_t *ent, int *lag, int *variance, int *delay, int *queued);
+
+void SP_trigger_counting(edict_t *self);
+void SP_trigger_log(edict_t *self);
+void SP_func_button_rotating(edict_t *ent);
+bool G_SpawnFuncExists(const char *classname);
+
+//
+// Cross-file declarations that used to be local `extern`s in a .c (R-SEC-8).
+//
+// Each of these names something another translation unit defines.  Declared in
+// a .c, the two sides never meet and nothing checks them -- which is how RA2
+// shipped four `bool[7]` arrays written through a stale `extern int[]` in
+// another file, 21 bytes out of bounds on every map load, with a clean build.
+// Declared here, the defining file includes the same line and the compiler
+// does the checking.
+//
+void M_WorldEffects(edict_t *ent);              // g_monster.c
+void train_use(edict_t *self, edict_t *other, edict_t *activator);  // g_func.c
+void func_train_find(edict_t *self);            // g_func.c
+void SP_item_foodcube(edict_t *self);           // g_items.c
+void SP_monster_makron(edict_t *self);          // m_boss32.c
+bool Pickup_Health(edict_t *ent, edict_t *other);       // g_items.c
+bool Pickup_Adrenaline(edict_t *ent, edict_t *other);   // g_items.c
+bool Pickup_Armor(edict_t *ent, edict_t *other);        // g_items.c
+bool Pickup_PowerArmor(edict_t *ent, edict_t *other);   // g_items.c
+edict_t *Sphere_Spawn(edict_t *owner, int spawnflags);  // rogue/g_sphere.c
+void check_dodge(edict_t *self, vec3_t start, vec3_t dir, int speed);   // g_weapon.c
+void hurt_touch(edict_t *self, edict_t *other, cplane_t *plane, csurface_t *surf);  // g_trigger.c
+void droptofloor(edict_t *ent);                 // g_items.c
+void Grenade_Explode(edict_t *ent);             // g_weapon.c
+byte P_DamageModifier(edict_t *ent);            // p_weapon.c
+char *ED_NewString(const char *string);         // g_spawn.c
+void Move_Calc(edict_t *ent, const vec3_t dest, void (*func)(edict_t *));  // g_func.c
+// m_flyer.c's three tables, which m_carrier.c drives directly.
+extern const mmove_t flyer_move_attack2;
+extern const mmove_t flyer_move_attack3;
+extern const mmove_t flyer_move_kamikaze;
+// m_widow.c's shared stalker bounding box, read by m_widow2.c.
+extern vec3_t stalker_mins, stalker_maxs;
+
 // ROGUE PROTOTYPES
 //====================
 
@@ -1442,6 +1567,37 @@ typedef struct {
 //ROGUE
 //=========
 } client_persistant_t;
+
+// The Gladiator observer's camera (R-EXTRA-6), for `dm`, `sp` and `ctf`.  One
+// per client because the eye and chase cameras are per viewer -- two observers
+// watching the same player have different smoothing state and different
+// offsets.  `ent`, `lastent` and `goalent` are edict pointers and therefore
+// need savegame descriptors, which g_save.c has (R-SAVE-3).
+typedef struct camera_s {
+    edict_t *ent;                   //observed client
+    vec3_t  angles;                 //camera angles
+    vec3_t  origin;                 //camera origin
+    vec3_t  ent_angles;             //observed client angles
+    vec3_t  chaseoffset;            //offset for the chasecamera
+    int     flags;                  //camera flags, CAMFL_*
+    //autocam fields
+    edict_t *lastent;               //targeted entity (player, bot etc)
+    edict_t *goalent;               //previous targeted entity
+    vec3_t  dest;                   //current expected camera position
+    vec3_t  viewtarget;             //current expected camera view target
+    vec3_t  dest2;                  //next target in Idle Mode
+    int     state;                  //the state of the camera
+    float   pause_time;             //delay measure
+    float   delay;                  //how long to keep current target / idle mode
+    float   search_time;            //when to drop from current mode
+    float   maxflybydist;             //maximum distance in flyby mode
+    int     cnt;                    //entity passing counter
+    //
+    float   lasttime;               //last time camera was updated
+    float   lastcycle;              //last time camera was cycled
+    vec3_t  clientangles;           //angles of the client using this camera
+    vec3_t  clientorigin;           //origin of the client using this camera
+} camera_t;
 
 // RA2's observer modes (R-EXTRA-6, the second exemption to sec 7 rule 6).  The
 // eye and chase cameras of `dm`/`ctf`/`sp` are g_chase.c's; these four are
@@ -1825,6 +1981,13 @@ struct gclient_s {
     edict_t     *owned_sphere;      // this points to the player's sphere
 //ROGUE
 //=======
+
+    // R-EXTRA-6: the Gladiator observer's eye and chase camera, live under
+    // `dm`, `sp` and `ctf`.  Not in a union with arena's `omode` pair or
+    // tourney's camera state: the three implementations are per ruleset and one
+    // library serves all of them, and R-70's six sites are what sharing a field
+    // between two donors' meanings costs.
+    camera_t    camera;
 };
 
 struct edict_s {

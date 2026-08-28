@@ -23,183 +23,58 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 // address comments are stripped -- SPECS.md N1 makes those oracles meaningless
 // here, and they survive at the pin.
 #include "g_local.h"
-#include "arena/net_compat.h"
 
 
 FILE        *StdLogFile;
 
-static fd_set   global_fds;
-
-#ifdef _WIN32
 /*
 =================
-GSNetStartup / GSNetShutdown
+netlog, and why there is no socket here
 
-Winsock init for the netlog forwarding below.  RA2 did this inside the GameSpy
-SDK's NetShutdown(); that SDK is gone, and netlog is the only socket user
-left, so it lives here.
+RA2 forwarded every kill, connect and disconnect line to a remote host over UDP
+-- `netlog <host:port>`, one datagram per event, through its own copies of
+gethostbyname/socket/connect/send.  R-SEC-7 allows the game library exactly one
+outbound process and no outbound network at all, so the forwarding is gone: the
+seven net_* helpers, GSSendLine, the winsock startup pair and net_compat.h with
+them.  Three things went with it that were worth losing on their own terms --
+`net_open_socket`, `net_close_socket` and `net_connect_socket` each called
+`exit(1)` on failure, from inside a game library, which turns a DNS hiccup on
+the operator's log host into a dead server.
+
+The LOCAL log is untouched: `logfile 2` still writes every line to
+`<gamedir>/<logname>`, which is what every RA2 log parser reads anyway.  The
+`netlog` cvar itself stays registered (R-COMPAT-3: a legacy name keeps
+resolving) and InitGame says once that setting it does nothing.
 =================
 */
-bool GSNetStartup(void)
-{
-    WSADATA wsaData;
-
-    if (WSAStartup(MAKEWORD(1, 1), &wsaData) != 0) {
-        gi.dprintf("WS Error: %d\n", WSAGetLastError());
-        return false;
-    }
-
-    return true;
-}
-
-void GSNetShutdown(void)
-{
-    WSACleanup();
-}
-#endif
-
-struct sockaddr_in net_name_to_address(char *name)
-{
-    struct sockaddr_in  sin;
-    struct hostent      *hp;
-    char            *s, *portstr;
-    unsigned long       a;
-
-    memset(&sin, 0, sizeof(sin));
-
-    s = strdup(name);
-    strtok(s, ":");
-    portstr = strtok(NULL, "");
-
-    if (portstr) {
-        int port = atoi(portstr);
-
-        if (port <= 0 || port > 65535) {
-            fprintf(stderr, "net_name_to_address: %s: invalid port number\n", portstr);
-            free(s);
-            return sin;
-        }
-
-        sin.sin_port = port;
-    } else
-        sin.sin_port = 0;
-
-    a = inet_addr(s);
-    if (a == INADDR_NONE) {
-        hp = gethostbyname(s);
-        if (hp)
-            sin.sin_addr.s_addr = *(unsigned long *)hp->h_addr_list[0];
-        else {
-#ifdef _WIN32
-            fprintf(stderr, "%s: %d", s, WSAGetLastError());
-#else
-            fprintf(stderr, "%s: %s", s, "net_name_to_addr");
-#endif
-            free(s);
-            return sin;
-        }
-    }
-
-    sin.sin_family = AF_INET;
-    sin.sin_port = htons(sin.sin_port);
-    free(s);
-
-    return sin;
-}
-
-void net_send(int sock, char *buf, int len)
-{
-    int r;
-
-    r = send(sock, buf, len, 0);
-    if (r != len) {
-        perror("send");
-        if (errno)
-            exit(1);
-    }
-}
-
-int net_open_socket(void)
-{
-    int sock;
-
-    sock = socket(AF_INET, SOCK_DGRAM, 0);
-    if (sock < 0) {
-#ifdef _WIN32
-        printf("WSA %d\n", WSAGetLastError());
-#else
-        perror("socket");
-#endif
-        exit(1);
-    }
-
-    FD_SET(sock, &global_fds);
-
-    return sock;
-}
-
-void net_close_socket(int sock)
-{
-    if (sock) {
-        if (close(sock) < 0) {
-            perror("close");
-            exit(1);
-        }
-    }
-
-    FD_CLR(sock, &global_fds);
-}
-
-void net_connect_socket(int sock, struct sockaddr_in *addr, unsigned short port)
-{
-    addr->sin_port = htons(port);
-
-    if (connect(sock, (struct sockaddr *)addr, sizeof(*addr)) < 0) {
-        perror("connect");
-        exit(1);
-    }
-}
-
-void GSSendLine(char *line)
-{
-    struct sockaddr_in  addr;
-    int         sock;
-    unsigned short      port;
-
-    addr = net_name_to_address(netlog->string);
-    if (!addr.sin_addr.s_addr)
-        return;
-
-    port = ntohs(addr.sin_port);
-
-    sock = net_open_socket();
-    net_connect_socket(sock, &addr, port);
-    net_send(sock, line, strlen(line) + 1);
-    net_close_socket(sock);
-}
 
 void GSOpenLog(void)
 {
-    cvar_t  *gamedir, *logname;
-    char    path[80];
+    cvar_t  *logname;
+    char    path[MAX_QPATH * 2];
 
-    gamedir = gi.cvar("game", "", CVAR_LATCH);
     logname = gi.cvar("logname", "stdlog.log", 0);
 
-    strcpy(path, gamedir->string);
-#ifdef _WIN32
-    strcat(path, "\\");
-#else
-    strcat(path, "/");
-#endif
-    strcat(path, logname->string);
+    // Same correction as ra2stats: the donor composed "<gamedir>/<name>", which
+    // is relative to the server's working directory rather than to the
+    // installation.
+    if (!G_FsGamePath(path, sizeof(path), logname->string)) {
+        StdLogFile = NULL;
+        return;
+    }
 
     StdLogFile = fopen(path, "a+t");
 }
 
 void GSCloseLog(void)
 {
-    fclose(StdLogFile);
+    // The donor called fclose(NULL) whenever the open had failed, which is
+    // undefined and on glibc is a null dereference.  It could not fail for the
+    // donor because its path was always creatable; it can here.
+    if (StdLogFile) {
+        fclose(StdLogFile);
+        StdLogFile = NULL;
+    }
 }
 
 void GSLogShutdown(void)
@@ -208,6 +83,9 @@ void GSLogShutdown(void)
         return;
 
     GSOpenLog();
+
+    if (!StdLogFile)
+        return;
 
     fprintf(StdLogFile, "\t\tGameEnd\t\t\t%d\n", (int)level.time);
 
@@ -220,6 +98,9 @@ void GSLogStartup(void)
         return;
 
     GSOpenLog();
+
+    if (!StdLogFile)
+        return;
 
     fprintf(StdLogFile, "\t\tStdLog\t1.22\n");
     fprintf(StdLogFile, "\t\tPatchName\tRocket Arena 2 %s\n", "v2.25");
@@ -234,6 +115,9 @@ void GSLogNewmap(void)
 
     GSOpenLog();
 
+    if (!StdLogFile)
+        return;
+
     fprintf(StdLogFile, "\t\tMAP\t%s\n", level.level_name);
     fprintf(StdLogFile, "\t\tGameStart\t\t\t%d\n", (int)level.time);
 
@@ -242,10 +126,8 @@ void GSLogNewmap(void)
 
 void GSdodeathlog(char *line)
 {
-    fprintf(StdLogFile, "%s", line);
-
-    if (netlog->string[0])
-        GSSendLine(line);
+    if (StdLogFile)
+        fprintf(StdLogFile, "%s", line);
 }
 
 void GSLogDeath(edict_t *self, edict_t *inflictor, edict_t *attacker)
@@ -258,6 +140,8 @@ void GSLogDeath(edict_t *self, edict_t *inflictor, edict_t *attacker)
         return;
 
     GSOpenLog();
+    if (!StdLogFile)
+        return;
 
     if (attacker == self) {
         if (attacker->client->pers.weapon) {
@@ -311,6 +195,9 @@ void GSLogEnter(edict_t *ent)
 
     GSOpenLog();
 
+    if (!StdLogFile)
+        return;
+
     fprintf(StdLogFile, "\t\tPlayerConnect\t%s\t\t%d\n",
             ent->client->pers.netname, (int)level.time);
 
@@ -323,6 +210,9 @@ void GSLogExit(edict_t *ent)
         return;
 
     GSOpenLog();
+
+    if (!StdLogFile)
+        return;
 
     fprintf(StdLogFile, "\t\tPlayerLeft\t%s\t\t%d\n",
             ent->client->pers.netname, (int)level.time);

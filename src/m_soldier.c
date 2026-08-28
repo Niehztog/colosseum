@@ -2226,7 +2226,6 @@ void soldierh_pain(edict_t *self, edict_t *other, float kick, int damage)
 // ATTACK
 //
 
-extern void brain_dabeam(edict_t *self);
 
 void soldierh_laserbeam(edict_t *self, int flash_index)
 {

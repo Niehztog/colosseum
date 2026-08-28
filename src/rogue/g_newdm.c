@@ -77,11 +77,6 @@ void InitGameRules(void)
 //=================
 #define IT_TYPE_MASK    (IT_WEAPON|IT_AMMO|IT_POWERUP|IT_ARMOR|IT_KEY)
 
-extern void ED_CallSpawn(edict_t *ent);
-extern bool Pickup_Health(edict_t *ent, edict_t *other);
-extern bool Pickup_Adrenaline(edict_t *ent, edict_t *other);
-extern bool Pickup_Armor(edict_t *ent, edict_t *other);
-extern bool Pickup_PowerArmor(edict_t *ent, edict_t *other);
 
 char *FindSubstituteItem(edict_t *ent)
 {
@@ -255,7 +250,6 @@ void PrecacheForRandomRespawn(void)
 //  DOPPLEGANGER
 // ***************************
 
-extern edict_t *Sphere_Spawn(edict_t *owner, int spawnflags);
 
 void fire_doppleganger(edict_t *ent, vec3_t start, vec3_t aimdir);
 void doppleganger_die(edict_t *self, edict_t *inflictor, edict_t *attacker, int damage, vec3_t point);

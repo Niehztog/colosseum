@@ -14,6 +14,8 @@
 #include "tourney/osp_hooks.h"
 // R-ENG-6's second half: no savegame while a bot exists.
 #include "bot/bl_main.h"
+// R-CTF-8 / R-DM-1's target, which the botfill rows below print.
+#include "bot/bl_spawn.h"
 // Phase 7's bot-placement census reads RA2's FIGHT_* and tourney's ENTERED_*.
 #include "arena/arena.h"
 
@@ -84,9 +86,6 @@ static const ruleset_ops_t ops_dm = {
 static const ruleset_ops_t ops_sp = {
     .name = "sp",
 };
-
-extern const ruleset_ops_t ops_arena;    // src/arena/arena.c
-extern const ruleset_ops_t ops_tourney;  // src/tourney/osp_main.c
 
 static const ruleset_ops_t *ruleset_ops[RULESET_COUNT] = {
     [RULESET_DM]      = &ops_dm,
@@ -482,7 +481,7 @@ void G_Svcmd_Ruleset_f(void)
 
         switch (G_Ruleset()) {
         case RULESET_CTF: {
-            int red = 0, blue = 0, noteam = 0;
+            int red = 0, blue = 0, noteam = 0, teamskin = 0;
 
             for (int i = 0; i < game.maxclients; i++) {
                 edict_t *e = &g_edicts[i + 1];
@@ -494,15 +493,48 @@ void G_Svcmd_Ruleset_f(void)
                     blue++;
                 else
                     noteam++;
+                // WHAT THE BRAIN IS TOLD, which is not what the wire carries.
+                // `clientsettings[].skin` is the only currency the Gladiator
+                // brain has for CTF teams -- BotCTFTeam() is
+                // `strstr(skin, "ctf_r") ? RED : BLUE` and BotSameTeam()
+                // compares the half after the '/' -- and bl_main.c fills it
+                // from THIS string, the game's own copy of the userinfo.
+                // CTFAssignSkin writes the playerskins configstring either way,
+                // so a client reading the wire cannot tell the two apart: a bot
+                // wearing `ctf_r` on every screen while its brain still reads
+                // `male/viper` is a bot that thinks the whole server is on the
+                // other side.  Nothing else in this tree can report it, which
+                // is why it is a field here (R-CTF-4).
+                if (strstr(Info_ValueForKey(e->client->pers.userinfo, "skin"),
+                           "ctf_"))
+                    teamskin++;
             }
             gi.cprintf(NULL, PRINT_HIGH,
-                       "botplace     ctf red=%d blue=%d noteam=%d, "
+                       "botplace     ctf red=%d blue=%d noteam=%d teamskin=%d, "
                        "FL_BOTCLIENT=%d (R-CTF-4)\n",
-                       red, blue, noteam, nbotclient);
+                       red, blue, noteam, teamskin, nbotclient);
+            // R-CTF-8, and a line of its own for R-VER-19's reason: the target
+            // is computed from the map's three spawn pools rather than read from
+            // a cvar, so a play test has nowhere else to read it back from.
+            // `seats` is what the map says and `want` what it survives the
+            // ceilings as -- printing only the second hides a clamp.
+            if (BotFillEnabled())
+                gi.cprintf(NULL, PRINT_HIGH,
+                           "botfill      ctf want=%d of seats=%d, shared=%d "
+                           "base=%d+%d (R-CTF-8)\n",
+                           BotFillTarget(), CTF_BotFillSeats(),
+                           G_SpawnPointPool("info_player_deathmatch"),
+                           G_SpawnPointPool("info_player_team1"),
+                           G_SpawnPointPool("info_player_team2"));
+            else
+                gi.cprintf(NULL, PRINT_HIGH,
+                           "botfill      off -- minimumplayers %d is the "
+                           "target (R-CTF-8)\n", (int)BotMinPlayers()->value);
             break;
         }
         case RULESET_ARENA: {
             int placed = 0, teamed = 0, fighting = 0, arena1 = 0;
+            int fill = RA_BotFillArena();
 
             for (int i = 0; i < game.maxclients; i++) {
                 edict_t *e = &g_edicts[i + 1];
@@ -521,6 +553,20 @@ void G_Svcmd_Ruleset_f(void)
                        "botplace     arena in-arena=%d (arena1=%d) on-team=%d "
                        "fighting=%d, FL_BOTCLIENT=%d (R-RA-4)\n",
                        placed, arena1, teamed, fighting, nbotclient);
+            // R-RA-7, and a line of its own for R-VER-19's reason: the target
+            // is computed from the arena rather than read from a cvar, so a
+            // play test has nowhere else to read it back from.
+            if (fill)
+                gi.cprintf(NULL, PRINT_HIGH,
+                           "botfill      arena %d, %d/%d players%s (R-RA-7)\n",
+                           fill, RA_ArenaPlayers(fill, NULL),
+                           RA_BotFillTarget(fill),
+                           arenas[fill].idarena ? ", pickup: by spawn points"
+                                                : ", duel: by playersperteam");
+            else
+                gi.cprintf(NULL, PRINT_HIGH,
+                           "botfill      off -- minimumplayers %d is the "
+                           "target (R-RA-7)\n", (int)BotMinPlayers()->value);
             break;
         }
         case RULESET_TOURNEY: {
@@ -543,6 +589,27 @@ void G_Svcmd_Ruleset_f(void)
                        "botplace     tourney m_mode=%d entered=%d ready=%d "
                        "team0=%d team1=%d, FL_BOTCLIENT=%d (R-OSP-11)\n",
                        m_mode, entered, ready, t0, t1, nbotclient);
+            // R-156.  Tourney has no `botfill` switch and does not need one, and
+            // the row says why rather than printing nothing: `team_maxplayers`
+            // IS a declared capacity -- 4 by default, forced to 1 CVAR_NOSET
+            // under mode 3, clamped so that twice it fits `maxclients` -- which
+            // is precisely what dm and ctf lack and what R-DM-1 / R-CTF-8 had to
+            // read off the map instead.  Modes 0 and 1 have no teams and would
+            // fall to the same map-sized answer dm gets; that is a change to
+            // tourney's bot contract, which R-OSP-11 preserves rather than
+            // redesigns, so it is recorded here and not made.
+            //
+            // `team_maxplayers` is deliberately NOT printed here: its default is
+            // itself mode-dependent (1 under mode 3, 4 otherwise), so naming a
+            // default at this call site would be R-COMPAT-6's collision -- one
+            // cvar registered twice with two values.  `bots_autoload` has one
+            // default and `bl_spawn.c` already reads it exactly this way.
+            gi.cprintf(NULL, PRINT_HIGH,
+                       "botfill      tourney has no fill switch -- %s %d is the "
+                       "target, bots_autoload %d, capacity is "
+                       "team_maxplayers (R-156)\n",
+                       BotMinPlayersCvar(), (int)BotMinPlayers()->value,
+                       (int)gi.cvar("bots_autoload", "0", 0)->value);
             break;
         }
         default:
@@ -550,6 +617,20 @@ void G_Svcmd_Ruleset_f(void)
                        "botplace     %s has no per-ruleset bot placement, "
                        "FL_BOTCLIENT=%d\n", G_RulesetName(G_Ruleset()),
                        nbotclient);
+            // R-DM-1.  `dm` is the arm this reaches, and `sp` has no bots to
+            // report on; BotFillEnabled() is false under both `sp` and
+            // `tourney`, which have no such switch (see BotFillCvar()).
+            if (BotFillEnabled())
+                gi.cprintf(NULL, PRINT_HIGH,
+                           "botfill      dm want=%d of seats=%d, spawns=%d%s "
+                           "(R-DM-1)\n",
+                           BotFillTarget(), DM_BotFillSeats(),
+                           G_SpawnPointPool("info_player_deathmatch"),
+                           G_TeamplayEnabled() ? ", teamplay: even" : "");
+            else
+                gi.cprintf(NULL, PRINT_HIGH,
+                           "botfill      off -- %s %d is the target (R-DM-1)\n",
+                           BotMinPlayersCvar(), (int)BotMinPlayers()->value);
             break;
         }
     }

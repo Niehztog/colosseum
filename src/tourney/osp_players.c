@@ -1093,15 +1093,15 @@ static void sayteam_weapon(edict_t *who, char *buf)
 // two case labels in the caller are separate, the code behind them is not.
 static void sayteam_runes(edict_t *who, char *buf)
 {
-    if (who->client->ps.stats[SID_OSP_RUNE_RESIST])
+    if (G_GetStat(who, SID_OSP_RUNE_RESIST))
         Q_strlcpy(buf, "the RESIST rune", OSP_SAYTEAM_BUF);
-    else if (who->client->ps.stats[SID_OSP_RUNE_STRENGTH])
+    else if (G_GetStat(who, SID_OSP_RUNE_STRENGTH))
         Q_strlcpy(buf, "the STRENGTH rune", OSP_SAYTEAM_BUF);
-    else if (who->client->ps.stats[SID_OSP_RUNE_HASTE])
+    else if (G_GetStat(who, SID_OSP_RUNE_HASTE))
         Q_strlcpy(buf, "the HASTE rune", OSP_SAYTEAM_BUF);
-    else if (who->client->ps.stats[SID_OSP_RUNE_REGEN])
+    else if (G_GetStat(who, SID_OSP_RUNE_REGEN))
         Q_strlcpy(buf, "the REGEN rune", OSP_SAYTEAM_BUF);
-    else if (who->client->ps.stats[SID_OSP_RUNE_VAMPIRE])
+    else if (G_GetStat(who, SID_OSP_RUNE_VAMPIRE))
         Q_strlcpy(buf, "the VAMPIRE rune", OSP_SAYTEAM_BUF);
     else
         Q_strlcpy(buf, "no runes", OSP_SAYTEAM_BUF);

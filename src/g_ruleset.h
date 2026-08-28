@@ -85,6 +85,12 @@ typedef struct {
     void        (*ClientPlaced)(edict_t *ent);
 } ruleset_ops_t;
 
+// The two tables a donor defines.  Declared here rather than as a local
+// `extern` in g_ruleset.c so the file that DEFINES each one sees the same
+// declaration and the compiler checks the two against each other (R-SEC-8).
+extern const ruleset_ops_t ops_arena;    // src/arena/arena.c
+extern const ruleset_ops_t ops_tourney;  // src/tourney/osp_main.c
+
 // ---------------------------------------------------------------- accessors
 
 void        G_InitRuleset(void);        // once, from InitGame, before anything reads a ruleset

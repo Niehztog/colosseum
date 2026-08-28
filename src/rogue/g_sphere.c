@@ -34,7 +34,6 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 //#define MINIMUM_FLY_TIME  30
 
 // FIXME - do we need to be calling ED_NewString at all?
-extern char *ED_NewString(const char *string);
 void LookAtKiller(edict_t *self, edict_t *inflictor, edict_t *attacker);
 
 void defender_think(edict_t *self);

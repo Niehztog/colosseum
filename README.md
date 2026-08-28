@@ -33,7 +33,7 @@ full Rocket Arena 2 — but the notice ships with any line of it that survives.
 
 ## Status
 
-**Phase 6 of nine.** `SPECS.md` is the specification of record and every
+**Phase 8 of nine.** `SPECS.md` is the specification of record and every
 requirement carries a stable ID that code, commits and review notes reference;
 `doc/reconciliation.md` records every decision the merges needed and why.
 
@@ -50,15 +50,23 @@ What plays today, from one library, chosen by `g_ruleset`:
 `xatrix` and `rogue` are content layers, orthogonal to all five and valid with
 any of them.
 
+The seven small Gladiator features are cvars rather than `#define`s (R-EXTRA):
+the game log, client-lag simulation, two 1999 trigger entities, the rotating
+button, visible weapons and the eye/chase observer. `sv extras` reports what is
+in force. `colosseum/` in this repository is a default gamedir config set —
+copy it beside the library and `exec configs/<ruleset>.cfg`.
+
 **And bots.** `src/bot/` is the game side of Mr. Elusive's botlib: it loads the
 brain dynamically, redirects twenty slots of the game import so the brain sees
 everything the game does, spawns fake clients, drives them through the frame
 loop and gives them the 1999 command set and menu. On `q2dm1` under `dm` they
 load, spawn, navigate and fight.
 
-On `q2dm1` under `dm` they load, spawn, navigate, fight and chat. Bots in `ctf`,
-`arena` and `tourney` — team assignment, arena rosters, the tourney queue — are
-Phase 7's; they do spawn and are removed cleanly in all four rulesets today.
+They load, spawn, navigate, fight and chat in all four rulesets that accept
+them: a CTF team from `botctfteam`, an arena's waiting queue from the `arena`
+key, and a tourney match in all four `match_mode`s, readying themselves up per
+`bots_warmuptime`. With 32 of them on `q2dm1` the bot section of `G_RunFrame`
+costs about 2.5 ms of a 100 ms frame (R-BOT-23, `sv botperf`).
 
 The brain is a sibling repository, `gladiator-bot-restored`, built for whichever
 platform the game targets. The interface between the two is
@@ -83,6 +91,60 @@ make help       # what each target is and whether this host can run it
 Five targets are gating: ELF aarch64, ELF x86-64, ELF i386, win32 PE, win64 PE.
 A given host can usually only *execute* one of them; `make help` says which.
 
+### The old game API
+
+Colosseum targets Q2PRO's game ABI, `GAME_API_VERSION_NEW` (3302), and that is
+the default and the shipped configuration. `API=old` builds the same sources
+against the classic id ABI, `GAME_API_VERSION_OLD` (3) — `gclient_old_t`,
+`pmove_old_t`, 32 stat slots — for a 1997-vintage engine or a Q2PRO built without
+`USE_NEW_GAME_API`. Q2PRO's loader accepts either, so both are real targets.
+
+```sh
+make API=old            # native pair, old ABI
+make windows API=old    # composes with every target above
+make oldapi             # shorthand for `native API=old`
+make bothapis           # the same goal at both settings
+```
+
+`API=old` builds into `<dir>-oldapi`, and that separation is load-bearing rather
+than tidy: the switch changes **struct layouts**, so an object from one setting
+linked against an object from the other reads every field at the wrong offset
+*and links cleanly*. Header dependencies cannot catch it either — no header
+changed, so `make API=old` in a tree built as `new` would recompile nothing. The
+artifact **name** does not change, because the engine looks for
+`game<cpu><suffix>` and nothing else.
+
+**One behaviour differs, by design.** Under `ctf` the second powerup timer needs
+two stat slots and Threewave already uses 0..30 of the old 32, so Colosseum puts
+the pair at 32/33 — reachable only on the new ABI, and only for a client that
+negotiated protocol extensions. Under `API=old` it is dropped and `ctf` loses that
+display, exactly as upstream does. `sv slots` reports it by name, and its header
+line carries the api version for this reason:
+
+    ruleset      ctf   (extensions on, api 3, so slots 0..31 are reachable)
+      (dropped)  SID_TIMER2_ICON -- map says 32
+      (dropped)  SID_TIMER2 -- map says 33
+
+Note `extensions on` beside `0..31`: the two switches are independent, so a
+client can negotiate 64 slots from a library whose array holds 32. Every other
+ruleset stays inside 32 and is unaffected. Savegames are **not** portable between
+the two builds and are refused rather than misread (`SAVE_VERSION` already
+differs). See R-ENG-1a and R-OSP-7 clause 6.
+
+A second ABI also earns its keep as a check. `-Warray-bounds` at `API=old -O2`
+refused one line, and under it was a defect that five phases of audits, ten build
+configurations, a twenty-row boot matrix and the play-test battery had all
+passed: the tourney runes had **never worked**, and `g_ruleset tourney` with
+`runes 1` died at map load with `ED_Alloc: no free edicts`. Everything that could
+have caught it asked the stat map, and the stat map was right (R-132).
+
+The two PE artifacts are checked for what they **import** the moment they are
+linked (`tools/pedeps.sh`, R-SEC-6a): a game DLL that needs a compiler runtime
+shipped beside it is not shippable, and both of ours wanted `libssp-0.dll` until
+the stack protector's runtime was linked in statically. That failure is invisible
+from a Linux host — the DLL links and every other check passes — so the check
+runs in the build rather than on request.
+
 Warnings are on and fatal: `-Wall -Wextra -Werror`, clean under both `gcc` and
 `clang`, with three suppressions for inherited code that R-CORE-5 forbids
 editing — `unused-parameter` (594 hits, Quake II's callback signatures are fixed
@@ -93,8 +155,8 @@ release builds under `gcc`; it cannot be used with `clang`, for a reason worth
 reading in the `Makefile` if you ever name a struct member `dprintf`.
 
 The contract audits run as part of the build, not on request, and a finding
-fails it the way a warning does. Seventeen of them, each with a positive control
-that makes it fail — `tools/audit.py --help`, and §10 of `SPECS.md` for what
+fails it the way a warning does. Twenty-three of them, each with a positive
+control that makes it fail — `tools/audit.py --help`, and §10 of `SPECS.md` for what
 each one is for.
 
 Requires: a C compiler, `python3`, and `make`. Cross targets additionally need
@@ -103,16 +165,32 @@ Requires: a C compiler, `python3`, and `make`. Cross targets additionally need
 
 ### Running the checks that need a server
 
-`make check` is static. Four scripts drive a real `q2proded`, and none of them
+`make check` is static. Five scripts drive a real `q2proded`, and none of them
 is part of the build because each needs a built engine, retail paks and a
 minute or more:
 
 ```sh
 tools/bootmatrix.sh   # 20 rows: every ruleset x xatrix x rogue boots and reports back
 tools/smoke.sh        # one map per ruleset, with a savegame round trip
-tools/playtest.sh     # 139 assertions through headless clients (needs the q2-playtest skill)
-tools/botmatrix.sh    # 1 and 16 bots per ruleset, spawned, played and removed
+tools/playtest.sh     # 187 assertions through headless clients (needs the q2-playtest skill)
+tools/botmatrix.sh    # 1, 16 and 32 bots per ruleset: spawned, played, removed, and timed
+tools/extras.sh       # 39 checks: the R-EXTRA features, the shipped configs, an item respawn
+tools/osprunes.sh     # 33 checks: do tourney's five runes actually grant and read? (R-132)
 ```
+
+And one that asserts nothing on purpose:
+
+```sh
+tools/watch.sh                     # four bots on q2dm1, and a person watching
+tools/watch.sh doors -r sp -m base1
+tools/watch.sh ctf-skin -r ctf -m q2ctf1
+```
+
+Every check here is a program looking at a program. `tools/watch.sh` puts
+q2pro's own client on your display against a server with bots in it and runs one
+of three drive scripts, each of which opens with what to look for. That is the
+only thing in this repository that can say whether what a player sees looks like
+a game.
 
 Every one takes `--control`, or ships its controls inline: a check that has
 never failed is not trusted (§10, R-VER-9). `tools/botmatrix.sh` additionally
@@ -135,6 +213,43 @@ the *filesystem* search path does include `basedir/colosseum`, so assets placed
 there are found and a library placed there is not. Putting it beside the assets
 gives `Failed to load game library` and four `Can't access` lines, none of which
 names the directory you used. See R-BUILD-8.
+
+### And the bots, which install the other way round
+
+The brain is not part of the library and does not live where the library lives.
+`BotUseLibrary` calls `dlopen`/`LoadLibrary` on an OS path, and the botlib does
+its own file I/O from `basedir` + `gamedir` rather than through the engine — so
+everything the bots need goes **beside the assets**, in `basedir`:
+
+```
+<basedir>/colosseum/gladiator.so      the brain, built for this platform
+<basedir>/colosseum/pak7.pak          its weapon, item, sound and chat configs
+<basedir>/colosseum/botcfg/bots.cfg   the roster
+<basedir>/colosseum/maps/q2dm1.aas    one navigation mesh PER MAP
+```
+
+All four come from `gladiator-bot-restored` (`release/`, `assets/`); `GLADDIR`
+is where the harness scripts look for them. Miss `pak7.pak` and the brain loads,
+says *"couldn't load the weapon config"* and unloads itself. Miss the `.aas` and
+it loads, refuses the map with **`no AAS file available`**, and every bot that
+wanted it is destroyed — which reads on the console as `gladiator.so not
+available` and no bots.
+
+**There is no auto-bspc.** The `autolaunchbspc` libvar is off by default
+(R-SEC-7) and cannot work here even when set: the branch is Windows-only, it
+spawns a `winbspc.exe` that has to be in the gamedir, and the reconstructed
+brain's `SpawnProcess` is a stub. The assets ship 16 finished meshes — `q2dm1`–
+`q2dm8` and `q2ctf1`–`q2ctf8`. Any other map, `base1` included, needs one made
+first, and that is two steps: `bspc -bsp2aas` for the geometry, then one load of
+the map with the brain, which computes reachability and clustering itself and
+writes the finished file (minutes, not seconds). `gladiator-bot-restored/tools/`
+has both halves as scripts.
+
+**One client setting, if you play on a listen server.** q2pro pauses the game
+whenever the console or a menu is up and exactly one client is connected — it
+does not look at `deathmatch`, and bots are fake clients that never enter the
+engine's client list, so a server full of them still counts as one. `cl_autopause
+0` turns that off. See `doc/reconciliation.md` R-125.
 
 Colosseum loads into unmodified Q2PRO; it requires no engine patch.
 

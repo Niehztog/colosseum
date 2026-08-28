@@ -331,6 +331,79 @@ index_row() {
     [ "$verdict" = ok ]
 }
 
+# ---------------------------------------------------------------- R-BOT-23
+#
+# "Bot AI cost must be bounded: with 32 bots on a loaded map the bot section of
+# G_RunFrame stays under half a 100 ms frame on the reference machine, or the
+# shortfall is reported in doc/regression.md."
+#
+# A requirement with a number in it needs a measurement from INSIDE the library:
+# nothing outside can tell the bot section apart from the rest of the frame.
+# `sv botperf` reports it -- frames, mean and worst, in microseconds -- and
+# `sv botperf reset` starts a fresh window, so the map load and thirty-two
+# connects are not averaged into the steady state this asks about.
+#
+# The WORST frame is what the row judges, not the mean: a requirement about a
+# frame budget is about the frame that misses it.  The mean is printed beside it
+# because a single slow frame during the AAS load is a different fact from a
+# section that is over budget every frame.
+botperf_row() {
+    n=$1
+    log=$DIR/botperf-$n.log
+    ( ulimit -c 0
+      { printf 'wait 40\n'
+        # `sv addrandom` will not seat a character already in the game, so the
+        # shipped eighteen-name roster is its ceiling.  R-BOT-23 asks about
+        # THIRTY-TWO, so these are added by name -- the roster's own character
+        # under distinct netnames, which is what addrandom calls underneath.
+        i=0
+        while [ $i -lt "$n" ]; do
+          printf 'sv addbot "perf%d" "male/grunt" "bots/trash_c.c" "trash"\nwait 5\n' "$i"
+          i=$((i+1))
+        done
+        printf 'wait 100\nsv botperf reset\nwait 300\nsv botperf\nwait 10\nquit\n'
+      } | timeout -s KILL 900 "$Q2PRO_BUILD/q2proded" \
+        +set basedir "$DIR" +set homedir "$DIR" +set game colosseum \
+        +set dedicated 1 +set net_port 0 +set g_ruleset dm \
+        +set deathmatch 1 +set coop 0 +set maxclients 40 +set minimumplayers 0 \
+        +set bots 1 +map q2dm1 >"$log" 2>&1 ) 2>>"$log"
+    rc=$?
+
+    line=$(grep '^botperf frames' "$log" | tail -1)
+    bots=$(printf '%s' "$line" | sed -n 's/.* bots \([0-9]*\) .*/\1/p')
+    mean=$(printf '%s' "$line" | sed -n 's/.* mean \([0-9]*\) us.*/\1/p')
+    worst=$(printf '%s' "$line" | sed -n 's/.* worst \([0-9]*\) us.*/\1/p')
+    budget=$(printf '%s' "$line" | sed -n 's/.* budget \([0-9]*\) us.*/\1/p')
+    frames=$(printf '%s' "$line" | sed -n 's/^botperf frames \([0-9]*\) .*/\1/p')
+
+    # A cascade rather than this file's `&&`/`||` chain: that idiom re-fires
+    # every later `||` once the verdict is already bad, so the LAST message
+    # wins and the row reports the wrong reason.  It cost one confusing run
+    # here -- "over the 50000us budget" on a row whose worst frame was 4517us,
+    # because the bot count had failed two lines earlier.
+    verdict=ok
+    if [ "$rc" != 0 ]; then
+      verdict="exited $rc"
+    elif [ -z "$line" ]; then
+      verdict="sv botperf did not answer"
+    elif [ "${frames:-0}" -lt 100 ] 2>/dev/null; then
+      verdict="only ${frames:-0} measured frame(s)"
+    elif [ "${bots:-0}" -lt "$n" ] 2>/dev/null; then
+      verdict="only ${bots:-0} of $n bot(s) present"
+    elif [ "${worst:-999999}" -ge "${budget:-50000}" ] 2>/dev/null; then
+      verdict="worst frame ${worst}us over the ${budget}us budget (R-BOT-23)"
+    fi
+
+    printf '%-9s %-5s %-13s %-13s %-13s %s\n' botperf "${bots:-0}" \
+      "${frames:-0} frames" "mean ${mean:-?}us" "worst ${worst:-?}us" "$verdict"
+    [ "$verdict" = ok ]
+}
+
+echo
+echo "R-BOT-23: the bot section of G_RunFrame, measured"
+printf '%-9s %-5s %-13s %-13s %-13s %s\n' row bots frames mean worst verdict
+if botperf_row 32; then pass=$((pass+1)); else fail=$((fail+1)); fi
+
 echo
 echo "R-VER-6: the bot index tables, used and sized (R-BOT-11)"
 printf '%-9s %-5s %-13s %-13s %-13s %s\n' map ext models sounds images verdict

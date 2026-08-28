@@ -18,6 +18,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 */
 #include "g_local.h"
+#include "bot/p_observer.h"
 #include "m_player.h"
 
 typedef enum match_s {
@@ -263,6 +264,32 @@ void CTFInit(void)
 
 void CTFPrecache(void)
 {
+    // *** THE GRAPPLE IS NEVER SPAWNED, SO ITS PRECACHE LIST IS NEVER WALKED.
+    // ***
+    //
+    // `PrecacheItem` is reached only from `SpawnItem` and worldspawn's explicit
+    // `Blaster` call, and `weapon_grapple` is always owned and never stands in
+    // a map -- so its six sounds, its hook model, its view model, its icon and
+    // its pickup sound were registered on FIRST USE instead, one configstring
+    // at a time, mid-round, with the HUD icon missing until then.  The engine
+    // allows a late precache rather than erroring on it, which is why this was
+    // a hitch and not a crash, and why nothing could see it.
+    //
+    // The Gladiator donor carries the fix as `PrecacheCTFItems()` under
+    // `#ifdef BOT` -- the same fence R-CTF-4 found around `ctfteam` and
+    // R-137 found around the team skin -- and RA2 upstream fixed the identical
+    // pattern in its own copy (`rocketarena2@ddba883`).  The flags and the four
+    // techs are in the donor's list too and are belt-and-braces here: both do
+    // spawn in the world, so SpawnItem already reaches them, and PrecacheItem
+    // is idempotent and NULL-safe.
+    PrecacheItem(FindItemByClassname("weapon_grapple"));
+    PrecacheItem(FindItemByClassname("item_flag_team1"));
+    PrecacheItem(FindItemByClassname("item_flag_team2"));
+    PrecacheItem(FindItemByClassname("item_tech1"));
+    PrecacheItem(FindItemByClassname("item_tech2"));
+    PrecacheItem(FindItemByClassname("item_tech3"));
+    PrecacheItem(FindItemByClassname("item_tech4"));
+
     imageindex_i_ctf1 =   gi.imageindex("i_ctf1");
     imageindex_i_ctf2 =   gi.imageindex("i_ctf2");
     imageindex_i_ctf1d =  gi.imageindex("i_ctf1d");
@@ -325,23 +352,50 @@ void CTFAssignSkin(edict_t *ent, char *s)
 
     Q_snprintf(t, sizeof(t), "%s", s);
 
-    if ((p = strchr(t, '/')) != NULL)
+    if ((p = strchr(t, '/')) != NULL) {
         p[1] = 0;
-    else
-        strcpy(t, "male/");
+        // The Gladiator donor's guard, and it sits under the same `#ifdef BOT`
+        // fence as the userinfo writes below because it is there for the same
+        // reason: a userinfo skin of "/grunt" leaves `t` as "/", and "/ctf_r"
+        // is not a model the brain -- or a client -- can resolve.
+        if (strlen(t) <= 1)
+            Q_strlcpy(t, "male/", sizeof(t));
+    } else
+        Q_strlcpy(t, "male/", sizeof(t));
 
+    // *** THE TEAM SKIN GOES INTO `pers.userinfo` AS WELL AS ON THE WIRE. ***
+    //
+    // Threewave writes only the configstring, because a client is the only
+    // thing that needs to know.  `gladq2_src/g_ctf.c` adds the userinfo write
+    // at all three arms under `#ifdef BOT` -- the same fence R-CTF-4 found
+    // around `ctfteam` -- and the reason is `bl_main.c`: the brain is told a
+    // client's skin from `Info_ValueForKey(pers.userinfo, "skin")`, and
+    // `clientsettings[].skin` is the ONLY thing it has to answer "whose side is
+    // this player on" with.  Both of its readers are string tests on that
+    // field: `BotCTFTeam()` is `strstr(skin, "ctf_r") ? RED : BLUE`, and
+    // `BotSameTeam()` compares the half after the '/'.  Left at the player's
+    // own choice of skin, every bot reads itself as BLUE -- so it defends the
+    // wrong flag -- and reads a team-mate wearing a different skin as an enemy,
+    // which is bots shooting their own side.  R-ARENA-2 answered the identical
+    // question for RA2's teams in 1.29; this is CTF's, and unlike RA2's it is
+    // the donor's own answer rather than a new one.
     switch (ent->client->resp.ctf_team) {
     case CTF_TEAM1:
         gi.configstring(game.csr.playerskins + playernum, va("%s\\%s%s",
                         ent->client->pers.netname, t, CTF_TEAM1_SKIN));
+        Info_SetValueForKey(ent->client->pers.userinfo, "skin",
+                            va("%s%s", t, CTF_TEAM1_SKIN));
         break;
     case CTF_TEAM2:
         gi.configstring(game.csr.playerskins + playernum,
                         va("%s\\%s%s", ent->client->pers.netname, t, CTF_TEAM2_SKIN));
+        Info_SetValueForKey(ent->client->pers.userinfo, "skin",
+                            va("%s%s", t, CTF_TEAM2_SKIN));
         break;
     default:
         gi.configstring(game.csr.playerskins + playernum,
                         va("%s\\%s", ent->client->pers.netname, s));
+        Info_SetValueForKey(ent->client->pers.userinfo, "skin", s);
         break;
     }
 //  gi.cprintf(ent, PRINT_HIGH, "You have been assigned to %s team.\n", ent->client->pers.netname);
@@ -391,6 +445,114 @@ void CTFAssignTeam(gclient_t *who)
     }
 
     CTFForceAssignTeam(who);
+}
+
+/*
+=================
+`ctf_botfill` -- THE BOT COUNT FOLLOWS THE MAP AND THE TWO BASES
+
+R-CTF-8, and R-RA-7's argument a second ruleset over.  Threewave declares no
+capacity at all: there is no `team_maxplayers` here and never was, `matchlock`
+locks a match rather than sizing one, and `warn_unbalanced` only warns.  So the
+map is the only signal -- and unlike deathmatch there are THREE pools, because a
+CTF client draws from a different one on its first spawn than on every one after
+it.  `SelectCTFSpawnPoint` sends a player to its own base while
+`resp.ctf_state` is 0 and to `info_player_deathmatch` for ever after, which is
+the line that decides this rule: a side seats the smallest of its base and half
+the shared pool, and the target is twice that, because a capture game with
+uneven sides is not the game.
+
+**Taking the base pools alone would be wrong, and it is written down because it
+is the obvious thing to try** -- the same trap R-RA-7 recorded for a non-pickup
+arena.  Threewave's mappers put spawn points in a base for variety: `q2ctf1`
+carries 14 and 16, which read as capacity would say 28 players on a map that is
+played 8v8.  Measured across the eight shipped maps, pools after
+`G_SpawnPointPool`, `2 * min(shared/2, base1, base2)`:
+
+  | map | shared | bases | target |
+  |---|---|---|---|
+  | `q2ctf1` | 17 | 12, 14 | **16** |
+  | `q2ctf2` | 13 |  8,  7 | **12** |
+  | `q2ctf3` | 16 |  7,  7 | **14** |
+  | `q2ctf4` |  5 | 10,  8 |  **4** |
+  | `q2ctf5` | 20 | 12, 12 | **20** |
+  | `q2ctf6` | 14 | 10, 11 | **14** |
+  | `q2ctf7` | 30 |  7,  7 | **14** |
+  | `q2ctf8` | 36 |  8,  8 | **16** |
+
+Both halves of the `min` earn their place: `q2ctf1`, `q2ctf2`, `q2ctf5` and
+`q2ctf6` are bounded by the shared pool they respawn into, `q2ctf3`, `q2ctf7`
+and `q2ctf8` by a base that cannot seat the side at the whistle, and `q2ctf4`
+by a shared pool of five on a map whose bases would claim 8v8.
+
+`0` is off and nothing here runs.  The ceilings are the caller's (`bl_spawn.c`),
+so that every fill settles on one number the same way.
+=================
+*/
+int CTF_BotFillSeats(void)
+{
+    int seats  = G_SpawnPointPool("info_player_deathmatch") / 2;
+    int base1  = G_SpawnPointPool("info_player_team1");
+    int base2  = G_SpawnPointPool("info_player_team2");
+
+    // A map with no team spawns at all is a deathmatch map booted under `ctf`,
+    // and CTFStartClient still puts everybody on a side.  Its bases cannot bound
+    // anything, so they do not: SelectCTFSpawnPoint falls back to the shared
+    // pool for the first spawn too, which is the pool already counted.
+    if (base1 > 0 && base1 < seats)
+        seats = base1;
+    if (base2 > 0 && base2 < seats)
+        seats = base2;
+
+    return 2 * seats;
+}
+
+/*
+=================
+CTFBotFillName
+
+Which bot the fill should throw out when people arrive, and it is not "any".
+
+`removebot` with no name takes the LOWEST CLIENT SLOT, which under `ctf` is a
+bot on whichever side happened to connect first -- so a server filling to an
+even target could still be shrunk 4v4 -> 4v3 -> 4v2, and an even target is the
+whole reason `ctf_botfill` exists.  Take a bot off the LARGER side, and where
+the sides are level take one off either (R-CTF-8).  RA_ArenaBotName is the same
+function for the same reason one ruleset over.
+
+NULL falls through to the caller's "any bot", which is right when the only bots
+left are on the smaller side: a human joined it, and the next tick asks again.
+=================
+*/
+char *CTFBotFillName(void)
+{
+    edict_t *e;
+    int     i, count[2] = { 0, 0 }, want;
+
+    for (i = 0; i < game.maxclients; i++) {
+        e = &g_edicts[i + 1];
+        if (!e->inuse || !e->client)
+            continue;
+        if (e->client->resp.ctf_team == CTF_TEAM1)
+            count[0]++;
+        else if (e->client->resp.ctf_team == CTF_TEAM2)
+            count[1]++;
+    }
+
+    if (count[0] == count[1])
+        return NULL;
+    want = count[0] > count[1] ? CTF_TEAM1 : CTF_TEAM2;
+
+    for (i = 0; i < game.maxclients; i++) {
+        e = &g_edicts[i + 1];
+        if (!e->inuse || !e->client || !(e->flags & FL_BOT))
+            continue;
+        if (e->client->resp.ctf_team != want)
+            continue;
+        return e->client->pers.netname;
+    }
+
+    return NULL;
 }
 
 /*
@@ -996,7 +1158,8 @@ void SetCTFStats(edict_t *ent)
     //ghosting
     if (ent->client->resp.ghost) {
         ent->client->resp.ghost->score = ent->client->resp.score;
-        strcpy(ent->client->resp.ghost->netname, ent->client->pers.netname);
+        Q_strlcpy(ent->client->resp.ghost->netname, ent->client->pers.netname,
+                  sizeof(ent->client->resp.ghost->netname));
         ent->client->resp.ghost->number = ent->s.number;
     }
 
@@ -1588,7 +1751,7 @@ void CTFTeam_f(edict_t *ent)
         ent->s.event = EV_PLAYER_TELEPORT;
         // hold in place briefly
         ent->client->ps.pmove.pm_flags = PMF_TIME_TELEPORT;
-        ent->client->ps.pmove.pm_time = 14;
+        ent->client->ps.pmove.pm_time = 112 >> PM_TIME_SHIFT;
         gi.bprintf(PRINT_HIGH, "%s joined the %s team.\n",
                    ent->client->pers.netname, CTFTeamName(desired_team));
         return;
@@ -1689,9 +1852,9 @@ void CTFScoreboardMessage(edict_t *ent, edict_t *killer)
 
 #if 0 //ndef NEW_SCORE
         // set up y
-        sprintf(entry, "yv %d ", 42 + i * 8);
+        Q_snprintf(entry, sizeof(entry), "yv %d ", 42 + i * 8);
         if (maxsize - len > strlen(entry)) {
-            strcat(string, entry);
+            Q_strlcat(string, entry, sizeof(string));
             len = strlen(string);
         }
 #else
@@ -1704,30 +1867,30 @@ void CTFScoreboardMessage(edict_t *ent, edict_t *killer)
             cl_ent = g_edicts + 1 + sorted[0][i];
 
 #if 0 //ndef NEW_SCORE
-            sprintf(entry + strlen(entry),
-                    "xv 0 %s \"%3d %3d %-12.12s\" ",
-                    (cl_ent == ent) ? "string2" : "string",
-                    cl->resp.score,
-                    (cl->ping > 999) ? 999 : cl->ping,
-                    cl->pers.netname);
+            Q_snprintf(entry + strlen(entry), sizeof(entry) - strlen(entry),
+                       "xv 0 %s \"%3d %3d %-12.12s\" ",
+                       (cl_ent == ent) ? "string2" : "string",
+                       cl->resp.score,
+                       (cl->ping > 999) ? 999 : cl->ping,
+                       cl->pers.netname);
 
             if (cl_ent->client->pers.inventory[ITEM_INDEX(flag2_item)])
-                strcat(entry, "xv 56 picn sbfctf2 ");
+                Q_strlcat(entry, "xv 56 picn sbfctf2 ", sizeof(entry));
 #else
-            sprintf(entry + strlen(entry),
-                    "ctf 0 %d %d %d %d ",
-                    42 + i * 8,
-                    sorted[0][i],
-                    cl->resp.score,
-                    cl->ping > 999 ? 999 : cl->ping);
+            Q_snprintf(entry + strlen(entry), sizeof(entry) - strlen(entry),
+                       "ctf 0 %d %d %d %d ",
+                       42 + i * 8,
+                       sorted[0][i],
+                       cl->resp.score,
+                       cl->ping > 999 ? 999 : cl->ping);
 
             if (cl_ent->client->pers.inventory[ITEM_INDEX(flag2_item)])
-                sprintf(entry + strlen(entry), "xv 56 yv %d picn sbfctf2 ",
-                        42 + i * 8);
+                Q_snprintf(entry + strlen(entry), sizeof(entry) - strlen(entry),
+                           "xv 56 yv %d picn sbfctf2 ", 42 + i * 8);
 #endif
 
             if (maxsize - len > strlen(entry)) {
-                strcat(string, entry);
+                Q_strlcat(string, entry, sizeof(string));
                 len = strlen(string);
                 last[0] = i;
             }
@@ -1739,31 +1902,31 @@ void CTFScoreboardMessage(edict_t *ent, edict_t *killer)
             cl_ent = g_edicts + 1 + sorted[1][i];
 
 #if 0 //ndef NEW_SCORE
-            sprintf(entry + strlen(entry),
-                    "xv 160 %s \"%3d %3d %-12.12s\" ",
-                    (cl_ent == ent) ? "string2" : "string",
-                    cl->resp.score,
-                    (cl->ping > 999) ? 999 : cl->ping,
-                    cl->pers.netname);
+            Q_snprintf(entry + strlen(entry), sizeof(entry) - strlen(entry),
+                       "xv 160 %s \"%3d %3d %-12.12s\" ",
+                       (cl_ent == ent) ? "string2" : "string",
+                       cl->resp.score,
+                       (cl->ping > 999) ? 999 : cl->ping,
+                       cl->pers.netname);
 
             if (cl_ent->client->pers.inventory[ITEM_INDEX(flag1_item)])
-                strcat(entry, "xv 216 picn sbfctf1 ");
+                Q_strlcat(entry, "xv 216 picn sbfctf1 ", sizeof(entry));
 
 #else
 
-            sprintf(entry + strlen(entry),
-                    "ctf 160 %d %d %d %d ",
-                    42 + i * 8,
-                    sorted[1][i],
-                    cl->resp.score,
-                    cl->ping > 999 ? 999 : cl->ping);
+            Q_snprintf(entry + strlen(entry), sizeof(entry) - strlen(entry),
+                       "ctf 160 %d %d %d %d ",
+                       42 + i * 8,
+                       sorted[1][i],
+                       cl->resp.score,
+                       cl->ping > 999 ? 999 : cl->ping);
 
             if (cl_ent->client->pers.inventory[ITEM_INDEX(flag1_item)])
-                sprintf(entry + strlen(entry), "xv 216 yv %d picn sbfctf1 ",
-                        42 + i * 8);
+                Q_snprintf(entry + strlen(entry), sizeof(entry) - strlen(entry),
+                           "xv 216 yv %d picn sbfctf1 ", 42 + i * 8);
 #endif
             if (maxsize - len > strlen(entry)) {
-                strcat(string, entry);
+                Q_strlcat(string, entry, sizeof(string));
                 len = strlen(string);
                 last[1] = i;
             }
@@ -1789,21 +1952,22 @@ void CTFScoreboardMessage(edict_t *ent, edict_t *killer)
 
             if (!k) {
                 k = 1;
-                sprintf(entry, "xv 0 yv %d string2 \"Spectators\" ", j);
-                strcat(string, entry);
+                Q_snprintf(entry, sizeof(entry),
+                           "xv 0 yv %d string2 \"Spectators\" ", j);
+                Q_strlcat(string, entry, sizeof(string));
                 len = strlen(string);
                 j += 8;
             }
 
-            sprintf(entry + strlen(entry),
-                    "ctf %d %d %d %d %d ",
-                    (n & 1) ? 160 : 0, // x
-                    j, // y
-                    i, // playernum
-                    cl->resp.score,
-                    cl->ping > 999 ? 999 : cl->ping);
+            Q_snprintf(entry + strlen(entry), sizeof(entry) - strlen(entry),
+                       "ctf %d %d %d %d %d ",
+                       (n & 1) ? 160 : 0, // x
+                       j, // y
+                       i, // playernum
+                       cl->resp.score,
+                       cl->ping > 999 ? 999 : cl->ping);
             if (maxsize - len > strlen(entry)) {
-                strcat(string, entry);
+                Q_strlcat(string, entry, sizeof(string));
                 len = strlen(string);
             }
 
@@ -1814,11 +1978,13 @@ void CTFScoreboardMessage(edict_t *ent, edict_t *killer)
     }
 
     if (total[0] - last[0] > 1) // couldn't fit everyone
-        sprintf(string + strlen(string), "xv 8 yv %d string \"..and %d more\" ",
-                42 + (last[0] + 1) * 8, total[0] - last[0] - 1);
+        Q_snprintf(string + strlen(string), sizeof(string) - strlen(string),
+                   "xv 8 yv %d string \"..and %d more\" ",
+                   42 + (last[0] + 1) * 8, total[0] - last[0] - 1);
     if (total[1] - last[1] > 1) // couldn't fit everyone
-        sprintf(string + strlen(string), "xv 168 yv %d string \"..and %d more\" ",
-                42 + (last[1] + 1) * 8, total[1] - last[1] - 1);
+        Q_snprintf(string + strlen(string), sizeof(string) - strlen(string),
+                   "xv 168 yv %d string \"..and %d more\" ",
+                   42 + (last[1] + 1) * 8, total[1] - last[1] - 1);
 
     gi.WriteByte(svc_layout);
     gi.WriteString(string);
@@ -2440,40 +2606,40 @@ void CTFSay_Team(edict_t *who, char *msg)
             case 'L' :
                 CTFSay_Team_Location(who, buf, sizeof(buf));
                 if (strlen(buf) + (p - outmsg) < sizeof(outmsg) - 2) {
-                    strcpy(p, buf);
-                    p += strlen(buf);
+                    Q_strlcpy(p, buf, sizeof(outmsg) - (p - outmsg));
+                    p += strlen(p);
                 }
                 break;
             case 'a' :
             case 'A' :
                 CTFSay_Team_Armor(who, buf, sizeof(buf));
                 if (strlen(buf) + (p - outmsg) < sizeof(outmsg) - 2) {
-                    strcpy(p, buf);
-                    p += strlen(buf);
+                    Q_strlcpy(p, buf, sizeof(outmsg) - (p - outmsg));
+                    p += strlen(p);
                 }
                 break;
             case 'h' :
             case 'H' :
                 CTFSay_Team_Health(who, buf, sizeof(buf));
                 if (strlen(buf) + (p - outmsg) < sizeof(outmsg) - 2) {
-                    strcpy(p, buf);
-                    p += strlen(buf);
+                    Q_strlcpy(p, buf, sizeof(outmsg) - (p - outmsg));
+                    p += strlen(p);
                 }
                 break;
             case 't' :
             case 'T' :
                 CTFSay_Team_Tech(who, buf, sizeof(buf));
                 if (strlen(buf) + (p - outmsg) < sizeof(outmsg) - 2) {
-                    strcpy(p, buf);
-                    p += strlen(buf);
+                    Q_strlcpy(p, buf, sizeof(outmsg) - (p - outmsg));
+                    p += strlen(p);
                 }
                 break;
             case 'w' :
             case 'W' :
                 CTFSay_Team_Weapon(who, buf, sizeof(buf));
                 if (strlen(buf) + (p - outmsg) < sizeof(outmsg) - 2) {
-                    strcpy(p, buf);
-                    p += strlen(buf);
+                    Q_strlcpy(p, buf, sizeof(outmsg) - (p - outmsg));
+                    p += strlen(p);
                 }
                 break;
 
@@ -2481,8 +2647,8 @@ void CTFSay_Team(edict_t *who, char *msg)
             case 'N' :
                 CTFSay_Team_Sight(who, buf, sizeof(buf));
                 if (strlen(buf) + (p - outmsg) < sizeof(outmsg) - 2) {
-                    strcpy(p, buf);
-                    p += strlen(buf);
+                    Q_strlcpy(p, buf, sizeof(outmsg) - (p - outmsg));
+                    p += strlen(p);
                 }
                 break;
 
@@ -2557,10 +2723,9 @@ static void SetLevelName(ctf_pmenu_t *p)
 
     levelname[0] = '*';
     if (g_edicts[0].message)
-        strncpy(levelname + 1, g_edicts[0].message, sizeof(levelname) - 2);
+        Q_strlcpy(levelname + 1, g_edicts[0].message, sizeof(levelname) - 1);
     else
-        strncpy(levelname + 1, level.mapname, sizeof(levelname) - 2);
-    levelname[sizeof(levelname) - 1] = 0;
+        Q_strlcpy(levelname + 1, level.mapname, sizeof(levelname) - 1);
     p->text = levelname;
 }
 
@@ -2678,7 +2843,8 @@ void CTFAssignGhost(edict_t *ent)
             break;
     }
     ctfgame.ghosts[ghost].ent = ent;
-    strcpy(ctfgame.ghosts[ghost].netname, ent->client->pers.netname);
+    Q_strlcpy(ctfgame.ghosts[ghost].netname, ent->client->pers.netname,
+              sizeof(ctfgame.ghosts[ghost].netname));
     ent->client->resp.ghost = ctfgame.ghosts + ghost;
     gi.cprintf(ent, PRINT_CHAT, "Your ghost code is **** %d ****\n", ctfgame.ghosts[ghost].code);
     gi.cprintf(ent, PRINT_HIGH, "If you lose connection, you can rejoin with your score "
@@ -3069,7 +3235,7 @@ void CTFJoinTeam(edict_t *ent, int desired_team)
     ent->s.event = EV_PLAYER_TELEPORT;
     // hold in place briefly
     ent->client->ps.pmove.pm_flags = PMF_TIME_TELEPORT;
-    ent->client->ps.pmove.pm_time = 14;
+    ent->client->ps.pmove.pm_time = 112 >> PM_TIME_SHIFT;
     gi.bprintf(PRINT_HIGH, "%s joined the %s team.\n",
                ent->client->pers.netname, CTFTeamName(desired_team));
 
@@ -3131,8 +3297,8 @@ void CTFRequestMatch(edict_t *ent, ctf_pmenuhnd_t *p)
 
     ctf_PMenu_Close(ent);
 
-    sprintf(text, "%s has requested to switch to competition mode.",
-            ent->client->pers.netname);
+    Q_snprintf(text, sizeof(text), "%s has requested to switch to competition mode.",
+               ent->client->pers.netname);
     CTFBeginElection(ent, ELECT_MATCH, text);
 }
 
@@ -3197,8 +3363,8 @@ int CTFUpdateJoinMenu(edict_t *ent)
             num2++;
     }
 
-    sprintf(team1players, "  (%d players)", num1);
-    sprintf(team2players, "  (%d players)", num2);
+    Q_snprintf(team1players, sizeof(team1players), "  (%d players)", num1);
+    Q_snprintf(team2players, sizeof(team2players), "  (%d players)", num2);
 
     switch (ctfgame.match) {
     case MATCH_NONE :
@@ -3350,6 +3516,17 @@ void CTFObserver(edict_t *ent)
     ent->client->resp.ctf_team = CTF_NOTEAM;
     ent->client->ps.gunindex = 0;
     ent->client->resp.score = 0;
+    // R-EXTRA-6: `observer` stays THREEWAVE's verb under ctf -- it drops the
+    // flag, drops the tech and resets the score, none of which the Gladiator
+    // toggle knows about -- and the Gladiator CAMERAS come with it.  Setting
+    // the flag is what puts DoObserver in the frame, so a CTF spectator gets
+    // autocam, chasecam and the rest for the first time; without it the six
+    // camera verbs would resolve and do nothing.
+    if (G_GladiatorObserver()) {
+        ent->flags |= FL_OBSERVER;
+        ent->client->camera.ent = ent;
+        CheckValidCamera(ent);
+    }
     memcpy(userinfo, ent->client->pers.userinfo, sizeof(userinfo));
     InitClientPersistant(ent->client, true);
     ClientUserinfoChanged(ent, userinfo);
@@ -3429,17 +3606,17 @@ bool CTFCheckRules(void)
             }
 
             if (competition->value < 3)
-                sprintf(text, "%02d:%02d SETUP: %d not ready",
-                        t / 60, t % 60, j);
+                Q_snprintf(text, sizeof(text), "%02d:%02d SETUP: %d not ready",
+                           t / 60, t % 60, j);
             else
-                sprintf(text, "SETUP: %d not ready", j);
+                Q_snprintf(text, sizeof(text), "SETUP: %d not ready", j);
 
             gi.configstring(CONFIG_CTF_MATCH, text);
             break;
 
         case MATCH_PREGAME :
-            sprintf(text, "%02d:%02d UNTIL START",
-                    t / 60, t % 60);
+            Q_snprintf(text, sizeof(text), "%02d:%02d UNTIL START",
+                       t / 60, t % 60);
             gi.configstring(CONFIG_CTF_MATCH, text);
 
             if (t <= 10 && !ctfgame.countdown) {
@@ -3449,8 +3626,8 @@ bool CTFCheckRules(void)
             break;
 
         case MATCH_GAME:
-            sprintf(text, "%02d:%02d MATCH",
-                    t / 60, t % 60);
+            Q_snprintf(text, sizeof(text), "%02d:%02d MATCH",
+                       t / 60, t % 60);
             gi.configstring(CONFIG_CTF_MATCH, text);
             if (t <= 10 && !ctfgame.countdown) {
                 ctfgame.countdown = true;
@@ -3539,7 +3716,7 @@ void old_teleporter_touch(edict_t *self, edict_t *other, cplane_t *plane, csurfa
 
     // clear the velocity and hold them in place briefly
     VectorClear(other->velocity);
-    other->client->ps.pmove.pm_time = 160 >> 3;     // hold time
+    other->client->ps.pmove.pm_time = 160 >> PM_TIME_SHIFT;   // hold time
     other->client->ps.pmove.pm_flags |= PMF_TIME_TELEPORT;
 
     // draw the teleport splash at source and on the player
@@ -3637,7 +3814,7 @@ void CTFAdmin_SettingsApply(edict_t *ent, ctf_pmenuhnd_t *p)
             // in the middle of a match, change it on the fly
             ctfgame.matchtime = (ctfgame.matchtime - matchtime->value * 60) + settings->matchlen * 60;
         }
-        sprintf(st, "%d", settings->matchlen);
+        Q_snprintf(st, sizeof(st), "%d", settings->matchlen);
         gi.cvar_set("matchtime", st);
     }
 
@@ -3648,7 +3825,7 @@ void CTFAdmin_SettingsApply(edict_t *ent, ctf_pmenuhnd_t *p)
             // in the middle of a match, change it on the fly
             ctfgame.matchtime = (ctfgame.matchtime - matchsetuptime->value * 60) + settings->matchsetuplen * 60;
         }
-        sprintf(st, "%d", settings->matchsetuplen);
+        Q_snprintf(st, sizeof(st), "%d", settings->matchsetuplen);
         gi.cvar_set("matchsetuptime", st);
     }
 
@@ -3659,7 +3836,7 @@ void CTFAdmin_SettingsApply(edict_t *ent, ctf_pmenuhnd_t *p)
             // in the middle of a match, change it on the fly
             ctfgame.matchtime = (ctfgame.matchtime - matchstarttime->value) + settings->matchstartlen;
         }
-        sprintf(st, "%d", settings->matchstartlen);
+        Q_snprintf(st, sizeof(st), "%d", settings->matchstartlen);
         gi.cvar_set("matchstarttime", st);
     }
 
@@ -3671,7 +3848,7 @@ void CTFAdmin_SettingsApply(edict_t *ent, ctf_pmenuhnd_t *p)
             i |= DF_WEAPONS_STAY;
         else
             i &= ~DF_WEAPONS_STAY;
-        sprintf(st, "%d", i);
+        Q_snprintf(st, sizeof(st), "%d", i);
         gi.cvar_set("dmflags", st);
     }
 
@@ -3683,7 +3860,7 @@ void CTFAdmin_SettingsApply(edict_t *ent, ctf_pmenuhnd_t *p)
             i |= DF_INSTANT_ITEMS;
         else
             i &= ~DF_INSTANT_ITEMS;
-        sprintf(st, "%d", i);
+        Q_snprintf(st, sizeof(st), "%d", i);
         gi.cvar_set("dmflags", st);
     }
 
@@ -3695,21 +3872,21 @@ void CTFAdmin_SettingsApply(edict_t *ent, ctf_pmenuhnd_t *p)
             i |= DF_QUAD_DROP;
         else
             i &= ~DF_QUAD_DROP;
-        sprintf(st, "%d", i);
+        Q_snprintf(st, sizeof(st), "%d", i);
         gi.cvar_set("dmflags", st);
     }
 
     if (settings->instantweap != !!((int)instantweap->value)) {
         gi.bprintf(PRINT_HIGH, "%s turned %s instant weapons.\n",
                    ent->client->pers.netname, settings->instantweap ? "on" : "off");
-        sprintf(st, "%d", (int)settings->instantweap);
+        Q_snprintf(st, sizeof(st), "%d", (int)settings->instantweap);
         gi.cvar_set("instantweap", st);
     }
 
     if (settings->matchlock != !!((int)matchlock->value)) {
         gi.bprintf(PRINT_HIGH, "%s turned %s match lock.\n",
                    ent->client->pers.netname, settings->matchlock ? "on" : "off");
-        sprintf(st, "%d", (int)settings->matchlock);
+        Q_snprintf(st, sizeof(st), "%d", (int)settings->matchlock);
         gi.cvar_set("matchlock", st);
     }
 
@@ -3802,35 +3979,35 @@ void CTFAdmin_UpdateSettings(edict_t *ent, ctf_pmenuhnd_t *setmenu)
     char text[64];
     admin_settings_t *settings = setmenu->arg;
 
-    sprintf(text, "Match Len:       %2d mins", settings->matchlen);
+    Q_snprintf(text, sizeof(text), "Match Len:       %2d mins", settings->matchlen);
     ctf_PMenu_UpdateEntry(setmenu->entries + i, text, CTF_PMENU_ALIGN_LEFT, CTFAdmin_ChangeMatchLen);
     i++;
 
-    sprintf(text, "Match Setup Len: %2d mins", settings->matchsetuplen);
+    Q_snprintf(text, sizeof(text), "Match Setup Len: %2d mins", settings->matchsetuplen);
     ctf_PMenu_UpdateEntry(setmenu->entries + i, text, CTF_PMENU_ALIGN_LEFT, CTFAdmin_ChangeMatchSetupLen);
     i++;
 
-    sprintf(text, "Match Start Len: %2d secs", settings->matchstartlen);
+    Q_snprintf(text, sizeof(text), "Match Start Len: %2d secs", settings->matchstartlen);
     ctf_PMenu_UpdateEntry(setmenu->entries + i, text, CTF_PMENU_ALIGN_LEFT, CTFAdmin_ChangeMatchStartLen);
     i++;
 
-    sprintf(text, "Weapons Stay:    %s", settings->weaponsstay ? "Yes" : "No");
+    Q_snprintf(text, sizeof(text), "Weapons Stay:    %s", settings->weaponsstay ? "Yes" : "No");
     ctf_PMenu_UpdateEntry(setmenu->entries + i, text, CTF_PMENU_ALIGN_LEFT, CTFAdmin_ChangeWeapStay);
     i++;
 
-    sprintf(text, "Instant Items:   %s", settings->instantitems ? "Yes" : "No");
+    Q_snprintf(text, sizeof(text), "Instant Items:   %s", settings->instantitems ? "Yes" : "No");
     ctf_PMenu_UpdateEntry(setmenu->entries + i, text, CTF_PMENU_ALIGN_LEFT, CTFAdmin_ChangeInstantItems);
     i++;
 
-    sprintf(text, "Quad Drop:       %s", settings->quaddrop ? "Yes" : "No");
+    Q_snprintf(text, sizeof(text), "Quad Drop:       %s", settings->quaddrop ? "Yes" : "No");
     ctf_PMenu_UpdateEntry(setmenu->entries + i, text, CTF_PMENU_ALIGN_LEFT, CTFAdmin_ChangeQuadDrop);
     i++;
 
-    sprintf(text, "Instant Weapons: %s", settings->instantweap ? "Yes" : "No");
+    Q_snprintf(text, sizeof(text), "Instant Weapons: %s", settings->instantweap ? "Yes" : "No");
     ctf_PMenu_UpdateEntry(setmenu->entries + i, text, CTF_PMENU_ALIGN_LEFT, CTFAdmin_ChangeInstantWeap);
     i++;
 
-    sprintf(text, "Match Lock:      %s", settings->matchlock ? "Yes" : "No");
+    Q_snprintf(text, sizeof(text), "Match Lock:      %s", settings->matchlock ? "Yes" : "No");
     ctf_PMenu_UpdateEntry(setmenu->entries + i, text, CTF_PMENU_ALIGN_LEFT, CTFAdmin_ChangeMatchLock);
     i++;
 
@@ -3973,8 +4150,8 @@ void CTFAdmin(edict_t *ent)
     }
 
     if (!ent->client->resp.admin) {
-        sprintf(text, "%s has requested admin rights.",
-                ent->client->pers.netname);
+        Q_snprintf(text, sizeof(text), "%s has requested admin rights.",
+                   ent->client->pers.netname);
         CTFBeginElection(ent, ELECT_ADMIN, text);
         return;
     }
@@ -4002,9 +4179,9 @@ void CTFStats(edict_t *ent)
             if (!e2->inuse)
                 continue;
             if (!e2->client->resp.ready && e2->client->resp.ctf_team != CTF_NOTEAM) {
-                sprintf(st, "%s is not ready.\n", e2->client->pers.netname);
+                Q_snprintf(st, sizeof(st), "%s is not ready.\n", e2->client->pers.netname);
                 if (strlen(text) + strlen(st) < sizeof(text) - 50)
-                    strcat(text, st);
+                    Q_strlcat(text, st, sizeof(text));
             }
         }
     }
@@ -4030,21 +4207,21 @@ void CTFStats(edict_t *ent)
             e = 50;
         else
             e = g->kills * 100 / (g->kills + g->deaths);
-        sprintf(st, "%3d|%-16.16s|%5d|%5d|%5d|%5d|%5d|%4d%%|\n",
-                g->number,
-                g->netname,
-                g->score,
-                g->kills,
-                g->deaths,
-                g->basedef,
-                g->carrierdef,
-                e);
+        Q_snprintf(st, sizeof(st), "%3d|%-16.16s|%5d|%5d|%5d|%5d|%5d|%4d%%|\n",
+                   g->number,
+                   g->netname,
+                   g->score,
+                   g->kills,
+                   g->deaths,
+                   g->basedef,
+                   g->carrierdef,
+                   e);
         if (strlen(text) + strlen(st) > sizeof(text) - 50) {
             Q_strlcat(text, "And more...\n", sizeof(text));
             gi.cprintf(ent, PRINT_HIGH, "%s", text);
             return;
         }
-        strcat(text, st);
+        Q_strlcat(text, st, sizeof(text));
     }
     gi.cprintf(ent, PRINT_HIGH, "%s", text);
 }
@@ -4064,9 +4241,9 @@ void CTFPlayerList(edict_t *ent)
             if (!e2->inuse)
                 continue;
             if (!e2->client->resp.ready && e2->client->resp.ctf_team != CTF_NOTEAM) {
-                sprintf(st, "%s is not ready.\n", e2->client->pers.netname);
+                Q_snprintf(st, sizeof(st), "%s is not ready.\n", e2->client->pers.netname);
                 if (strlen(text) + strlen(st) < sizeof(text) - 50)
-                    strcat(text, st);
+                    Q_strlcat(text, st, sizeof(text));
             }
         }
     }
@@ -4096,7 +4273,7 @@ void CTFPlayerList(edict_t *ent)
             gi.cprintf(ent, PRINT_HIGH, "%s", text);
             return;
         }
-        strcat(text, st);
+        Q_strlcat(text, st, sizeof(text));
     }
     gi.cprintf(ent, PRINT_HIGH, "%s", text);
 }
@@ -4182,7 +4359,7 @@ void CTFBoot(edict_t *ent)
         return;
     }
 
-    sprintf(text, "kick %d\n", i - 1);
+    Q_snprintf(text, sizeof(text), "kick %d\n", i - 1);
     gi.AddCommandString(text);
 }
 

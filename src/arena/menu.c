@@ -23,6 +23,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 // address comments are stripped -- SPECS.md N1 makes those oracles meaningless
 // here, and they survive at the pin.
 #include "g_local.h"
+#include "arena/arena.h"
 
 #define MAXMENUITEMS    18
 
@@ -105,12 +106,14 @@ DisplayMenu(edict_t *ent)
     selected = cl->selected;
 
     string[0] = 0;
-    sprintf(string, "xv 32 yv 8 picn inventory ");
+    Q_strlcpy(string, "xv 32 yv 8 picn inventory ", sizeof(string));
 
     p = string + strlen(string);
-    sprintf(p, "xv 202 yv 12 string2 \"%s\" ", "Menu");
+    Q_snprintf(p, sizeof(string) - (p - string),
+               "xv 202 yv 12 string2 \"%s\" ", "Menu");
     p = string + strlen(string);
-    sprintf(p, "xv 0 yv 24 cstring2 \"%s\" ", info->title);
+    Q_snprintf(p, sizeof(string) - (p - string),
+               "xv 0 yv 24 cstring2 \"%s\" ", info->title);
 
     p = string + strlen(string);
     shown = count_queue((qmenu_t *)info) - count_queue(selected);
@@ -121,10 +124,11 @@ DisplayMenu(edict_t *ent)
             shown--;
         } while (node != (qmenu_t *)info && (shown % MAXMENUITEMS) != 0);
 
-        sprintf(p, "xv 50 yv 32 string2 \"(More)\" ");
+        Q_strlcpy(p, "xv 50 yv 32 string2 \"(More)\" ",
+                  sizeof(string) - (p - string));
     } else {
         node = (qmenu_t *)info;
-        sprintf(p, "xv 50 ");
+        Q_strlcpy(p, "xv 50 ", sizeof(string) - (p - string));
     }
 
     p = string + strlen(string);
@@ -145,33 +149,36 @@ DisplayMenu(edict_t *ent)
         entry[0] = 0;
 
         if (node == selected) {
-            strcat(entry, "\r");
-            strcat(entry, LoPrint(((menuitem_t *)node->it)->text));
+            Q_strlcat(entry, "\r", sizeof(entry));
+            Q_strlcat(entry, LoPrint(((menuitem_t *)node->it)->text), sizeof(entry));
 
             if (((menuitem_t *)node->it)->value)
-                strcat(entry, ((menuitem_t *)node->it)->value);
+                Q_strlcat(entry, ((menuitem_t *)node->it)->value, sizeof(entry));
         } else {
-            strcat(entry, " ");
-            strcat(entry, HiPrint(((menuitem_t *)node->it)->text));
+            Q_strlcat(entry, " ", sizeof(entry));
+            Q_strlcat(entry, HiPrint(((menuitem_t *)node->it)->text), sizeof(entry));
 
             if (((menuitem_t *)node->it)->value)
-                strcat(entry, ((menuitem_t *)node->it)->value);
+                Q_strlcat(entry, ((menuitem_t *)node->it)->value, sizeof(entry));
         }
 
         LoPrint(((menuitem_t *)node->it)->text);
 
         if (((menuitem_t *)node->it)->num >= 0)
-            sprintf(entry + strlen(entry), "%d", ((menuitem_t *)node->it)->num);
+            Q_snprintf(entry + strlen(entry), sizeof(entry) - strlen(entry),
+                       "%d", ((menuitem_t *)node->it)->num);
 
         if (strlen(string) + strlen(entry) + 50 >= MAXSTATUSBAR)
             break;
 
-        sprintf(p, "yv %d string2 \"%s\" ", y, entry);
+        Q_snprintf(p, sizeof(string) - (p - string),
+                   "yv %d string2 \"%s\" ", y, entry);
         p = string + strlen(string);
     }
 
     if (shown == MAXMENUITEMS && node->next)
-        sprintf(p, "yv %d string2 \"(More)\" ", y + 10);
+        Q_snprintf(p, sizeof(string) - (p - string),
+                   "yv %d string2 \"(More)\" ", y + 10);
 
     SendStatusBar(ent, string, false);
 }
@@ -181,13 +188,15 @@ CreateQMenu(edict_t *ent, char *title)
 {
     menuinfo_t  *info;
     qmenu_t     *menu;
+    size_t      tlen;
 
     info = gi.TagMalloc(sizeof(*info), TAG_LEVEL);
     menu = gi.TagMalloc(sizeof(*menu), TAG_LEVEL);
     menu->it = info;
 
-    info->title = gi.TagMalloc(strlen(title) + 1, TAG_LEVEL);
-    strcpy(info->title, title);
+    tlen = strlen(title) + 1;
+    info->title = gi.TagMalloc(tlen, TAG_LEVEL);
+    memcpy(info->title, title, tlen);
     info->flags = 0;
     info->items = NULL;
 
@@ -200,17 +209,21 @@ AddMenuItem(qmenu_t *menu, char *text, char *value, int num, menuselect_t select
     menuinfo_t  *info;
     menuitem_t  *item;
     qmenu_t     *node;
+    size_t      len;
 
     node = gi.TagMalloc(sizeof(*node), TAG_LEVEL);
     item = gi.TagMalloc(sizeof(*item), TAG_LEVEL);
 
-    item->text = gi.TagMalloc(strlen(text) + 1, TAG_LEVEL);
-    strcpy(item->text, text);
+    len = strlen(text) + 1;
+    item->text = gi.TagMalloc(len, TAG_LEVEL);
+    memcpy(item->text, text, len);
 
     if (value) {
-        item->value = gi.TagMalloc(strlen(value) + 1, TAG_LEVEL);
-        strcpy(item->value, value);
+        item->valuesize = strlen(value) + 1;
+        item->value = gi.TagMalloc(item->valuesize, TAG_LEVEL);
+        memcpy(item->value, value, item->valuesize);
     } else {
+        item->valuesize = 0;
         item->value = NULL;
     }
 
@@ -275,10 +288,54 @@ MenuPrev(edict_t *ent)
     DisplayMenu(ent);
 }
 
+/*
+================
+free_menu
+
+Releases one menu: its title block, its items' text and values, the items, the
+item nodes, and the node that carries the menu in a queue.  The caller unlinks
+that node first.
+
+This was UseMenu's inline teardown and was the only one, so it is lifted out
+here for close_menus() to reach -- and lifting it out is what showed the leak.
+AddMenuItem makes THREE allocations per row (the qmenu_t node, the menuitem_t,
+and its text) and the teardown released two: `node->it`, the menuitem_t itself,
+was never freed.  That is one block leaked per row every time anybody closes a
+menu by picking a row, which on a Rocket Arena server is how menus normally
+close.  Taken from `rocketarena2@28a8af7`.
+================
+*/
+static void free_menu(qmenu_t *menu)
+{
+    qmenu_t     *node;
+    menuitem_t  *item;
+
+    node = (qmenu_t *)menu->it;
+    gi.TagFree(node->it);
+
+    while (node->next) {
+        node = node->next;
+
+        item = (menuitem_t *)node->it;
+        gi.TagFree(item->text);
+        if (item->value)
+            gi.TagFree(item->value);
+        gi.TagFree(item);
+        if (node->prev)
+            gi.TagFree(node->prev);
+    }
+
+    if (node)
+        gi.TagFree(node);
+
+    gi.TagFree(menu);
+}
+
 void
 UseMenu(edict_t *ent, int arg)
 {
-    qmenu_t     *menu, *item, *node;
+    qmenu_t     *menu, *item, *qnode;
+    bool        orphan;
     int         result;
 
     if (ent->client->menuusetime + 5 > level.framenum)
@@ -299,25 +356,39 @@ UseMenu(edict_t *ent, int arg)
         return;
     }
 
-    remove_from_queue(menu, &ent->client->menuqueue);
-
-    node = (qmenu_t *)menu->it;
-    gi.TagFree(node->it);
-
-    while (node->next) {
-        node = node->next;
-
-        gi.TagFree(((menuitem_t *)node->it)->text);
-        if (((menuitem_t *)node->it)->value)
-            gi.TagFree(((menuitem_t *)node->it)->value);
-        if (node->prev)
-            gi.TagFree(node->prev);
+    // R-130: A CALLBACK MAY DISCARD THE WHOLE QUEUE, and `menu` above was read
+    // BEFORE it ran.  `init_player()` is the tail of two of them -- both "Leave
+    // Team" rows -- and it drops the queue rather than walking it, because a
+    // reused client slot must not inherit the previous occupant's TAG_LEVEL
+    // menus.  The menu captured here is then orphaned with its `prev` still
+    // pointing at the queue HEAD, so the unlink below writes
+    // `menuqueue.next = menu->next`, which is NULL, and takes the callback's
+    // BRAND NEW menu with it.  `curmenulink` ends up NULL, the `inven` reopen
+    // tests exactly that field, and the player is left in arena 0 with no menu,
+    // unable to rejoin or spawn -- which is what a play test hit and what the
+    // donor never could, because its `init_player` does not touch the queue.
+    // So ask whether the captured menu is still in the queue before unlinking.
+    orphan = true;
+    for (qnode = ent->client->menuqueue.next; qnode; qnode = qnode->next) {
+        if (qnode == menu) {
+            orphan = false;
+            break;
+        }
     }
 
-    if (node)
-        gi.TagFree(node);
+    if (!orphan)
+        remove_from_queue(menu, &ent->client->menuqueue);
 
-    gi.TagFree(menu);
+    free_menu(menu);
+
+    // An orphaned menu was the callback's to replace, and it has: `curmenulink`,
+    // `selected` and the queue all belong to the menu it built.  Freeing the old
+    // one is all this function may do -- the relink below would overwrite that
+    // menu with whatever the walk finds, and the walk is what went wrong.
+    if (orphan) {
+        DisplayMenu(ent);
+        return;
+    }
 
     menu = &ent->client->menuqueue;
     while (menu->next)
@@ -342,6 +413,11 @@ MenuThink(edict_t *ent)
     cl = ent->client;
 
     if (cl->menu_owner == MENU_ARENA && !((level.framenum - cl->ra_menutime) % 10)) {
+        // The repaint is where a menu's live numbers get to be live: SendMenu
+        // re-transmits the bar DisplayMenu last composed, so a count that moved
+        // has to be composed again before it is sent (see RA_RefreshMenuCounts).
+        if (RA_RefreshMenuCounts(ent))
+            DisplayMenu(ent);
         SendMenu(ent);
         return true;
     }
@@ -375,3 +451,50 @@ ra_MenuClose(edict_t *ent)
     DisplayMenu(ent);
 }
 
+
+/*
+================
+close_menus
+
+Like clear_menus, but it FREES what it drops instead of merely forgetting it.
+
+clear_menus can afford to forget: it runs from the intermission, where the level
+and every TAG_LEVEL allocation behind a menu is over anyway.  PutClientInServer
+is the other place the queue head goes away -- it memsets the whole gclient_t
+and copies `pers`/`resp` back, and `menuqueue`, `curmenulink` and `selected` are
+in neither -- and that one runs on EVERY RESPAWN, so what it drops stays dropped
+for the rest of the map.  A menu is open on every one of those, because
+PutClientInServer ends in move_to_arena(..., 1) and that reopens the observer
+menu.
+
+R-147 already put a close there and it is not enough by itself, which is the
+point worth keeping: under arena, closing is HIDING (see ra_MenuClose above), so
+the arbiter's close repaints the statusbar and frees nothing.  The repaint is
+still its job and still goes through it -- nothing here may call G_MenuClose's
+engine row directly (R-MENU-3) -- and the freeing is this function's.
+
+Taken from `rocketarena2@28a8af7`.  RA2's own version tests its `showmenu` bool
+to decide whether a repaint is owed; this tree does not carry that field
+(sec 7 rule 3), and `menu_owner == MENU_ARENA` is the same question -- a menu
+built with FinishMenu(show=false) has never claimed the channel.
+================
+*/
+void
+close_menus(edict_t *ent)
+{
+    qmenu_t *menu;
+
+    if (!ent->client)
+        return;
+
+    if (ent->client->menu_owner == MENU_ARENA)
+        G_MenuClose(ent);
+
+    while ((menu = remove_from_queue(NULL, &ent->client->menuqueue)) != NULL)
+        free_menu(menu);
+
+    ent->client->menuqueue.next = NULL;
+    ent->client->menuqueue.prev = NULL;
+    ent->client->curmenulink = NULL;
+    ent->client->selected = NULL;
+}

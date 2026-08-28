@@ -486,6 +486,32 @@ static const save_field_t clientfields[] = {
     // Deliberately not saved, and named here so dsweep.py's finding is answered
     // rather than merely absent.
 
+    // R-EXTRA-6: the Gladiator camera.  Saved in full, including its three
+    // edict pointers -- an observer who saves mid-flyby reloads watching the
+    // same player from the same place, and a dangling `camera.ent` after a load
+    // is what CheckValidCamera exists to catch but should never have to.
+    E(camera.ent),
+    V(camera.angles),
+    V(camera.origin),
+    V(camera.ent_angles),
+    V(camera.chaseoffset),
+    I(camera.flags),
+    E(camera.lastent),
+    E(camera.goalent),
+    V(camera.dest),
+    V(camera.viewtarget),
+    V(camera.dest2),
+    I(camera.state),
+    F(camera.pause_time),
+    F(camera.delay),
+    F(camera.search_time),
+    F(camera.maxflybydist),
+    I(camera.cnt),
+    F(camera.lasttime),
+    F(camera.lastcycle),
+    V(camera.clientangles),
+    V(camera.clientorigin),
+
     E(ctf_grapple),
     I(ctf_grapplestate),
     I(ctf_hookstate),
@@ -1032,6 +1058,12 @@ void ReadGame(const char *filename)
     // the bot layer is one of them.  Told first, set up again at the end, once
     // `game.maxclients` has been read.
     BotForgetGameMemory();
+
+    // R-EXTRA-2's delayed-command pool is the fourth owner (R-108: "any new
+    // owner needs a Forget/Setup pair like the bot layer's").  It has no Setup
+    // half because the pool is a cache -- it re-extends on the next command --
+    // but the queue POINTERS have to go with the blocks they point into.
+    Lag_ForgetGameMemory();
 
     f = gzopen(filename, "rb");
     if (!f)

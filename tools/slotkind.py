@@ -405,6 +405,96 @@ def audit_map(lbl, files, out, header_text, impl_text, extra=None):
                                     f'declares it {rows[sid][0]} '
                                     f'(R-OSP-7 clause 7)')
 
+    # A LOGICAL ID USED AS A SLOT NUMBER.  Neither question above can see this
+    # one, and it is the failure R-OSP-7's whole shape exists to prevent: a
+    # statslot_t is an ENUM, so `ps.stats[SID_OSP_RUNE_HASTE]` compiles silently
+    # and indexes by the id's ordinal in STATSLOT_MAP instead of by the slot the
+    # active ruleset assigned it.  The kind check cannot fire -- no kind is
+    # named -- and the availability check cannot fire either, because the map
+    # itself is correct; only the access bypasses it.
+    #
+    # Measured on this tree 2026-08-27: fourteen sites in the tourney rune code
+    # read ordinals 28..32 where the map had put the runes at 22..26.  Ordinals
+    # 29 and 30 are tourney's OWN second-powerup-timer pair, so holding a pent
+    # read as holding the STRENGTH and HASTE runes -- doubled damage and haste
+    # fire rate from an invulnerability -- while resist, regen and vampire, whose
+    # ordinals landed on unassigned slots, could not fire at all.  Ordinal 32
+    # was additionally out of bounds on a 32-slot player_state_t, which is how
+    # this was found: -Warray-bounds at -O2 under the API=old build (R-ENG-1a).
+    # Nothing at the shipped setting had reported it in five phases.
+    #
+    # G_Stat/G_GetStat/G_SetStat are the only legitimate readers of the map, so
+    # the rule is simply that a SID never appears inside stats[].
+    sid_index = re.compile(r'stats\s*\[\s*(SID_\w+)\s*\]')
+    for name, t in sources(files) + list(extra or []):
+        for m in sid_index.finditer(t):
+            problems.append(f'{name} indexes stats[] with the logical id '
+                            f'{m.group(1)} rather than its resolved slot -- '
+                            f'use G_GetStat/G_SetStat (R-OSP-7 clause 4)')
+
+    # ...AND THE MIRROR IMAGE: a slot number where an id belongs.  The accessors
+    # take a statslot_t, which is an enum and therefore accepts any int, so
+    # `G_SetStat(ent, ent->item->quantity, 1)` compiles and resolves whatever
+    # logical id happens to share that ordinal.  That is the other half of R-132:
+    # the rune items carried the donor's literal 22 in `quantity` while every
+    # consumer had been renamed to `SID_OSP_RUNE_RESIST` (28), so the pickup set
+    # statslot_t 22 -- SID_RA_ID_VIEW, unmapped under tourney -- and granted
+    # nothing.  A silent no-op is the worst possible symptom: no crash, no
+    # warning, and a feature that still reports itself as enabled.
+    #
+    # NAMING THE INVARIANT TOOK TWO TRIES, and the first one is worth recording
+    # because it is the shape of a bad check.  "The id argument must be a `SID_`
+    # name" rejects the *fixed* code as loudly as the broken code -- the pickup
+    # legitimately carries the id in a field -- and it also flagged the
+    # accessors' own `statslot_t id` parameters.  A check that fires on the
+    # correct version of the thing it is guarding is not a check, it is a rename.
+    #
+    # The real invariant is a JOIN between two files: if an item's `quantity` is
+    # passed to an accessor, then `quantity` is a statslot_t, so every item that
+    # sets it must set it to a `SID_` name and not to a number.  Both halves are
+    # checked, and a computed id that is *not* the item field is reported as a
+    # note -- it cannot be kind-checked, so it should be visible without being
+    # fatal.
+    carries_id = False
+    accessor = re.compile(r'\bG_(?:Set|Get)Stat\s*\(\s*[^,()]+,\s*([^,()]+?)\s*,')
+    for name, t in sources(files) + list(extra or []):
+        for m in accessor.finditer(t):
+            arg = m.group(1).strip()
+            if re.fullmatch(r'SID_\w+', arg):
+                continue
+            # the accessors' own definitions/declarations: `statslot_t id`
+            if re.fullmatch(r'\w+\s+\w+', arg):
+                continue
+            if re.search(r'\bitem\s*->\s*quantity\b|\bitem\.quantity\b', arg):
+                carries_id = True
+                continue
+            notes.append(f'{name} passes the computed id `{arg}` to an accessor: '
+                         f'correct only if it holds a SID_, and its kind cannot '
+                         f'be checked here (R-OSP-7 clause 4)')
+
+    # The other half of the join: `quantity` is an id, so it must be spelled as
+    # one.  Only for items that actually use it that way -- IT_RUNE is the flag
+    # that marks them -- because `quantity` means a count on every other item.
+    if carries_id:
+        for name, t in sources(files) + list(extra or []):
+            # segment the itemlist by .classname so an item's flags and its
+            # quantity are read from the same entry
+            parts = re.split(r'(?=\.classname\s*=)', t)
+            for part in parts:
+                if 'IT_RUNE' not in part:
+                    continue
+                q = re.search(r'\.quantity\s*=\s*([^,]+),', part)
+                if not q:
+                    continue
+                val = q.group(1).strip()
+                if re.fullmatch(r'SID_\w+', val):
+                    continue
+                cls = re.search(r'\.classname\s*=\s*"([^"]*)"', part)
+                problems.append(
+                    f'{name}: {cls.group(1) if cls else "an IT_RUNE item"} sets '
+                    f'.quantity = {val}, but an accessor reads item->quantity as '
+                    f'a statslot_t -- it must be a SID_ name (R-OSP-7 clause 4)')
+
     # And the writers must agree with the map, which is the original kind check
     # re-aimed at G_SetStat.
     idx = index_vars(files)
@@ -479,6 +569,22 @@ SELFTESTS = [
      (None, 'void ctl(edict_t *ent) { '
             'G_SetStat(ent, SID_TIMER2, gi.imageindex("p_quad")); }'),
      'writes pic'),
+    # The real bug, as its own control: a SID inside stats[].  Written as the
+    # fourteen sites were actually written rather than as a minimal case, so
+    # that the control still resembles the thing it is guarding against.
+    ('id as index', 'inject',
+     (None, 'bool ctl(edict_t *ent) { '
+            'return ent->client->ps.stats[SID_OSP_RUNE_HASTE] != 0; }'),
+     'rather than its resolved slot'),
+    # R-132's other half, as the join it actually is: the accessor reads
+    # item->quantity as an id, so an IT_RUNE item that sets quantity to a NUMBER
+    # is the defect.  The control supplies the item, because the real accessor
+    # call is already in the tree -- which is the point: this control fails only
+    # while both halves disagree, exactly as the tree did.
+    ('number as id', 'inject',
+     (None, 'const gitem_t rune_ctl = { .classname = "item_rune_ctl", '
+            '.quantity = 22, .flags = IT_RUNE };'),
+     'must be a SID_ name'),
 ]
 
 

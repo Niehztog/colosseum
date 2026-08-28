@@ -28,12 +28,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #define INCLUDE_TESLA           1
 #define INCLUDE_BEAMS           1
 
-extern void check_dodge(edict_t *self, vec3_t start, vec3_t dir, int speed);
-extern void hurt_touch(edict_t *self, edict_t *other, cplane_t *plane, csurface_t *surf);
-extern void droptofloor(edict_t *ent);
-extern void Grenade_Explode(edict_t *ent);
 
-extern void drawbbox(edict_t *ent);
 
 #ifdef INCLUDE_ETF_RIFLE
 /*
@@ -1291,7 +1286,6 @@ void nuke_bounce(edict_t *ent, edict_t *other, cplane_t *plane, csurface_t *surf
         gi.sound(ent, CHAN_VOICE, gi.soundindex("weapons/hgrenb2a.wav"), 1, ATTN_NORM, 0);
 }
 
-extern byte P_DamageModifier(edict_t *ent);
 
 void fire_nuke(edict_t *self, vec3_t start, vec3_t aimdir, int speed)
 {

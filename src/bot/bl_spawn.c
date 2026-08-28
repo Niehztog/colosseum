@@ -34,6 +34,9 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "bot/bl_botcfg.h"
 #include "bot/p_menulib.h"
 #include "arena/arena.h"
+// R-CTF-8's half of the fill: the seat count and the balanced removal are CTF's
+// own knowledge, the same way arena.h's are arena's.
+#include "ctf/g_ctf.h"
 
 // `old_botcount` is the mod's own, not the SDK's: osp_teams.c compares it
 // against botglobals.numbots to notice a bot joining or leaving, and
@@ -42,6 +45,11 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 // two definitions of one object; -1 is the one CheckMinimumPlayers needs,
 // because 0 is a legal bot count.
 int old_botcount = -1;
+
+// The roster-exhausted brake for `ctf_botfill` and `dm_botfill`.  See
+// BotFillNoMore(); arena keeps its own in arena.c, because its target is per
+// arena and so is the count it settled for.
+static int botfill_ceiling;
 
 typedef struct queuedbot_s
 {
@@ -224,6 +232,7 @@ static edict_t *BotCreate(char *userinfo, bot_library_t *lib)
 {
     edict_t *ent;
     bot_state_t *bs;
+    int arena;
 
     //spawn a client entity
     ent = G_SpawnClient();
@@ -282,7 +291,24 @@ static edict_t *BotCreate(char *userinfo, bot_library_t *lib)
         // workspace has that field.  It belongs to GLADIATOR's own RA2 support
         // -- gladq2_src/g_arena.c -- which R-ARENA-1 explicitly does not carry,
         // and the donor's #ifdef ROCKETARENA block was never compiled anywhere.
-        ent->client->resp.context = Q_atoi(Info_ValueForKey(userinfo, "arena"));
+        //
+        // R-SEC-4: the key is text out of bots.cfg and `resp.context` indexes
+        // arenas[MAX_ARENAS] from a dozen places -- give_ammo() takes
+        // &arenas[context] before it looks at anything.  `arena 999` in a bot
+        // file was an out-of-bounds read and write with no diagnostic, so the
+        // value is bounded where it enters: 0 means "no arena yet", which is
+        // what a human gets, and anything outside 1..num_arenas becomes 0 with
+        // one line saying so rather than being silently clamped to a real
+        // arena the author did not name.
+        arena = Q_atoi(Info_ValueForKey(userinfo, "arena"));
+        if (arena < 0 || arena > num_arenas || arena >= MAX_ARENAS)
+        {
+            newgameimport.dprintf("WARNING: bot arena key %d is not 1..%d; "
+                                  "the bot waits in the queue instead\n",
+                                  arena, num_arenas);
+            arena = 0;
+        } //end if
+        ent->client->resp.context = arena;
     } //end if
     //one extra bot
     botglobals.numbots++;
@@ -386,6 +412,10 @@ void BotSpawn(void)
     int i;
     edict_t *cl_ent;
 
+    //a new level is a new question: the last one's roster ceiling was about the
+    //last one's target (R-CTF-8, R-DM-1).  Ahead of the guard below, because a
+    //server with no bot states yet still changes map.
+    botfill_ceiling = 0;
     if (!botglobals.botstates) return;
     for (i = 0; i < game.maxclients; i++)
     {
@@ -631,10 +661,15 @@ void BotAddDeathmatch(edict_t *ent)
     {
         cvar_t *arena_cvar = gi.cvar("arena", "1", 0);
 
+        // R-131: the donor forced "1" here when the cvar was out of range, and
+        // "1" is a request like any other -- it cannot be told apart from an
+        // operator who meant arena 1.  "0" is the absence of a request, which
+        // RA_BotJoinArena resolves by following the people; 1..N still reaches
+        // it verbatim, which is 1999's behaviour.
         if (arena_cvar->value > 0 && arena_cvar->value <= num_arenas)
             Info_SetValueForKey(uinfo, "arena", arena_cvar->string);
         else
-            Info_SetValueForKey(uinfo, "arena", "1");
+            Info_SetValueForKey(uinfo, "arena", "0");
     } //end if
     if (G_Ruleset() == RULESET_CTF)
     {
@@ -747,6 +782,64 @@ void BotRemoveDeathmatch(edict_t *ent)
     else gi.cprintf(ent, PRINT_HIGH, "No bots found to remove!\n");
 } //end of the functoin BotRemoveDeathmatch
 //===========================================================================
+// R-CTF-8 and R-DM-1.  What `ctf_botfill` / `dm_botfill` ask for, or 0 when the
+// switch is off -- and 0 is the only value that means off, which is why the
+// clamp to two lives here: a map with nothing to count still gets a game.
+//
+// The RULESET owns its number and this owns the ceilings, because the ceilings
+// are the same three questions for all of them: two sides make a round,
+// `game.maxclients` is what the engine will seat, and the roster is what
+// `bots.cfg` can supply.  arena answers through RA_BotFillTarget() instead,
+// because its census is per arena as well as its target; that is the one
+// asymmetry and CheckMinimumPlayers names it.
+//
+// Parameter:               -
+// Returns:                 the target, or 0
+// Changes Globals:     -
+//===========================================================================
+int BotFillTarget(void)
+{
+    int want;
+
+    if (!BotFillEnabled())
+        return 0;
+
+    switch (G_Ruleset())
+    {
+        case RULESET_CTF: want = CTF_BotFillSeats(); break;
+        case RULESET_DM: want = DM_BotFillSeats(); break;
+        default: return 0;
+    } //end switch
+
+    // Two sides is what makes it a game -- the same floor RA_BotFillTarget has,
+    // for the same reason.
+    if (want < 2) want = 2;
+    if (botfill_ceiling && want > botfill_ceiling) want = botfill_ceiling;
+    if (want > game.maxclients) want = game.maxclients;
+
+    return want;
+} //end of the function BotFillTarget
+//===========================================================================
+// The roster ran out.  Both arms of CheckMinimumPlayers have to settle on ONE
+// number or the server never sits still, and the arms that read a flat count get
+// that by writing the count they achieved back into `minimumplayers`.  A switch
+// cannot carry a count -- and writing 0 into it would be worse than useless,
+// because the target would fall back to `minimumplayers`, which a server using
+// the fill has no reason to have set, and the removal arm would then delete
+// every bot that had just been added.  So the ceiling is held here and cleared
+// by BotSpawn() (R-CTF-8, R-DM-1).  arena keeps its own, in arena.c.
+//
+// Parameter:               achieved: the bot count the roster could reach
+// Returns:                 -
+// Changes Globals:     botfill_ceiling
+//===========================================================================
+void BotFillNoMore(int achieved)
+{
+    if (achieved < 2) achieved = 2;
+    if (!botfill_ceiling || achieved < botfill_ceiling)
+        botfill_ceiling = achieved;
+} //end of the function BotFillNoMore
+//===========================================================================
 // R-BOT-17, and R-BOT-29's blocks 3 and 4 of seventeen.
 //
 // The donor's `#ifdef TOURNEY` arm is not one branch but four differences, and
@@ -772,12 +865,37 @@ void CheckMinimumPlayers(void)
     cvar_t *minplayers;
     edict_t *cl_ent;
     queuedbot_t *bot;
-    int i, numplayers, numbots, want, votedin;
+    int i, numplayers, numbots, pending, totalbots, want, votedin;
+    int fillarena, fill;
+    bool fillon;
     char buf[32];
 
     minplayers = BotMinPlayers();
 
-    if (!minplayers->value) return;
+    // R-RA-7.  `ra_botfill` is arena's alternative target and it is asked for
+    // FIRST, because it is also the thing that makes `minimumplayers 0` stop
+    // meaning "no bots": with the fill on, 0 means "the flat count is not the
+    // authority here, the arena is".  Nothing outside `arena` can reach this,
+    // and with the cvar at its default of 0 the function behaves exactly as it
+    // did before.
+    fillarena = G_Ruleset() == RULESET_ARENA ? RA_BotFillArena() : 0;
+
+    // R-CTF-8 and R-DM-1 are the same switch under `ctf` and `dm`, and they are
+    // ONE variable rather than two arms because they differ from arena's in
+    // exactly one way: the census.  Arena's target belongs to one of up to 32
+    // games on the map and so does the count it is compared against; these two
+    // fill the whole server, which is what the loop below already counts, so the
+    // only thing that changes is `want`.
+    //
+    // ONLY THE SWITCH IS READ HERE.  Everything above the frame gate below runs
+    // on EVERY frame, and the target is not a cvar read: BotFillTarget() walks
+    // the entity list once per spawn-point class -- three times under `ctf` --
+    // so it is asked for on a fill tick and not before (R-BASE-6's argument
+    // about hot paths, reached from the other side).
+    fill = 0;
+    fillon = !fillarena && BotFillEnabled();
+
+    if (!minplayers->value && !fillarena && !fillon) return;
     //
     if (level.framenum & 31) return;
     //arena used to return here, and Phase 6 was right to: with no bot able to
@@ -793,58 +911,126 @@ void CheckMinimumPlayers(void)
     //count the number of players and the number of bots
     numplayers = 0;
     numbots = 0;
+    pending = 0;
     for (i = 0; i < game.maxclients; i++)
     {
         cl_ent = DF_CLIENTENT(i);
-        if (!BotCountsAsPlayer(cl_ent)) continue;
+        if (!BotCountsAsPlayer(cl_ent))
+        {
+            // A BOT THAT IS NOT YET A PLAYER IS STILL A BOT ON ITS WAY IN, and
+            // the add arm below has to know that or it asks for the same bot
+            // again every 32 frames.  BotStarted() holds a connected bot's
+            // ClientBegin back until its library reports initialised, and on
+            // the first visit to a map that is the whole reachability build --
+            // twenty seconds of frames on a real map.  Under arena there is a
+            // second window on top of it: BotCountsAsPlayer asks for
+            // `teamnum >= 0`, which RA_BotJoinArena only sets from inside that
+            // deferred ClientBegin.
+            //
+            // Measured on ra2map7: seven bots connected while ra2map7.aas was
+            // being written, all seven joined the pickup teams at once when it
+            // finished, and the removal arm then threw three of them straight
+            // back out -- "Java Man entered the game" / "Java Man: goodbye"
+            // three lines apart.
+            if (cl_ent->inuse && cl_ent->client && (cl_ent->flags & FL_BOTCLIENT))
+                pending++;
+            continue;
+        } //end if
         numplayers++;
         if (cl_ent->flags & FL_BOT) numbots++;
     } //end for
-    //add the queued bots to the bot count
+    //a queued bot has not even been created yet, and counts the same way
     for (bot = queuedbots; bot; bot = bot->next)
     {
-        numbots++;
+        pending++;
     } //end for
     //
-    want = (int)minplayers->value;
-    votedin = BotTourneyVotedIn();
-
-    if (G_Ruleset() == RULESET_TOURNEY &&
-        (int)gi.cvar("bots_autoload", "0", 0)->value == 4 && numbots < want)
+    // R-RA-7's arithmetic replaces the two counts and the target, and leaves
+    // `pending` alone.  A pending bot has connected and has no arena yet --
+    // `resp.context` is 0 and `resp.teamnum` is -1 until RA_BotJoinArena runs
+    // from the deferred ClientBegin -- so it belongs to no arena's census and
+    // must still be subtracted from what the fill asks for.  That is the same
+    // fact the comment above records, reached from the other side.
+    if (fillarena)
     {
-        if (!AddRandomBot(NULL))
-        {
-            Q_snprintf(buf, sizeof(buf), "%d", numbots);
-            gi.cvar_set(BotMinPlayersCvar(), buf);
-        } //end if
-        old_botcount = numbots;
-    } //end if
-    else if (G_Ruleset() == RULESET_TOURNEY
-             ? ((numplayers - votedin - 1) < want &&
-                numplayers < game.maxclients && numbots < want &&
-                old_botcount != numbots)
-             : (numplayers < want))
-    {
-        if (!AddRandomBot(NULL))
-        {
-            Q_snprintf(buf, sizeof(buf), "%d", numbots);
-            gi.cvar_set(BotMinPlayersCvar(), buf);
-        } //end if
-        old_botcount = numbots;
+        numplayers = RA_ArenaPlayers(fillarena, &numbots);
+        want = RA_BotFillTarget(fillarena);
     } //end if
     else
     {
-        // R-BOT-17 says "adding AND removing", and the 1999 non-TOURNEY build
-        // only ever added: `if (numplayers < minimumplayers) AddRandomBot()`
-        // and nothing else, so bots accumulated as humans arrived and never
-        // left.  The removal arm is tourney's and it is right for every
-        // ruleset, which is why `votedin` is 0 rather than the arm being gated
-        // -- uGladQ2 records the same fix for CTF (v0.98.2u) and RA2
-        // (v0.98.1u).
-        if ((numplayers - votedin - 1) > want)
+        //0 from a ruleset that has no fill, which `arena` is when its own
+        //RA_BotFillArena() declined -- then `minimumplayers` is the target, as
+        //it is with the switch off.
+        if (fillon) fill = BotFillTarget();
+        want = fill ? fill : (int)minplayers->value;
+    } //end else
+    votedin = BotTourneyVotedIn();
+    // `totalbots` is the donor's `numbots`: it counted the queue into the same
+    // variable.  They are separate here because the removal arm needs a bot
+    // that has actually been created to remove, and `numbots` is that count.
+    totalbots = numbots + pending;
+
+    if (G_Ruleset() == RULESET_TOURNEY &&
+        (int)gi.cvar("bots_autoload", "0", 0)->value == 4 && totalbots < want)
+    {
+        if (!AddRandomBot(NULL))
         {
-            if (numbots > 0) BotServerCommand("sv", "removebot", NULL);
-            old_botcount = numbots;
+            Q_snprintf(buf, sizeof(buf), "%d", totalbots);
+            gi.cvar_set(BotMinPlayersCvar(), buf);
+        } //end if
+        old_botcount = totalbots;
+    } //end if
+    else if (G_Ruleset() == RULESET_TOURNEY
+             ? ((numplayers - votedin - 1) < want &&
+                numplayers < game.maxclients && totalbots < want &&
+                old_botcount != totalbots)
+             : (numplayers + pending < want))
+    {
+        if (!AddRandomBot(NULL))
+        {
+            // R-RA-7: the clamp exists so that the add and the remove arms
+            // settle on ONE number when the roster runs out.  `ra_botfill` is a
+            // switch and cannot hold a count -- and writing 0 into it would be
+            // worse than useless, because the target would fall back to
+            // `minimumplayers`, which is 0 under this configuration, and the
+            // removal arm would then delete every bot there is.  So the arena
+            // keeps its own ceiling.
+            if (fillarena) RA_BotFillNoMore(totalbots);
+            else if (fill) BotFillNoMore(totalbots);
+            else
+            {
+                Q_snprintf(buf, sizeof(buf), "%d", totalbots);
+                gi.cvar_set(BotMinPlayersCvar(), buf);
+            } //end else
+        } //end if
+        old_botcount = totalbots;
+    } //end if
+    else
+    {
+        // R-BOT-17 says "adding AND removing", and the non-TOURNEY arm is the
+        // SDK's own: gladq2_src/bl_spawn.c ends in
+        // `else if (numplayers > minplayers->value)` with no `- 1`, so add and
+        // remove settle on the SAME number.  tourney's `- bots_votedin - 1` is
+        // tourney's, and carrying it into the other rulesets left the two arms
+        // half a player apart -- adding up to `want`, removing down to
+        // `want + 1` -- which is a server that never sits still on either
+        // side of a join.
+        if (G_Ruleset() == RULESET_TOURNEY
+            ? ((numplayers - votedin - 1) > want)
+            : (numplayers > want))
+        {
+            // Under the fill the bot is NAMED, because `removebot` with no name
+            // takes the lowest client slot -- and that bot may be playing in an
+            // arena nobody asked to shrink, or holding up the side that is
+            // already short (R-CTF-8).  A NULL name terminates the vararg list,
+            // which is the call the other rulesets already make (R-RA-7).
+            if (numbots > 0)
+                BotServerCommand("sv", "removebot",
+                                 fillarena ? RA_ArenaBotName(fillarena) :
+                                 fill && G_Ruleset() == RULESET_CTF ?
+                                 CTFBotFillName() : NULL,
+                                 NULL);
+            old_botcount = totalbots;
         } //end if
     } //end else
 } //end of the function CheckMinimumPlayers

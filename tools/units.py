@@ -18,7 +18,7 @@ site written against the other is now a unit mix.  That is how the gekk's three
 `attack_finished` sites came to disagree with the other fifty (R-56), and no
 upstream check could have seen it.
 
-THREE CHECKS
+FOUR CHECKS
 
   MIX    an int-declared timer field used with level.time, or a float-declared
          one used with level.framenum, on the same line.
@@ -28,6 +28,15 @@ THREE CHECKS
   SPLIT  one field, both clocks, across the tree -- the merged-tree case above.
          Reported per field with the minority side named, because the minority
          is what has to move.
+  SHIFT  a `pm_time` written with a raw literal instead of `PM_TIME_SHIFT`.
+         This is a second unit contract in the same tree and it is the
+         PROTOCOL's rather than the clock's: `PM_TIME_SHIFT` is 3 on a plain
+         server and **0** on one that negotiated extensions, so `160 >> 3` and
+         a bare `14` are the pre-extension spellings and hold for an eighth as
+         long as they say on an extended server.  RA2's own post-port fix list
+         names one instance of this (`reconciliation.md`, R-SEC-2's sixteen);
+         four more survived in CTF, Ground Zero and the Gladiator observer
+         until somebody read the assignments side by side.
 
 None of the three can see a comparison written entirely in the wrong unit --
 `SV_RunThink`'s `thinktime > level.time` mentions no timer field at all.  Only
@@ -64,6 +73,10 @@ FLOAT_LIT = re.compile(r'(?<![\w.])\d+\.\d*f?(?![\w.])')
 # a float literal added to or subtracted from a frame count, which is a duration
 # that forgot its scale.  Requiring adjacency is what keeps an unrelated literal
 # elsewhere on the line from reading as one.
+# `pmove.pm_time = <something>`.  The value is captured so an assignment of a
+# literal 0 -- "cancel the hold", which has no unit at all -- is not a finding.
+PM_TIME = re.compile(r'([\w\[\]\.>-]*\bpm_time)\s*=\s*([^;]+);')
+
 ADJACENT_LIT = re.compile(
     r'level\.framenum\s*[-+]\s*\(?\s*\d+\.\d*f?'
     r'|\d+\.\d*f?\s*[-+]\s*level\.framenum')
@@ -113,6 +126,20 @@ SELFTESTS = [
      ('self->monsterinfo.attack_finished = level.time + 3;',
       'self->monsterinfo.attack_finished = level.framenum + 3 * BASE_FRAMERATE;'),
      'is used with BOTH clocks'),
+    # The mutation IS the defect this check was written for: the 1999 spelling
+    # of the observer's teleport hold, which holds for an eighth as long as it
+    # says on an extended server.
+    ('raw pm_time', 'p_observer.c',
+     ('ent->client->ps.pmove.pm_time = 112 >> PM_TIME_SHIFT;',
+      'ent->client->ps.pmove.pm_time = 14;'),
+     'pm_time written without PM_TIME_SHIFT'),
+    # ...and the copy that crosses the ABI, which the exemption used to wave
+    # through.  The mutation restores the line as it stood before
+    # `osp-tourney@11563de`.
+    ('copied pm_time', 'bl_main.c',
+     ('buc.pm_time = min(bot->client->ps.pmove.pm_time >> (3 - PM_TIME_SHIFT), 255);',
+      'buc.pm_time = bot->client->ps.pmove.pm_time;'),
+     'pm_time written without PM_TIME_SHIFT'),
 ]
 
 
@@ -165,12 +192,38 @@ def run(tree, files):
     types = declared_types(dict(files).get(header) or
                            open(header, encoding='latin-1').read())
 
-    mix, scale = [], []
+    mix, scale, shift = [], [], []
     clocks = {}     # field -> {'time': n, 'framenum': n}
 
     for path, text in files:
         name = os.path.basename(path)
         for i, line in enumerate(strip(text).split('\n'), 1):
+            # SHIFT is asked first because it is about a different clock and
+            # would otherwise be skipped by the level.time/framenum filter.
+            m = PM_TIME.search(line)
+            if m:
+                lhs, rhs = m.group(1).strip(), m.group(2).strip()
+                # A literal 0 cancels the hold and is zero in either unit, and a
+                # line that already names PM_TIME_SHIFT has been converted.
+                if rhs == '0' or 'PM_TIME_SHIFT' in line:
+                    pass
+                elif 'pm_time' in rhs:
+                    # A COPY constructs no duration -- but it can still cross a
+                    # UNIT BOUNDARY, and this exemption used to say it could not.
+                    # `ps.pmove.pm_time` is 8 ms tics on a plain server and
+                    # MILLISECONDS on an extended one; `bot_updateclient_t`'s is
+                    # the frozen 1999 botlib ABI and is always tics.  bl_main.c
+                    # copied one straight into the other, so every hold the brain
+                    # saw ran eight times long, and the old wording here -- "it
+                    # COPIES a value that was already shifted where it was set"
+                    # -- is exactly the reasoning that let it stand
+                    # (`osp-tourney@11563de`).  So a copy is exempt only between
+                    # two fields of the SAME kind.
+                    if ('ps.pmove.pm_time' in rhs) != ('ps.pmove.pm_time' in lhs):
+                        shift.append((name, i, line.strip()[:70]))
+                else:
+                    shift.append((name, i, line.strip()[:70]))
+
             has_t = 'level.time' in line
             has_f = 'level.framenum' in line
             if not (has_t or has_f):
@@ -210,7 +263,8 @@ def run(tree, files):
              if c['time'] and c['framenum']]
 
     out.append(f'units.py: {len(types)} declared timer field(s); '
-               f'{len(mix)} mix, {len(scale)} lost-scale, {len(split)} split')
+               f'{len(mix)} mix, {len(scale)} lost-scale, {len(split)} split, '
+               f'{len(shift)} raw pm_time')
 
     for n, i, f, why, txt in mix:
         out.append(f'  !! {n}:{i}: {f} -- {why}: {txt}')
@@ -223,7 +277,11 @@ def run(tree, files):
                    f'with level.time, {c["framenum"]} with level.framenum. The '
                    f'{minority} side is the minority and is what has to move')
 
-    if not (mix or scale or split):
+    for n, i, txt in shift:
+        out.append(f'  !! {n}:{i}: pm_time written without PM_TIME_SHIFT -- an '
+                   f'extended server holds for an eighth as long: {txt}')
+
+    if not (mix or scale or split or shift):
         out.append('  every declared timer field agrees with the clock it is '
                    'used with')
         out.append('  (this cannot see a comparison written entirely in the '

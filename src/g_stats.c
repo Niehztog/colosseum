@@ -37,10 +37,44 @@ static int8_t g_slot[SID_COUNT];
 
 // ---------------------------------------------------------------- resolution
 
+// The highest slot + 1 that is reachable right now, and it is TWO bounds at
+// once rather than one.
+//
+// R-OSP-7 clause 6 reads as a single question -- did the client negotiate the
+// protocol extension? -- and that was the whole story while USE_NEW_GAME_API
+// was fixed on.  It stopped being the whole story when R-ENG-1a made the game
+// API a build switch, because the two switches are INDEPENDENT in both
+// directions.  g_local.h's PM_TIME_SHIFT already handles one direction (the new
+// API without extensions); this is the other, and it is the dangerous one:
+// G_InitGame sets game.csr from sv_features and g_protocol_extensions alone, so
+// `extended` can be true on a library whose player_state_t is
+// player_state_old_t with stats[MAX_STATS_OLD].
+//
+//     what the ARRAY holds    MAX_STATS -- 64 or 32, fixed at compile time by
+//                             USE_NEW_GAME_API
+//     what the WIRE carries   64 only for a client that negotiated the
+//                             extension, otherwise 32
+//
+// A check that asks only about the wire keeps CTF's timer pair at 32/33 on an
+// old-API build talking to an extended client -- two writes off the end of the
+// struct, every frame, for every client holding a second powerup, on the one
+// ruleset that uses the pair.  The lower of the two bounds wins, and
+// MAX_STATS >= MAX_STATS_OLD always, so the expression below IS that minimum
+// rather than an approximation of it.
+//
+// Both bounds are enforced in this one place on purpose: `used[]` below is
+// sized MAX_STATS and indexed by the resolved slot, so a ceiling that let 32
+// through on a 32-entry array would overrun the checker as well as the client.
+static int stat_ceiling(void)
+{
+    return game.csr.extended ? MAX_STATS : MAX_STATS_OLD;
+}
+
 void G_InitStats(void)
 {
     ruleset_t r = G_Ruleset();
     int used[MAX_STATS];
+    int ceiling = stat_ceiling();
 
     memset(used, -1, sizeof(used));
 
@@ -48,10 +82,11 @@ void G_InitStats(void)
         int slot = slotdefs[i].slot[r];
 
         // R-OSP-7 clause 6, and it is the reason CTF's timer pair may sit at
-        // 32/33 at all: 32..63 exist only for a client that negotiated the
-        // protocol extension, so without one the stat is dropped -- from the
-        // bar and from the write together, because both go through this array.
-        if (slot >= MAX_STATS_OLD && !game.csr.extended)
+        // 32/33 at all: those slots exist only for a client that negotiated the
+        // protocol extension AND only on a library built against the new game
+        // API, so short of both the stat is dropped -- from the bar and from the
+        // write together, because both go through this array.
+        if (slot >= ceiling)
             slot = -1;
 
         g_slot[i] = slot;
@@ -778,10 +813,25 @@ void G_Svcmd_Slots_f(void)
     ruleset_t   r = G_Ruleset();
     int         n = 0, top = 0;
 
-    gi.cprintf(NULL, PRINT_HIGH, "ruleset      %s   (extensions %s, so slots "
-               "0..%d are reachable)\n", G_RulesetName(r),
-               game.csr.extended ? "on" : "off",
-               (game.csr.extended ? MAX_STATS_NEW : MAX_STATS_OLD) - 1);
+    // The reachable range is read off stat_ceiling() rather than recomputed
+    // from game.csr, so this line cannot claim a range resolution did not use.
+    // It said `0..63` whenever extensions were on, which is a lie on an
+    // old-API build (R-ENG-1a) -- and `sv slots` exists precisely because a
+    // slot number that only lives inside the library cannot be checked from
+    // outside it, so a wrong figure here is worse than no figure.  The api
+    // version is printed for the same reason: since R-ENG-1a it is the other
+    // half of the answer, and `extensions on` alone no longer implies 0..63.
+    //
+    // `(extensions <on|off>,` STAYS THE HEAD OF THE PARENTHESIS.  This line is
+    // read from outside by the play-test harness (R-VER-27), which anchors on
+    // exactly that prefix; putting the new field first parsed as "extensions
+    // off" on a server that had them on, and the battery then failed the
+    // extensions check while passing the slot check it contradicts.  A
+    // diagnostic with a reader has a format, so the field is appended.
+    gi.cprintf(NULL, PRINT_HIGH, "ruleset      %s   (extensions %s, api %d, so "
+               "slots 0..%d are reachable)\n", G_RulesetName(r),
+               game.csr.extended ? "on" : "off", GAME_API_VERSION,
+               stat_ceiling() - 1);
 
     for (int i = 0; i < SID_COUNT; i++) {
         static const char *const kindname[] = { "num", "pic", "cs " };
@@ -812,4 +862,153 @@ void G_Svcmd_Slots_f(void)
                "statusbar    %d of %d bytes%s\n%s\n",
                n, top, sb.len, MAX_STATUSBAR,
                sb.overflow ? " -- OVERFLOWED, items dropped" : "", sb.data);
+}
+
+/*
+=================
+G_Svcmd_Extras_f      `sv extras`, R-VER-33
+
+R-EXTRA-1..7 are seven features behind seven `#define`s in the 1999 module and
+seven cvars here, and six of the seven are invisible from outside the library:
+a log that is open, a lag pool that is empty, two entity classnames that a
+shipped map never uses, a visible weapon that looks like a skin, and an
+observer implementation chosen per ruleset.  `sv ruleset` exists for exactly
+this reason on the dispatch (R-VER-18) and `sv slots` on the stat map
+(R-VER-19); this is the same answer for the extras.
+
+Every line is a MEASUREMENT rather than a restatement of the cvar: the log line
+says whether the file is open and what it is called, the trigger lines say
+whether the classname is in the spawn table, the vwep line counts the itemlist
+rows that actually carry a weapon model.
+=================
+*/
+void G_Svcmd_Extras_f(void)
+{
+    int i, weapmodels = 0, lagged = 0;
+    const char *observer;
+
+    for (i = 0; i < game.num_items; i++)
+        if (itemlist[i].weapmodel)
+            weapmodels++;
+
+    for (i = 1; i <= game.maxclients; i++) {
+        edict_t *e = g_edicts + i;
+        int lag, variance, delay, queued;
+
+        if (!e->inuse || !e->client)
+            continue;
+        Lag_ClientState(e, &lag, &variance, &delay, &queued);
+        if (lag || variance || queued)
+            lagged++;
+    }
+
+    switch (G_Ruleset()) {
+    case RULESET_TOURNEY:
+        observer = "tourney: osp_observe.c + p_camera.c";
+        break;
+    case RULESET_ARENA:
+        observer = "arena: OMODE_NORMAL/FREEFLYING/TRACKCAM/EYECAM in arena.c";
+        break;
+    default:
+        observer = g_observer->value
+                   ? "dm/sp/ctf: p_observer.c autocam/chasecam + g_chase.c"
+                   : "dm/sp/ctf: g_chase.c chasecam only (g_observer 0)";
+        break;
+    }
+
+    gi.cprintf(NULL, PRINT_HIGH, "extras: ruleset %s\n",
+               G_RulesetName(G_Ruleset()));
+    gi.cprintf(NULL, PRINT_HIGH, "  R-EXTRA-1 gamelog       g_gamelog \"%s\" %s%s%s writes %d\n",
+               g_gamelog->string,
+               Log_IsOpen() ? "open" : "closed",
+               Log_IsOpen() ? " " : "",
+               Log_IsOpen() ? Log_Path() : "",
+               Log_Writes());
+    gi.cprintf(NULL, PRINT_HIGH, "  R-EXTRA-2 clientlag     g_clientlag %d pool %d lagged %d\n",
+               (int)g_clientlag->value, Lag_PoolBlocks(), lagged);
+    gi.cprintf(NULL, PRINT_HIGH, "  R-EXTRA-3 triggers      g_triggercounting %d trigger_counting %s, "
+               "g_triggerlog %d trigger_log %s\n",
+               (int)g_triggercounting->value,
+               G_SpawnFuncExists("trigger_counting") ? "registered" : "MISSING",
+               (int)g_triggerlog->value,
+               G_SpawnFuncExists("trigger_log") ? "registered" : "MISSING");
+    gi.cprintf(NULL, PRINT_HIGH, "  R-EXTRA-4 rotatingbutton g_rotatingbutton %d func_button_rotating %s\n",
+               (int)g_rotatingbutton->value,
+               G_SpawnFuncExists("func_button_rotating") ? "registered" : "MISSING");
+    // R-EXTRA-5 has no cvar and says why: VWep is not a Gladiator patch in this
+    // tree, it is what id shipped from 3.20 on and what q2pro carries.  The
+    // measurement is the data the feature IS -- `weapmodel` on the weapon rows,
+    // which PutClientInServer turns into `s.modelindex2` and ChangeWeapon packs
+    // into the top byte of `s.skinnum`.
+    gi.cprintf(NULL, PRINT_HIGH, "  R-EXTRA-5 vwep          always on, %d item(s) carry a weapmodel\n",
+               weapmodels);
+    gi.cprintf(NULL, PRINT_HIGH, "  R-EXTRA-6 observer      %s\n", observer);
+    // R-EXTRA-7 is a regression entry rather than a feature; the verdict lives
+    // in doc/regression.md and this line says which one it is.
+    gi.cprintf(NULL, PRINT_HIGH, "  R-EXTRA-7 ztn2dm2 plat  not isolable from any tree here -- see doc/regression.md\n");
+}
+
+/*
+=================
+G_Svcmd_Census_f      `sv census <classname>`, R-VER-20
+
+R-VER-20 asks that at least one check WAIT for something and then look again --
+"spawn a level, advance past a known think deadline, and assert the thing that
+think was supposed to do".  CTF's techs were the first, found by counting them
+two seconds late.  An item's respawn is the second and it is a better one,
+because the deadline is thirty seconds rather than two and because getting there
+needs somebody to pick the item up first.
+
+Nobody has to: bots do it on their own.  So the shape of the check is a census
+that can be taken twice, and what it counts is the distinction a respawn is
+about -- an item in the world, an item taken and waiting on its own think, and
+the frame the count was taken on so the two are comparable.
+
+`sv ruleset` reports the whole world in one line and cannot answer this: an item
+that has been picked up is still `inuse`, still counted, and still at the same
+origin.  What changed is `solid`.
+=================
+*/
+void G_Svcmd_Census_f(void)
+{
+    const char *want = gi.argc() > 2 ? gi.argv(2) : NULL;
+    int spawned = 0, inworld = 0, waiting = 0;
+    size_t len;
+    int i;
+
+    if (!want || !*want) {
+        gi.cprintf(NULL, PRINT_HIGH, "usage: sv census <classname-or-prefix>\n");
+        return;
+    }
+
+    // A PREFIX, not an exact name: `sv census item_` counts every item on the
+    // map and `sv census weapon_` every weapon, which is what a question about
+    // respawns actually wants.  Asking about one classname is the narrow case
+    // and still works -- `item_health` matches only itself, because no other
+    // classname begins with it.
+    len = strlen(want);
+
+    for (i = 0; i < globals.num_edicts; i++) {
+        edict_t *e = &g_edicts[i];
+
+        if (!e->inuse || !e->classname)
+            continue;
+        if (strncmp(e->classname, want, len))
+            continue;
+
+        spawned++;
+        if (e->solid == SOLID_NOT) {
+            // Taken, and on its way back if something is going to bring it.
+            // `nextthink` is the deadline; without one it is gone for good,
+            // which is what DF_NO_ITEMS and arena's item sweep leave behind.
+            if (e->nextthink)
+                waiting++;
+        } else {
+            inworld++;
+        }
+    }
+
+    gi.cprintf(NULL, PRINT_HIGH,
+               "census %s: %d spawned, %d in world, %d waiting, frame %d\n",
+               want, spawned, inworld, waiting, level.framenum);
 }

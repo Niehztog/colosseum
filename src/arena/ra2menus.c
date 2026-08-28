@@ -313,6 +313,71 @@ menuRefreshTeamList(edict_t *ent, qmenu_t *menu, qmenu_t *item, int arg)
     return 2;
 }
 
+// R-MENU: A MENU BUILT ONCE IS A SNAPSHOT, and both lobby menus put a number
+// in one.  RA2's answer is the "Refresh List" row, which is a real answer for
+// 1999 and a poor one now: `minimumplayers` fills the pickup teams while the
+// person is still reading the list, and `inven` REOPENS the menu rather than
+// rebuilding it (R-MENU-3: closing is hiding), so a player who joined, watched
+// four bots arrive on the scoreboard and pressed TAB again saw "Players: 0"
+// against every team and no reason to believe otherwise.
+//
+// Rebuilding on each open was the other candidate and is refused: FinishMenu
+// pushes a fresh menu onto the client's queue and nothing pops the old one --
+// which is why "Refresh List" leaks a menu per press -- so binding a rebuild to
+// a key that is pressed all match long turns a bounded 1999 leak into an
+// unbounded one.  The numbers are updated in place instead, which costs no
+// allocation and makes them LIVE rather than merely fresh-on-open: MenuThink
+// already repaints every ten frames and only needs to be told the composed bar
+// is stale.
+//
+// The two row kinds are matched the two different ways their own callbacks
+// resolve them.  A team row is matched by NAME, which add_to_team makes unique,
+// because teams are created and freed while the list is open and a row's
+// position stops meaning anything.  An arena row is matched by POSITION,
+// because that is exactly what menuAddtoArena does with the row it was clicked
+// on, and because arena display names come out of the map and may repeat.
+bool RA_RefreshMenuCounts(edict_t *ent)
+{
+    qmenu_t     *node;
+    menuitem_t  *item;
+    bool        changed = false;
+    int         i, idx = 0, num;
+
+    if (!ent->client->curmenulink)
+        return false;
+
+    for (node = ((menuinfo_t *)ent->client->curmenulink->it)->items;
+         node; node = node->next) {
+        item = (menuitem_t *)node->it;
+        idx++;
+        num = -1;
+
+        if (item->select == menuAddtoTeam) {
+            for (i = 0; i < MAX_TEAMS; i++)
+                if (teams[i].it && !strcmp(TEAM(&teams[i])->name, item->text)) {
+                    num = count_queue(&teams[i]);
+                    break;
+                }
+        } else if (item->select == menuAddtoArena &&
+                   idx >= 1 && idx <= num_arenas && !arenas[idx].idarena) {
+            num = count_queue(&arenas[idx].waitingteams) +
+                  count_queue(&arenas[idx].activeteams);
+        }
+
+        // -1 is "this row carries no number", which is a pickup arena's (PT)
+        // row and every row that is not one of the two kinds above.  It is also
+        // what a team that has been freed since the list was built leaves
+        // behind, and leaving the stale count on a dead row is the honest
+        // answer: clicking it re-creates the team under that name.
+        if (num >= 0 && item->num != num) {
+            item->num = num;
+            changed = true;
+        }
+    }
+
+    return changed;
+}
+
 int
 menuChangeValue10AZ(edict_t *ent, qmenu_t *menu, qmenu_t *item, int arg)
 {
@@ -372,10 +437,12 @@ menuChangeValue(edict_t *ent, qmenu_t *menu, qmenu_t *item, int arg)
 int
 menuChangeYesNo(edict_t *ent, qmenu_t *menu, qmenu_t *item, int arg)
 {
-    if (((menuitem_t *)item->it)->value[0] == 'Y')
-        strcpy(((menuitem_t *)item->it)->value, "NO ");
+    menuitem_t  *it = (menuitem_t *)item->it;
+
+    if (it->value[0] == 'Y')
+        Q_strlcpy(it->value, "NO ", it->valuesize);
     else
-        strcpy(((menuitem_t *)item->it)->value, "YES");
+        Q_strlcpy(it->value, "YES", it->valuesize);
 
     return 1;
 }
@@ -397,7 +464,8 @@ menuChangeProtect(edict_t *ent, qmenu_t *menu, qmenu_t *item, int arg)
     if (protect > 2)
         protect = 0;
 
-    strcpy(((menuitem_t *)item->it)->value, StringForProtect(protect));
+    Q_strlcpy(((menuitem_t *)item->it)->value, StringForProtect(protect),
+              ((menuitem_t *)item->it)->valuesize);
 
     return 1;
 }
@@ -405,8 +473,12 @@ menuChangeProtect(edict_t *ent, qmenu_t *menu, qmenu_t *item, int arg)
 int
 menuChangeMap(edict_t *ent, qmenu_t *menu, qmenu_t *item, int arg)
 {
-    strcpy(((menuitem_t *)item->it)->value,
-           get_next_map(((menuitem_t *)item->it)->value));
+    // The map name comes out of arena.cfg and the block was sized by the
+    // menu's placeholder, so a long entry truncates here rather than running
+    // off the end of a TAG_LEVEL allocation (R-SEC-1).
+    Q_strlcpy(((menuitem_t *)item->it)->value,
+              get_next_map(((menuitem_t *)item->it)->value),
+              ((menuitem_t *)item->it)->valuesize);
 
     return 1;
 }
@@ -416,7 +488,7 @@ cvar_setvalue(char *name, int value)
 {
     char    buf[256];
 
-    sprintf(buf, "%d", value);
+    Q_snprintf(buf, sizeof(buf), "%d", value);
     gi.cvar_set(name, buf);
 }
 
@@ -427,6 +499,7 @@ menuApplyAdmin(edict_t *ent, qmenu_t *menu, qmenu_t *item, int arg)
     menuitem_t  *it;
     edict_t     *e;
     char        *map = NULL;
+    size_t      maplen;
 
     node = (qmenu_t *)menu->it;
 
@@ -447,8 +520,9 @@ menuApplyAdmin(edict_t *ent, qmenu_t *menu, qmenu_t *item, int arg)
 
     e = G_Spawn();
     e->classname = "target_changelevel";
-    e->map = gi.TagMalloc(strlen(map) + 1, TAG_LEVEL);
-    strcpy(e->map, map);
+    maplen = strlen(map) + 1;
+    e->map = gi.TagMalloc(maplen, TAG_LEVEL);
+    memcpy(e->map, map, maplen);
 
     BeginIntermission(e);
 
@@ -485,7 +559,8 @@ Cmd_admin_f(edict_t *ent)
         AddMenuItem(m, "Timelimit:        ", NULL, (int) timelimit->value, menuChangeValue10AZ);
         mi = AddMenuItem(m, "Mapname:          ",
                          "                                ", -1, menuChangeMap);
-        strcpy(((menuitem_t *)mi->it)->value, level.mapname);
+        Q_strlcpy(((menuitem_t *)mi->it)->value, level.mapname,
+                  ((menuitem_t *)mi->it)->valuesize);
 
         AddMenuItem(m, "", NULL, -1, NULL);
         AddMenuItem(m, "Apply", NULL, -1, menuApplyAdmin);
@@ -685,7 +760,12 @@ Cmd_arenaadmin_f(edict_t *ent, unsigned mode)
         changeyesno = NULL;
         changevalue = NULL;
 
-        vals = (int *) &arenas[arenanum].proposetime + 1;
+        // R-SEC-8: this was `(int *)&arenas[arenanum].proposetime + 1`, which
+        // takes the address of a float, reads it as int* and steps one int
+        // forward hoping to land on `proposed` -- undefined, and correct only
+        // while sizeof(float) == sizeof(int) and nothing pads between the two
+        // members.  The member it meant is nameable.
+        vals = &arenas[arenanum].proposed.playersperteam;
         live = &arenas[arenanum].playersperteam;
 
         m = CreateQMenu(ent, "Proposed Changes");
@@ -919,7 +999,18 @@ menu_centerprint(edict_t *ent, char *message)
     m = CreateQMenu(ent, "Message");
     AddMenuItem(m, "---------Continue----------", NULL, -1, menuNo);
 
+    // R-SEC-1, and R-SEC-2's kept-bug list only names half of it.  The list
+    // says `lastspace` is never reset after a wrap, which is why this buffer is
+    // 2048 bytes and the text is never compacted back to the start.  The other
+    // half is that `dst` was never bounded at all: `message` reaches here from
+    // `va()` and, through G_UseTargets, from an entity's `message` key -- so a
+    // map with a long enough string on a trigger overflowed 2048 bytes of stack
+    // under `arena`.  `bounded.py` cannot see this one: it is a hand-rolled
+    // copy loop and not one of the five names that tool bans, which is worth
+    // knowing about the check as much as about the bug.
     while ((c = *src++) != 0) {
+        if (dst >= buf + sizeof(buf) - 1)
+            break;
         *dst++ = c;
         linelen++;
 

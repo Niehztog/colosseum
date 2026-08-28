@@ -41,10 +41,6 @@ cvar_t  *goallimit;
 
 // prototypes
 
-extern void EndDMLevel(void);
-extern void ClientUserinfoChanged(edict_t *ent, char *userinfo);
-extern void SelectSpawnPoint(edict_t *ent, vec3_t origin, vec3_t angles);
-extern float PlayersRangeFromSpot(edict_t *spot);
 
 void DBall_BallDie(edict_t *self, edict_t *inflictor, edict_t *attacker, int damage, vec3_t point);
 void DBall_BallRespawn(edict_t *self);
@@ -100,7 +96,7 @@ void DBall_ClientBegin(edict_t *ent)
         if (other == ent)   // don't count the new player
             continue;
 
-        strcpy(value, Info_ValueForKey(other->client->pers.userinfo, "skin"));
+        Q_strlcpy(value, Info_ValueForKey(other->client->pers.userinfo, "skin"), sizeof(value));
         p = strchr(value, '/');
         if (p) {
             if (!strcmp(dball_team1_skin->string, value))
@@ -137,7 +133,7 @@ void DBall_SelectSpawnPoint(edict_t *ent, vec3_t origin, vec3_t angles)
     char    *spottype;
     char    skin[512];
 
-    strcpy(skin, Info_ValueForKey(ent->client->pers.userinfo, "skin"));
+    Q_strlcpy(skin, Info_ValueForKey(ent->client->pers.userinfo, "skin"), sizeof(skin));
     if (!strcmp(dball_team1_skin->string, skin))
         spottype = "dm_dball_team1_start";
     else if (!strcmp(dball_team2_skin->string, skin))
@@ -325,7 +321,7 @@ void DBall_GoalTouch(edict_t *self, edict_t *other, cplane_t *plane, csurface_t 
         else
             scorechange = self->wait;
 
-        strcpy(value, Info_ValueForKey(ent->client->pers.userinfo, "skin"));
+        Q_strlcpy(value, Info_ValueForKey(ent->client->pers.userinfo, "skin"), sizeof(value));
         p = strchr(value, '/');
         if (p) {
             if (!strcmp(dball_team1_skin->string, value)) {

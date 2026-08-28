@@ -80,6 +80,41 @@ edict_t *G_Find(edict_t *from, int fieldofs, char *match)
 
 /*
 =================
+G_SpawnPointPool
+
+How many spawn points of `classname` a random selection can actually draw from,
+which is NOT the number the map carries.
+
+R-DM-1 and R-CTF-8 both need this number and neither may guess it.  Both random
+selectors in this tree -- SelectRandomDeathmatchSpawnPoint and
+SelectCTFSpawnPoint -- find the two spots nearest a player, refuse them, and
+choose among `count - 2`; the arm that keeps both is `if (count <= 2)`, for a
+map with nothing to spare.  So a map's usable pool is two short of its count and
+the two rules that size a bot fill to a map ask for it here rather than each
+writing the loop and the subtraction (sec 7 rule 6).
+
+Arena's answer is its own -- `ArenaSpawnCount` filters by arena number, and
+SelectRandomArenaSpawnPoint refuses NOTHING: it walks every candidate on the
+side's parity and takes the first with 50 units of clearance, so a pickup arena
+seats its whole even count (R-RA-7).  Two selectors, two pools, one rule.
+=================
+*/
+int G_SpawnPointPool(char *classname)
+{
+    edict_t *spot = NULL;
+    int     count = 0;
+
+    while ((spot = G_Find(spot, FOFS(classname), classname)) != NULL)
+        count++;
+
+    if (count > 2)
+        count -= 2;
+
+    return count;
+}
+
+/*
+=================
 findradius
 
 Returns entities that have origins within a spherical area
@@ -452,9 +487,12 @@ void vectoangles2(const vec3_t value1, vec3_t angles)
 char *G_CopyString(char *in)
 {
     char    *out;
+    size_t  len = strlen(in) + 1;
 
-    out = gi.TagMalloc(strlen(in) + 1, TAG_LEVEL);
-    strcpy(out, in);
+    // The block is allocated from the source's own length, so this is a
+    // sized copy rather than an unbounded one (R-SEC-1).
+    out = gi.TagMalloc(len, TAG_LEVEL);
+    memcpy(out, in, len);
     return out;
 }
 
@@ -622,8 +660,20 @@ bool KillBox(edict_t *ent)
             AngleVectors(angle, forward, NULL, NULL);
             VectorScale(forward, 600, forward);
 
+            // *** OPPOSITE DIRECTIONS, WHICH IS THE WHOLE POINT AND WHICH THE
+            // DONOR DOES NOT DO. ***  RA2 adds the SAME vector to both bodies:
+            // 600 units per second each, along one random yaw, so the pair
+            // drifts as a pair and the distance between them never changes.
+            // Two players who drew the same spawn point are therefore still
+            // inside each other after the "push apart", which is exactly the
+            // report -- "they did not telefrag or push away each other, their
+            // bodies overlapped like siamese twins".  The telefrag underneath
+            // cannot save it either: an arena fighter is `takedamage DAMAGE_NO`
+            // until ASTATE_FIGHTING, and `!tr.ent->takedamage` is the condition
+            // for taking this branch instead of that one, so during a countdown
+            // this IS the whole mechanism.
             VectorAdd(tr.ent->velocity, forward, tr.ent->velocity);
-            VectorAdd(ent->velocity, forward, ent->velocity);
+            VectorSubtract(ent->velocity, forward, ent->velocity);
 
             tr.ent->client->resp.spawn_recheck = level.framenum + 0.5f / FRAMETIME;
             ent->client->resp.spawn_recheck = level.framenum + 0.5f / FRAMETIME;

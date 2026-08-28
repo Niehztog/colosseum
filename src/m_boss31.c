@@ -26,7 +26,6 @@ jorg
 #include "g_local.h"
 #include "m_boss31.h"
 
-extern void SP_monster_makron(edict_t *self);
 
 static int  sound_pain1;
 static int  sound_pain2;

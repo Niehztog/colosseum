@@ -181,6 +181,7 @@ void SP_func_plat2(edict_t *ent);
 void SP_func_door_secret2(edict_t *ent);
 void SP_func_force_wall(edict_t *ent);
 void SP_info_player_coop_lava(edict_t *self);
+void SP_func_illusionary(edict_t *self);
 void SP_info_teleport_destination(edict_t *self);
 void SP_trigger_teleport(edict_t *self);
 void SP_trigger_disguise(edict_t *self);
@@ -246,6 +247,16 @@ static const spawn_func_t spawn_funcs[] = {
     {"func_explosive", SP_func_explosive},
     {"func_killbox", SP_func_killbox},
 
+    // R-EXTRA-4
+    {"func_button_rotating", SP_func_button_rotating},
+
+    // R-RA-4: RA2's own brush classname.  Its SP_ function was carried into
+    // arena.c and its table row was not, so ED_CallSpawn refused the entity
+    // outright -- ported, declared, unreachable.  Latent on the shipped
+    // content: none of the 76 BSPs in the RA2 paks carries one.  Gated in
+    // g_misc.c like the other classnames a donor owns alone (R-44).
+    {"func_illusionary", SP_func_illusionary},
+
     // RAFAEL
     {"func_object_repair", SP_object_repair},
     {"rotating_light", SP_rotating_light},
@@ -261,6 +272,14 @@ static const spawn_func_t spawn_funcs[] = {
     {"trigger_elevator", SP_trigger_elevator},
     {"trigger_gravity", SP_trigger_gravity},
     {"trigger_monsterjump", SP_trigger_monsterjump},
+
+    // R-EXTRA-3's two, from the 1999 module.  Both spawn functions free their
+    // entity when their cvar is off, so the classnames stay known -- a map
+    // using them loads without "unknown classname" either way, which is what
+    // R-KEY-3's "every key any donor accepted is still accepted" is about at
+    // the classname level.
+    {"trigger_counting", SP_trigger_counting},
+    {"trigger_log", SP_trigger_log},
 
     {"target_temp_entity", SP_target_temp_entity},
     {"target_speaker", SP_target_speaker},
@@ -575,6 +594,21 @@ void ED_CallSpawn(edict_t *ent)
 
     gi.dprintf("%s doesn't have a spawn function\n", ent->classname);
     G_FreeEdict(ent);
+}
+
+// For `sv extras` (R-VER-33): is this classname in the spawn table at all?
+// R-EXTRA-3 and R-EXTRA-4 are gated at the spawn FUNCTION rather than at the
+// table, so the row is there either way and a map that uses one loads without
+// "doesn't have a spawn function" whichever way the cvar is set -- which is
+// the property worth being able to check from outside.
+bool G_SpawnFuncExists(const char *classname)
+{
+    const spawn_func_t *s;
+
+    for (s = spawn_funcs; s->name; s++)
+        if (!strcmp(s->name, classname))
+            return true;
+    return false;
 }
 
 /*
@@ -901,6 +935,25 @@ void SpawnEntities(const char *mapname, const char *entities, const char *spawnp
         // the one pointer in menustate_t that outlives its owner.
         memset(&game.clients[i].menustate, 0, sizeof(game.clients[i].menustate));
         game.clients[i].showloading = false;
+        // RA2's three, and they were the ones this loop did not clear.  The
+        // queue HEAD is in game.clients -- TAG_GAME, and it survives the free
+        // above -- while every node hanging off it was TAG_LEVEL and no longer
+        // exists.  MoveClientToIntermission nulls them on the way out of a
+        // level, so an ordinary map change arrives here with nothing to do; a
+        // console `map` runs no intermission, and close_menus() would then walk
+        // freed nodes.  `rocketarena2@28a8af7` puts it here for that reason:
+        // the free is what invalidates them, so the free is what clears them.
+        //
+        // Gated for R-VER-25, and the gate is safe rather than merely quiet:
+        // `g_ruleset` is CVAR_LATCH and G_InitRuleset() runs once per InitGame,
+        // which is also where `game.clients` is allocated -- so the ruleset
+        // cannot change between two SpawnEntities calls that share an array.
+        if (G_Ruleset() == RULESET_ARENA) {
+            game.clients[i].menuqueue.next = NULL;
+            game.clients[i].menuqueue.prev = NULL;
+            game.clients[i].curmenulink = NULL;
+            game.clients[i].selected = NULL;
+        }
     }
 
     G_FreePrecaches();
@@ -1037,6 +1090,12 @@ void SpawnEntities(const char *mapname, const char *entities, const char *spawnp
     G_FindTeams();
 
     PlayerTrail_Init();
+
+    // The stdlog's MAP and GameStart lines, which RA2 writes from the end of
+    // this function -- after arena_init(), because `level.level_name` is what
+    // it prints.
+    if (G_Ruleset() == RULESET_ARENA)
+        GSLogNewmap();
 
     // CTF's flag and tech setup, after the entities exist.  A no-op in every
     // other ruleset.

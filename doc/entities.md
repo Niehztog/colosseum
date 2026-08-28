@@ -76,3 +76,29 @@ One spawnflag note: CTF's `trigger_teleport` reads **no** spawnflags at all whil
 Ground Zero's reads four (`player_only`, `silent`, `ctf_only`, `start_on`), so
 unlike R-27's `trigger_push` there is no bit collision to resolve here — only the
 classname, and the ruleset settles that.
+
+## Phase 8: R-EXTRA's three entities
+
+**240 classnames** (`tools/counts.py`), three of them new here. All three come
+from the 1999 module, all three are gated on a cvar that is **off by default**,
+and for a spawn function "off" means the entity is freed rather than created and
+inert — an inert entity still occupies an edict slot and still shows in every
+census.
+
+The **classnames stay in `spawn_funcs[]` either way**, which is the property
+worth having: a map that uses one loads without `doesn't have a spawn function`
+whichever way the cvar is set, and `sv extras` reports that they are registered.
+
+| classname | cvar | keys | notes |
+|---|---|---|---|
+| `trigger_counting` | `g_triggercounting` | `count`, `target`, `targetname`, `style` | An intermediary for an action that takes several inputs. `style` is the door state to drive the target into when the count reaches zero: **0 is STATE_TOP and 1 is STATE_BOTTOM**, and those two numbers are part of the map contract. They are spelled out in `g_trigger.c` rather than exported from `g_func.c`, because exporting a door's internal states into a shared header to satisfy one trigger is the wrong direction |
+| `trigger_log` | `g_triggerlog` | `message` | Writes `message` into the game log the first time a client touches it, and can be re-triggered after **two frames** of not being touched. The donor wrote `level.time + FRAMETIME * 2`; this tree counts frames (R-VER-21) |
+| `func_button_rotating` | `g_rotatingbutton` | `move_angles`, `move_origin`, `speed`, `killtarget`, `style`, `dmg`, `target`, `pathtarget`, `deathtarget` | A three-position rotating button — top, middle, bottom — with a spawnflag choosing the axis (1 X, 2 Y, else Z), 4 to skip the middle position and 8 to reverse. `target` fires at the top, `pathtarget` at the bottom, `deathtarget` in the middle, and `killtarget` is used as the button's **name** in the game log rather than as a kill target |
+
+**No new spawn key.** `move_angles` and `move_origin` are already in
+`spawn_fields[]` — Xatrix's turret uses both — so the frozen key column of
+R-KEY-1 is untouched and `keycontract.py` is clean on the merged tables. The
+rotating button reads `move_angles[0..2]` as its three positions and
+`move_origin[0..2]` as the counter values it hands to a `trigger_counting`
+chain, which is why a button and a counting trigger are one feature in two
+entities.

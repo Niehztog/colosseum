@@ -102,10 +102,14 @@ PARSERS = {
     'lostref.py': _bang,
     'donorgate.py': _bang,
     'encoding.py': _bang,
+    'bounded.py': _bang,
+    'externs.py': _bang,
+    'noexec.py': _bang,
     'botabi.py': _bang,
     'dsweep.py': _bang,
     'keycontract.py': _bang,
     'slotkind.py': _bang,
+    'dupvalue.py': _bang,
     'auditsave.py': _auditsave,
     'auditems.py': _auditems,
 }
@@ -155,6 +159,15 @@ def main():
     # gates: every ruleset decision goes through the dispatch or a predicate,
     # and the monster-suppression idiom has not come back (Phase 1 exit).
     results.append(run('gates.py', ['--tree', tree], 'gates'))
+    # dupvalue: two names for one POSITION in a list something outside this tree
+    # walks (R-142).  Each donor numbered its own extra weapons from 12 because
+    # each ships a precache block with nothing after the BFG; R-CORE-2 unions the
+    # content into ONE ordered block, and three private 12s made seven weapons
+    # draw somebody else's model.  Checks the values and, separately, that
+    # WEAP_* still agrees with the block it indexes -- a family can be
+    # internally consistent and still disagree with its list.
+    results.append(run('dupvalue.py', ['--tree', tree], 'dupvalue'))
+    results.append(run('dupvalue.py', ['--selftest'], 'dupvalue/controls'))
     # units: the timer-unit contract (R-VER-21).  q2pro's frame-number conversion
     # left a field's type saying nothing about its unit, and a merged tree has a
     # failure mode the separate packs cannot: one g_local.h means one declaration
@@ -181,6 +194,24 @@ def main():
     # another donor's ruleset, which is what R-70's six sites did.
     results.append(run('donorgate.py', ['--tree', tree], 'donorgate'))
     results.append(run('donorgate.py', ['--selftest'], 'donorgate/controls'))
+    # bounded: no unbounded string copy anywhere in src/ (R-SEC-1, R-VER-30).
+    # A ban rather than a reachability judgement, because reachability is what a
+    # reviewer gets wrong: `sprintf(entry, "yv %d ", y)` reads as arithmetic
+    # until somebody adds a %s to it, and the netname three lines down was
+    # always client-controlled.
+    results.append(run('bounded.py', ['--tree', tree], 'bounded'))
+    results.append(run('bounded.py', ['--selftest'], 'bounded/controls'))
+    # externs: a .c may not declare what another .c defines, and where the tree
+    # still does (baseq2's 150-row spawn table, mostly), the declaration must
+    # agree with the definition (R-SEC-8, R-VER-31).  Its first run found
+    # Ground Zero's `Move_Calc` prototype one qualifier out since Phase 2.
+    results.append(run('externs.py', ['--tree', tree], 'externs'))
+    results.append(run('externs.py', ['--selftest'], 'externs/controls'))
+    # noexec: no socket, no process, no exit() (R-SEC-7, R-VER-32).  RA2 shipped
+    # a UDP event forwarder whose three helpers each called exit(1) from inside
+    # a game library; it is gone, and this is what keeps it gone.
+    results.append(run('noexec.py', ['--tree', tree], 'noexec'))
+    results.append(run('noexec.py', ['--selftest'], 'noexec/controls'))
     # encoding: every source file is valid UTF-8.  Trivial, and it has bitten
     # twice -- grep in a UTF-8 locale returns NOTHING for a file it cannot
     # decode, so a census can silently report zero (R-60).

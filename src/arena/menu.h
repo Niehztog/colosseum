@@ -36,6 +36,13 @@ typedef int (*menuselect_t)(edict_t *ent, qmenu_t *menu, qmenu_t *item, int arg)
 typedef struct {
     char            *text;
     char            *value;
+    // The value block is allocated from the INITIAL value's length and then
+    // overwritten in place by menuChangeYesNo, menuChangeProtect,
+    // menuChangeMap and Cmd_admin_f.  Nothing recorded how big it was, so each
+    // of those was an unbounded write into a TAG_LEVEL block sized by an
+    // unrelated string -- a map name out of arena.cfg being the reachable one
+    // (R-SEC-1).  This is that size.
+    size_t          valuesize;
     int             num;
     menuselect_t    select;
 } menuitem_t;
@@ -69,5 +76,9 @@ void        UseMenu(edict_t *ent, int arg);
 bool    MenuThink(edict_t *ent);
 // MENU_ARENA's row in G_MenuClose()'s switch (R-MENU-2a).
 void        ra_MenuClose(edict_t *ent);
+// ...and the DESTROY that row deliberately is not.  See close_menus() in
+// menu.c: under arena a close is a hide, so the one caller that is about to
+// lose the queue head has to free the queue as well.
+void        close_menus(edict_t *ent);
 
 #endif // _MENU_H

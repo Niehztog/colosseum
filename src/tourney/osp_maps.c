@@ -191,24 +191,20 @@ edict_t *NextMap(void)
 void OSP_loadMaps(void)
 {
     FILE    *f = NULL;
-    cvar_t  *gamedir;
-    cvar_t  *basedir;
     cvar_t  *mfile;
 
-    gamedir = gi.cvar("gamedir", "tourney", 0);
-    basedir = gi.cvar("basedir", ".", 0);
     {
         // No cached pointer for the default name: the literal is repeated.
         mfile = gi.cvar("map_file", "maps.txt", 0);
         map_size = 0;
 
-        if (gamedir && basedir) {
+        {
             {
                 char    path[MAX_OSPATH];
                 char    *pathptr = path;
 
-                Q_snprintf(path, sizeof(path), "%s/%s/%s", basedir->string,
-                           gamedir->string, mfile ? mfile->string : "maps.txt");
+                G_FsGamePath(path, sizeof(path),
+                             mfile ? mfile->string : "maps.txt");
 
                 f = fopen(pathptr, "r");
                 if (f) {

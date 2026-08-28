@@ -1,0 +1,4 @@
+Welcome to Colosseum.
+One library, one venue, many rulesets.
+Type "menu" for the bot menu, or
+press TAB for the arena menu.

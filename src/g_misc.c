@@ -21,7 +21,6 @@ with this program; if not, write to the Free Software Foundation, Inc.,
 #include "arena/arena.h"
 #include "tourney/osp_types.h"
 
-extern void M_WorldEffects(edict_t *ent);
 
 /*QUAKED func_group (0 0 0) ?
 Used to group brushes together just for editor convenience.
@@ -731,6 +730,25 @@ void func_wall_use(edict_t *self, edict_t *other, edict_t *activator)
         self->use = NULL;
 }
 
+/*QUAKED func_illusionary (0 .5 .8) ?
+Rocket Arena's non-solid brush: visible, walked through, never used.
+
+Arena's alone -- no other donor has the classname -- so the dispatch is
+one-sided the way SP_trigger_teleport's arena arm is, and outside arena the
+entity is freed rather than spawned.  That is exactly what happened before the
+table row existed (ED_CallSpawn frees what it cannot spawn), so adding the row
+gives arena the entity and changes nothing for the other four rulesets.
+*/
+void SP_func_illusionary(edict_t *self)
+{
+    if (G_Ruleset() == RULESET_ARENA) {
+        ra_SP_func_illusionary(self);
+        return;
+    }
+    gi.dprintf("%s doesn't have a spawn function\n", self->classname);
+    G_FreeEdict(self);
+}
+
 void SP_func_wall(edict_t *self)
 {
     self->movetype = MOVETYPE_PUSH;
@@ -1434,8 +1452,6 @@ There must be a path for it to follow once it is activated.
 "speed"     How fast the Viper should fly
 */
 
-extern void train_use(edict_t *self, edict_t *other, edict_t *activator);
-extern void func_train_find(edict_t *self);
 
 void misc_viper_use(edict_t *self, edict_t *other, edict_t *activator)
 {
@@ -1638,8 +1654,6 @@ There must be a path for it to follow once it is activated.
 "speed"     How fast it should fly
 */
 
-extern void train_use(edict_t *self, edict_t *other, edict_t *activator);
-extern void func_train_find(edict_t *self);
 
 void misc_strogg_ship_use(edict_t *self, edict_t *other, edict_t *activator)
 {
@@ -1942,7 +1956,7 @@ void func_clock_think(edict_t *self)
         if (ltime)
             Q_snprintf(self->message, CLOCK_MESSAGE_SIZE, "%2i:%02i:%02i", ltime->tm_hour, ltime->tm_min, ltime->tm_sec);
         else
-            strcpy(self->message, "00:00:00");
+            Q_strlcpy(self->message, "00:00:00", CLOCK_MESSAGE_SIZE);
     }
 
     self->enemy->message = self->message;

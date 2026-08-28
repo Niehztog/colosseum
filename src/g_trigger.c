@@ -201,6 +201,16 @@ This fixed size trigger cannot be touched, it can only be fired by other events.
 */
 void trigger_relay_use(edict_t *self, edict_t *other, edict_t *activator)
 {
+    // R-EXTRA-3: a relay in a counting chain passes a count on -- its own
+    // `style` if it has one, otherwise whatever fired it.  Off by default, so
+    // a map that does not use trigger_counting sees the relay it always had.
+    if (g_triggercounting->value) {
+        if (self->style)
+            self->count = self->style;
+        else
+            self->count = other->count;
+    }
+
     G_UseTargets(self, activator);
 }
 
@@ -719,4 +729,145 @@ void SP_trigger_monsterjump(edict_t *self)
     InitTrigger(self);
     self->touch = trigger_monsterjump_touch;
     self->movedir[2] = st.height;
+}
+
+/*
+==============================================================================
+
+trigger_log            R-EXTRA-3, from the 1999 module's TRIGGER_LOG
+
+==============================================================================
+*/
+
+/*QUAKED trigger_log (.5 .5 .5) ? nomessage
+writes a message to the log file the first time triggered
+can be retriggered after not being triggered for 0.2 seconds
+
+"message"       message to print
+*/
+
+#define TRIGGER_STATE_ACTIVE        0
+#define TRIGGER_STATE_NONACTIVE     1
+
+void trigger_log_reset(edict_t *self)
+{
+    self->count = TRIGGER_STATE_ACTIVE;
+}
+
+void trigger_log_touch(edict_t *self, edict_t *other, cplane_t *plane, csurface_t *surf)
+{
+    //only clients
+    if (!other->client)
+        return;
+
+    // R-VER-21: two frames, not `level.time + FRAMETIME * 2`.  The donor's
+    // 0.2 seconds is two frames and this tree counts frames.
+    self->nextthink = level.framenum + 2;
+    self->think = trigger_log_reset;
+
+    //if active output message
+    if (self->count == TRIGGER_STATE_ACTIVE)
+        Log_WriteTimeStamped("%s", self->message ? self->message : "");
+
+    self->count = TRIGGER_STATE_NONACTIVE;
+}
+
+void SP_trigger_log(edict_t *self)
+{
+    // R-EXTRA-3 is off by default, and for a spawn function "off" means the
+    // entity is not created rather than created and inert -- an inert trigger
+    // still occupies an edict slot and still shows in the census.
+    if (!g_triggerlog->value) {
+        G_FreeEdict(self);
+        return;
+    }
+
+    InitTrigger(self);
+
+    self->count = TRIGGER_STATE_ACTIVE;
+    self->touch = trigger_log_touch;
+}
+
+/*
+==============================================================================
+
+trigger_counting       R-EXTRA-3, from the 1999 module's TRIGGER_COUNTING
+
+==============================================================================
+*/
+
+/*QUAKED trigger_counting (.5 .5 .5) ? nomessage
+Acts as an intermediary for an action that takes multiple inputs.
+
+"count"         initial count value (default 2)
+"targetname"    doors with the same "target" field will be set in the correct state
+"style"         state the door will be set to when "count" reached zero
+                the door will be set out of this state when "count" is unequal zero
+                possible "style" values: STATE_TOP STATE_BOTTOM
+
+if the counter has counted down to zero, it will set the target into the given
+state "style"
+*/
+
+// STATE_TOP and STATE_BOTTOM are g_func.c's, and this file cannot see them.
+// The two values are part of the map contract -- a .bsp says `style 0` -- so
+// they are spelled out here with the names they have there rather than
+// exported, which would put a door's internal states in a shared header.
+#define TRIGGER_COUNT_STATE_TOP     0
+#define TRIGGER_COUNT_STATE_BOTTOM  1
+
+//other is for instance the button activating
+//other->count is used to determine to count up or down
+void trigger_counting_use(edict_t *self, edict_t *other, edict_t *activator)
+{
+    edict_t *t;
+
+    //add the count of the other
+    self->count += other->count;
+
+    if (!self->target)
+        return;
+
+    t = NULL;
+    while ((t = G_Find(t, FOFS(targetname), self->target))) {
+        //if it is another trigger counting
+        if (!Q_stricmp(t->classname, "trigger_counting")) {
+            if (self->count)
+                t->count++;
+            else
+                t->count--;
+            continue;
+        }
+
+        if (!t->use)
+            continue;
+
+        //set the door in the correct state
+        if (!self->count) {
+            if (t->moveinfo.state != self->style)
+                t->use(t, self, activator);
+        } else {
+            if (t->moveinfo.state == self->style)
+                t->use(t, self, activator);
+        }
+    }
+}
+
+void SP_trigger_counting(edict_t *self)
+{
+    if (!g_triggercounting->value) {
+        G_FreeEdict(self);
+        return;
+    }
+
+    if (!self->target)
+        gi.dprintf("trigger_counting without target\n");
+
+    if (self->style != TRIGGER_COUNT_STATE_TOP &&
+        self->style != TRIGGER_COUNT_STATE_BOTTOM) {
+        gi.dprintf("trigger_counting with invalid style\n");
+        self->style = TRIGGER_COUNT_STATE_TOP;
+    }
+
+    self->use = trigger_counting_use;
 }

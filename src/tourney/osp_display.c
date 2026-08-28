@@ -56,20 +56,17 @@ void OSP_setMOTD(void)
     // as plain statements the temp comes after every declared local instead,
     // and real's ELF puts it fourth of five.  The literal is repeated rather
     // than cached -- real's PE pushes two distinct .rdata copies.
-    cvar_t  *gamedir = gi.cvar("gamedir", "tourney", CVAR_SERVERINFO);
-    cvar_t  *basedir = gi.cvar("basedir", ".", 0);
     cvar_t  *motdfile = gi.cvar("motd_file", "motd.txt", 0);
     cvar_t  *center = gi.cvar("motd_center", "0", 0);
     int     i;
     int     c = -1;
 
-    if (gamedir && basedir) {
+    {
         char    path[MAX_OSPATH];
         char    *p = path;
 
-        Q_snprintf(path, sizeof(path), "%s/%s/%s", basedir->string,
-                   gamedir->string,
-                   motdfile ? motdfile->string : "motd.txt");
+        G_FsGamePath(path, sizeof(path),
+                     motdfile ? motdfile->string : "motd.txt");
 
         f = fopen(p, "r");
 
@@ -117,9 +114,6 @@ void OSP_setMOTD(void)
             gi.dprintf("MOTD: Couldn't open \"%s\"\n", motdfile->string);
             lines = 0;
         }
-    } else {
-        gi.dprintf("MOTD: Couldn't find \"%s\"\n", motdfile->string);
-        lines = 0;
     }
 
     if (!(int)center->value) {

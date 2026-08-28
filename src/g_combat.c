@@ -314,10 +314,11 @@ static int CheckPowerArmor(edict_t *ent, const vec3_t point, const vec3_t normal
     return save;
 }
 
-static int CheckArmor(edict_t *ent, const vec3_t point, const vec3_t normal, int damage, int te_sparks, int dflags)
+static int CheckArmor(edict_t *ent, const vec3_t point, const vec3_t normal, int damage, int te_sparks, int dflags, edict_t *attacker)
 {
     gclient_t   *client;
     int         save;
+    int         take;
     int         index;
     const gitem_t   *armor;
 
@@ -349,8 +350,27 @@ static int CheckArmor(edict_t *ent, const vec3_t point, const vec3_t normal, int
     if (!save)
         return 0;
 
-    client->pers.inventory[index] -= save;
-    SpawnDamage(te_sparks, point, normal, save);
+    take = save;
+
+    // R-ARENA-1: `armorprotect`, the armour half of RA2's friendly fire and a
+    // per-arena SETTING rather than a dmflag -- 1 exempts anyone on your team
+    // including yourself, 2 exempts a team-mate and leaves your own splash to
+    // eat your armour, which is what makes a rocket jump cost something.  The
+    // health half is in T_Damage.
+    //
+    // `save` is still returned when `take` is zeroed: the armour absorbs the
+    // hit without being spent, which is the difference between "the shot does
+    // nothing" and "the shot is free".  That is the donor's own shape.
+    if (G_Ruleset() == RULESET_ARENA && attacker &&
+        !(dflags & DAMAGE_NO_PROTECTION) && OnSameTeam(ent, attacker)) {
+        int protect = arenas[ent->client->resp.context].armorprotect;
+
+        if (protect == 1 || (protect == 2 && ent != attacker))
+            take = 0;
+    }
+
+    client->pers.inventory[index] -= take;
+    SpawnDamage(te_sparks, point, normal, take);
 
     return save;
 }
@@ -724,12 +744,34 @@ void T_Damage(edict_t *targ, edict_t *inflictor, edict_t *attacker, const vec3_t
         psave = CheckPowerArmor(targ, point, normal, take, dflags);
         take -= psave;
 
-        asave = CheckArmor(targ, point, normal, take, te_sparks, dflags);
+        asave = CheckArmor(targ, point, normal, take, te_sparks, dflags, attacker);
         take -= asave;
     }
 
     //treat cheat/powerup savings the same as armor
     asave += save;
+
+    // R-ARENA-1: `healthprotect`, the health half of RA2's friendly fire, in
+    // the donor's own position -- after the armour has had its say and before
+    // anything is taken off.  1 means nobody on your team takes health off you
+    // and OnSameTeam answers true for yourself, so that covers your own splash
+    // too; 2 exempts only a team-mate.  Both are per-arena settings from
+    // arena.cfg, defaulting to armorprotect 2 / healthprotect 1.
+    //
+    // This does NOT replace baseq2's dmflags friendly-fire arm at the top of
+    // the function (R-CORE-8): that is a different rule with a different
+    // switch, and under arena its dmflags gate is off, so the two never both
+    // fire.  meansOfDeath is rewritten rather than only `mod`, because
+    // colosseum publishes it before this point and Killed() reads the global.
+    if (G_Ruleset() == RULESET_ARENA && targ->client &&
+        !(dflags & DAMAGE_NO_PROTECTION) && OnSameTeam(targ, attacker)) {
+        int protect = arenas[targ->client->resp.context].healthprotect;
+
+        if (protect == 1 || (protect == 2 && targ != attacker))
+            return;
+        mod |= MOD_FRIENDLY_FIRE;
+        meansOfDeath = mod;
+    }
 
     // CTF resistance tech.  A no-op without it, like the strength tech above.
     take = CTFApplyResistance(targ, take);

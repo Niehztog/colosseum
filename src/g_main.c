@@ -78,14 +78,22 @@ cvar_t  *bob_roll;
 
 cvar_t  *sv_cheats;
 
-// RA2's two logging cvars (R-RA-1a, R-OSP-10).  `netlog` is the only socket
-// user left in the tree after the GameSpy SDK was dropped and defaults to
-// empty, so nothing opens one unless a server operator asks.  `logfile` is the
-// ENGINE's own console-logging cvar, re-obtained: RA2 gates its stdlog on it
-// rather than adding a second switch, which is an idiomatic re-obtain and not
-// R-COMPAT-6's collision case.
+// RA2's two logging cvars (R-RA-1a, R-OSP-10).  `netlog` named the remote host
+// its event log was forwarded to over UDP; the forwarding is gone (R-SEC-7) and
+// the name stays registered so an old config still parses (R-COMPAT-3).
+// `logfile` is the ENGINE's own console-logging cvar, re-obtained: RA2 gates
+// its stdlog on it rather than adding a second switch, which is an idiomatic
+// re-obtain and not R-COMPAT-6's collision case.
 cvar_t  *logfile;
 cvar_t  *netlog;
+
+// R-EXTRA's own switches (R-EXTRA-1, R-EXTRA-3, R-EXTRA-4).
+cvar_t  *g_gamelog;
+cvar_t  *g_clientlag;
+cvar_t  *g_observer;
+cvar_t  *g_triggercounting;
+cvar_t  *g_triggerlog;
+cvar_t  *g_rotatingbutton;
 
 // OSP Tourney's three match-state globals (R-OSP-1).  They live here because
 // the donor defines them in its g_main.c and because the match clock is read by
@@ -124,10 +132,12 @@ static void ShutdownGame(void)
     if (G_Ruleset() == RULESET_ARENA) {
         GSLogShutdown();
         RA2_Stats_Shutdown();
-#ifdef _WIN32
-        GSNetShutdown();
-#endif
     }
+
+    // R-EXTRA-1 names this by hand: the game log is closed on ShutdownGame,
+    // and it is closed for every ruleset because `g_gamelog` is not one
+    // ruleset's cvar.
+    Log_ShutDown();
 
     // R-OSP-3: both tourney logs are closed with a REASON, and the reason is
     // the console command that caused it -- `map`, `gamemap`, a `quit`, or
@@ -197,6 +207,25 @@ static void InitGame(void)
     sv_cheats = gi.cvar("cheats", "0", CVAR_SERVERINFO | CVAR_LATCH);
 
     logfile = gi.cvar("logfile", "0", CVAR_SERVERINFO);
+    // R-EXTRA-1: the 1999 module's LOGFILE, as a cvar.  A name opens the log;
+    // "" leaves it closed, which is every server that does not ask for one.
+    g_gamelog = gi.cvar("g_gamelog", "", 0);
+    // R-EXTRA-3 and R-EXTRA-4, off by default as the requirement says.  Latched:
+    // all three decide what a map spawns, so flipping one mid-level would leave
+    // half the entities on either side of the switch.
+    // R-EXTRA-2: off by default, because `lag` is a CLIENT command and a
+    // player who can ask the server to hold two seconds of their own input is
+    // asking it for memory.  Not latched: it turns a simulation on and off and
+    // nothing is spawned from it.
+    g_clientlag = gi.cvar("g_clientlag", "0", 0);
+    // R-EXTRA-6: ON by default, which is the one extra that is not off.  It is
+    // the 1999 module's own observer and the `observer` command is what a 1999
+    // config binds; under `arena` and `tourney` the ruleset's own
+    // implementation wins regardless of this cvar.
+    g_observer = gi.cvar("g_observer", "1", 0);
+    g_triggercounting = gi.cvar("g_triggercounting", "0", CVAR_LATCH);
+    g_triggerlog = gi.cvar("g_triggerlog", "0", CVAR_LATCH);
+    g_rotatingbutton = gi.cvar("g_rotatingbutton", "0", CVAR_LATCH);
     netlog = gi.cvar("netlog", "", CVAR_SERVERINFO);
     gi.cvar("gamename", GAMEVERSION, CVAR_SERVERINFO | CVAR_LATCH);
     gi.cvar("gamedate", __DATE__, CVAR_SERVERINFO | CVAR_LATCH);
@@ -286,14 +315,19 @@ static void InitGame(void)
     // are per-ruleset and only one owner may be live at a time; `hostname` and
     // `port` are the engine's own cvars, re-obtained for the log header.
     if (G_Ruleset() == RULESET_ARENA) {
-        cvar_t *publicserver;       // RA2 called this local `public`
-
         hostname = gi.cvar("hostname", "", CVAR_SERVERINFO);
         hostport = gi.cvar("port", "27910", CVAR_SERVERINFO | CVAR_NOSET);
 
-        publicserver = gi.cvar("public", "1", 0);
-        if (publicserver->value == 0)
-            gi.cvar_set("netlog", "");
+        // RA2 cleared `netlog` on a private server so the event forwarding
+        // stopped; there is no forwarding any more (R-SEC-7), so the cvar is
+        // read once to say so and the local log is unaffected.  `public` is
+        // still obtained because R-RA-2 counts it and the engine reads it.
+        gi.cvar("public", "1", 0);
+        if (netlog->string[0])
+            gi.dprintf("netlog is set to \"%s\": the UDP event forwarding it "
+                       "named was removed under R-SEC-7.  `logfile 2` still "
+                       "writes the same lines to the local log.\n",
+                       netlog->string);
 
         GSLogStartup();
         RA2_Stats_Init();
@@ -347,10 +381,6 @@ static void InitGame(void)
             game.clients[i].resp.entered = false;
         }
 
-#ifdef _WIN32
-        if (!GSNetStartup())
-            gi.cvar_set("netlog", "");
-#endif
     }
 
     globals.num_edicts = game.maxclients + 1;
@@ -369,6 +399,12 @@ static void InitGame(void)
     // `runes_enable` -- is registered by OSP_gameInit above.  See
     // G_ResolveModifiers() in g_ruleset.c for why it is a second pass.
     G_ResolveModifiers();
+
+    // R-EXTRA-1's cvar arm, after everything that might want to write to it.
+    if (g_gamelog->string[0]) {
+        Log_Open(g_gamelog->string);
+        Log_WriteTimeStamped("InitGame %s", G_RulesetName(G_Ruleset()));
+    }
 }
 
 /*

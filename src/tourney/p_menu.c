@@ -99,7 +99,7 @@ void osp_PMenu_Update(edict_t *ent)
 
     hnd = ent->client->osp_menu;
 
-    strcpy(string, "xv 32 yv 8 picn inventory ");
+    Q_strlcpy(string, "xv 32 yv 8 picn inventory ", sizeof(string));
 
     for (i = 0, p = hnd->entries; i < hnd->num; i++, p++) {
         if (!p->text || !*(p->text))
@@ -109,7 +109,8 @@ void osp_PMenu_Update(edict_t *ent)
             alt = true;
             t++;
         }
-        sprintf(string + strlen(string), "yv %d ", 32 + i * 8);
+        Q_snprintf(string + strlen(string), sizeof(string) - strlen(string),
+                   "yv %d ", 32 + i * 8);
         if (p->align == osp_PMENU_ALIGN_CENTER)
             x = 196 / 2 - strlen(t) * 4 + 60;
         else if (p->align == osp_PMENU_ALIGN_RIGHT)
@@ -117,17 +118,21 @@ void osp_PMenu_Update(edict_t *ent)
         else
             x = 60;
 
-        sprintf(string + strlen(string), "xv %d ",
-                x - ((hnd->cur == i) ? 8 : 0));
+        Q_snprintf(string + strlen(string), sizeof(string) - strlen(string),
+                   "xv %d ", x - ((hnd->cur == i) ? 8 : 0));
 
         if (hnd->cur == i && !alt)
-            sprintf(string + strlen(string), "string2 \"\x0d%s\" ", t);
+            Q_snprintf(string + strlen(string), sizeof(string) - strlen(string),
+                       "string2 \"\x0d%s\" ", t);
         else if (alt && hnd->cur != i)
-            sprintf(string + strlen(string), "string2 \"%s\" ", t);
+            Q_snprintf(string + strlen(string), sizeof(string) - strlen(string),
+                       "string2 \"%s\" ", t);
         else if (alt && hnd->cur == i)
-            sprintf(string + strlen(string), "string \"\x0d%s\" ", t);
+            Q_snprintf(string + strlen(string), sizeof(string) - strlen(string),
+                       "string \"\x0d%s\" ", t);
         else
-            sprintf(string + strlen(string), "string \"%s\" ", t);
+            Q_snprintf(string + strlen(string), sizeof(string) - strlen(string),
+                       "string \"%s\" ", t);
         alt = false;
     }
 

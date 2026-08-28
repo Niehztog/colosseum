@@ -595,6 +595,7 @@ static bool BotIndexRecord(char **table, int count, const char *what, int i, con
 {
     static bool reported[3];
     int slot = (table == modelindexes) ? 0 : (table == soundindexes) ? 1 : 2;
+    size_t len;
 
     if (!table)
         return false;
@@ -611,8 +612,9 @@ static bool BotIndexRecord(char **table, int count, const char *what, int i, con
     } //end if
     if (table[i] || !name)
         return false;
-    table[i] = newgameimport.TagMalloc(strlen(name) + 1, TAG_LEVEL);
-    strcpy(table[i], name);
+    len = strlen(name) + 1;
+    table[i] = newgameimport.TagMalloc(len, TAG_LEVEL);
+    memcpy(table[i], name, len);
     return true;
 }
 

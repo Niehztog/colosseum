@@ -517,6 +517,7 @@ extern void bq2_gunner_dodge(edict_t *, edict_t *, float, trace_t *);
 extern void bq2_infantry_dodge(edict_t *, edict_t *, float, trace_t *);
 extern void bq2_medic_dodge(edict_t *, edict_t *, float, trace_t *);
 extern void bq2_soldier_dodge(edict_t *, edict_t *, float, trace_t *);
+extern void brain_attack(edict_t *);
 extern void brain_die(edict_t *, edict_t *, edict_t *, int, vec3_t);
 extern void brain_duck(edict_t *, float);
 extern void brain_idle(edict_t *);
@@ -530,6 +531,12 @@ extern void brain_walk(edict_t *);
 extern void button_done(edict_t *);
 extern void button_killed(edict_t *, edict_t *, edict_t *, int, vec3_t);
 extern void button_return(edict_t *);
+extern void button_rotating_blocked(edict_t *, edict_t *);
+extern void button_rotating_hit_bottom(edict_t *);
+extern void button_rotating_hit_middle(edict_t *);
+extern void button_rotating_hit_top(edict_t *);
+extern void button_rotating_touch(edict_t *, edict_t *, cplane_t *, csurface_t *);
+extern void button_rotating_use(edict_t *, edict_t *, edict_t *);
 extern void button_touch(edict_t *, edict_t *, cplane_t *, csurface_t *);
 extern void button_use(edict_t *, edict_t *, edict_t *);
 extern void button_wait(edict_t *);
@@ -958,6 +965,7 @@ extern void train_use(edict_t *, edict_t *, edict_t *);
 extern void train_wait(edict_t *);
 extern void Trap_Think(edict_t *);
 extern void trigger_counter_use(edict_t *, edict_t *, edict_t *);
+extern void trigger_counting_use(edict_t *, edict_t *, edict_t *);
 extern void trigger_crosslevel_trigger_use(edict_t *, edict_t *, edict_t *);
 extern void trigger_disguise_touch(edict_t *, edict_t *, cplane_t *, csurface_t *);
 extern void trigger_disguise_use(edict_t *, edict_t *, edict_t *);
@@ -967,6 +975,8 @@ extern void trigger_enable(edict_t *, edict_t *, edict_t *);
 extern void trigger_gravity_touch(edict_t *, edict_t *, cplane_t *, csurface_t *);
 extern void trigger_gravity_use(edict_t *, edict_t *, edict_t *);
 extern void trigger_key_use(edict_t *, edict_t *, edict_t *);
+extern void trigger_log_reset(edict_t *);
+extern void trigger_log_touch(edict_t *, edict_t *, cplane_t *, csurface_t *);
 extern void trigger_monsterjump_touch(edict_t *, edict_t *, cplane_t *, csurface_t *);
 extern void trigger_push_active(edict_t *);
 extern void trigger_push_inactive(edict_t *);
@@ -1155,6 +1165,7 @@ const save_ptr_t save_ptrs[] = {
 { P_think, train_next },
 { P_think, Trap_Think },
 { P_think, trigger_elevator_init },
+{ P_think, trigger_log_reset },
 { P_think, trigger_push_active },
 { P_think, trigger_push_inactive },
 { P_think, turret_brain_link },
@@ -1167,6 +1178,7 @@ const save_ptr_t save_ptrs[] = {
 { P_think, walkmonster_start_go },
 { P_think, WidowExplode },
 { P_think, widowlegs_think },
+{ P_blocked, button_rotating_blocked },
 { P_blocked, door_blocked },
 { P_blocked, door_secret_blocked },
 { P_blocked, plat2_blocked },
@@ -1181,6 +1193,7 @@ const save_ptr_t save_ptrs[] = {
 { P_touch, bfg_touch },
 { P_touch, blaster2_touch },
 { P_touch, blaster_touch },
+{ P_touch, button_rotating_touch },
 { P_touch, button_touch },
 { P_touch, CTFDropFlagTouch },
 { P_touch, CTFGrappleTouch },
@@ -1224,12 +1237,14 @@ const save_ptr_t save_ptrs[] = {
 { P_touch, tracker_touch },
 { P_touch, trigger_disguise_touch },
 { P_touch, trigger_gravity_touch },
+{ P_touch, trigger_log_touch },
 { P_touch, trigger_monsterjump_touch },
 { P_touch, trigger_push_touch },
 { P_touch, trigger_teleport_touch },
 { P_touch, vengeance_touch },
 { P_touch, widow_gib_touch },
 { P_use, actor_use },
+{ P_use, button_rotating_use },
 { P_use, button_use },
 { P_use, commander_body_use },
 { P_use, Door_Activate },
@@ -1270,6 +1285,7 @@ const save_ptr_t save_ptrs[] = {
 { P_use, target_string_use },
 { P_use, train_use },
 { P_use, trigger_counter_use },
+{ P_use, trigger_counting_use },
 { P_use, trigger_crosslevel_trigger_use },
 { P_use, trigger_disguise_use },
 { P_use, trigger_elevator_use },
@@ -1390,6 +1406,9 @@ const save_ptr_t save_ptrs[] = {
 { P_die, widow2_die },
 { P_die, widow_die },
 { P_moveinfo_endfunc, button_done },
+{ P_moveinfo_endfunc, button_rotating_hit_bottom },
+{ P_moveinfo_endfunc, button_rotating_hit_middle },
+{ P_moveinfo_endfunc, button_rotating_hit_top },
 { P_moveinfo_endfunc, button_wait },
 { P_moveinfo_endfunc, door_hit_bottom },
 { P_moveinfo_endfunc, door_hit_top },
@@ -1975,6 +1994,7 @@ const save_ptr_t save_ptrs[] = {
 { P_monsterinfo_attack, actor_attack },
 { P_monsterinfo_attack, boss2_attack },
 { P_monsterinfo_attack, boss5_attack },
+{ P_monsterinfo_attack, brain_attack },
 { P_monsterinfo_attack, carrier_attack },
 { P_monsterinfo_attack, chick_attack },
 { P_monsterinfo_attack, fixbot_attack },

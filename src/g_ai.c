@@ -865,11 +865,18 @@ static void ai_run_slide(edict_t *self, float distance)
     // flyer (which has FL_FLY) and never for any non-flyer carrying any other
     // flag.  The jerkiness smoothing has therefore never operated.
     //
-    // Behaviour preserved, grouping made explicit.  §7 rule 2 gives the donor
-    // its own feature, and turning the clamp on would change how every Ground
-    // Zero monster sidesteps -- a gameplay change disguised as a warning fix.
-    // Recorded in doc/reconciliation.md R-30.  Found by clang; gcc is silent.
-    if ((!self->flags) & FL_FLY)
+    // R-30 kept the broken grouping, with the reason that turning the clamp on
+    // would change how every Ground Zero monster sidesteps -- a gameplay change
+    // disguised as a warning fix, which §7 rule 2 refuses.  **That decision is
+    // reversed here (R-148), because the donor has made it**: `q2pro@21381ffa`
+    // writes `!(self->flags & FL_FLY)` on the mission-packs branch, so taking it
+    // is following the donor rather than overruling it, and §7 rule 7 makes a
+    // Q2PRO fix cumulative.  The clamp now does what its own comment says --
+    // "clamp maximum sideways move for non flyers" -- and Ground Zero's
+    // sidestep smoothing operates for the first time since 1998.
+    //
+    // Found by clang; gcc is silent.
+    if (!(self->flags & FL_FLY))
         distance = min(distance, MAX_SIDESTEP);
     if (M_walkmove(self, self->ideal_yaw + ofs, distance))
         return;

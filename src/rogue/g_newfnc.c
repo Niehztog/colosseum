@@ -19,9 +19,6 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 */
 #include "g_local.h"
 
-//void plat_CalcMove (edict_t *ent, vec3_t dest, void(*func)(edict_t*));
-void Move_Calc(edict_t *ent, vec3_t dest, void(*func)(edict_t*));
-
 void fd_secret_move1(edict_t *self);
 void fd_secret_move2(edict_t *self);
 void fd_secret_move3(edict_t *self);

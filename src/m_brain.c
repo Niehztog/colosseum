@@ -917,7 +917,17 @@ void SP_monster_brain(edict_t *self)
     }
 //  self->monsterinfo.dodge = brain_dodge;
 // pmm
-//  self->monsterinfo.attack = brain_attack;
+    // *** The xatrix arm of the same gate. ***  baseq2 and Ground Zero both
+    // ship this line COMMENTED OUT -- id never gave the brain a ranged attack
+    // -- and The Reckoning turns it on: `self->monsterinfo.attack =
+    // brain_attack` in its own SP_monster_brain, with brain_attack and its two
+    // move tables (brain_move_attack3, brain_move_attack4) existing only there.
+    // All three were carried into this file and the assignment was not, so a
+    // brain under `xatrix 1` was a melee-only monster with fifty lines of
+    // unreachable ranged attack behind it.  Literal assignment inside an `if`,
+    // not a ternary, for the reason the dodge gate above gives.
+    if (self->content_flavour & CONTENT_XATRIX)
+        self->monsterinfo.attack = brain_attack;
     self->monsterinfo.melee = brain_melee;
     self->monsterinfo.sight = brain_sight;
     self->monsterinfo.search = brain_search;

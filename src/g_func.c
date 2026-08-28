@@ -2806,3 +2806,231 @@ void SP_object_repair(edict_t *ent)
         ent->delay = 1.0;
 
 }
+
+/*
+==============================================================================
+
+func_button_rotating   R-EXTRA-4, from the 1999 module's FUNC_BUTTON_ROTATING
+
+==============================================================================
+*/
+
+//spawnflags
+#define BUTTON_X_AXIS           1
+#define BUTTON_Y_AXIS           2
+#define BUTTON_SKIPMIDDLE       4
+#define BUTTON_REVERSE          8
+
+//ent->style value (the state of the button)
+#define BUTTON_TOP              0
+#define BUTTON_BOTTOM           1
+#define BUTTON_MIDDLE           2
+#define BUTTON_UP               3
+#define BUTTON_DOWN             4
+
+/*QUAKED func_button_rotating (0 .5 .8) ? X_AXIS Y_AXIS SKIPMIDDLE REVERSE
+This is a rotating button.
+
+BUTTON_X_AXIS           x axis
+BUTTON_Y_AXIS           y axis
+BUTTON_SKIPMIDDLE       skip middle
+BUTTON_REVERSE          reverse direction
+
+"move_angles"       top, bottom and middle position
+"move_origin"       counter values
+"speed"             speed at which the button moves
+"killtarget"        name of the button
+"style"             position to start in
+"dmg"               damage to inflict when blocked (default 2)
+"target"            target activated in top position
+"pathtarget"        target activated in bottom position
+"deathtarget"       target activated in middle position
+*/
+
+void button_rotating_hit_top(edict_t *self)
+{
+    self->style = BUTTON_TOP;
+    self->count = self->move_origin[BUTTON_TOP];
+    //activate targets
+    G_UseTargets(self, self->activator);
+    //write to log
+    Log_WriteTimeStamped("%s   %d", self->killtarget, self->style);
+}
+
+void button_rotating_hit_bottom(edict_t *self)
+{
+    char *targ;
+
+    self->style = BUTTON_BOTTOM;
+    self->count = self->move_origin[BUTTON_BOTTOM];
+    //activate targets
+    targ = self->target;
+    self->target = self->pathtarget;
+    G_UseTargets(self, self->activator);
+    self->target = targ;
+    //write to log
+    Log_WriteTimeStamped("%s   %d", self->killtarget, self->style);
+}
+
+void button_rotating_hit_middle(edict_t *self)
+{
+    char *targ;
+
+    self->style = BUTTON_MIDDLE;
+    self->count = self->move_origin[BUTTON_MIDDLE];
+    //activate targets
+    targ = self->target;
+    self->target = self->deathtarget;
+    G_UseTargets(self, self->activator);
+    self->target = targ;
+    //write to log
+    Log_WriteTimeStamped("%s   %d", self->killtarget, self->style);
+}
+
+void button_rotating_up(edict_t *self)
+{
+    //if going up already
+    if (self->style == BUTTON_UP)
+        return;
+    //must be in bottom state to go up
+    if (self->style != BUTTON_BOTTOM)
+        return;
+
+    //moveinfo.end_angles = top angle
+    VectorScale(self->movedir, self->move_angles[BUTTON_TOP], self->moveinfo.end_angles);
+    AngleMove_Calc(self, button_rotating_hit_top);
+    //moving up now
+    self->style = BUTTON_UP;
+}
+
+void button_rotating_down(edict_t *self)
+{
+    //if going down already
+    if (self->style == BUTTON_DOWN)
+        return;
+    //can't go down in bottom state
+    if (self->style == BUTTON_BOTTOM)
+        return;
+
+    if (self->style == BUTTON_TOP && !(self->spawnflags & BUTTON_SKIPMIDDLE)) {
+        //moveinfo.end_angles = middle angle
+        VectorScale(self->movedir, self->move_angles[BUTTON_MIDDLE], self->moveinfo.end_angles);
+        AngleMove_Calc(self, button_rotating_hit_middle);
+    } else {
+        //moveinfo.end_angles = bottom angle
+        VectorScale(self->movedir, self->move_angles[BUTTON_BOTTOM], self->moveinfo.end_angles);
+        AngleMove_Calc(self, button_rotating_hit_bottom);
+    }
+    //moving down now
+    self->style = BUTTON_DOWN;
+}
+
+void button_rotating_use(edict_t *self, edict_t *other, edict_t *activator)
+{
+    self->activator = activator;
+    //move to the next state if appropriate
+    if (self->style == BUTTON_TOP)
+        button_rotating_down(self);
+    else if (self->style == BUTTON_MIDDLE)
+        button_rotating_down(self);
+    else if (self->style == BUTTON_BOTTOM)
+        button_rotating_up(self);
+}
+
+void button_rotating_touch(edict_t *self, edict_t *other, cplane_t *plane, csurface_t *surf)
+{
+    //only clients may activate the button
+    if (!other->client)
+        return;
+
+    button_rotating_use(self, other, other);
+}
+
+void button_rotating_blocked(edict_t *self, edict_t *other)
+{
+    //if not a monster or a client
+    if (!(other->svflags & SVF_MONSTER) && (!other->client)) {
+        // give it a chance to go away on it's own terms (like gibs)
+        T_Damage(other, self, self, vec3_origin, other->s.origin, vec3_origin, 100000, 1, 0, MOD_CRUSH);
+        // if it's still there, nuke it.  The donor tested `other` -- which is
+        // never null here -- where every other blocked handler in this file
+        // tests `other->inuse`, which is what T_Damage can actually change.
+        if (other->inuse)
+            BecomeExplosion1(other);
+        return;
+    }
+    //damage the monster or client
+    T_Damage(other, self, self, vec3_origin, other->s.origin, vec3_origin, self->dmg, 1, 0, MOD_CRUSH);
+}
+
+void SP_func_button_rotating(edict_t *ent)
+{
+    // R-EXTRA-4's cvar.  A spawn function that is switched off frees its
+    // entity rather than leaving an inert one in the census.
+    if (!g_rotatingbutton->value) {
+        G_FreeEdict(ent);
+        return;
+    }
+
+    VectorClear(ent->s.angles);
+
+    // set the axis of rotation
+    VectorClear(ent->movedir);
+    if (ent->spawnflags & BUTTON_X_AXIS)
+        ent->movedir[2] = 1.0f;
+    else if (ent->spawnflags & BUTTON_Y_AXIS)
+        ent->movedir[0] = 1.0f;
+    else // Z_AXIS
+        ent->movedir[1] = 1.0f;
+
+    //negate axis if button is moving reversed
+    if (ent->spawnflags & BUTTON_REVERSE)
+        VectorNegate(ent->movedir, ent->movedir);
+
+    ent->movetype = MOVETYPE_PUSH;
+    ent->solid = SOLID_BSP;
+    gi.setmodel(ent, ent->model);
+
+    ent->blocked = button_rotating_blocked;
+    ent->use = button_rotating_use;
+
+    if (!ent->killtarget)
+        ent->killtarget = "unknown";
+
+    if (!ent->speed)
+        ent->speed = 100;
+    if (!ent->accel)
+        ent->accel = ent->speed;
+    if (!ent->decel)
+        ent->decel = ent->speed;
+
+    if (ent->dmg < 0)
+        ent->dmg = 0;
+
+    //position the button starts in
+    if (ent->style != BUTTON_BOTTOM && ent->style != BUTTON_MIDDLE)
+        ent->style = BUTTON_TOP;
+
+    //start angle of the button
+    VectorScale(ent->movedir, ent->move_angles[ent->style], ent->s.angles);
+    //called when button is touched
+    ent->touch = button_rotating_touch;
+
+    ent->moveinfo.state = STATE_UP;     //always STATE_UP
+    ent->moveinfo.speed = ent->speed;
+    ent->moveinfo.accel = ent->accel;
+    ent->moveinfo.decel = ent->decel;
+    ent->moveinfo.wait = ent->wait;
+    //the origin stays the same, the button is only rotating
+    VectorCopy(ent->s.origin, ent->moveinfo.start_origin);
+    VectorCopy(ent->s.origin, ent->moveinfo.end_origin);
+    //start angles are always zero
+    VectorClear(ent->moveinfo.start_angles);
+    //end_angles will hold the next angle position of the button
+    VectorClear(ent->moveinfo.end_angles);
+
+    if (ent->spawnflags & 16)
+        ent->s.effects |= EF_ANIM_ALL;
+
+    gi.linkentity(ent);
+}

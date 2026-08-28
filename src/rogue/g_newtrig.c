@@ -28,7 +28,6 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #define TELEPORT_CTF_ONLY       4
 #define TELEPORT_START_ON       8
 
-extern void TeleportEffect(vec3_t origin);
 
 /*QUAKED info_teleport_destination (.5 .5 .5) (-16 -16 -24) (16 16 32)
 Destination marker for a teleporter.
@@ -82,7 +81,7 @@ void trigger_teleport_touch(edict_t *self, edict_t *other, cplane_t *plane, csur
     // clear the velocity and hold them in place briefly
     VectorClear(other->velocity);
     if (other->client) {
-        other->client->ps.pmove.pm_time = 160 >> 3;     // hold time
+        other->client->ps.pmove.pm_time = 160 >> PM_TIME_SHIFT;   // hold time
         other->client->ps.pmove.pm_flags |= PMF_TIME_TELEPORT;
 
         // draw the teleport splash at source and on the player

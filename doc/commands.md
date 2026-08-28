@@ -23,7 +23,7 @@ tools/counts.py --list commands
 | command | what it does |
 |---|---|
 | `sv slots` | Reports the active ruleset's resolved stat-slot map (slot, kind, logical id), every row the map declares that resolution *dropped* and why, and the composed statusbar with its byte count. R-OSP-7/7a's counterpart to `sv ruleset`: a slot number that exists only inside the library cannot be checked from outside it |
-| `sv ruleset` | Reports the resolved ruleset, content layers, modifiers, every predicate's answer, the legacy `deathmatch`/`coop` values, and an entity census split into live monsters, corpses and gibs. Self-checking: names any live monster present under a ruleset that forbids them. R-VER-18, and R-VER-2's boot matrix depends on it. **1.23 adds two lines**, `bots` and `botplace`: the bot census with its slot list, and where each bot ended up in the running ruleset's own terms — CTF team, arena and roster, or tourney entry and ready state. `FL_BOT` and `FL_BOTCLIENT` are counted separately on purpose (R-CORE-14). Both print under every ruleset that accepts bots, including when there are none |
+| `sv ruleset` | Reports the resolved ruleset, content layers, modifiers, every predicate's answer, the legacy `deathmatch`/`coop` values, and an entity census split into live monsters, corpses and gibs. Self-checking: names any live monster present under a ruleset that forbids them. R-VER-18, and R-VER-2's boot matrix depends on it. **1.23 adds two lines**, `bots` and `botplace`: the bot census with its slot list, and where each bot ended up in the running ruleset's own terms — CTF team, arena and roster, or tourney entry and ready state. `FL_BOT` and `FL_BOTCLIENT` are counted separately on purpose (R-CORE-14). Both print under every ruleset that accepts bots, including when there are none. **1.34 adds a third, `botfill`, and 1.35 gives it a row under every ruleset**: the target in force, and where it came from -- an arena's `playersperteam` or spawn count (R-RA-7), ctf's three spawn pools with the map's number printed beside the clamped one (R-CTF-8), dm's pool (R-DM-1), the flat `minimumplayers` / `bots_minplayers` where the switch is off, and under `tourney` the fact that it has no such switch and why. The target is COMPUTED every tick rather than stored, so this is the only place it can be read back from (R-VER-19) |
 
 ## Phase 3: Threewave CTF client commands
 
@@ -114,8 +114,34 @@ are console-only regardless, because they dump tables at the server.
 | `inventory` | console | `itemlist[]` by name and index |
 | `botlibdump` | console | one block per loaded library, its path, its user count and the clients using it. R-VER-3 reads this |
 | `clientdump` | console | every client slot: free, human, or bot with its library. R-VER-3 reads this too |
+| `botinv` | console | R-141's instrument: per bot, its arena and round state, the weapon it has chosen, and the inventory **as the brain reads it** beside the client's own. A `brain` ammo row that disagrees with the `game` row under it is an index-space defect. `hold`, `asked` and `dropped` are R-140's: whether the fire gate is closed right now, how many AI frames asked to shoot while the round was not being fought, and how many of those the gate took away — a gap between the last two is a shot that left during a countdown |
 
 `invnext`, `invprev` and `invuse` gain a `MENU_BOT` arm rather than new
 commands, so the help screen's "your inventory key to select" becomes true —
 the donor drove the cursor from `forwardmove`/`sidemove` alone, and that is
 still wired (R-MENU-4).
+
+## Phase 8: R-EXTRA's commands, and three diagnostics
+
+**104 client commands** (`tools/counts.py`).  The figure counts every literal the
+dispatchers compare against, so the two `sv` diagnostics added since it last read
+102 -- `arenadump` (1.30) and `botinv` (1.31) -- are in it.
+
+| command | who | what |
+|---|---|---|
+| `observer` | client | R-EXTRA-6. Toggles the Gladiator observer under `dm` and `sp`. **Under `ctf` this name is Threewave's** and stays Threewave's — it drops the flag, drops the tech, resets the score and opens the join menu, none of which the Gladiator toggle knows about (`reconciliation.md` R-116) |
+| `autocam` | client | R-EXTRA-6. The camera picks its own subject and cuts between players like a spectator camera |
+| `chasecam` | client | R-EXTRA-6. Follow one player from behind; jump cycles to the next |
+| `cyclecam` | client | R-EXTRA-6. Next subject |
+| `setcam <name>` | client | R-EXTRA-6. Watch a named player |
+| `camfixed` | client | R-EXTRA-6. Fix or free the chase camera's offset |
+| `camname` | client | R-EXTRA-6. Show or hide the tracked player's name and score |
+| `observerhelp` | client | R-EXTRA-6. The seven above, listed |
+| `lag <ms>` | client | R-EXTRA-2. Simulate this much lag on **your own** input, 0..2000. Says so and does nothing when `g_clientlag` is 0 |
+| `lagvariance <ms>` | client | R-EXTRA-2. How much the simulated lag wanders each second, 0..2000 |
+| `sv openlog <name>` | console | R-EXTRA-1. Opens `<gamedir>/<name>`. The name may not contain a path — the donor took the argument as one, which let `sv openlog ../../anything` write outside the game directory |
+| `sv closelog` | console | R-EXTRA-1 |
+| `sv writelog <text>` | console | R-EXTRA-1. **The whole line**, not `gi.argv(2)`'s first word, and passed as an argument rather than as a format string — the donor passed it as the format, so `sv writelog %n` wrote through a stack pointer |
+| `sv extras` | console | R-VER-33. One line per R-EXTRA requirement, each a **measurement** rather than a restatement of the cvar: whether the log is open and where, the lag pool's size, whether the three classnames are in the spawn table, how many itemlist rows carry a `weapmodel`, and which observer implementation the running ruleset uses |
+| `sv census <classname-or-prefix>` | console | R-VER-20. How many entities of that class are spawned, in the world, and taken-and-waiting on their own think, with the frame the count was taken on. A prefix, so `sv census weapon_` answers about every weapon on the map. `sv ruleset` cannot: an item that has been picked up is still `inuse`, still counted and still at the same origin — what changed is `solid` |
+| `sv botperf [reset]` | console | R-BOT-23. Frames measured, mean and worst cost of the bot section of `G_RunFrame` in microseconds, and the budget. `reset` starts a fresh window so a map load and thirty-two connects are not averaged into the steady state |

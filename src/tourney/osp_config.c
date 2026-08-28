@@ -57,16 +57,14 @@ void OSP_configLoad(void)
     // "serverconfigs.txt" address between `list` and `cdefault` in real's
     // frame.  Written as plain assignments the temp comes after every
     // declared local instead, and the three slots rotate.
-    cvar_t  *gamedir = gi.cvar("gamedir", "tourney", 0);
-    cvar_t  *basedir = gi.cvar("basedir", ".", 0);
     cvar_t  *list = gi.cvar("vote_config_list", "serverconfigs.txt", 0);
     cvar_t  *cdefault = gi.cvar("vote_config_default", "0", 0);
     cvar_t  *cdefname = gi.cvar("vote_config_defaultname", "default", 0);
     conf_size = 0;
 
-    if (gamedir && basedir) {
-        Q_snprintf(path, sizeof(path), "%s/%s/%s", basedir->string,
-                   gamedir->string, list ? list->string : "serverconfigs.txt");
+    {
+        G_FsGamePath(path, sizeof(path),
+                     list ? list->string : "serverconfigs.txt");
 
         f = fopen(path, "r");
         if (f) {
@@ -95,8 +93,7 @@ void OSP_configLoad(void)
                         Q_strlcpy(conf_info[i], p, sizeof(conf_info[i]));
                     }
 
-                    Q_snprintf(path, sizeof(path), "%s/%s/%s", basedir->string,
-                               gamedir->string, line);
+                    G_FsGamePath(path, sizeof(path), line);
                     if (OSP_configFileExists(path))
                         Q_strlcpy(conf_name[i], line, sizeof(conf_name[i]));
                     else
@@ -123,9 +120,7 @@ void OSP_configLoad(void)
 
                 if ((int)cdefault->value && cdefname->string &&
                     strcmp(cdefname->string, "default")) {
-                    Q_snprintf(path, sizeof(path), "%s/%s/%s",
-                               basedir->string, gamedir->string,
-                               cdefname->string);
+                    G_FsGamePath(path, sizeof(path), cdefname->string);
 
                     if (OSP_configFileExists(path))
                         gi.dprintf("** Default config is: %s\n",

@@ -54,6 +54,46 @@ CPU_LINUX32 = i386
 CPU_WIN32   = x86
 CPU_WIN64   = x86_64
 
+# ---------------------------------------------------------------- game API
+#
+# R-ENG-1a.  Which Quake II game ABI the library exports.  Composes with every
+# target above: `make API=old`, `make windows API=old`, `make everything API=old`.
+#
+#   new   GAME_API_VERSION_NEW (3302), gclient_new_t / pmove_new_t, 64 stats.
+#         THE DEFAULT and the shipped configuration (R-ENG-1) -- an unqualified
+#         `make` is identical to what it was before this switch existed.
+#   old   GAME_API_VERSION_OLD (3), gclient_old_t / pmove_old_t, 32 stats.  The
+#         classic id ABI, for a 1997-vintage engine or any Q2PRO built without
+#         USE_NEW_GAME_API.
+#
+# THE BUILD DIRECTORIES DIVERGE, and that is not tidiness.  The switch changes
+# player_state_t, pmove_state_t and gclient_t -- struct layouts, not just a
+# version number -- so an object from one setting linked against an object from
+# the other reads every field at the wrong offset AND LINKS CLEANLY.  That is
+# the R-48 failure the -MMD -MP note below describes, except that header
+# dependencies cannot catch this one: no header changed, so `make API=old` in a
+# tree built as `new` would recompile nothing at all.  Separate BUILDDIRs make
+# the two physically incapable of meeting; -MMD -MP still covers everything
+# within one of them.
+#
+# The name of the artifact does NOT change.  The engine looks for
+# game<CPU><suffix> and nothing else, so both settings must produce that name --
+# which is the other reason they cannot share a directory.
+API ?= new
+
+ifeq ($(API),new)
+API_CFLAGS =
+API_SUFFIX =
+else
+ifeq ($(API),old)
+API_CFLAGS = -DUSE_NEW_GAME_API=0
+API_SUFFIX = -oldapi
+else
+$(error API must be 'new' (default, GAME_API_VERSION 3302) or 'old' \
+(GAME_API_VERSION 3), not '$(API)')
+endif
+endif
+
 # ---------------------------------------------------------------- flags
 
 INCLUDES = -I. -Iinc -Isrc
@@ -69,7 +109,7 @@ INCLUDES = -I. -Iinc -Isrc
 # symptom looked like memory corruption in game code and cost an hour of
 # bisecting before the build was suspected (doc/reconciliation.md R-48).
 BASE_CFLAGS = -DHAVE_CONFIG_H $(INCLUDES) -std=gnu99 -MMD -MP \
-	-fno-strict-aliasing -fwrapv -fvisibility=hidden
+	-fno-strict-aliasing -fwrapv -fvisibility=hidden $(API_CFLAGS)
 
 # R-BUILD-2 / R-SEC-9.  -Wall -Wextra, no casts to silence the
 # __attribute__((format)) annotations Q2PRO puts on the game import table, and
@@ -181,10 +221,18 @@ ELF_SHLIBLDFLAGS = -shared -Wl,--no-undefined
 # __USE_MINGW_ANSI_STDIO makes MinGW's printf take the C99 length modifiers the
 # format attributes are checked against.
 PE_CFLAGS       = -D__USE_MINGW_ANSI_STDIO=1
-# -lws2_32: src/arena/gslog.c forwards the RA2 event log over UDP when `netlog`
-# is set, and on Windows that is winsock rather than libc.  It is the only
-# socket user in the tree (R-RA-1a), and the ELF side needs no extra library.
-PE_LDFLAGS      = -lm -lws2_32 -static-libgcc
+# No -lws2_32 any more: src/arena/gslog.c's UDP event forwarding was the tree's
+# only socket user and R-SEC-7 does not allow it, so nothing links winsock.
+#
+# -Bstatic -lssp: the stack protector's runtime, linked IN rather than imported.
+# `-fstack-protector-strong` makes gcc add an implicit `-lssp`, and on mingw the
+# link prefers `libssp.dll.a` over `libssp.a` -- so the shipped DLL declared
+# `libssp-0.dll` as an import and would not load on a machine without it.  A
+# game DLL that needs a compiler runtime beside it is not shippable, and the
+# answer is not to drop the hardening (R-SEC-6 forbids exactly that): the static
+# archive is right there in the toolchain.  -Bdynamic is restored immediately so
+# nothing after this line is affected.
+PE_LDFLAGS      = -Wl,-Bstatic -lssp -Wl,-Bdynamic -lm -static-libgcc
 PE_SHLIBCFLAGS  =
 PE_SHLIBLDFLAGS = -shared
 
@@ -232,18 +280,18 @@ TOURNEY_SRC = \
 BOT_SRC = \
 	bot/bl_botcfg.c bot/bl_cmd.c bot/bl_debug.c bot/bl_main.c \
 	bot/bl_redirgi.c bot/bl_spawn.c \
-	bot/p_botmenu.c bot/p_menulib.c
+	bot/p_botmenu.c bot/p_menulib.c bot/p_observer.c
 
 GAME_SRC = \
 	g_ai.c g_chase.c g_cmds.c g_combat.c g_func.c g_items.c g_main.c \
 	g_misc.c g_monster.c g_phys.c g_ptrs.c g_save.c g_spawn.c g_svcmds.c \
-	g_ruleset.c g_stats.c g_fs.c \
+	g_ruleset.c g_stats.c g_fs.c g_log.c \
 	g_target.c g_trigger.c g_turret.c g_utils.c g_weapon.c \
 	m_actor.c m_berserk.c m_boss2.c m_boss3.c m_boss31.c m_boss32.c \
 	m_brain.c m_chick.c m_flipper.c m_float.c m_flyer.c m_gladiator.c \
 	m_gunner.c m_hover.c m_infantry.c m_insane.c m_medic.c m_move.c \
 	m_mutant.c m_parasite.c m_soldier.c m_supertank.c m_tank.c \
-	p_client.c p_hud.c p_trail.c p_view.c p_weapon.c \
+	p_client.c p_hud.c p_lag.c p_trail.c p_view.c p_weapon.c \
 	shared/m_flash.c shared/shared.c \
 	\
 	ctf/g_ctf.c ctf/p_menu.c \
@@ -273,44 +321,60 @@ TARGET = $(BUILDDIR)/game$(CPU).$(SHLIBEXT)
 # ---------------------------------------------------------------- goals
 
 .PHONY: all everything native linux64 linux32 win32 win64 windows \
-	check check-ptrs check-audits clean distclean help
+	oldapi bothapis check check-ptrs check-audits clean distclean help
 
 all: native
 
 native:
-	$(MAKE) _build BUILDDIR=debug          CC=$(CC_NATIVE)  CPU=$(CPU_NATIVE) \
+	$(MAKE) _build BUILDDIR=debug$(API_SUFFIX)          CC=$(CC_NATIVE)  CPU=$(CPU_NATIVE) \
 		SHLIBEXT=so  CFLAGS="$(DEBUG_CFLAGS) $(ELF_CFLAGS)"   KIND=ELF
-	$(MAKE) _build BUILDDIR=release        CC=$(CC_NATIVE)  CPU=$(CPU_NATIVE) \
+	$(MAKE) _build BUILDDIR=release$(API_SUFFIX)        CC=$(CC_NATIVE)  CPU=$(CPU_NATIVE) \
 		SHLIBEXT=so  CFLAGS="$(NATIVE_RELEASE_CFLAGS) $(ELF_CFLAGS)" KIND=ELF
 
 linux64:
-	$(MAKE) _build BUILDDIR=debug-linux64   CC=$(CC_LINUX64) CPU=$(CPU_LINUX64) \
+	$(MAKE) _build BUILDDIR=debug-linux64$(API_SUFFIX)   CC=$(CC_LINUX64) CPU=$(CPU_LINUX64) \
 		SHLIBEXT=so  CFLAGS="$(DEBUG_CFLAGS) $(ELF_CFLAGS)"   KIND=ELF
-	$(MAKE) _build BUILDDIR=release-linux64 CC=$(CC_LINUX64) CPU=$(CPU_LINUX64) \
+	$(MAKE) _build BUILDDIR=release-linux64$(API_SUFFIX) CC=$(CC_LINUX64) CPU=$(CPU_LINUX64) \
 		SHLIBEXT=so  CFLAGS="$(RELEASE_CFLAGS) $(ELF_CFLAGS)" KIND=ELF
 
 linux32:
-	$(MAKE) _build BUILDDIR=debug-linux32   CC=$(CC_LINUX32) CPU=$(CPU_LINUX32) \
+	$(MAKE) _build BUILDDIR=debug-linux32$(API_SUFFIX)   CC=$(CC_LINUX32) CPU=$(CPU_LINUX32) \
 		SHLIBEXT=so  CFLAGS="$(DEBUG_CFLAGS) $(ELF_CFLAGS)"   KIND=ELF
-	$(MAKE) _build BUILDDIR=release-linux32 CC=$(CC_LINUX32) CPU=$(CPU_LINUX32) \
+	$(MAKE) _build BUILDDIR=release-linux32$(API_SUFFIX) CC=$(CC_LINUX32) CPU=$(CPU_LINUX32) \
 		SHLIBEXT=so  CFLAGS="$(RELEASE_CFLAGS) $(ELF_CFLAGS)" KIND=ELF
 
 win32:
-	$(MAKE) _build BUILDDIR=debug-win32     CC=$(CC_WIN32)   CPU=$(CPU_WIN32) \
+	$(MAKE) _build BUILDDIR=debug-win32$(API_SUFFIX)     CC=$(CC_WIN32)   CPU=$(CPU_WIN32) \
 		SHLIBEXT=dll CFLAGS="$(DEBUG_CFLAGS) $(PE_CFLAGS)"    KIND=PE
-	$(MAKE) _build BUILDDIR=release-win32   CC=$(CC_WIN32)   CPU=$(CPU_WIN32) \
+	$(MAKE) _build BUILDDIR=release-win32$(API_SUFFIX)   CC=$(CC_WIN32)   CPU=$(CPU_WIN32) \
 		SHLIBEXT=dll CFLAGS="$(RELEASE_CFLAGS) $(PE_CFLAGS)"  KIND=PE
 
 win64:
-	$(MAKE) _build BUILDDIR=debug-win64     CC=$(CC_WIN64)   CPU=$(CPU_WIN64) \
+	$(MAKE) _build BUILDDIR=debug-win64$(API_SUFFIX)     CC=$(CC_WIN64)   CPU=$(CPU_WIN64) \
 		SHLIBEXT=dll CFLAGS="$(DEBUG_CFLAGS) $(PE_CFLAGS)"    KIND=PE
-	$(MAKE) _build BUILDDIR=release-win64   CC=$(CC_WIN64)   CPU=$(CPU_WIN64) \
+	$(MAKE) _build BUILDDIR=release-win64$(API_SUFFIX)   CC=$(CC_WIN64)   CPU=$(CPU_WIN64) \
 		SHLIBEXT=dll CFLAGS="$(RELEASE_CFLAGS) $(PE_CFLAGS)"  KIND=PE
 
 windows: win32 win64
 
 # R-BUILD-1 / R-VER-8: every gating target of R-BUILD-5, debug and release.
 everything: native linux64 linux32 win32 win64
+
+# R-ENG-1a, spelled as a target because `API=old` on a command line is easy to
+# forget and easy to misread in a build log.  The recursion re-enters this file
+# with API set, so it composes the same way the variable does: `make oldapi`
+# is the native pair, `make oldapi GOAL=everything` is all five.
+GOAL ?= native
+
+oldapi:
+	$(MAKE) $(GOAL) API=old
+
+# Both settings of R-ENG-1a, which is what "the old API still builds" has to
+# mean to be worth claiming.  Serial rather than a prerequisite list: the two
+# recursions must not interleave their `check` runs (see check-ptrs).
+bothapis:
+	$(MAKE) $(GOAL) API=new
+	$(MAKE) $(GOAL) API=old
 
 # ---------------------------------------------------------------- build
 
@@ -322,8 +386,16 @@ _build: check
 	$(MAKE) $(TARGET) BUILDDIR=$(BUILDDIR) CC=$(CC) CPU=$(CPU) \
 		SHLIBEXT=$(SHLIBEXT) CFLAGS="$(CFLAGS)" KIND=$(KIND)
 
+# R-SEC-6a: a PE artifact is checked for what it IMPORTS the moment it is
+# linked.  The failure it catches is invisible from a Linux host -- the DLL
+# links, the build is clean, and nothing here can load it to find out that it
+# wanted `libssp-0.dll` beside it.  In the build rather than on request, for the
+# same reason the audits are (R-TOOL-3).
 $(TARGET): $(OBJS)
 	$(CC) $(CFLAGS) $($(KIND)_SHLIBLDFLAGS) -o $@ $(OBJS) $($(KIND)_LDFLAGS)
+ifeq ($(KIND),PE)
+	@$(SHELL) tools/pedeps.sh $@
+endif
 
 $(BUILDDIR)/%.o: src/%.c
 	$(CC) $(CFLAGS) $($(KIND)_SHLIBCFLAGS) -DCPUSTRING='"$(CPU)"' -o $@ -c $<
@@ -375,10 +447,15 @@ check-audits:
 
 # ---------------------------------------------------------------- housekeeping
 
+# Both API settings' directories, unconditionally -- `make clean` must not
+# depend on which API the caller happened to name, or the stale half survives a
+# clean and gets linked later.
+BUILDDIRS = debug release debug-linux64 release-linux64 \
+	debug-linux32 release-linux32 debug-win32 release-win32 \
+	debug-win64 release-win64
+
 clean:
-	-rm -rf debug release debug-linux64 release-linux64 \
-		debug-linux32 release-linux32 debug-win32 release-win32 \
-		debug-win64 release-win64
+	-rm -rf $(BUILDDIRS) $(addsuffix -oldapi,$(BUILDDIRS))
 
 distclean: clean
 	-rm -f src/.g_ptrs.gen
@@ -395,3 +472,15 @@ help:
 	@echo "  check       the audits and the g_ptrs.c freshness check only"
 	@echo
 	@echo "This host builds all five and can execute only 'native' (R-BUILD-6)."
+	@echo
+	@echo "Game ABI (R-ENG-1a) -- API=new is the default and the shipped one:"
+	@echo "  API=new     GAME_API_VERSION 3302, gclient_new_t/pmove_new_t, 64 stats"
+	@echo "  API=old     GAME_API_VERSION 3, gclient_old_t/pmove_old_t, 32 stats"
+	@echo "  oldapi      shorthand for 'native API=old'; GOAL=<target> to widen it"
+	@echo "  bothapis    the named GOAL (default native) at both settings"
+	@echo
+	@echo "API=old builds into <dir>-oldapi, because the two settings differ in"
+	@echo "STRUCT LAYOUT and mixed objects would link cleanly and run wrong."
+	@echo "Under API=old, ctf drops the second powerup timer: its slots are"
+	@echo "32/33 and the old player_state_t holds 32 (R-OSP-7 clause 6)."
+	@echo "Now: API=$(API), so BUILDDIRs are '<dir>$(API_SUFFIX)'."

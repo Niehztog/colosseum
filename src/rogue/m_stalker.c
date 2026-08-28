@@ -54,8 +54,6 @@ static bool stalker_ok_to_transition(edict_t *self);
 #define STALKER_ON_CEILING(ent)  ( ent->gravityVector[2] > 0 ? 1 : 0 )
 
 //extern bool SV_StepDirection (edict_t *ent, float yaw, float dist);
-extern bool SV_PointCloseEnough(edict_t *ent, vec3_t goal, float dist);
-extern void drawbbox(edict_t *self);
 
 //=========================
 //=========================

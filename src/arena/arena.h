@@ -25,6 +25,9 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #ifndef G_ARENA_H
 #define G_ARENA_H
 
+// offsetof, for the layout assertions below (R-SEC-8).
+#include <stddef.h>
+
 #define MAX_ARENAS          32
 #define MAX_TEAMS           256
 #define MAX_ARENA_SKINS     7
@@ -53,6 +56,9 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 // g_stats.h's map now, as SID_RA_LINEPOSITION and SID_RA_ID_VIEW, along with
 // the eight RA2 kept in its own g_local.h (R-OSP-7 clause 3).
 
+// The block add_to_team() copies a name into.  It was a bare 100 at the
+// allocation and an unbounded sprintf at the fill (R-SEC-1).
+#define ARENA_TEAMNAME_SIZE     100
 #define MAX_STATUS_TEAMS        2
 #define MAX_STATUS_MEMBERS      4
 
@@ -130,6 +136,106 @@ typedef struct arena_settings_s {
     int     scorebydamage;
     int     changed;
 } arena_settings_t;
+
+// R-SEC-8: `arena_settings_t` is addressed BY INDEX.  `ra2menus.c` reads and
+// writes it as `int settings[42]` -- settings[2] is the weapon mask,
+// settings[17] the armour protection, settings[41] the changed flag -- and
+// `arena_t` carries a second, inline copy of the same 42 members that
+// `arena.c` and `ra2menus.c` memcpy across with `sizeof(arena_settings_t)`.
+// Both are assumptions about layout that no compiler was checking, and the
+// class is the one that bit RA2 after its own port: a qboolean -> bool
+// retype shrank this struct from 168 bytes to 96 while `ra2menus.c` still
+// punned it as int[42], putting four writes outside `arena_t`.
+//
+// So the layout is pinned rather than trusted.  A member inserted, removed,
+// reordered or retyped now fails the build on the line that names it,
+// instead of silently moving every index after it.
+_Static_assert(sizeof(arena_settings_t) == 42 * sizeof(int),
+               "arena_settings_t is read as int[42] by ra2menus.c");
+_Static_assert(offsetof(arena_settings_t, playersperteam) == 0 * sizeof(int),
+               "arena_settings_t.playersperteam is index 0");
+_Static_assert(offsetof(arena_settings_t, rounds) == 1 * sizeof(int),
+               "arena_settings_t.rounds is index 1");
+_Static_assert(offsetof(arena_settings_t, weapons) == 2 * sizeof(int),
+               "arena_settings_t.weapons is index 2");
+_Static_assert(offsetof(arena_settings_t, armor) == 3 * sizeof(int),
+               "arena_settings_t.armor is index 3");
+_Static_assert(offsetof(arena_settings_t, health) == 4 * sizeof(int),
+               "arena_settings_t.health is index 4");
+_Static_assert(offsetof(arena_settings_t, minping) == 5 * sizeof(int),
+               "arena_settings_t.minping is index 5");
+_Static_assert(offsetof(arena_settings_t, maxping) == 6 * sizeof(int),
+               "arena_settings_t.maxping is index 6");
+_Static_assert(offsetof(arena_settings_t, rocket_speed) == 7 * sizeof(int),
+               "arena_settings_t.rocket_speed is index 7");
+_Static_assert(offsetof(arena_settings_t, shells) == 8 * sizeof(int),
+               "arena_settings_t.shells is index 8");
+_Static_assert(offsetof(arena_settings_t, bullets) == 9 * sizeof(int),
+               "arena_settings_t.bullets is index 9");
+_Static_assert(offsetof(arena_settings_t, slugs) == 10 * sizeof(int),
+               "arena_settings_t.slugs is index 10");
+_Static_assert(offsetof(arena_settings_t, grenades) == 11 * sizeof(int),
+               "arena_settings_t.grenades is index 11");
+_Static_assert(offsetof(arena_settings_t, rockets) == 12 * sizeof(int),
+               "arena_settings_t.rockets is index 12");
+_Static_assert(offsetof(arena_settings_t, cells) == 13 * sizeof(int),
+               "arena_settings_t.cells is index 13");
+_Static_assert(offsetof(arena_settings_t, startdelay) == 14 * sizeof(int),
+               "arena_settings_t.startdelay is index 14");
+_Static_assert(offsetof(arena_settings_t, fastswitch) == 15 * sizeof(int),
+               "arena_settings_t.fastswitch is index 15");
+_Static_assert(offsetof(arena_settings_t, armorprotect) == 16 * sizeof(int),
+               "arena_settings_t.armorprotect is index 16");
+_Static_assert(offsetof(arena_settings_t, healthprotect) == 17 * sizeof(int),
+               "arena_settings_t.healthprotect is index 17");
+_Static_assert(offsetof(arena_settings_t, fallingdamage) == 18 * sizeof(int),
+               "arena_settings_t.fallingdamage is index 18");
+_Static_assert(offsetof(arena_settings_t, allow_voting_armor) == 19 * sizeof(int),
+               "arena_settings_t.allow_voting_armor is index 19");
+_Static_assert(offsetof(arena_settings_t, allow_voting_health) == 20 * sizeof(int),
+               "arena_settings_t.allow_voting_health is index 20");
+_Static_assert(offsetof(arena_settings_t, allow_voting_minping) == 21 * sizeof(int),
+               "arena_settings_t.allow_voting_minping is index 21");
+_Static_assert(offsetof(arena_settings_t, allow_voting_maxping) == 22 * sizeof(int),
+               "arena_settings_t.allow_voting_maxping is index 22");
+_Static_assert(offsetof(arena_settings_t, allow_voting_playersperteam) == 23 * sizeof(int),
+               "arena_settings_t.allow_voting_playersperteam is index 23");
+_Static_assert(offsetof(arena_settings_t, allow_voting_rounds) == 24 * sizeof(int),
+               "arena_settings_t.allow_voting_rounds is index 24");
+_Static_assert(offsetof(arena_settings_t, allow_voting_maxteams) == 25 * sizeof(int),
+               "arena_settings_t.allow_voting_maxteams is index 25");
+_Static_assert(offsetof(arena_settings_t, allow_voting_armorprotect) == 26 * sizeof(int),
+               "arena_settings_t.allow_voting_armorprotect is index 26");
+_Static_assert(offsetof(arena_settings_t, allow_voting_healthprotect) == 27 * sizeof(int),
+               "arena_settings_t.allow_voting_healthprotect is index 27");
+_Static_assert(offsetof(arena_settings_t, allow_voting_shotgun) == 28 * sizeof(int),
+               "arena_settings_t.allow_voting_shotgun is index 28");
+_Static_assert(offsetof(arena_settings_t, allow_voting_supershotgun) == 29 * sizeof(int),
+               "arena_settings_t.allow_voting_supershotgun is index 29");
+_Static_assert(offsetof(arena_settings_t, allow_voting_machinegun) == 30 * sizeof(int),
+               "arena_settings_t.allow_voting_machinegun is index 30");
+_Static_assert(offsetof(arena_settings_t, allow_voting_chaingun) == 31 * sizeof(int),
+               "arena_settings_t.allow_voting_chaingun is index 31");
+_Static_assert(offsetof(arena_settings_t, allow_voting_grenadelauncher) == 32 * sizeof(int),
+               "arena_settings_t.allow_voting_grenadelauncher is index 32");
+_Static_assert(offsetof(arena_settings_t, allow_voting_rocketlauncher) == 33 * sizeof(int),
+               "arena_settings_t.allow_voting_rocketlauncher is index 33");
+_Static_assert(offsetof(arena_settings_t, allow_voting_hyperblaster) == 34 * sizeof(int),
+               "arena_settings_t.allow_voting_hyperblaster is index 34");
+_Static_assert(offsetof(arena_settings_t, allow_voting_railgun) == 35 * sizeof(int),
+               "arena_settings_t.allow_voting_railgun is index 35");
+_Static_assert(offsetof(arena_settings_t, allow_voting_bfg) == 36 * sizeof(int),
+               "arena_settings_t.allow_voting_bfg is index 36");
+_Static_assert(offsetof(arena_settings_t, allow_voting_fallingdamage) == 37 * sizeof(int),
+               "arena_settings_t.allow_voting_fallingdamage is index 37");
+_Static_assert(offsetof(arena_settings_t, locked) == 38 * sizeof(int),
+               "arena_settings_t.locked is index 38");
+_Static_assert(offsetof(arena_settings_t, competition) == 39 * sizeof(int),
+               "arena_settings_t.competition is index 39");
+_Static_assert(offsetof(arena_settings_t, scorebydamage) == 40 * sizeof(int),
+               "arena_settings_t.scorebydamage is index 40");
+_Static_assert(offsetof(arena_settings_t, changed) == 41 * sizeof(int),
+               "arena_settings_t.changed is index 41");
 
 typedef struct arena_s {
     int         numteams;
@@ -216,6 +322,19 @@ typedef struct arena_s {
     struct ra2_round_s  *stats;     // NULL when statsfile is off
 } arena_t;
 
+// The second half of the same contract: `arena_t` repeats those 42 members
+// inline, from `playersperteam` to `changed`, and both arena.c and ra2menus.c
+// copy a whole `arena_settings_t` over that run with memcpy.  If the run and
+// the struct ever differ in extent the copy writes past `changed` and into
+// `proposetime` -- so the extent is pinned too, measured from the first member
+// of the run to the field that follows it.
+_Static_assert(offsetof(arena_t, proposetime) - offsetof(arena_t, playersperteam)
+               == sizeof(arena_settings_t),
+               "arena_t's inline settings run must match arena_settings_t");
+_Static_assert(offsetof(arena_t, changed) - offsetof(arena_t, playersperteam)
+               == offsetof(arena_settings_t, changed),
+               "arena_t's inline settings run must match arena_settings_t");
+
 extern  int         votetries_setting;
 extern  bool    allow_grapple;
 extern  bool    broken;
@@ -231,6 +350,8 @@ extern  cvar_t      *admincode;
 // R-RA-5, re-expressed against RA2's queue rather than Gladiator's own arena.
 extern  cvar_t      *ra_playercycle;
 extern  cvar_t      *ra_botcycle;
+// R-RA-7: the bot count follows the arena's own size instead of the server's.
+extern  cvar_t      *ra_botfill;
 
 extern  char        *teamskins[MAX_ARENA_SKINS];
 extern  char        *vwepmodels[4];
@@ -249,6 +370,8 @@ int         count_queue(qmenu_t *head);
 int         count_players_queue(qmenu_t *head);
 
 void        set_damage(int arenanum, int state);
+bool        RA_RoundFighting(edict_t *ent);
+bool        RA_HoldFire(edict_t *ent);
 void        give_ammo(edict_t *ent);
 
 team_t      *add_to_team(edict_t *ent, char *teamname);
@@ -256,8 +379,17 @@ char        *RA_NewTeamName(edict_t *ent);
 void        RA_BotJoinArena(edict_t *ent);
 void        remove_from_team(edict_t *ent);
 
-edict_t     *SelectRandomArenaSpawnPoint(char *classn, int arenanum, int side);
-edict_t     *SelectFarthestArenaSpawnPoint(char *classn, int arenanum);
+edict_t     *SelectRandomArenaSpawnPoint(char *classn, int arenanum, int side, edict_t *ignore);
+edict_t     *SelectFarthestArenaSpawnPoint(char *classn, int arenanum, edict_t *ignore);
+
+// R-RA-7.  The four the bot layer asks for, and `sv arenadump`/`sv ruleset`
+// report; see the block above RA_BotFillArena() in arena.c for why the answer
+// comes from `arena.cfg` for one kind of arena and from the map for the other.
+int         RA_BotFillArena(void);
+int         RA_BotFillTarget(int arenanum);
+void        RA_BotFillNoMore(int achieved);
+int         RA_ArenaPlayers(int arenanum, int *bots);
+char        *RA_ArenaBotName(int arenanum);
 
 void        track_SetStats(edict_t *ent);
 void        eyecam_think(edict_t *ent, usercmd_t *ucmd);
@@ -294,6 +426,7 @@ int         fight_done(int arenanum);
 void        CTFSetIDView(edict_t *ent);
 void        UpdateStatusBars(int arenanum);
 void        check_telefrag(int arenanum);
+void        G_Svcmd_ArenaDump_f(void);
 
 void        start_voting(edict_t *proposer, int arenanum);
 void        check_voting(int arenanum);
@@ -307,7 +440,7 @@ void        Cmd_menuhelp_f(edict_t *ent);
 void        list_keys(edict_t *ent);
 void        print_map_loop(edict_t *ent);
 
-void        SP_func_illusionary(edict_t *ent);
+void        ra_SP_func_illusionary(edict_t *ent);
 
 char        *getarenaname(int arenanum);
 char        *get_next_map(char *current);        // maploop.c
@@ -330,12 +463,9 @@ void        RA_ScoreboardMessage(edict_t *ent, edict_t *killer);
 void        arena_init(edict_t *wsent);
 void        GSLogStartup(void);
 void        GSLogShutdown(void);
-#ifdef _WIN32
-bool        GSNetStartup(void);
-void        GSNetShutdown(void);
-#endif
 void        menu_centerprint(edict_t *ent, char *message);
 int         menuRefreshTeamList(edict_t *ent, qmenu_t *menu, qmenu_t *item, int arg);
+bool        RA_RefreshMenuCounts(edict_t *ent);
 
 void        motd_menu(edict_t *ent);
 
@@ -346,10 +476,6 @@ void        GSLogNewmap(void);
 void        GSLogEnter(edict_t *ent);
 void        GSLogExit(edict_t *ent);
 void        GSLogDeath(edict_t *self, edict_t *inflictor, edict_t *attacker);
-#ifdef _WIN32
-bool        GSNetStartup(void);
-void        GSNetShutdown(void);
-#endif
 
 
 #endif // G_ARENA_H

@@ -392,6 +392,21 @@ bool BotCmd(const char *cmd, edict_t *ent, int server)
     {
         BotDumpInventory();
     } //end else if
+    else if (server && Q_stricmp(cmd, "botperf") == 0)
+    {
+        //R-BOT-23's measurement.  An argument of "reset" starts a new window,
+        //so a script can discard the frames a map load and 32 connects cost
+        //and measure only the steady state.
+        if (gi.argc() > 2 && !Q_stricmp(gi.argv(2), "reset"))
+        {
+            BotPerfReset();
+            gi.dprintf("botperf reset\n");
+        } //end if
+        else
+        {
+            BotPerfReport();
+        } //end else
+    } //end else if
     else if (server && Q_stricmp(cmd, "botlibdump") == 0)
     {
         BotLibraryDump();
@@ -399,6 +414,11 @@ bool BotCmd(const char *cmd, edict_t *ent, int server)
     else if (server && Q_stricmp(cmd, "clientdump") == 0)
     {
         BotClientDump();
+    } //end else if
+    else if (server && Q_stricmp(cmd, "botinv") == 0)
+    {
+        //R-141's instrument: the inventory as the BRAIN reads it.
+        BotInventoryDump();
     } //end else if
     else if (ent && Q_stricmp(cmd, "bbox") == 0)
     {

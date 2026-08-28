@@ -40,19 +40,14 @@ void OSP_loadPlayers(char *filename)
 {
     char    pathbuf[MAX_OSPATH];
     FILE    *f = NULL;
-    cvar_t  *gamedir;
-    cvar_t  *basedir;
     cvar_t  *pbmode;
     int     res;
 
-    gamedir = gi.cvar("gamedir", "tourney", 0);
-    basedir = gi.cvar("basedir", ".", 0);
     pbmode = gi.cvar("player_ban", "0", 0);
     num_names = 0;
 
-    if (gamedir && basedir) {
-        if (Q_snprintf(pathbuf, sizeof(pathbuf), "%s/%s/%s", basedir->string,
-                       gamedir->string, filename) >= sizeof(pathbuf)) {
+    {
+        if (!G_FsGamePath(pathbuf, sizeof(pathbuf), filename)) {
             gi.dprintf("\nPlayer list path too long, no players loaded.\n\n");
             return;
         }

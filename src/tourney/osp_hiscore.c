@@ -217,19 +217,14 @@ void OSP_loadHighScores(void)
     char    dir[MAX_OSPATH];
     int     i;
     FILE    *f = NULL;
-    cvar_t  *gamedir;
-    cvar_t  *basedir;
     cvar_t  *port;
     cvar_t  *hsdir;
 
-    gamedir = gi.cvar("gamedir", "tourney", 0);
-    basedir = gi.cvar("basedir", ".", 0);
     port = gi.cvar("port", "27910", 0);
     hsdir = gi.cvar("client_highscoredir", "highscores", 0);
 
-    if (gamedir && basedir) {
-        Q_snprintf(dir, sizeof(dir), "%s/%s", basedir->string,
-                   gamedir->string);
+    {
+        Q_snprintf(dir, sizeof(dir), "%s/%s", G_FsBaseDir(), G_FsGameDir());
         if (Q_snprintf(file, sizeof(file), "%s/%s/%d/%s", dir, hsdir->string,
                        (int)port->value, level.mapname) >= sizeof(file)) {
             gi.dprintf("High score path too long.\n");
@@ -283,19 +278,14 @@ void OSP_writeHighScores(void)
     char    dir[MAX_OSPATH];
     int     i;
     FILE    *f = NULL;
-    cvar_t  *gamedir;
-    cvar_t  *basedir;
     cvar_t  *port;
     cvar_t  *hsdir;
 
-    gamedir = gi.cvar("gamedir", "tourney", 0);
-    basedir = gi.cvar("basedir", ".", 0);
     port = gi.cvar("port", "27910", 0);
     hsdir = gi.cvar("client_highscoredir", "highscores", 0);
 
-    if (gamedir && basedir) {
-        Q_snprintf(dir, sizeof(dir), "%s/%s", basedir->string,
-                   gamedir->string);
+    {
+        Q_snprintf(dir, sizeof(dir), "%s/%s", G_FsBaseDir(), G_FsGameDir());
         if (Q_snprintf(file, sizeof(file), "%s/%s/%d/%s", dir, hsdir->string,
                        (int)port->value, level.mapname) >= sizeof(file)) {
             gi.dprintf("High score path too long.\n");

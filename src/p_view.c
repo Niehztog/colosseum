@@ -17,6 +17,7 @@ with this program; if not, write to the Free Software Foundation, Inc.,
 */
 
 #include "g_local.h"
+#include "bot/p_observer.h"
 #include "bot/p_menulib.h"
 #include "bot/bl_debug.h"
 #include "tourney/osp_hooks.h"
@@ -187,6 +188,19 @@ static void P_DamageFeedback(edict_t *player)
     client->damage_knockback = 0;
 }
 
+// R-EXTRA-6: is arena.c driving this client's view?
+//
+// TRACKCAM and EYECAM place the camera and set its angles from the player being
+// watched, which makes three things about this client not its own any more: its
+// position, its screen blend, and -- this one -- the view kick.  The predicate
+// was written out three times; naming it is what stops the fourth copy drifting
+// from the other three.
+static bool RA_CameraObserver(edict_t *ent)
+{
+    return (G_Ruleset() == RULESET_ARENA && ent->client &&
+            ent->client->resp.track_target && !ent->client->resp.fightstate);
+}
+
 /*
 ===============
 SV_CalcViewOffset
@@ -216,8 +230,26 @@ static void SV_CalcViewOffset(edict_t *ent)
     // base angles
     angles = ent->client->ps.kick_angles;
 
-    // if dead, fix the angle and don't add any kick
-    if (ent->deadflag) {
+    // R-EXTRA-6: nothing kicks an arena camera.
+    //
+    // The run and bob terms below are computed from ent->velocity, and
+    // track_think() parks the whole camera-to-goal offset there every frame --
+    // `velocity = (goal - origin) * 10`, which at 0.1s a frame is "arrive next
+    // frame", except that a client edict gets no physics and so never arrives.
+    // The leftover is hundreds of units per second of standing velocity, and
+    // run_roll turns it into ps.kick_angles[ROLL], which the client ADDS to the
+    // view: turn the mouse and the horizon tilts, further the faster you turn.
+    // Measured at 7 degrees of roll over one slow circle, and kick_angles are a
+    // signed char at quarter-degree steps, so it saturates at 32.
+    //
+    // The camera has no weapon, takes no damage and does not fall, so every
+    // other term in this branch is already zero for it; clearing the lot says
+    // what is meant -- the view angles are the ones arena.c chose -- instead of
+    // subtracting the two that happen to be non-zero today.
+    if (RA_CameraObserver(ent)) {
+        VectorClear(angles);
+    } else if (ent->deadflag) {
+        // if dead, fix the angle and don't add any kick
         VectorClear(angles);
 
         if (ent->flags & FL_SAM_RAIMI) {
@@ -291,8 +323,11 @@ static void SV_CalcViewOffset(edict_t *ent)
     v[2] -= ratio * ent->client->fall_value * 0.4f;
 
     // add bob height
-
-    bob = bobfracsin * xyspeed * bob_up->value;
+    //
+    // Zero for the arena camera, and for the same reason its kick angles are:
+    // `xyspeed` there is the standing chase velocity, not motion, so the term
+    // is a constant six-unit lift that changes whenever the mouse does.
+    bob = RA_CameraObserver(ent) ? 0 : bobfracsin * xyspeed * bob_up->value;
     if (bob > 6)
         bob = 6;
     //gi.DebugGraph (bob *2, 255);
@@ -1023,8 +1058,7 @@ void ClientEndServerFrame(edict_t *ent)
     // R-EXTRA-6: an arena observer in TRACKCAM or EYECAM has its view driven by
     // arena.c from the tracked player, so its own body position must not be
     // written over the top of it.
-    if (G_Ruleset() != RULESET_ARENA ||
-        !ent->client->resp.track_target || ent->client->resp.fightstate) {
+    if (!RA_CameraObserver(ent)) {
         for (i = 0; i < 3; i++) {
             current_client->ps.pmove.origin[i] = COORD2SHORT(ent->s.origin[i]);
             current_client->ps.pmove.velocity[i] = COORD2SHORT(ent->velocity[i]);
@@ -1119,8 +1153,7 @@ void ClientEndServerFrame(edict_t *ent)
     // accurately determined
     // FIXME: with client prediction, the contents
     // should be determined by the client
-    if (G_Ruleset() == RULESET_ARENA &&
-        ent->client->resp.track_target && !ent->client->resp.fightstate) {
+    if (RA_CameraObserver(ent)) {
         // EYECAM: arena.c has copied the tracked player's blend in already, so
         // recomputing it from this client's own contents would undo that.
         ent->client->ps.blend[0] = ent->client->ps.blend[1] =
@@ -1270,13 +1303,16 @@ void ClientEndServerFrame(edict_t *ent)
     // if the scoreboard is up, update it.  `scoremode` is RA2's replacement for
     // baseq2's `showscores` bool and the merged struct keeps both (sec 7 rule
     // 3), so this asks whichever field the running ruleset writes.
-    if ((G_Ruleset() == RULESET_ARENA ? ent->client->scoremode != 0
-                                      : ent->client->showscores) &&
-        !(level.framenum & 31)) {
+    if (G_ScoreboardUp(ent) && !(level.framenum & 31)) {
         // The menu shares the layout channel with the scoreboard -- which is
         // exactly why every engine sets showscores when it opens (R-MENU-2a) --
-        // so the owner decides which of the two is redrawn.
-        if (G_MenuActive(ent)) {
+        // so the owner decides which of the two is redrawn.  MENU_ARENA is the
+        // exception and does not contend: it draws by overwriting CS_STATUSBAR
+        // for the one client (arena/menu.c SendMenu), on its own cadence, out
+        // of MenuThink() above.  Treating it as a layout owner here suppressed
+        // the arena board's 32-frame redraw for as long as the observer menu
+        // was up, which is all the time.
+        if (G_MenuActive(ent) && ent->client->menu_owner != MENU_ARENA) {
             if (ent->client->menu_owner == MENU_CTF)
                 ctf_PMenu_Do_Update(ent);
             ent->client->menudirty = false;
@@ -1285,5 +1321,27 @@ void ClientEndServerFrame(edict_t *ent)
             G_ScoreboardMessage(ent, ent->enemy);
         }
         gi.unicast(ent, false);
+    }
+
+    // R-EXTRA-6: an observer watching somebody else gets that player's HUD, so
+    // the ammo and armour counters belong to who is on screen.  Only the first
+    // thirteen stats: everything above them is the layout and the scoreboard,
+    // which are this client's own (the donor's comment, and it is right).
+    //
+    // The two-second wait is the donor's too, and its reason is recorded there:
+    // copying the stats of a player who has just respawned makes the client
+    // print "Can't find pic:" for the icons the new inventory has not indexed
+    // yet.  `respawn_framenum` is the frame-number spelling of the donor's
+    // `respawn_time` (R-VER-21), so the wait is 2 * BASE_FRAMERATE frames.
+    if ((ent->flags & FL_OBSERVER) && ent->client->camera.ent &&
+        ent->client->camera.ent != ent) {
+        edict_t *cam = ent->client->camera.ent;
+
+        if (cam->inuse && cam->client &&
+            cam->client->respawn_framenum < level.framenum - 2 * BASE_FRAMERATE) {
+            memcpy(ent->client->ps.stats, cam->client->ps.stats,
+                   13 * sizeof(ent->client->ps.stats[0]));
+            ent->client->pickup_msg_framenum = cam->client->pickup_msg_framenum;
+        }
     }
 }

@@ -53,7 +53,6 @@ static void gekk_swim(edict_t *self);
 static void gekk_jump_takeoff(edict_t *self);
 static void gekk_jump_takeoff2(edict_t *self);
 static void gekk_check_landing(edict_t *self);
-extern void gekk_check_landing2(edict_t *self);
 static void gekk_stop_skid(edict_t *self);
 
 static void water_to_land(edict_t *self);

@@ -114,6 +114,47 @@ against the brain's 1228 and the brain's own `memcpy` read the inventory sixteen
 slots out of place. A contract array whose bound follows one side's engine is not
 a contract. `doc/reconciliation.md` R-100.
 
+## Item indices — the DATA half of the contract (R-141, 1.31)
+
+The two halves above are about bytes: how big a struct is and where its members
+sit. `bot_updateclient_t.inventory` passes both and was still wrong, because a
+256-int array agreed on at both ends says nothing about what any one of its
+slots MEANS — and the brain has a very definite opinion. Its numbering is
+`inv.h` out of the 1999 asset pak, where **slot 10 is the Machinegun and slot 19
+is Bullets**, and three separate data files are written against it:
+
+| botfile | field | what it indexes |
+|---|---|---|
+| `weapons.c` | `weaponindex`, `ammoindex` | "do I own this weapon, and do I have ammo for it" |
+| `items.c` | `index` | which slot a pickup in the world fills |
+| `bots/<char>_w.c`, `_i.c` | every `switch(INVENTORY_*)` | the fuzzy weight of a weapon or a goal |
+
+So the numbering is not the brain's private business. It is contract carried as
+data, and the game has to speak it.
+
+`inv.h` is baseq2's itemlist with Gladiator's additions appended. Colosseum's
+itemlist is five donors merged into one array (R-CORE-2): it agrees for the
+first six rows and diverges at the seventh, where `weapon_grapple` sits and the
+Blaster used to. Everything after is off by one or more, so a straight memcpy
+handed the brain an inventory reading "one bullet, no rockets, no cells" to a
+fighter carrying 200, 50 and 150 — and `fw_weap.c` zeroes the weight of any
+weapon whose ammo test fails. Of a nine-weapon RA2 loadout the brain could see
+six, and the Railgun only by accident: slot 16 lands on
+`weapon_grenadelauncher`, so an arena that grants the GL grants the brain its
+Railgun too. Which of the six a bot then settles on is an accident of that
+accident, which is why "every bot uses the same one or two weapons" is the
+symptom and the character file is not what is talking.
+
+`BotFillInventory()` in `src/bot/bl_main.c` translates, one named slot at a
+time, resolved through `FindItemByClassname()` rather than written out as
+numbers: the game's numbering is the side that moves. Two ranges are
+deliberately not written — `INVENTORY_HEALTH` (41), which the brain fills from
+`stats[STAT_HEALTH]`, and everything from `ENEMY_HORIZONTAL_DIST` (200) up,
+which `BotUpdateInventory`/`BotUpdateBattleInventory` derive after the copy
+lands. `sv botinv` prints the brain's slots and the client's own inventory on
+adjacent lines, which is the only instrument that can see this: `sv inventory`
+prints the game's itemlist, and the game's itemlist was never wrong.
+
 ## Struct sizes — the layout half of the contract
 
 Every struct here crosses the library boundary, so both sides must agree on its

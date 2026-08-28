@@ -1137,6 +1137,12 @@ void Touch_Item(edict_t *ent, edict_t *other, cplane_t *plane, csurface_t *surf)
         return;     // dead people can't pickup
     if (!ent->item->pickup)
         return;     // not a grabbable item?
+    // R-EXTRA-6: an observer picks nothing up.  Structural today -- an observer
+    // is SOLID_NOT and MOVETYPE_NOCLIP, and ClientThink does not run
+    // G_TouchTriggers for a noclipper -- but the donor guarded it here and the
+    // guard is what makes it true of any future path into this function.
+    if (G_IsObserver(other))
+        return;
 
     // CTF match setup: nothing is pickable while captains pick teams.  False in
     // every other ruleset.
@@ -1760,6 +1766,12 @@ const gitem_t itemlist[] = {
             // CTFGrapplePull() plays this and Threewave never precached it;
             // RA2's copy of the row does, and sec 7 rule 7 makes the fix ours.
             "weapons/grapple/grhurt.wav",
+            // CTFGrappleFire() takes this model index at the moment it fires,
+            // so the hook was runtime-only in every donor.  RA2 upstream added
+            // it to the list in `rocketarena2@ddba883`; the same reasoning
+            // applies here, and now that CTFPrecache() walks this list it is
+            // registered at map load like the rest of the row.
+            "models/weapons/grapple/hook/tris.md2",
             NULL
         },
     },
@@ -3207,10 +3219,39 @@ const gitem_t itemlist[] = {
     //
     // Two things are deliberate.  All five share one world model -- the donor
     // draws them apart by colour shell rather than by mesh, which is why
-    // `runes_model` can override it at spawn time (Drop_Item) -- and the
-    // `quantity` values 22..26 are the donor's rune ids, which osp_runes.c
-    // indexes by, not a count.  IT_RUNE is the flag that keeps them out of
-    // every inventory sweep that means "weapons and ammo".
+    // `runes_model` can override it at spawn time (Drop_Item) -- and
+    // `quantity` holds the rune's IDENTITY rather than a count, which
+    // osp_runes.c compares, subtracts and passes to G_SetStat.  IT_RUNE is the
+    // flag that keeps them out of every inventory sweep that means "weapons and
+    // ammo".
+    //
+    // THE IDENTITY IS THE `SID_`, NOT THE NUMBER, and this is where R-132's
+    // second half went wrong.  The donor writes `.quantity = 22` because its own
+    // id for the resist rune *is* the literal 22 -- `#define STAT_RUNE_RESIST 22`
+    // in osp-tourney/g_local.h, the slot number doubling as the id.  R-OSP-7
+    // replaced that #define with a `statslot_t` whose value is its ordinal in
+    // STATSLOT_MAP (28), and the port carried the literals over unchanged while
+    // renaming every consumer to `SID_OSP_RUNE_*`.  The two sides then disagreed
+    // by six, silently, because both are ints:
+    //
+    //   G_SetStat(other, ent->item->quantity, 1)   set statslot_t 22, which is
+    //                                              SID_RA_ID_VIEW -- unmapped
+    //                                              under tourney, so a NO-OP:
+    //                                              picking up a rune granted
+    //                                              nothing at all
+    //   quantity == SID_OSP_RUNE_RESIST            22 == 28, false for all five,
+    //                                              so no rune ever got its
+    //                                              colour shell and all five
+    //                                              were indistinguishable
+    //   r_count[quantity - SID_OSP_RUNE_RESIST]    r_count[-6] -- an
+    //                                              out-of-bounds write on a
+    //                                              global int[5], on every rune
+    //                                              spawn, drop and expiry
+    //
+    // Writing the names keeps the donor's idiom -- quantity IS the id -- in this
+    // tree's vocabulary, and makes all three uses correct at once.  The
+    // contiguity that `r_count[]`'s subtraction needs is asserted in
+    // osp_runes.c, beside the array that depends on it.
     //
 
     /*QUAKED item_rune1 (.3 .3 1) (-16 -16 -16) (16 16 16)
@@ -3225,7 +3266,7 @@ const gitem_t itemlist[] = {
         .world_model_flags  = EF_ROTATE | EF_COLOR_SHELL,
         .pickup_name        = "Resist_Rune",
         .count_width        = 2,
-        .quantity           = 22,
+        .quantity           = SID_OSP_RUNE_RESIST,
         .flags              = IT_RUNE,
         .precaches          = (const char *const[]) {
             "world/force2.wav",
@@ -3245,7 +3286,7 @@ const gitem_t itemlist[] = {
         .world_model_flags  = EF_ROTATE | EF_COLOR_SHELL,
         .pickup_name        = "Strength_Rune",
         .count_width        = 2,
-        .quantity           = 23,
+        .quantity           = SID_OSP_RUNE_STRENGTH,
         .flags              = IT_RUNE,
         .precaches          = (const char *const[]) {
             "items/damage3.wav",
@@ -3265,7 +3306,7 @@ const gitem_t itemlist[] = {
         .world_model_flags  = EF_ROTATE | EF_COLOR_SHELL,
         .pickup_name        = "Haste_Rune",
         .count_width        = 2,
-        .quantity           = 24,
+        .quantity           = SID_OSP_RUNE_HASTE,
         .flags              = IT_RUNE,
         .precaches          = (const char *const[]) {
             "world/x_light.wav",
@@ -3285,7 +3326,7 @@ const gitem_t itemlist[] = {
         .world_model_flags  = EF_ROTATE | EF_COLOR_SHELL,
         .pickup_name        = "Regen_Rune",
         .count_width        = 2,
-        .quantity           = 25,
+        .quantity           = SID_OSP_RUNE_REGEN,
         .flags              = IT_RUNE,
         .precaches          = (const char *const[]) {
             "items/l_health.wav",
@@ -3305,7 +3346,7 @@ const gitem_t itemlist[] = {
         .world_model_flags  = EF_ROTATE | EF_COLOR_SHELL,
         .pickup_name        = "Vampire_Rune",
         .count_width        = 2,
-        .quantity           = 26,
+        .quantity           = SID_OSP_RUNE_VAMPIRE,
         .flags              = IT_RUNE,
         .precaches          = (const char *const[]) {
             "makron/pain2.wav",

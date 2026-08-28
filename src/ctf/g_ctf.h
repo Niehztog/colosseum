@@ -125,6 +125,11 @@ char *CTFOtherTeamName(int team);
 void CTFAssignSkin(edict_t *ent, char *s);
 void CTFForceAssignTeam(gclient_t *who);
 void CTFAssignTeam(gclient_t *who);
+// R-CTF-8: `ctf_botfill`'s two halves -- how many players the map and its two
+// bases seat, and which bot to remove when a person takes one of the seats.
+// Both unclamped and neither reads the switch; BotFillTarget() owns that.
+int  CTF_BotFillSeats(void);
+char *CTFBotFillName(void);
 edict_t *SelectCTFSpawnPoint(edict_t *ent);
 bool CTFPickup_Flag(edict_t *ent, edict_t *other);
 void CTFDrop_Flag(edict_t *ent, const gitem_t *item);

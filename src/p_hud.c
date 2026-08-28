@@ -17,6 +17,7 @@ with this program; if not, write to the Free Software Foundation, Inc.,
 */
 
 #include "g_local.h"
+#include "bot/p_observer.h"
 #include "arena/arena.h"
 #include "tourney/p_menu.h"
 #include "bot/p_botmenu.h"
@@ -101,6 +102,22 @@ bool G_MenuActive(edict_t *ent)
     return ent->client && ent->client->menu_owner != MENU_NONE;
 }
 
+// "Is this client asking for a scoreboard?" -- one question, two fields, for
+// the same reason G_IsObserver() exists (sec 7 rule 3).  baseq2, ctf and
+// tourney toggle `showscores`; RA2 deleted it and put a three-state
+// `scoremode` in its place -- 0 off, 1 the arena board, 2 the server-wide one
+// -- because it has two boards to cycle between and a bool cannot say which.
+// The merged gclient_t keeps both, so the sites that must know ask by name
+// rather than each picking a field and being right for one ruleset.
+bool G_ScoreboardUp(edict_t *ent)
+{
+    if (!ent->client)
+        return false;
+    if (G_Ruleset() == RULESET_ARENA)
+        return ent->client->scoremode != 0;
+    return ent->client->showscores;
+}
+
 // R-CTF-5.  "Is this client watching rather than playing?" has two answers in
 // one library and thirteen call sites that must not have to know which.
 //
@@ -113,6 +130,14 @@ bool G_IsObserver(edict_t *ent)
 {
     if (!ent->client)
         return false;
+    // R-EXTRA-6's observer is a fourth spelling, and it is the one that is a
+    // FLAG rather than a field.  Asked first and for every ruleset: it is only
+    // ever set under dm/sp/ctf, and asking it unconditionally means the thirteen
+    // sites that already call this predicate see the Gladiator observer without
+    // any of them being edited (R-CTF-5's "one predicate, three answers" is
+    // four now).
+    if (ent->flags & FL_OBSERVER)
+        return true;
     if (G_Ruleset() == RULESET_CTF)
         return ent->client->resp.ctf_team == CTF_NOTEAM;
     // RA2 has a third spelling: it deleted baseq2's spectator too, and expresses
@@ -132,8 +157,13 @@ INTERMISSION
 
 void MoveClientToIntermission(edict_t *ent)
 {
-    if (deathmatch->value || coop->value)
+    if (deathmatch->value || coop->value) {
         ent->client->showscores = true;
+        // RA2 writes `scoremode = 2` here -- the server-wide board, which is
+        // the only one that means anything once the level is over.
+        if (G_Ruleset() == RULESET_ARENA)
+            ent->client->scoremode = 2;
+    }
     VectorCopy(level.intermission_origin, ent->s.origin);
     ent->client->ps.pmove.origin[0] = COORD2SHORT(level.intermission_origin[0]);
     ent->client->ps.pmove.origin[1] = COORD2SHORT(level.intermission_origin[1]);
@@ -346,9 +376,15 @@ void DeathmatchScoreboardMessage(edict_t *ent, edict_t *killer)
             j = strlen(entry);
             if (stringlength + j > 1024)
                 break;
-            strcpy(string + stringlength, entry);
+            memcpy(string + stringlength, entry, j + 1);
             stringlength += j;
         }
+
+        // R-EXTRA-2, the v0.93 half: the scoreboard shows the SIMULATED ping
+        // when it is worse than the real one, so a player who asked for lag
+        // reads as lagged to everybody looking at the rankings.
+        if (g_clientlag->value)
+            Lag_SetClientPing(cl_ent);
 
         // send the layout
         Q_snprintf(entry, sizeof(entry),
@@ -357,7 +393,7 @@ void DeathmatchScoreboardMessage(edict_t *ent, edict_t *killer)
         j = strlen(entry);
         if (stringlength + j > 1024)
             break;
-        strcpy(string + stringlength, entry);
+        memcpy(string + stringlength, entry, j + 1);
         stringlength += j;
     }
 
@@ -397,8 +433,14 @@ void Cmd_Score_f(edict_t *ent)
     ent->client->showhelp = false;
 
     // R-MENU-3: the scoreboard and the menu are the same channel, so asking for
-    // one closes the other.
-    if (G_MenuActive(ent)) {
+    // one closes the other -- EXCEPT under arena, where they are not.  Every
+    // other menu engine here draws with svc_layout; RA2's draws by overwriting
+    // CS_STATUSBAR for the one client (menu.c's SendMenu), so the board and the
+    // menu occupy different channels and 1999 showed them together.  RA2's own
+    // Cmd_Score_f has no menu test at all.  Keeping one meant an arena observer
+    // could never open the board: move_to_arena() reopens the observer menu on
+    // every placement, so `score` was always spent closing it.
+    if (G_MenuActive(ent) && G_Ruleset() != RULESET_ARENA) {
         G_MenuClose(ent);
         return;
     }
@@ -492,6 +534,8 @@ void Cmd_Help_f(edict_t *ent)
 
     ent->client->showinventory = false;
     ent->client->showscores = false;
+    if (G_Ruleset() == RULESET_ARENA)
+        ent->client->scoremode = 0;
 
     if (ent->client->showhelp && (ent->client->pers.game_helpchanged == game.helpchanged)) {
         ent->client->showhelp = false;
@@ -661,14 +705,22 @@ void G_SetStats(edict_t *ent)
     //
     ent->client->ps.stats[STAT_LAYOUTS] = 0;
 
+    // THIS BIT IS WHAT MAKES A LAYOUT VISIBLE, and under arena the field that
+    // decides it is `scoremode`, not `showscores` (sec 7 rule 3, the same
+    // substitution p_view.c's redraw and Cmd_Score_f already make).  RA2's
+    // p_hud.c reads `scoremode` here.  Reading `showscores` instead meant
+    // Cmd_Score_f built the arena board, unicast it, and left the client with
+    // no reason to draw it: `score` did nothing at all for a living arena
+    // player, and appeared to work only while dead or in intermission, which
+    // are the two conditions in the same test.
     if (deathmatch->value) {
         if (ent->client->pers.health <= 0 || level.intermission_framenum
-            || ent->client->showscores)
+            || G_ScoreboardUp(ent))
             ent->client->ps.stats[STAT_LAYOUTS] |= LAYOUTS_LAYOUT;
         if (ent->client->showinventory && ent->client->pers.health > 0)
             ent->client->ps.stats[STAT_LAYOUTS] |= LAYOUTS_INVENTORY;
     } else {
-        if (ent->client->showscores || ent->client->showhelp)
+        if (G_ScoreboardUp(ent) || ent->client->showhelp)
             ent->client->ps.stats[STAT_LAYOUTS] |= LAYOUTS_LAYOUT;
         if (ent->client->showinventory && ent->client->pers.health > 0)
             ent->client->ps.stats[STAT_LAYOUTS] |= LAYOUTS_INVENTORY;
@@ -734,7 +786,7 @@ void G_SetSpectatorStats(edict_t *ent)
 
     // layouts are independant in spectator
     cl->ps.stats[STAT_LAYOUTS] = 0;
-    if (cl->pers.health <= 0 || level.intermission_framenum || cl->showscores)
+    if (cl->pers.health <= 0 || level.intermission_framenum || G_ScoreboardUp(ent))
         cl->ps.stats[STAT_LAYOUTS] |= LAYOUTS_LAYOUT;
     if (cl->showinventory && cl->pers.health > 0)
         cl->ps.stats[STAT_LAYOUTS] |= LAYOUTS_INVENTORY;

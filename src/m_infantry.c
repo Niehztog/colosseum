@@ -264,8 +264,27 @@ static void InfantryMachineGun(edict_t *self)
     if (!self->enemy || !self->enemy->inuse)    //PGM
         return;                                 //PGM
 
-    // pmm - new attack start frame
-    if (self->s.frame == FRAME_attak104) {
+    // *** WHICH ANIMATION IS RUNNING, not which frame number. ***
+    //
+    // Three donors give the infantry three different fire frames, because each
+    // reordered the attack animation: baseq2 FRAME_attak111, The Reckoning
+    // FRAME_attak103, Ground Zero FRAME_attak104.  This file ships TWO of the
+    // three attack tables -- `infantry_frames_attack1` is Ground Zero's and
+    // `bq2_infantry_frames_attack1` is baseq2's, selected by CONTENT_ROGUE --
+    // and it used to test one donor's constant for both.
+    //
+    // With `rogue 0`, which is plain dm and sp, the baseq2 sequence fires on
+    // frame 111, this test failed, and the shot fell into the DEATH-SPRAY
+    // branch below: `flash_number = MZ2_INFANTRY_MACHINEGUN_2 + (194 - 155)`,
+    // a muzzle flash belonging to another monster entirely, and
+    // `aimangles[39]` on a twelve-element array.
+    //
+    // The two branches do not mean "frame 104" and "not frame 104".  They mean
+    // "the attack shot" and "the death spray", and only two animations reach
+    // here: infantry_frames_attack1 (either donor's) and
+    // infantry_frames_death2.  Asking which one is running is correct for all
+    // three donors and needs no constant of its own.
+    if (self->s.frame >= FRAME_attak101 && self->s.frame <= FRAME_attak115) {
         flash_number = MZ2_INFANTRY_MACHINEGUN_1;
         AngleVectors(self->s.angles, forward, right, NULL);
         G_ProjectSource(self->s.origin, monster_flash_offset[flash_number], forward, right, start);
@@ -436,6 +455,21 @@ static void infantry_cock_gun(edict_t *self)
     gi.sound(self, CHAN_WEAPON, sound_weapon_cock, 1, ATTN_NORM, 0);
 }
 
+// baseq2's, which is the same sound AND the hold timer -- Ground Zero split the
+// two, moving the timer into infantry_fire_prep at an earlier frame and leaving
+// the sound behind.  The baseq2 sequence has no fire_prep, so pointing its table
+// at Ground Zero's sound-only version left `pause_framenum` at whatever the
+// previous burst had set: infantry_fire's AI_HOLD_FRAME test then held for the
+// wrong length, or not at all.
+static void bq2_infantry_cock_gun(edict_t *self)
+{
+    int n;
+
+    gi.sound(self, CHAN_WEAPON, sound_weapon_cock, 1, ATTN_NORM, 0);
+    n = (Q_rand() & 15) + 3 + 7;
+    self->monsterinfo.pause_framenum = level.framenum + n;
+}
+
 static void infantry_fire(edict_t *self)
 {
     InfantryMachineGun(self);
@@ -483,7 +517,7 @@ static const mframe_t bq2_infantry_frames_attack1[] = {
     { ai_charge, 4,  NULL },
     { ai_charge, -1, NULL },
     { ai_charge, -1, NULL },
-    { ai_charge, 0,  infantry_cock_gun },
+    { ai_charge, 0,  bq2_infantry_cock_gun },
     { ai_charge, -1, NULL },
     { ai_charge, 1,  NULL },
     { ai_charge, 1,  NULL },

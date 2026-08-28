@@ -19,6 +19,7 @@ with this program; if not, write to the Free Software Foundation, Inc.,
 #include "bot/bl_main.h"
 #include "bot/bl_spawn.h"
 #include "bot/p_menulib.h"
+#include "bot/p_observer.h"
 #include "tourney/osp_hooks.h"
 #include "m_player.h"
 #include "arena/arena.h"
@@ -693,10 +694,20 @@ void player_die(edict_t *self, edict_t *inflictor, edict_t *attacker, int damage
         }
 
         // `client_deathweapdrop` decides whether a tourney player drops the
-        // weapon they were holding; everywhere else it is unconditional.
-        if (G_Ruleset() != RULESET_TOURNEY ||
-            (int)client_deathweapdrop->value)
+        // weapon they were holding; everywhere else it is unconditional --
+        // except under arena, which does not drop weapons at all.  RA2's own
+        // TossClientWeapon is `static q_unused`, and the reconstruction's note
+        // against the shipped DLL is "no real counterpart -- confirmed dead
+        // code": id's function survives in the object and nothing reaches it.
+        // That is not an oversight there.  An arena hands out a fixed loadout
+        // at the start of the round and frees every pickup item on the map, so
+        // a dropped weapon is an item in a ruleset that has none.
+        if (G_Ruleset() == RULESET_ARENA) {
+            // nothing: the body keeps what it was holding
+        } else if (G_Ruleset() != RULESET_TOURNEY ||
+                   (int)client_deathweapdrop->value) {
             TossClientWeapon(self);
+        }
 
         // ...and the rune goes with the body, into the rune pool.
         if (G_Ruleset() == RULESET_TOURNEY && rune_stat)
@@ -863,6 +874,7 @@ void InitClientPersistant(gclient_t *client, bool full)
     char            userinfo[MAX_INFO_STRING];
     char            netname[16];
     char            greenname[16];
+    bool            keep_motd = false;
 
 //  gi.dprintf("InitClientPersistant()\n");
 
@@ -872,7 +884,19 @@ void InitClientPersistant(gclient_t *client, bool full)
         memcpy(greenname, client->pers.greenname, sizeof(greenname));
     }
 
+    // The motd flag survives the wipe on BOTH arms, which is the donor's own
+    // shape (`rocketarena2-public/p_client.c` saves and restores it around the
+    // memset unconditionally).  ClientConnect sets it once and init_player()
+    // consumes it; anything that re-initialises `pers` in between -- and
+    // PutClientInServer does, whenever `pers.health <= 0` -- would otherwise
+    // eat the motd before it was ever drawn.
+    if (G_Ruleset() == RULESET_ARENA)
+        keep_motd = client->pers.showmotd;
+
     memset(&client->pers, 0, sizeof(client->pers));
+
+    if (G_Ruleset() == RULESET_ARENA)
+        client->pers.showmotd = keep_motd;
 
     if (!full) {
         memcpy(client->pers.userinfo, userinfo, sizeof(userinfo));
@@ -1149,6 +1173,46 @@ edict_t *SelectFarthestDeathmatchSpawnPoint(void)
     return spot;
 }
 
+/*
+=================
+`dm_botfill` -- THE BOT COUNT FOLLOWS THE MAP, NOT THE SERVER
+
+R-DM-1, and R-RA-7's argument one ruleset over.  `minimumplayers` is one number
+and a server plays a rotation: eight is a full house on `q2dm1` and four more
+bodies than `q2dm7` has anywhere to put.  Deathmatch declares no capacity
+anywhere -- there is no `arena.cfg` and no `team_maxplayers` -- so the MAP is the
+only signal there is, and the spawn points are the map saying how many people it
+was built for.
+
+The number is `G_SpawnPointPool`'s and not the raw count, because the selector
+refuses the two spots nearest a player.  Measured over the eight `q2dm` maps:
+**8, 5, 5, 9, 7, 6, 4, 4**, against raw counts of 10, 7, 7, 11, 9, 8, 6, 6 --
+and the first row is the number each of those maps is actually played at.
+
+`DF_SPAWN_FARTHEST` is the other selector and it does use every spot, so under
+that flag the map has two more seats than this reports.  They are not given
+back, and that is a decision: `dmflags` is not latched, so a target that moved
+with the flag would add two bots on the write and remove them again on the next
+one.  Two seats short is a quieter answer than a server that twitches.
+
+Under `teamplay` the target is rounded DOWN TO EVEN, because two teams that
+cannot be the same size is the one thing a fill is able to get wrong for free.
+
+`0` is off and nothing here runs.  The ceilings -- `game.maxclients` and the
+roster in `bots.cfg` -- are the caller's, in `bl_spawn.c`, so that every fill
+settles on one number the same way (R-DM-1).
+=================
+*/
+int DM_BotFillSeats(void)
+{
+    int want = G_SpawnPointPool("info_player_deathmatch");
+
+    if (G_TeamplayEnabled())
+        want &= ~1;
+
+    return want;
+}
+
 static edict_t *SelectDeathmatchSpawnPoint(void)
 {
     if ((int)(dmflags->value) & DF_SPAWN_FARTHEST)
@@ -1363,6 +1427,13 @@ static void CopyToBodyQue(edict_t *ent)
     body = &g_edicts[game.maxclients + level.body_que + 1];
     level.body_que = (level.body_que + 1) % BODY_QUEUE_SIZE;
 
+    // R-EXTRA-6: the dead player points at its own corpse, and the observer's
+    // death camera follows that link -- Cam_DeathThink walks `goalentity` from
+    // the body it was watching to the player who left it, so a viewer whose
+    // subject dies keeps watching rather than dropping to idle.
+    if (ent->client)
+        ent->goalentity = body;
+
     // send an effect on the removed body
     if (body->s.modelindex) {
         gi.WriteByte(svc_temp_entity);
@@ -1417,9 +1488,30 @@ void respawn(edict_t *self)
         // add a teleportation effect
         self->s.event = EV_PLAYER_TELEPORT;
 
-        // hold in place briefly
-        self->client->ps.pmove.pm_flags = PMF_TIME_TELEPORT;
-        self->client->ps.pmove.pm_time = 112 >> PM_TIME_SHIFT;
+        // hold in place briefly -- BUT ONLY FOR A BODY THAT WALKS.
+        //
+        // PMF_TIME_TELEPORT is not a flag that expires on its own: Pmove()
+        // clears it from the `pm_time` countdown, and that countdown sits
+        // BELOW the `if (pm_type == PM_SPECTATOR) { PM_FlyMove(); return; }`
+        // early-out.  PM_ClampAngles(), which runs above it, answers the flag
+        // by pinning PITCH and ROLL to zero and letting only YAW follow the
+        // mouse.  Stamp it on a client whose pmove type is PM_SPECTATOR or
+        // PM_FREEZE and it is stamped there for good.
+        //
+        // Under arena that is every death: PutClientInServer() ends in
+        // move_to_arena(), the observer comes back as a free-flying
+        // MOVETYPE_NOCLIP body, and these two lines then ran on top of it --
+        // an observer who could turn left and right and never look up or
+        // down.  Rocket Arena deleted them from respawn() outright for exactly
+        // this reason; the guard keeps them for the rulesets that walk.
+        //
+        // It is an assignment rather than an |=, so it also wiped the
+        // PMF_NO_PREDICTION that SetObserverMode() had just set for the two
+        // camera modes.
+        if (self->movetype != MOVETYPE_NOCLIP) {
+            self->client->ps.pmove.pm_flags = PMF_TIME_TELEPORT;
+            self->client->ps.pmove.pm_time = 112 >> PM_TIME_SHIFT;
+        }
 
         self->client->respawn_framenum = level.framenum;
 
@@ -1523,6 +1615,15 @@ a deathmatch.
 */
 void PutClientInServer(edict_t *ent)
 {
+    // R-EXTRA-6: being put in as a PLAYER ends the watch.  Here rather than at
+    // each caller because there are four of them under ctf alone -- the join
+    // menu, `team red`, the ghost rejoin and the Gladiator toggle's own leave
+    // path -- and one of them (CTFTeam_f's spectator arm) is the one that was
+    // missed: the flag stayed set, DoObserver kept clearing the attack button,
+    // and the client had joined a team it could not shoot for.
+    ent->flags &= ~FL_OBSERVER;
+    memset(&ent->client->camera, 0, sizeof(ent->client->camera));
+
     char    userinfo[MAX_INFO_STRING];
     vec3_t  mins = { -16, -16, -24};
     vec3_t  maxs = {16, 16, 32};
@@ -1591,7 +1692,32 @@ void PutClientInServer(edict_t *ent)
 
     ClientUserinfoChanged(ent, userinfo);
 
-    // clear everything but the persistant data
+    // clear everything but the persistant data.
+    //
+    // R-147: and the menu handle lives in the part about to be zeroed, so it is
+    // freed FIRST or the allocation is orphaned.  `client->menu` is CTF's
+    // PMenu, `curmenulink`/`menuqueue` are RA2's, and every one of them is
+    // outside `pers`; a client that respawns with a menu open therefore lost
+    // whatever it was holding.  R-MENU-3 already closed the menu on
+    // ClientDisconnect, which is the same thought one path short -- this is the
+    // other path, and `q2pro@21381ffa` fixes it in the CTF donor the same way.
+    //
+    // G_MenuClose rather than ctf_PMenu_Close: it dispatches on
+    // `client->menu_owner`, so it is right for all three menu systems and is a
+    // no-op for a client that has none.
+    G_MenuClose(ent);
+
+    // ...and for ARENA the close above is not the whole of it, which is R-147
+    // one step short.  Under arena CLOSING IS HIDING by design (ra_MenuClose):
+    // the arbiter repaints the statusbar and frees nothing, so the queue is
+    // still standing when the memset below forgets the head.  A menu is open on
+    // every one of these, because this function ends in move_to_arena(..., 1)
+    // and that reopens the observer menu -- so each respawn orphaned the menu
+    // the previous respawn had opened, for the rest of the map.
+    // `rocketarena2@28a8af7` reports 15 blocks and 819 bytes per respawn.
+    if (G_Ruleset() == RULESET_ARENA)
+        close_menus(ent);
+
     saved = client->pers;
     memset(client, 0, sizeof(*client));
     client->pers = saved;
@@ -1605,7 +1731,24 @@ void PutClientInServer(edict_t *ent)
     // clear entity values
     ent->groundentity = NULL;
     ent->client = &game.clients[index];
-    ent->takedamage = DAMAGE_AIM;
+    // *** RA2 SPAWNS AN ARENA CLIENT UNDAMAGEABLE, and this one line is what
+    // makes its round machine work. ***  Under arena, `takedamage` is not a
+    // property of being alive -- it is the round's grant: set_damage(arena,
+    // DAMAGE_AIM) at ASTATE_FIGHTING is the ONLY thing that makes a fighter
+    // hittable, and SendTeamToArena, init_player and RA_BotJoinArena all put it
+    // back to DAMAGE_NO on the way out.  fight_done() then reads
+    // `takedamage == DAMAGE_AIM && deadflag == DEAD_NO` as "this team still has
+    // somebody in the fight".
+    //
+    // baseq2's DAMAGE_AIM here breaks that, and the way it breaks is a round
+    // that never ends.  A dead arena player is respawned by respawn() ->
+    // PutClientInServer, which cleared deadflag AND handed out DAMAGE_AIM, and
+    // then the arena tail below turned them into an observer -- reinit_player()
+    // sets fightstate and nothing else.  The result is a client fight_done()
+    // counts as a living fighter on a team they are no longer playing for, for
+    // the rest of the map: wipe the other side and the round sits in
+    // ASTATE_FIGHTING forever.  Found by playing a pickup round to its end.
+    ent->takedamage = (G_Ruleset() == RULESET_ARENA) ? DAMAGE_NO : DAMAGE_AIM;
     ent->movetype = MOVETYPE_WALK;
     ent->viewheight = 22;
     ent->inuse = true;
@@ -1886,9 +2029,44 @@ to be placed into the game.  This will happen every level load.
 */
 void ClientBegin(edict_t *ent)
 {
+    // R-EXTRA-2: the donor resets the lag queue here, before the client is
+    // hooked up.  Any command still queued belongs to the previous life on the
+    // previous map and would replay a shot from an origin in another level.
+    Lag_BeginGame(ent);
+
     int     i;
 
     ent->client = game.clients + (ent - g_edicts - 1);
+
+    // *** A FEATURE WHOSE CLIENT HALF IS AN ALIAS IS UNREACHABLE UNTIL THE
+    // SERVER STUFFS IT. ***
+    //
+    // `+hook`, `-hook`, `+grap` and `-grap` are console ALIASES and no Quake II
+    // client ships one, so `bind e "+hook"` -- which is what every 1999 config
+    // and every player types -- binds a key to nothing.  Both offhand grapples
+    // in this tree had their commands ported and their aliases dropped:
+    // ctf's `hookon`/`hookoff` (R-CTF-3, uGladQ2 v0.97u, stuffed at the top of
+    // its ClientBegin) and arena's `grap_on`/`grap_off` (RA2, stuffed at the top
+    // of its ClientBeginDeathmatch).  `tourney` did not, which is why the gap
+    // was ruleset-shaped rather than visible: OSP_hookAliases has done this
+    // since Phase 5.
+    //
+    // No `cmd` prefix, because a console command the client does not recognise
+    // is forwarded to the server -- that is what makes `hookon` arrive at
+    // ClientCommand.  A bot has no console and is skipped, as both donors skip
+    // it.  The aliases are stuffed whether or not the ruleset's hook cvar is
+    // on, because the command tests the cvar itself: a server that turns the
+    // hook off mid-map does not leave a stale alias firing it, and one that
+    // turns it on does not need every client to reconnect.
+    if (!(ent->flags & FL_BOT)) {
+        if (G_Ruleset() == RULESET_CTF) {
+            stuffcmd(ent, "alias +hook hookon\n");
+            stuffcmd(ent, "alias -hook hookoff\n");
+        } else if (G_Ruleset() == RULESET_ARENA) {
+            stuffcmd(ent, "alias +grap grap_on\nalias -grap grap_off\n");
+            stuffcmd(ent, "alias +hook grap_on\nalias -hook grap_off\n");
+        }
+    }
 
     // R-OSP-1: the per-LEVEL half -- a client id, a place back on their team,
     // and the 1-vs-1 queue.  Before ClientBeginDeathmatch rather than inside
@@ -1960,7 +2138,7 @@ void ClientUserinfoChanged(edict_t *ent, char *userinfo)
 
     // check for malformed or illegal info strings
     if (!Info_Validate(userinfo)) {
-        strcpy(userinfo, "\\name\\badinfo\\skin\\male/grunt");
+        Q_strlcpy(userinfo, "\\name\\badinfo\\skin\\male/grunt", MAX_INFO_STRING);
     }
 
     // R-OSP-1: tourney edits the userinfo it was handed -- refusing a forbidden
@@ -1998,9 +2176,13 @@ void ClientUserinfoChanged(edict_t *ent, char *userinfo)
     // combine name and skin into a configstring.  Under ctf the skin is the
     // team's, not the player's choice -- CTFAssignSkin writes the same
     // configstring with ctf_r or ctf_b substituted, which is also where the 1999
-    // bot-model bug lived (R-CTF-7).
-    if (G_Ruleset() == RULESET_CTF)
-        CTFAssignSkin(ent, s);
+    // bot-model bug lived (R-CTF-7).  CTFAssignSkin is NOT called here, which is
+    // why `ctf` is an exclusion below rather than an arm: it also writes
+    // `pers.userinfo`, and the save at the tail of this function would put the
+    // player's own skin straight back over it, so the call is the last thing
+    // this function does.  The Gladiator donor moved it for the same reason and
+    // left the note saying so.
+    //
     // `teams[]` is TAG_LEVEL and arena_init() reallocates it empty on every map,
     // while `resp.teamnum` is on the client and outlives the level -- so the
     // slot a returning client names may be NULL, and this dereferenced it.
@@ -2010,15 +2192,15 @@ void ClientUserinfoChanged(edict_t *ent, char *userinfo)
     // happens to be valid again.  On a real arena map, where each client makes
     // a team of its own, it is a null dereference in ClientUserinfoChanged --
     // which BotSpawn calls for every bot before ClientBegin has reset resp.
-    else if (G_Ruleset() == RULESET_ARENA && ent->client->resp.teamnum != -1 &&
-             teams[ent->client->resp.teamnum].it &&
-             ((team_t *)teams[ent->client->resp.teamnum].it)->skin != -1)
+    if (G_Ruleset() == RULESET_ARENA && ent->client->resp.teamnum != -1 &&
+        teams[ent->client->resp.teamnum].it &&
+        ((team_t *)teams[ent->client->resp.teamnum].it)->skin != -1)
         // RA2 does the same thing for the same reason: on a team, the skin is
         // the team's.  Its `/nullxxx` placeholder branch is not carried -- that
         // string is written by RA2's own menu and means "no skin chosen", and
         // nothing in this tree writes it.
         setteamskin(ent, userinfo, ((team_t *)teams[ent->client->resp.teamnum].it)->skin);
-    else
+    else if (G_Ruleset() != RULESET_CTF)
         gi.configstring(game.csr.playerskins + playernum, va("%s\\%s", ent->client->pers.netname, s));
 
     // CTF's player-id view reads the name out of a configstring of its own,
@@ -2049,6 +2231,13 @@ void ClientUserinfoChanged(edict_t *ent, char *userinfo)
 
     // save off the userinfo in case we want to check something later
     Q_strlcpy(ent->client->pers.userinfo, userinfo, sizeof(ent->client->pers.userinfo));
+
+    // ...and only NOW the CTF skin, because CTFAssignSkin's second write goes
+    // into the copy above.  The skin is re-read rather than reusing `s`:
+    // Info_ValueForKey hands back a rotating static buffer and the fov and hand
+    // lookups between here and there have taken it twice.
+    if (G_Ruleset() == RULESET_CTF)
+        CTFAssignSkin(ent, Info_ValueForKey(userinfo, "skin"));
 }
 
 /*
@@ -2065,6 +2254,11 @@ loadgames will.
 */
 qboolean ClientConnect(edict_t *ent, char *userinfo)
 {
+    // R-EXTRA-6: never connect as an observer.  The flag lives on the edict and
+    // an edict is reused, so a client taking a slot an observer left would
+    // inherit FL_OBSERVER and its camera.
+    ent->flags &= ~FL_OBSERVER;
+
     char    *value;
 
     // check to see if they are on the banned IP list
@@ -2153,9 +2347,31 @@ qboolean ClientConnect(edict_t *ent, char *userinfo)
         InitClientResp(ent->client);
         if (!game.autosaved || !ent->client->pers.weapon)
             InitClientPersistant(ent->client, true);
+
+        // R-RA-4's motd, and the ONLY thing that ever set this true.  The
+        // donor sets it here, in this same `inuse == false` arm and after the
+        // two Init calls for the same reason they are ordered that way; the
+        // merge kept `showmotd`'s declaration, kept init_player()'s read of it
+        // and kept menuMotdContinue()'s clear, and dropped the one write that
+        // made the field ever be true.  So `motd.txt` was loaded at every map
+        // load, reported "Sucessfully read arena/motd.txt", and was shown to
+        // nobody -- init_player() took its `else` branch every time.
+        //
+        // Under arena only: motd.txt is RA2's file and the menu that draws it
+        // is RA2's (R-EXTRA-6's shape -- a donor's feature stays in its
+        // ruleset).
+        if (G_Ruleset() == RULESET_ARENA)
+            ent->client->pers.showmotd = true;
     }
 
     ClientUserinfoChanged(ent, userinfo);
+
+    // RA2's stdlog gets the arrival, after the rename that decides what name is
+    // written.  Three of `gslog.c`'s six entry points had no caller: the log
+    // recorded GameStart, the kills and GameEnd, and never a PlayerConnect, a
+    // PlayerLeft or a MAP line -- the file was complete, ported and half wired.
+    if (G_Ruleset() == RULESET_ARENA)
+        GSLogEnter(ent);
 
     if (game.maxclients > 1)
         gi.dprintf("%s connected\n", ent->client->pers.netname);
@@ -2183,6 +2399,10 @@ void ClientDisconnect(edict_t *ent)
 
     if (!ent->client)
         return;
+
+    // ...and the departure, before anything else may return early.
+    if (G_Ruleset() == RULESET_ARENA)
+        GSLogExit(ent);
 
     if (G_Ruleset() == RULESET_TOURNEY) {
         // Tourney announces the departure itself, at the end and with the
@@ -2266,6 +2486,13 @@ void ClientDisconnect(edict_t *ent)
     ent->classname = "disconnected";
     ent->client->pers.connected = false;
 
+    // The brain keeps its own copy of every client and nothing clears it when
+    // one leaves, because BotLib_UpdateAllClientSettings skips a slot whose
+    // edict is not `inuse` -- which is the line above.  Here rather than at the
+    // tail of this function because tourney's arm below can return, and after
+    // `inuse` rather than before it so the state pushed is the one that lasts.
+    BotLib_ClientDisconnected(ent);
+
     // R-OSP-1: the half that needs the slot already free -- the recount, the
     // recover seat, the chase cams that were watching this player, and the
     // pause that waits for the last member of a team to come back.
@@ -2294,6 +2521,135 @@ static trace_t q_gameabi PM_trace(const vec3_t start, const vec3_t mins, const v
     return gi.trace(start, mins, maxs, end, pm_passent, pm_clipmask);
 }
 #endif
+
+/*
+==============
+ClientLagThink
+
+The half of ClientThink that R-EXTRA-2 replays.  Called once with the live
+usercmd on a server with `g_clientlag 0`, which is every server that has not
+asked for the simulation, and once per delayed command otherwise -- with
+`ent->s.origin` and `client->v_angle` already put back to what they were when
+that command arrived, so a shot leaves from where the player was rather than
+from where they are.
+==============
+*/
+static void ClientLagThink(edict_t *ent, usercmd_t *ucmd)
+{
+    gclient_t *client = ent->client;
+
+    client->oldbuttons = client->buttons;
+    client->buttons = ucmd->buttons;
+    client->latched_buttons |= client->buttons & ~client->oldbuttons;
+
+    // R-149's open half, closed at the BUTTON rather than at the think -- see
+    // RA_HoldFire() for why the donor's `Think_Weapon` guard cannot be taken
+    // verbatim.  Here rather than beside either call site because both of them
+    // read these two fields, as does every weaponthink underneath them, so one
+    // clear covers baseq2's weapons, the mission packs' and Threewave's.
+    //
+    // This runs BEFORE R-RA-4's observer mode cycle below, which also reads
+    // BUTTON_ATTACK -- safe only because RA_HoldFire() answers false for a
+    // FIGHT_SPECTATING client, which is every observer.  Moving it after that
+    // block would work too; moving the exemption out of RA_HoldFire() would not.
+    if (G_Ruleset() == RULESET_ARENA && RA_HoldFire(ent)) {
+        client->buttons &= ~BUTTON_ATTACK;
+        client->latched_buttons &= ~BUTTON_ATTACK;
+    }
+
+    // save light level the player is standing on for
+    // monster sighting AI
+    ent->light_level = ucmd->lightlevel;
+
+    // R-RA-4's observer key, and the half of it that was missing.  RA2 has two
+    // observer inputs and this tree carried only one: jump/crouch cycles WHO
+    // you are watching (in ClientThink, where it reads the movement axes), and
+    // ATTACK cycles HOW -- normal, free-flying, trackcam, eyecam.  ChangeOMode()
+    // was ported, declared and never called, so an arena observer was pinned in
+    // whichever mode move_to_arena() had left them in: on a pickup arena that
+    // is always OMODE_FREEFLYING, the two camera modes were unreachable, and
+    // with them the jump/crouch cycle that only runs inside them.  There was no
+    // way to watch a team-mate at all.
+    //
+    // `context != 0` is the donor's and it is load-bearing: arena 0 is the
+    // lobby, it has nobody to track, and cycling there would move the client
+    // out of the team menu it is standing in.
+    // NOT FOR A BOT, and this is the second half of the same rule that keeps a
+    // layout away from one (R-MENU-4, R-BOT-10): the observer inputs are a
+    // PERSON's, read off a screen a bot does not have.  A bot holds ATTACK for
+    // a different reason entirely -- EA_Respawn is "press fire to respawn" --
+    // so wiring this arm without the gate handed every dead bot a camera mode
+    // it never asked for, and the consequences ran a long way.  SetObserverMode
+    // gives a camera mode a track_target; ClientThink used to answer a
+    // track_target on a spectating client with PM_FREEZE; and PM_FREEZE is
+    // exactly what the brain's BotIntermission() tests for.  The bot decided the
+    // level had ended, re-entered its intermission node every frame, and said
+    // its end-of-level line every frame with it.  Flood protection let four
+    // through, which is what a player sees: the same sentence, four times,
+    // instantly.  R-145 restored the donor's PM_GIB in that branch, so the
+    // PM_FREEZE half of this is history; the gate stays, because a bot has no
+    // screen to point a camera at either way.
+    if (G_Ruleset() == RULESET_ARENA && !(ent->flags & FL_BOT)) {
+        if (!(client->latched_buttons & BUTTON_ATTACK))
+            client->resp.omode_buttons &= ~1;
+        else if (client->resp.fightstate == FIGHT_SPECTATING &&
+                 client->resp.context != 0 &&
+                 !(client->resp.omode_buttons & 1)) {
+            ChangeOMode(ent);
+            client->resp.omode_buttons |= 1;
+        }
+    }
+
+    // fire weapon from final position if needed
+    if (client->latched_buttons & BUTTON_ATTACK) {
+        // G_IsObserver, not resp.spectator: under ctf an observer is a
+        // CTF_NOTEAM player, so the inherited test would let him shoot
+        // (R-CTF-3's "observers cannot fire it", R-CTF-5).
+        if (G_IsObserver(ent) && G_Ruleset() != RULESET_ARENA) {
+            client->latched_buttons = 0;
+
+            if (client->chase_target) {
+                client->chase_target = NULL;
+                client->ps.pmove.pm_flags &= ~PMF_NO_PREDICTION;
+            } else
+                GetChaseTarget(ent);
+        } else if (G_IsObserver(ent)) {
+            // R-143: and an ARENA observer does not fire either.  It reaches
+            // this line because the arm above is deliberately not its own --
+            // RA2 ships four observer modes and no chase cam, so ATTACK is the
+            // key that cycles them (R-RA-4, handled at the top of this
+            // function) -- and the donor then lets the same press fall through
+            // to Think_Weapon.  An arena observer is invisible, non-solid and
+            // has no ammo, but ClientSpawn leaves it the Blaster, which needs
+            // none: so a player waiting in the queue could plink the fighters
+            // in a live round, from inside the arena, with no way for them to
+            // answer.  `rocketarena2/p_client.c` has the same fall-through, so
+            // this is 1999's and is fixed at the root rather than kept: the
+            // whole point of the mode is to watch.
+            //
+            // The latch is NOT cleared here.  Clearing it is the chase arm's
+            // business -- it consumes the press to change target -- whereas
+            // R-RA-4's mode cycle has already read this one, and
+            // ClientBeginServerFrame clears it at the end of the frame.
+        } else if (!client->weapon_thunk) {
+            client->weapon_thunk = true;
+            Think_Weapon(ent);
+        }
+    }
+
+    if (G_IsObserver(ent) && G_Ruleset() != RULESET_ARENA) {
+        if (ucmd->upmove >= 10) {
+            if (!(client->ps.pmove.pm_flags & PMF_JUMP_HELD)) {
+                client->ps.pmove.pm_flags |= PMF_JUMP_HELD;
+                if (client->chase_target)
+                    ChaseNext(ent);
+                else
+                    GetChaseTarget(ent);
+            }
+        } else
+            client->ps.pmove.pm_flags &= ~PMF_JUMP_HELD;
+    }
+}
 
 /*
 ==============
@@ -2337,6 +2693,15 @@ void ClientThink(edict_t *ent, usercmd_t *ucmd)
     if (G_Ruleset() == RULESET_TOURNEY && OSP_clientThink(ent, ucmd))
         return;
 
+    // R-EXTRA-6: the Gladiator observer, in the place the donor put it -- after
+    // the menus and before pmove, because it EDITS the command (it clears the
+    // attack and use buttons, and in a camera mode the movement axes too) and
+    // sets the pm_type pmove is about to run with.  It does not return: the
+    // donor let the rest of ClientThink run on the edited command, which is
+    // what makes a free-flying observer noclip rather than freeze.
+    if (G_GladiatorObserver())
+        DoObserver(ent, ucmd);
+
     if (ent->client->chase_target) {
         client->resp.cmd_angles[0] = SHORT2ANGLE(ucmd->angles[0]);
         client->resp.cmd_angles[1] = SHORT2ANGLE(ucmd->angles[1]);
@@ -2370,9 +2735,34 @@ void ClientThink(edict_t *ent, usercmd_t *ucmd)
 
             if (client->resp.track_target &&
                 client->resp.fightstate == FIGHT_SPECTATING) {
-                // TRACKCAM and EYECAM drive the view from the tracked player,
-                // so this client's own movement must not (R-EXTRA-6).
-                client->ps.pmove.pm_type = PM_FREEZE;
+                // PM_GIB, and it is the donor's literal `3` restored (R-145).
+                //
+                // This port read `pm_type = 3` as "stop this client moving" and
+                // wrote PM_FREEZE, which is 4.  They are not the same answer:
+                // pmove returns early for PM_FREEZE -- `// no movement at all`,
+                // before PM_CheckDuck and everything after it -- while PM_GIB
+                // only narrows the bounding box and then falls through friction,
+                // air move and step-slide like any other type.
+                //
+                // Which matters because THE CAMERA'S ONLY INTEGRATOR IS PMOVE.
+                // track_think has two branches: when the line to the goal is
+                // blocked it teleports the camera and zeroes the velocity, and
+                // when the line is clear it sets `velocity = (goal - here) * 10`
+                // and expects pmove to cover the distance.  Under PM_FREEZE that
+                // velocity was never consumed, so the clear-path branch moved the
+                // camera not at all and the blocked branch -- the escape hatch --
+                // was the only thing that ever moved it.  The trackcam did not
+                // follow; it snapped when something got in the way.  Not by
+                // sitting still, which is worth knowing before measuring it: the
+                // blocked branch fires often enough on a real map that the
+                // pre-fix camera still covered 1837 units in a sample, in jumps.
+                // What was wrong is that it stalled exactly when the path was
+                // clear.
+                //
+                // SV_Physics_Noclip is indeed never reached for a client edict,
+                // which is what the earlier note here reasoned from.  It was
+                // never the integrator.
+                client->ps.pmove.pm_type = PM_GIB;
                 client->ps.pmove.gravity = 0;
 
                 if (client->resp.omode == OMODE_TRACKCAM)
@@ -2491,14 +2881,6 @@ void ClientThink(edict_t *ent, usercmd_t *ucmd)
         }
     }
 
-    client->oldbuttons = client->buttons;
-    client->buttons = ucmd->buttons;
-    client->latched_buttons |= client->buttons & ~client->oldbuttons;
-
-    // save light level the player is standing on for
-    // monster sighting AI
-    ent->light_level = ucmd->lightlevel;
-
     if (G_Ruleset() == RULESET_ARENA) {
         if (client->resp.fightstate == FIGHT_SPECTATING &&
             (client->resp.omode == OMODE_TRACKCAM ||
@@ -2517,36 +2899,26 @@ void ClientThink(edict_t *ent, usercmd_t *ucmd)
         }
     }
 
-    // fire weapon from final position if needed
-    if (client->latched_buttons & BUTTON_ATTACK) {
-        // G_IsObserver, not resp.spectator: under ctf an observer is a
-        // CTF_NOTEAM player, so the inherited test would let him shoot
-        // (R-CTF-3's "observers cannot fire it", R-CTF-5).
-        if (G_IsObserver(ent) && G_Ruleset() != RULESET_ARENA) {
-            client->latched_buttons = 0;
+    // R-EXTRA-2: everything from here to the end of ClientLagThink is what the
+    // lag simulation REPLAYS.  It is the button half -- the latch, the light
+    // level, the shot and the observer's jump-cycle -- and it is the half that
+    // has to happen at the position and view angles the player had `delay`
+    // milliseconds ago.  pmove is deliberately not in it: a lagged player still
+    // walks in real time, which is the point of simulating the lag rather than
+    // simply stalling the client.
+    if (g_clientlag->value && !(ent->flags & FL_BOTCLIENT)) {
+        usercmd_t laggeducmd;
+        vec3_t v_angle, origin;
 
-            if (client->chase_target) {
-                client->chase_target = NULL;
-                client->ps.pmove.pm_flags &= ~PMF_NO_PREDICTION;
-            } else
-                GetChaseTarget(ent);
-        } else if (!client->weapon_thunk) {
-            client->weapon_thunk = true;
-            Think_Weapon(ent);
-        }
-    }
-
-    if (G_IsObserver(ent) && G_Ruleset() != RULESET_ARENA) {
-        if (ucmd->upmove >= 10) {
-            if (!(client->ps.pmove.pm_flags & PMF_JUMP_HELD)) {
-                client->ps.pmove.pm_flags |= PMF_JUMP_HELD;
-                if (client->chase_target)
-                    ChaseNext(ent);
-                else
-                    GetChaseTarget(ent);
-            }
-        } else
-            client->ps.pmove.pm_flags &= ~PMF_JUMP_HELD;
+        VectorCopy(ent->s.origin, origin);
+        VectorCopy(client->v_angle, v_angle);
+        Lag_StoreClientInput(ent, ucmd, ent->s.origin, client->v_angle);
+        while (Lag_GetClientInput(ent, &laggeducmd, ent->s.origin, client->v_angle))
+            ClientLagThink(ent, &laggeducmd);
+        VectorCopy(v_angle, client->v_angle);
+        VectorCopy(origin, ent->s.origin);
+    } else {
+        ClientLagThink(ent, ucmd);
     }
 
     // CTF regeneration tech.  A no-op without it.

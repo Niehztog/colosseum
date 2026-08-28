@@ -53,9 +53,20 @@ static const filesystem_api_v1_t *G_Fs(void)
     return fs;
 }
 
+// R-COMPAT-6: `basedir` and `gamedir` are the ENGINE's, and this library asks
+// for both from six other files as well.  A re-obtain with a DIFFERENT default
+// is the collision R-COMPAT-6 names -- whichever registration runs first
+// decides, and `counts.py --duplicates` reported exactly that pair.  So the
+// defaults live here, once, and every other site goes through these two
+// functions.  On a real server the engine has registered both long before, and
+// the defaults are what a tool sees rather than what a player does; that is
+// still a difference that should not depend on call order.
+#define FS_BASEDIR_DEFAULT  "."
+#define FS_GAMEDIR_DEFAULT  ""
+
 const char *G_FsBaseDir(void)
 {
-    cvar_t *cvar = gi.cvar("basedir", "", 0);
+    cvar_t *cvar = gi.cvar("basedir", FS_BASEDIR_DEFAULT, 0);
 
     // Q2PRO's own name for it.  `basedir` is the 1997 spelling and q2pro keeps
     // it only as an alias on some builds, so ask for both and take the first
@@ -70,7 +81,7 @@ const char *G_FsBaseDir(void)
 
 const char *G_FsGameDir(void)
 {
-    cvar_t *cvar = gi.cvar("gamedir", "", 0);
+    cvar_t *cvar = gi.cvar("gamedir", FS_GAMEDIR_DEFAULT, 0);
 
     if (cvar && *cvar->string)
         return cvar->string;
@@ -78,6 +89,24 @@ const char *G_FsGameDir(void)
     if (cvar && *cvar->string)
         return cvar->string;
     return GAMEVERSION;
+}
+
+// Where the library WRITES.  Three writers in this tree built their paths from
+// the gamedir alone -- `fopen("colosseum/stdlog.log")` -- which resolves
+// against the server's working directory rather than against the installation,
+// so a server started from anywhere else wrote its log into a directory that
+// may not exist and reported "Error opening log file" with the right name in
+// it.  The engine writes under `homedir` when there is one and under `basedir`
+// otherwise, and so does this.
+//
+// Returns false when the composed path did not fit, so a caller can say so
+// rather than opening a truncated name.
+bool G_FsGamePath(char *out, size_t size, const char *name)
+{
+    cvar_t *home = gi.cvar("homedir", "", 0);
+    const char *base = (home && *home->string) ? home->string : G_FsBaseDir();
+
+    return Q_snprintf(out, size, "%s/%s/%s", base, G_FsGameDir(), name) < size;
 }
 
 int G_FsLoadFile(const char *path, void **buffer)

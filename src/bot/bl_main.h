@@ -83,6 +83,15 @@ typedef struct bot_state_s
     bool active;                    //true if a bot is active for this client
     bool started;                   //true if the bot has started
     bot_library_t *library;         //used library by the bot
+    // R-140's two counters, and they are here rather than in a file-static
+    // because this struct is already the per-client bot state and is already
+    // reallocated per game.  `firecalls` is every frame the brain asked to
+    // shoot while its arena was NOT being fought; `firedrops` is how many of
+    // those the button gate took away.  `sv botinv` prints the pair: equal
+    // means the gate is doing its whole job, and a gap is a shot that went out
+    // during a countdown.
+    int firecalls;
+    int firedrops;
 } bot_state_t;
 
 //bot globals
@@ -121,6 +130,7 @@ void BotFreeLibrary(bot_library_t *lib);
 void BotUnloadAllLibraries(void);
 void BotLibraryDump(void);
 void BotClientDump(void);
+void BotInventoryDump(void);
 bool BotStarted(edict_t *bot);
 //the default botlib filename for this platform and build (R-BOT-4)
 const char *BotDefaultLibrary(void);
@@ -130,8 +140,8 @@ int  BotLib_BotSetupClient(edict_t *ent, char *userinfo);
 void BotLib_BotShutdownClient(edict_t *client);
 void BotLib_BotMoveClient(edict_t *oldclient, edict_t *newclient);
 void BotLib_BotClientSettings(edict_t *client);
+void BotLib_ClientDisconnected(edict_t *ent);
 void BotLib_BotSettings(edict_t *bot, bot_settings_t *settings);
-void BotLib_BotLibVarSet(char *var_name, char *value);
 void BotLib_BotStartFrame(float time);
 void BotLib_BotUpdateClient(edict_t *bot);
 void BotLib_BotUpdateEntity(edict_t *ent);
@@ -144,6 +154,11 @@ int  BotLib_Test(int parm0, char *parm1, vec3_t parm2, vec3_t parm3);
 // R-BOT-20's frame section, in one function so that the order the requirement
 // fixes cannot be re-arranged by an edit to G_RunFrame.
 void BotRunFrame(void);
+
+// R-BOT-23's measurement.  The budget is half a 100 ms frame, in microseconds.
+#define BOTPERF_BUDGET_US   50000
+void BotPerfReset(void);
+void BotPerfReport(void);
 
 // ---- R-BOT-29: the seventeen TOURNEY blocks, as ruleset-neutral accessors ---
 //
@@ -171,6 +186,11 @@ int  BotTourneyVotedIn(void);       // bots_votedin, or 0
 // and `bots_botfile`, everyone else's `minimumplayers` and `botfile`.
 const char *BotMinPlayersCvar(void);
 const char *BotFileCvar(void);
+// ...and so is the name of the switch that replaces the flat count with a target
+// read off the game: `ra_botfill`, `ctf_botfill`, `dm_botfill`, or NULL for the
+// two rulesets that have no such switch (R-RA-7, R-CTF-8, R-DM-1).
+const char *BotFillCvar(void);
+bool BotFillEnabled(void);
 // ...and the cvars themselves, obtained once with the RULESET's default.
 // R-COMPAT-6: osp_main.c registers `bots_minplayers` with a default of "4" and
 // the SDK registers `minimumplayers` with "0", so a bot-layer call site that

@@ -49,7 +49,6 @@ RA2_Stats_Init
 */
 void RA2_Stats_Init(void)
 {
-    cvar_t  *gamedir;
     FILE    *f;
 
 
@@ -58,10 +57,11 @@ void RA2_Stats_Init(void)
     if (!g_statsfile->value || !g_statsname->string[0])
         return;
 
-    gamedir = gi.cvar("game", "", CVAR_LATCH);
-
-    if (Q_snprintf(stats_path, sizeof(stats_path), "%s/%s",
-                   gamedir->string, g_statsname->string) >= sizeof(stats_path)) {
+    // <homedir-or-basedir>/<gamedir>/<name>, not "<gamedir>/<name>": the donor's
+    // relative path resolves against the server's WORKING DIRECTORY, so a
+    // server started from anywhere but the installation wrote its stats
+    // somewhere else or not at all.
+    if (!G_FsGamePath(stats_path, sizeof(stats_path), g_statsname->string)) {
         gi.dprintf("RA2_Stats_Init: stats path too long, logging disabled\n");
         stats_path[0] = 0;
         return;

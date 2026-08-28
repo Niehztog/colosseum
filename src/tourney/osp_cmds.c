@@ -1544,53 +1544,53 @@ void OSP_listItems(char *out)
 
     if (want & 1) {
         if (!(int)quad->value) {
-            strcat(buf, " quad ON");
+            Q_strlcat(buf, " quad ON", sizeof(buf));
             any = 1;
         }
     } else if ((int)quad->value) {
-        strcat(buf, " quad OFF");
+        Q_strlcat(buf, " quad OFF", sizeof(buf));
         any = 1;
     }
 
     if (want & 2) {
         if (!(int)invul->value) {
             if (any)
-                strcat(buf, ",");
-            strcat(buf, " invul ON");
+                Q_strlcat(buf, ",", sizeof(buf));
+            Q_strlcat(buf, " invul ON", sizeof(buf));
             any = 1;
         }
     } else if ((int)invul->value) {
         if (any)
-            strcat(buf, ",");
-        strcat(buf, " invul OFF");
+            Q_strlcat(buf, ",", sizeof(buf));
+        Q_strlcat(buf, " invul OFF", sizeof(buf));
         any = 1;
     }
 
     if (want & 8) {
         if (!(int)bfg->value) {
             if (any)
-                strcat(buf, ",");
-            strcat(buf, " bfg ON");
+                Q_strlcat(buf, ",", sizeof(buf));
+            Q_strlcat(buf, " bfg ON", sizeof(buf));
             any = 1;
         }
     } else if ((int)bfg->value) {
         if (any)
-            strcat(buf, ",");
-        strcat(buf, " bfg OFF");
+            Q_strlcat(buf, ",", sizeof(buf));
+        Q_strlcat(buf, " bfg OFF", sizeof(buf));
         any = 1;
     }
 
     if (want & 0x10) {
         if (!(int)powershield->value) {
             if (any)
-                strcat(buf, ",");
-            strcat(buf, " power armor ON");
+                Q_strlcat(buf, ",", sizeof(buf));
+            Q_strlcat(buf, " power armor ON", sizeof(buf));
             any = 1;
         }
     } else if ((int)powershield->value) {
         if (any)
-            strcat(buf, ",");
-        strcat(buf, " power armor OFF");
+            Q_strlcat(buf, ",", sizeof(buf));
+        Q_strlcat(buf, " power armor OFF", sizeof(buf));
         any = 1;
     }
 
@@ -1598,14 +1598,14 @@ void OSP_listItems(char *out)
         if (want & 0x40) {
             if (!(int)teamhurtself->value) {
                 if (any)
-                    strcat(buf, ",");
-                strcat(buf, " self damage ON");
+                    Q_strlcat(buf, ",", sizeof(buf));
+                Q_strlcat(buf, " self damage ON", sizeof(buf));
                 any = 1;
             }
         } else if ((int)teamhurtself->value) {
             if (any)
-                strcat(buf, ",");
-            strcat(buf, " self damage OFF");
+                Q_strlcat(buf, ",", sizeof(buf));
+            Q_strlcat(buf, " self damage OFF", sizeof(buf));
             any = 1;
         }
 
@@ -1613,14 +1613,14 @@ void OSP_listItems(char *out)
         if (want & 0x40) {
             if (!(int)ffahurtself->value) {
                 if (any)
-                    strcat(buf, ",");
-                strcat(buf, " self damage ON");
+                    Q_strlcat(buf, ",", sizeof(buf));
+                Q_strlcat(buf, " self damage ON", sizeof(buf));
                 any = 1;
             }
         } else if ((int)ffahurtself->value) {
             if (any)
-                strcat(buf, ",");
-            strcat(buf, " self damage OFF");
+                Q_strlcat(buf, ",", sizeof(buf));
+            Q_strlcat(buf, " self damage OFF", sizeof(buf));
             any = 1;
         }
 
@@ -1630,14 +1630,14 @@ void OSP_listItems(char *out)
         if (want & 0x80) {
             if (!(int)teamhurtself->value) {
                 if (any)
-                    strcat(buf, ",");
-                strcat(buf, " team damage ON");
+                    Q_strlcat(buf, ",", sizeof(buf));
+                Q_strlcat(buf, " team damage ON", sizeof(buf));
                 any = 1;
             }
         } else if ((int)teamhurtself->value) {
             if (any)
-                strcat(buf, ",");
-            strcat(buf, " team damage OFF");
+                Q_strlcat(buf, ",", sizeof(buf));
+            Q_strlcat(buf, " team damage OFF", sizeof(buf));
             any = 1;
         }
 
@@ -1648,28 +1648,28 @@ void OSP_listItems(char *out)
     if (want & 4) {
         if (!(dmf & DF_QUAD_DROP)) {
             if (any)
-                strcat(buf, ",");
-            strcat(buf, " quad drop ON");
+                Q_strlcat(buf, ",", sizeof(buf));
+            Q_strlcat(buf, " quad drop ON", sizeof(buf));
             any = 1;
         }
     } else if (dmf & DF_QUAD_DROP) {
         if (any)
-            strcat(buf, ",");
-        strcat(buf, " quad drop OFF");
+            Q_strlcat(buf, ",", sizeof(buf));
+        Q_strlcat(buf, " quad drop OFF", sizeof(buf));
         any = 1;
     }
 
     if (want & 0x20) {
         if (!(dmf & DF_WEAPONS_STAY)) {
             if (any)
-                strcat(buf, ",");
-            strcat(buf, " weapons STAY");
+                Q_strlcat(buf, ",", sizeof(buf));
+            Q_strlcat(buf, " weapons STAY", sizeof(buf));
             any = 1;
         }
     } else if (dmf & DF_WEAPONS_STAY) {
         if (any)
-            strcat(buf, ",");
-        strcat(buf, " weapons DONT STAY");
+            Q_strlcat(buf, ",", sizeof(buf));
+        Q_strlcat(buf, " weapons DONT STAY", sizeof(buf));
         any = 1;
     }
 
@@ -1893,7 +1893,11 @@ void OSP_referee_cmd(edict_t *ent)
 {
     cvar_t  *rcon;
 
-    rcon = gi.cvar("rcon_password", NULL, 0);
+    // "" and not NULL: `rcon_password` is the ENGINE's cvar and this library
+    // re-obtains it from two files, so the defaults have to agree (R-COMPAT-6)
+    // -- and a NULL default is a null pointer handed to Cvar_Get on the one
+    // path where the cvar does not already exist.
+    rcon = gi.cvar("rcon_password", "", 0);
 
     if (ent->osp_e39c) {
         OSP_adminMenu(ent);

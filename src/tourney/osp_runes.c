@@ -25,9 +25,11 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 // osp_runes.c -- <INVENTED FILENAME>. The five Lithium-style runes.
 //
 // Resist / Strength / Haste / Regeneration / Vampire, held one at a time and
-// carried in `ps.stats[STAT_RUNE_*]` (slots 22..26) so the client HUD can draw
-// them.  `r_count[]` tracks how many of each are loose in the world and
-// `rune_spawnpoint[]` is the pool of places one may reappear.
+// carried in the `SID_OSP_RUNE_*` stats (tourney slots 22..26) so the client HUD
+// can draw them -- reached through G_SetStat/G_GetStat, never by indexing
+// `ps.stats[]` with the id, which is R-132.  `r_count[]` tracks how many of each
+// are loose in the world and `rune_spawnpoint[]` is the pool of places one may
+// reappear.
 
 #include "g_local.h"
 #include "tourney/osp_types.h"
@@ -37,6 +39,21 @@ int runespawn = 0;
 int rune_spawncount = 0;
 edict_t * rune_spawnpoint[50];
 int r_count[5];
+
+// `r_count[]` is indexed as `item->quantity - SID_OSP_RUNE_RESIST`, which is the
+// donor's idiom (`quantity` holds the rune's id) and is correct only while the
+// five ids are five CONSECUTIVE values in that order.  Nothing in STATSLOT_MAP's
+// shape enforces that -- the ordinals come from the order rows happen to be
+// written in, so inserting a row between two runes, or reordering them, would
+// silently turn this subtraction into an out-of-bounds index the way R-132's
+// mismatch did.  Asserted rather than commented, because the failure is a
+// negative array index and the compiler will otherwise emit it happily.
+_Static_assert(SID_OSP_RUNE_STRENGTH == SID_OSP_RUNE_RESIST + 1 &&
+               SID_OSP_RUNE_HASTE    == SID_OSP_RUNE_RESIST + 2 &&
+               SID_OSP_RUNE_REGEN    == SID_OSP_RUNE_RESIST + 3 &&
+               SID_OSP_RUNE_VAMPIRE  == SID_OSP_RUNE_RESIST + 4,
+               "the five SID_OSP_RUNE_* ids must stay consecutive and in order: "
+               "r_count[] and item->quantity index by their difference");
 
 // The five rune classnames, NULL-terminated.
 static char *runenames[] = {
@@ -361,7 +378,7 @@ int OSP_runesApplyResistance(edict_t *ent, int damage)
     if (ent->client && ent->client->silencer_shots)
         volume = 0.2f;
 
-    if (damage && ent->client && ent->client->ps.stats[SID_OSP_RUNE_RESIST]) {
+    if (damage && ent->client && G_GetStat(ent, SID_OSP_RUNE_RESIST)) {
         gi.sound(ent, CHAN_VOICE, gi.soundindex("world/force2.wav"), volume, ATTN_NORM, 0);
         if ((int)runes_flash->value)
             ent->client->osp_t074 = level.time + 0.2f;
@@ -377,7 +394,7 @@ int OSP_runesApplyResistance(edict_t *ent, int damage)
 
 int OSP_runesApplyStrength(edict_t *ent, int damage)
 {
-    if (damage && ent->client && ent->client->ps.stats[SID_OSP_RUNE_STRENGTH])
+    if (damage && ent->client && G_GetStat(ent, SID_OSP_RUNE_STRENGTH))
         return (int)(runes_strength->value * damage);
     return damage;
 }
@@ -386,7 +403,7 @@ bool OSP_runesApplyStrengthSound(edict_t *ent)
 {
     float   volume = 1.0f;
 
-    if (ent->client && ent->client->ps.stats[SID_OSP_RUNE_STRENGTH]) {
+    if (ent->client && G_GetStat(ent, SID_OSP_RUNE_STRENGTH)) {
         if (ent->client->silencer_shots)
             volume = 0.2f;
 
@@ -401,7 +418,7 @@ bool OSP_runesApplyStrengthSound(edict_t *ent)
 
 bool OSP_runesHasHaste(edict_t *ent)
 {
-    if (ent->client && ent->client->ps.stats[SID_OSP_RUNE_HASTE])
+    if (ent->client && G_GetStat(ent, SID_OSP_RUNE_HASTE))
         return true;
     return false;
 }
@@ -414,7 +431,7 @@ void OSP_runesApplyHasteSound(edict_t *ent)
         volume = 0.2f;
 
     if (ent->client) {
-        if (ent->client->ps.stats[SID_OSP_RUNE_HASTE]) {
+        if (G_GetStat(ent, SID_OSP_RUNE_HASTE)) {
             if ((int)runes_flash->value)
                 ent->client->osp_t07c = level.time + 0.2f;
 
@@ -441,7 +458,7 @@ void OSP_runesApplyRegeneration(edict_t *ent)
     if (clientp->silencer_shots)
         volume = 0.2f;
 
-    if (clientp->ps.stats[SID_OSP_RUNE_REGEN]) {
+    if (G_GetStat(ent, SID_OSP_RUNE_REGEN)) {
         if (clientp->osp_t06c < level.time) {
             clientp->osp_t06c = level.time;
 
@@ -488,14 +505,14 @@ void OSP_runesApplyRegeneration(edict_t *ent)
 
 bool OSP_runesHasRegeneration(edict_t *ent)
 {
-    if (ent->client->ps.stats[SID_OSP_RUNE_REGEN])
+    if (G_GetStat(ent, SID_OSP_RUNE_REGEN))
         return true;
     return false;
 }
 
 bool OSP_runesHasVampire(edict_t *ent)
 {
-    if (ent->client->ps.stats[SID_OSP_RUNE_VAMPIRE])
+    if (G_GetStat(ent, SID_OSP_RUNE_VAMPIRE))
         return true;
     return false;
 }
@@ -507,7 +524,7 @@ void OSP_runesApplyVampire(edict_t *ent, int damage)
     if (ent->client && ent->client->silencer_shots)
         volume = 0.2f;
 
-    if (ent->client && ent->client->ps.stats[SID_OSP_RUNE_VAMPIRE] &&
+    if (ent->client && G_GetStat(ent, SID_OSP_RUNE_VAMPIRE) &&
         ent->health < (int)runes_vampire_max->value) {
         ent->health += (int)(runes_vampire->value * damage);
 

@@ -18,6 +18,7 @@ with this program; if not, write to the Free Software Foundation, Inc.,
 #include "g_local.h"
 #include "bot/bl_cmd.h"
 #include "bot/p_menulib.h"
+#include "bot/p_observer.h"
 #include "arena/arena.h"
 #include "tourney/osp_hooks.h"
 #include "m_player.h"
@@ -32,7 +33,7 @@ static char *ClientTeam(edict_t *ent)
     if (!ent->client)
         return value;
 
-    strcpy(value, Info_ValueForKey(ent->client->pers.userinfo, "skin"));
+    Q_strlcpy(value, Info_ValueForKey(ent->client->pers.userinfo, "skin"), sizeof(value));
     p = strchr(value, '/');
     if (!p)
         return value;
@@ -51,11 +52,32 @@ bool OnSameTeam(edict_t *ent1, edict_t *ent2)
     char    ent1Team[MAX_INFO_STRING];
     char    ent2Team[MAX_INFO_STRING];
 
+    // R-ARENA-1: under arena a team is an RA2 TEAM, not a model or a skin.
+    // RA2 replaces this function outright with `resp.teamnum == resp.teamnum`
+    // and every arena rule that asks "are these two on a side together" -- the
+    // friendly-fire pair in g_combat.c, score-by-damage, the crosshair ID --
+    // asks it through here.  Left on baseq2's answer the question is decided by
+    // `dmflags`, which under arena is not set, so every one of them answered
+    // "no" and RA2's teams meant nothing to the damage rules.
+    //
+    // Two properties the donor's version leaves implicit and this one states:
+    // a non-client is on nobody's team, and `teamnum` -1 is "not on a team"
+    // (p_client.c: 0 is a real index), so two team-less clients are not
+    // team-mates.  Neither is reachable from a live round -- you cannot fight
+    // without a team -- and both are reachable from the lobby.
+    if (G_Ruleset() == RULESET_ARENA) {
+        if (!ent1->client || !ent2->client)
+            return false;
+        if (ent1->client->resp.teamnum < 0)
+            return false;
+        return ent1->client->resp.teamnum == ent2->client->resp.teamnum;
+    }
+
     if (!((int)(dmflags->value) & (DF_MODELTEAMS | DF_SKINTEAMS)))
         return false;
 
-    strcpy(ent1Team, ClientTeam(ent1));
-    strcpy(ent2Team, ClientTeam(ent2));
+    Q_strlcpy(ent1Team, ClientTeam(ent1), sizeof(ent1Team));
+    Q_strlcpy(ent2Team, ClientTeam(ent2), sizeof(ent2Team));
 
     if (strcmp(ent1Team, ent2Team) == 0)
         return true;
@@ -512,6 +534,8 @@ void Cmd_Inven_f(edict_t *ent)
     cl = ent->client;
 
     cl->showscores = false;
+    if (G_Ruleset() == RULESET_ARENA)
+        cl->scoremode = 0;
     cl->showhelp = false;
 
     // R-MENU-4 again: `inven` closes an open menu rather than opening the
@@ -805,6 +829,10 @@ Cmd_PutAway_f
 void Cmd_PutAway_f(edict_t *ent)
 {
     ent->client->showscores = false;
+    // RA2's `putaway` clears `scoremode`; `showscores` is not the field its
+    // HUD reads (sec 7 rule 3), so clearing only that left the arena board up.
+    if (G_Ruleset() == RULESET_ARENA)
+        ent->client->scoremode = 0;
     ent->client->showhelp = false;
     ent->client->showinventory = false;
     G_MenuClose(ent);
@@ -861,10 +889,10 @@ void Cmd_Players_f(edict_t *ent)
                    game.clients[index[i]].pers.netname);
         if (strlen(small) + strlen(large) > sizeof(large) - 100) {
             // can't print all of them in one packet
-            strcat(large, "...\n");
+            Q_strlcat(large, "...\n", sizeof(large));
             break;
         }
-        strcat(large, small);
+        Q_strlcat(large, small, sizeof(large));
     }
 
     gi.cprintf(ent, PRINT_HIGH, "%s\n%i players\n", large, count);
@@ -1008,7 +1036,16 @@ void Cmd_Say_f(edict_t *ent, bool team, bool arg0, bool bcast)
         if (!other->client)
             continue;
         if (team) {
-            if (!OnSameTeam(ent, other))
+            // R-EXTRA-6: observers are their own team for `say_team`.  An
+            // observer's team chat reaches observers and nobody else, and a
+            // player's reaches players -- otherwise the audience reads the
+            // callouts, which is the whole reason the donor added this.
+            bool i_watch = (ent->flags & FL_OBSERVER) != 0;
+            bool they_watch = (other->flags & FL_OBSERVER) != 0;
+
+            if (i_watch != they_watch)
+                continue;
+            if (!i_watch && !OnSameTeam(ent, other))
                 continue;
         }
         gi.cprintf(other, PRINT_CHAT, "%s", text);
@@ -1056,11 +1093,11 @@ void Cmd_PlayerList_f(edict_t *ent)
                    e2->client->pers.spectator ? " (spectator)" : "");
         if (strlen(text) + strlen(st) > sizeof(text) - 50) {
             if (strlen(text) < sizeof(text) - 12)
-                strcat(text, "And more...\n");
+                Q_strlcat(text, "And more...\n", sizeof(text));
             gi.cprintf(ent, PRINT_HIGH, "%s", text);
             return;
         }
-        strcat(text, st);
+        Q_strlcat(text, st, sizeof(text));
     }
     gi.cprintf(ent, PRINT_HIGH, "%s", text);
 }
@@ -1192,6 +1229,20 @@ void ClientCommand(edict_t *ent)
         CTFHook_f(ent);
     else if (G_Ruleset() == RULESET_CTF && Q_stricmp(cmd, "hookoff") == 0)
         CTFUnhook_f(ent);
+    // R-EXTRA-6's eight, from the 1999 module: observer, autocam, chasecam,
+    // cyclecam, setcam, camfixed, camname, observerhelp.  Asked as one
+    // predicate, the shape the donor used, and only where the Gladiator
+    // observer is the implementation in force -- under `arena` and `tourney`
+    // the ruleset's own observer owns those verbs.
+    else if (G_GladiatorObserver() && ClientObserverCmd(cmd, ent))
+        ;
+    // R-EXTRA-2's two, from the 1999 module.  Client commands in the donor and
+    // client commands here; `g_clientlag` decides whether they do anything, and
+    // both say so when it is off rather than silently accepting a number.
+    else if (Q_stricmp(cmd, "lag") == 0)
+        Lag_SetClientLag(ent, Q_atoi(gi.argv(1)));
+    else if (Q_stricmp(cmd, "lagvariance") == 0)
+        Lag_SetClientLagVariance(ent, Q_atoi(gi.argv(1)));
     else if (Q_stricmp(cmd, "playerlist") == 0) {
         // Threewave DELETES baseq2's Cmd_PlayerList_f and replaces it; R-CORE-8's
         // rule applies to functions as well as files, so both survive and the
