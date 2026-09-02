@@ -25,7 +25,7 @@ void UpdateChaseCam(edict_t *ent)
     vec3_t forward, right;
     trace_t trace;
     int i;
-    vec3_t angles;
+    vec3_t angles, vangles;
 
     // is our chase target gone?
     if (!ent->client->chase_target->inuse
@@ -45,15 +45,67 @@ void UpdateChaseCam(edict_t *ent)
 
     ownerv[2] += targ->viewheight;
 
+    VectorCopy(targ->s.origin, ownerv);
+    ownerv[2] += targ->viewheight;
+
     VectorCopy(targ->client->v_angle, angles);
-    if (angles[PITCH] > 56)
-        angles[PITCH] = 56;
+    // *** R-OSP-1'S TWO CAMERAS, and everything below that reads `osp` is
+    // R-193. ***  Tourney has a chase camera with controls and an in-eyes mode,
+    // and this function is the consumer the merge left behind: `movedir` carries
+    // the free-look offsets ClientThink accumulated, `speed` the zoom, and the
+    // two modes differ in the pitch they allow, in whether the camera is behind
+    // the target or at its eyes, and in whether it is lifted off the floor.
+    //
+    // `vangles` is the donor's second copy: the offsets have to reach the
+    // VIEW angles as well as the ones the camera is placed along, or free-look
+    // moves the camera and not the picture.  baseq2 has one copy because it has
+    // no free-look.
+    int osp = G_IsOspRuleset() ? ent->client->resp.osp_entered : 0;
+
+    VectorCopy(targ->client->v_angle, vangles);
+
+    // In-eyes looks along the target's own view, so the pitch is pinned rather
+    // than clamped -- 1 against the chase camera's 56, which is baseq2's too.
+    if (angles[PITCH] > (osp == ENTERED_INEYES ? 1 : 56))
+        angles[PITCH] = (osp == ENTERED_INEYES ? 1 : 56);
+
+    // The gate is written out rather than carried in `osp`, because
+    // `camera_pitch` is tourney's own cvar in a spine file and R-CORE-7 wants
+    // that legible at the use rather than three lines up (donorgate.py).
+    if (G_IsOspRuleset()) {
+        if (osp == ENTERED_CHASECAM) {
+            ent->movedir[0] = camera_pitch->value;
+            ent->movedir[1] = ent->client->osp_t018;
+        } else {
+            // In-eyes has no free-look and no zoom, and -12 puts the camera
+            // twelve units IN FRONT of the eye rather than behind the head.
+            ent->movedir[0] = 0;
+            ent->movedir[1] = 0;
+            ent->speed = -12;
+        }
+
+        angles[PITCH] += ent->movedir[0];
+        angles[PITCH] = Q_clipf(angles[PITCH], -90, 90);
+        angles[YAW] += ent->movedir[1];
+
+        vangles[PITCH] += ent->movedir[0];
+        vangles[PITCH] = Q_clipf(vangles[PITCH], -90, 90);
+        vangles[YAW] += ent->movedir[1];
+    }
+
     AngleVectors(angles, forward, right, NULL);
     VectorNormalize(forward);
-    VectorMA(ownerv, -30, forward, o);
+    VectorMA(ownerv, osp ? -ent->speed : -30, forward, o);
 
-    if (o[2] < targ->s.origin[2] + 20)
-        o[2] = targ->s.origin[2] + 20;
+    // The chase camera is kept 30 units off the target's feet; in-eyes is not
+    // lifted at all, because it is meant to be where the eyes are.
+    if (!osp) {
+        if (o[2] < targ->s.origin[2] + 20)
+            o[2] = targ->s.origin[2] + 20;
+    } else if (osp == ENTERED_CHASECAM) {
+        if (o[2] < targ->s.origin[2] + 30)
+            o[2] = targ->s.origin[2] + 30;
+    }
 
     // jump animation lifts
     if (!targ->groundentity)
@@ -96,8 +148,11 @@ void UpdateChaseCam(edict_t *ent)
         ent->client->ps.viewangles[PITCH] = -15;
         ent->client->ps.viewangles[YAW] = targ->client->killer_yaw;
     } else {
-        VectorCopy(targ->client->v_angle, ent->client->ps.viewangles);
-        VectorCopy(targ->client->v_angle, ent->client->v_angle);
+        // `vangles` rather than the target's own view under tourney: it is the
+        // target's view PLUS the free-look offsets, and sending the target's
+        // instead is what makes a free-look camera point the wrong way.
+        VectorCopy(vangles, ent->client->ps.viewangles);
+        VectorCopy(vangles, ent->client->v_angle);
     }
 
     ent->viewheight = 0;
@@ -110,7 +165,7 @@ void UpdateChaseCam(edict_t *ent)
     // "Threewave draws this differently" -- see doc/reconciliation.md R-43.
     // Elsewhere STAT_CHASE and the bar's `stat_string 16` do the job and this
     // block would fight them for the layout channel.
-    if ((G_Ruleset() == RULESET_CTF || G_Ruleset() == RULESET_TOURNEY) &&
+    if ((G_Ruleset() == RULESET_CTF || G_IsOspRuleset()) &&
         ((!ent->client->showscores && !G_MenuActive(ent) &&
           !ent->client->showinventory && !ent->client->showhelp &&
           !(level.framenum & 31)) || ent->client->update_chase)) {
@@ -122,16 +177,16 @@ void UpdateChaseCam(edict_t *ent)
         // R-OSP-1's observer is meant to be able to follow a match, and
         // "Chasing Bob" alone does not say which side Bob is on.  Its slot 16
         // is the crosshair-id line, not this one, so the two do not collide.
-        if (G_Ruleset() == RULESET_TOURNEY && m_mode == 2 && sync_stat > 2)
+        if (G_IsOspRuleset() && G_Ruleset() == RULESET_TDM && sync_stat > 2)
             Q_snprintf(s, sizeof(s),
                        "xv 44 yb -59 string \"Chasing `%s' [%d] (%s)\"",
                        targ->client->pers.netname, targ->client->resp.score,
                        OSP_teamName(targ->client->resp.team));
-        else if (G_Ruleset() == RULESET_TOURNEY && m_mode == 2)
+        else if (G_IsOspRuleset() && G_Ruleset() == RULESET_TDM)
             Q_snprintf(s, sizeof(s), "xv 44 yb -59 string \"Chasing `%s' (%s)\"",
                        targ->client->pers.netname,
                        OSP_teamName(targ->client->resp.team));
-        else if (G_Ruleset() == RULESET_TOURNEY)
+        else if (G_IsOspRuleset())
             Q_snprintf(s, sizeof(s), "xv 44 yb -59 string \"Chasing `%s'\"",
                        targ->client->pers.netname);
         else
@@ -152,6 +207,16 @@ void ChaseNext(edict_t *ent)
     if (!ent->client->chase_target)
         return;
 
+    // R-193: tourney starts every new target at the configured distance and
+    // straight behind, so a zoom or a free-look does not follow the cursor from
+    // the last player to the next one.  `osp_r000` is the count of clients
+    // watching this one, which p_view.c reads to draw "N watching".
+    if (G_IsOspRuleset()) {
+        VectorClear(ent->movedir);
+        ent->speed = camera_depth->value;
+        ent->client->osp_t018 = 0;
+    }
+
     i = ent->client->chase_target - g_edicts;
     do {
         i++;
@@ -165,6 +230,8 @@ void ChaseNext(edict_t *ent)
     } while (e != ent->client->chase_target);
 
     ent->client->chase_target = e;
+    if (G_IsOspRuleset() && e->client)
+        e->client->resp.osp_r000++;
     ent->client->update_chase = true;
 }
 
@@ -175,6 +242,16 @@ void ChasePrev(edict_t *ent)
 
     if (!ent->client->chase_target)
         return;
+
+    // R-193: tourney starts every new target at the configured distance and
+    // straight behind, so a zoom or a free-look does not follow the cursor from
+    // the last player to the next one.  `osp_r000` is the count of clients
+    // watching this one, which p_view.c reads to draw "N watching".
+    if (G_IsOspRuleset()) {
+        VectorClear(ent->movedir);
+        ent->speed = camera_depth->value;
+        ent->client->osp_t018 = 0;
+    }
 
     i = ent->client->chase_target - g_edicts;
     do {
@@ -189,6 +266,8 @@ void ChasePrev(edict_t *ent)
     } while (e != ent->client->chase_target);
 
     ent->client->chase_target = e;
+    if (G_IsOspRuleset() && e->client)
+        e->client->resp.osp_r000++;
     ent->client->update_chase = true;
 }
 

@@ -18,7 +18,7 @@ All paths relative to `<workspace>`. Re-verified 2026-08-21, and again in 1.34 -
 | `src/` (72 files) | `q2pro/src/game` | same |
 | `src/shared/m_flash.c`, `src/shared/shared.c` | `q2pro/src/shared` | same |
 | `LICENSE` | `q2pro/LICENSE` | same |
-| `tools/` (30 scripts) | `q2pro-mission-pack-tools` | `66f043d` (branch `ubuntu`) |
+| `tools/` (30 scripts imported, **28 kept** — see §2) | `q2pro-mission-pack-tools` | `66f043d` (branch `ubuntu`) |
 | `vendor/harness/` | `../colosseum-harness-archive` | not a git tree; see its `MANIFEST.md` |
 
 `q2pro` is on branch `feature/mission-packs`. `c751d316` is its tip and is a
@@ -69,8 +69,24 @@ further of the two, and print the SHA they used so the choice is never implicit.
 
 R-PROV-2a/2b, R-PROV-7, R-TOOL-4. Verified 2026-08-21:
 
-* `vendor/harness/rr-cache/ra2replay/` — **407** recorded `rerere` resolutions (recorded as 411 until 1.34; re-counted directly)
-* `vendor/harness/rr-cache/replay-missionpacks/` — **85**
+* `vendor/harness/rr-cache/` — **516 recorded `rerere` resolutions** in **492
+  conflict directories**, 431 resolutions in 407 directories under `ra2replay/`
+  and 85 in 85 under `replay-missionpacks/`. Three numbers because there are
+  three things to count and the archive's own MANIFEST used to conflate them:
+  a directory is one conflict *id*, and a merge whose conflict hashes collide
+  across several paths stores them as `preimage.1`, `preimage.2` and so on
+  inside it — one `ra2replay` directory holds 24. Six hashes appear in **both**
+  caches, so the distinct-hash count is 486 and the directory count is not.
+  411 was the figure until 1.34 and 496 the derived total; both were the
+  directory count of `ra2replay` mis-taken for its resolution count.
+* **27 `thisimage` files were removed.** `thisimage` is what `git rerere` writes
+  for the conflict it is looking at *right now*; it is working state, not cache,
+  and git neither reads it back nor needs it to replay a resolution. All 27 were
+  under `ra2replay/`, in four directories that each also carry the complete
+  `preimage`/`postimage` pair, so nothing recorded was lost. R-PROV-2a's
+  byte-identity claim is about the copy taken on 2026-08-21 and is unaffected —
+  but this repository's copy is a **pruned** one from that date on, and saying so
+  is the point of this line.
 * `vendor/harness/tools-inputs/commit_paths.txt` — 188 lines; **all 188 SHAs
   still resolve** against `q2pro`. They are upstream Q2PRO commits and survived
   the re-commit that moved the three pins in §1.1.
@@ -94,19 +110,31 @@ and produces byte-identical output, so it is not needed).
 | `config.h` | written for this tree, modelled on `osp-tourney/config.h` | GPL-2-or-later |
 | `Makefile`, `meson.build` | written for this tree | GPL-2-or-later |
 | `tools/*.py`, `tools/*.sh` | `q2pro-mission-pack-tools`, with the path repairs of R-TOOL-1 | GPL-2-or-later |
-| the other 25 scripts in `tools/` — `divergence.py`, `counts.py`, `coverage.py`, `audit.py` and the audits and harnesses it drives | written for this tree (R-TOOL-5). The `(30 scripts)` in §1 is the IMPORTED count and is still exact: all 30 of the donor's are present | GPL-2-or-later |
+| the other **30** scripts in `tools/` — `divergence.py`, `counts.py`, `coverage.py`, `audit.py` and the audits and harnesses it drives | written for this tree (R-TOOL-5). Was 25; `itemnames.py`, `classnames.py` and `assets.py` arrived with R-183/R-184/R-188 and were never added to the count, `deadvalue.py` with R-192 and `fnsweep.py` with R-195. **58 scripts in `tools/` now**: 28 imported and 30 this tree's, which is the count `ls tools/*.py tools/*.sh \| wc -l` prints rather than a figure kept by hand (R-TOOL-2) | GPL-2-or-later |
 | `src/arena/*.{c,h}` | `rocketarena2-public@d20e1ce`, asm-matching comments stripped and the GPL header restored (`doc/reconciliation.md` R-65, R-67) | GPL-2-or-later, id-derived (R-LIC-1) |
 | `src/tourney/*.{c,h}` | `osp-tourney@1d8427e`, same treatment (R-78, R-84) | GPL-2-or-later, id-derived (R-LIC-1) |
 | `src/bot/{botlib,bl_main,bl_botcfg,bl_cmd,bl_debug,bl_redirgi,bl_spawn}.h`, `src/bot/bl_*.c` | `osp-tourney@1d8427e`, same treatment as `src/tourney/`. Headers only in Phase 5, because R-OSP-5 needs `botglobals` declared exactly once (R-86); the six implementations landed in Phase 6. One slot of `botlib.h` gains a second spelling there — see `doc/botlib-contract.md` version 2 and reconciliation R-97 | GPL-2-or-later, Gladiator SDK (R-LIC-2) |
 | `src/bot/p_menulib.{c,h}`, `src/bot/p_botmenu.{c,h}` | `gladiator-bot-restored@game`, which `osp-tourney` cannot supply: it moved its bot menu into `osp_menus.c` on id's `PMenu` and ships neither file (R-BOT-28). The two reconstructions' copies are byte-identical, so there is one source of truth | non-commercial, Gladiator (R-LIC-2) |
 | `src/g_fs.c` | written for this tree — the engine's extended API as the game library sees it (§5.7, R-BOT-8, R-BOT-26, reconciliation R-95) | GPL-2-or-later |
 | `tools/{botabi.py,botmatrix.sh}` | written for this tree (R-VER-3, R-VER-28) | GPL-2-or-later |
-| `colosseum/arena.cfg` | **Rocket Arena 2's own arena-definition file**, CRLF as it shipped and `.gitattributes` keeps it that way. Added in 1.27 (`doc/reconciliation.md` R-129), replacing a 69-line example written for this tree. **No longer byte-identical**: 953 lines, `md5 d598d8ccd108e52485776a5de4ac1500`, and the file's own header names the two deviations — the `armor:`/`health:` default (1.27) and `armorprotect: 1` (R-154). Every one of the 171 per-arena blocks is 1999's, untouched | data, no header of its own — see the note below |
+| `colosseum/arena.cfg` | **Rocket Arena 2's own arena-definition file**, CRLF as it shipped and `.gitattributes` keeps it that way. Added in 1.27 (`doc/reconciliation.md` R-129), replacing a 69-line example written for this tree. **No longer byte-identical**: 1028 lines, `md5 d777983efda013cbbc76c686de1992a0` (953 and `d598d8cc` until the mission-pack weapon names landed in `cdb9df2`, which also dropped every CR -- restored, see `.gitattributes`), and the file's own header names the two deviations — the `armor:`/`health:` default (1.27) and `armorprotect: 1` (R-154). Every one of the 171 per-arena blocks is 1999's, untouched | data, no header of its own — see the note below |
 | `colosseum/botcfg/bots.cfg` | `gladiator-bot-restored/assets/bots.cfg`, byte-identical, CRLF as it shipped in 1999 | the Gladiator Bot licence, non-commercial (R-LIC-2) |
 | `colosseum/{server.cfg,configs/*.cfg,motd.txt,README.md}` | written for this tree (D6) | GPL-2-or-later |
 | `vendor/replay/*.bundle` | the replay harness (R-PROV-1) | contains id-derived GPL-2 sources |
 | `vendor/harness/**` | rescued harness scratchpad (R-PROV-2a) | mixed; see its `MANIFEST.md` |
 | `LICENSE` | `q2pro/LICENSE`, GPL-2 verbatim | — |
+
+**Two of the donor's 30 scripts are gone, and §1's row says 28 for that reason.**
+`mkvariant.py` (19 lines, builds a `v_*` branch from a donor tree) and
+`savemach.py` (22 lines, strips `g_save.c`'s descriptor tables so variants can be
+compared for savegame compatibility) are replay-era: they belong to the run that
+produced `vendor/replay/`'s three bundles, which Colosseum does not repeat
+(R-PROV-1). Nothing referenced either one — not another tool, not R-TOOL-1's
+inventory table, not a document. They remain in
+`q2pro-mission-pack-tools@66f043d`, which is the pin, so the import is still
+reproducible from the source named in §1; what this tree carries is the subset it
+uses. Recorded here rather than left as an unexplained gap between "30 imported"
+and 28 files.
 
 **RA2's pin moves in spec 1.16, from `cd0708b` to `d20e1ce`** — one commit, *"Build
 with -Wall, and clear what it reports"*. Colosseum builds `-Wall -Wextra -Werror`,

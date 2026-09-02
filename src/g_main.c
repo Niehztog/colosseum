@@ -144,10 +144,26 @@ static void ShutdownGame(void)
     // nothing at all when the server is going down on its own.  A stats file
     // that does not say why it ended cannot be told from one that was
     // truncated.
-    if (G_Ruleset() == RULESET_TOURNEY) {
+    if (G_IsOspRuleset()) {
         const char *reason = gi.argc() ? gi.argv(0) : "server";
 
         sl_GameEnd(&gi, level);
+
+        // R-195.6.  The donor's guard is the whole point of the call:
+        // `if (!level.intermission_framenum) q2log_logAccuracy();`
+        // (`port_osp:g_main.c:79`, between sl_GameEnd and the game-end event,
+        // which is where this sits).  Every one of the six
+        // OSP_Stats_AccuracyAll() callers in osp_main.c is a MATCH-end
+        // condition, so the table is written whenever a match finishes -- and
+        // a `map` typed with a match still running ended the log without it.
+        // Outside intermission is exactly the case nothing else covers; at
+        // intermission the match-end caller has already written the table and
+        // the guard keeps it from being written twice.
+        //
+        // Before OSP_Stats_Shutdown, which closes stats_f.
+        if (!level.intermission_framenum)
+            OSP_Stats_AccuracyAll();
+
         OSP_Stats_Shutdown(reason);
         if (server_log)
             OSP_logAdminLog("Shutdown: %s", reason);
@@ -297,7 +313,7 @@ static void InitGame(void)
     // The merge put the tourney block above it, so the clamp read 0, set
     // `team_maxplayers` to 0, and OSP_addTeamMember then refused every join
     // with "Sorry, both teams are full!" -- which for a bot is BotDestroy, so
-    // a `match_mode 2` server destroyed every bot the moment it tried to join
+    // a `tdm` server destroyed every bot the moment it tried to join
     // and printed the reason to nobody.  The allocation stays below because
     // that is where `game.clients` is wanted; the int is what the init reads.
     game.maxclients = maxclients->value;
@@ -305,7 +321,7 @@ static void InitGame(void)
     // OSP Tourney's own init: the map list, the match system's globals and the
     // Standard Log (R-OSP-1, R-OSP-3).  After resolution for the same reason
     // RA2's is -- both are per-ruleset writers and only one owner may be live.
-    if (G_Ruleset() == RULESET_TOURNEY) {
+    if (G_IsOspRuleset()) {
         OSP_loadMaps();
         OSP_gameInit();
         sl_Logging(&gi, "Colosseum tourney");
@@ -564,6 +580,19 @@ edict_t *CreateTargetChangeLevel(char *map)
 EndDMLevel
 
 The timelimit or fraglimit has been exceeded
+
+*** G_BeginIntermission(), NOT BeginIntermission(). ***  This function is the
+level-end path for every deathmatch ruleset, and it called the base
+implementation directly at all eight sites -- so `ruleset_ops_t.BeginIntermission`
+was reachable from exactly ONE place in the tree, use_target_changelevel(), which
+a deathmatch map's exit trigger does not fire.  CTF is the only ruleset that
+fills the row, and what it puts there is CTFCalcScores(): Threewave calls it from
+inside BeginIntermission() itself, so it ran on every path.  Here it ran on
+none, leaving ctfgame.total1/total2 at whatever CTFEndMatch last wrote -- zero on
+a public server -- so SetCTFStats' frag tie-breaker read 0 > 0 both ways and
+blanked BOTH team headers, showing a tie at the end of every level whose
+captures were level.  The dispatch's NULL row falls back to ops_base, so this is
+the same call it always was for dm, sp, arena and the OSP four (R-174).
 =================
 */
 void EndDMLevel(void)
@@ -574,7 +603,7 @@ void EndDMLevel(void)
 
     // stay on same level flag
     if ((int)dmflags->value & DF_SAME_LEVEL) {
-        BeginIntermission(CreateTargetChangeLevel(level.mapname));
+        G_BeginIntermission(CreateTargetChangeLevel(level.mapname));
         return;
     }
 
@@ -582,7 +611,7 @@ void EndDMLevel(void)
     // CTF's `warp` vote and admin menu override the rotation for exactly one
     // level change.  Empty in every other ruleset, so no gate.
     if (*level.forcemap) {
-        BeginIntermission(CreateTargetChangeLevel(level.forcemap));
+        G_BeginIntermission(CreateTargetChangeLevel(level.forcemap));
         return;
     }
 
@@ -596,11 +625,11 @@ void EndDMLevel(void)
                 t = strtok(NULL, seps);
                 if (t == NULL) { // end of list, go to first one
                     if (f == NULL) // there isn't a first one, same level
-                        BeginIntermission(CreateTargetChangeLevel(level.mapname));
+                        G_BeginIntermission(CreateTargetChangeLevel(level.mapname));
                     else
-                        BeginIntermission(CreateTargetChangeLevel(f));
+                        G_BeginIntermission(CreateTargetChangeLevel(f));
                 } else
-                    BeginIntermission(CreateTargetChangeLevel(t));
+                    G_BeginIntermission(CreateTargetChangeLevel(t));
                 free(s);
                 return;
             }
@@ -612,16 +641,50 @@ void EndDMLevel(void)
     }
 
     if (level.nextmap[0]) // go to a specific map
-        BeginIntermission(CreateTargetChangeLevel(level.nextmap));
+        G_BeginIntermission(CreateTargetChangeLevel(level.nextmap));
     else {  // search for a changelevel
         ent = G_Find(NULL, FOFS(classname), "target_changelevel");
         if (!ent) {
             // the map designer didn't include a changelevel,
             // so create a fake ent that goes back to the same level
-            BeginIntermission(CreateTargetChangeLevel(level.mapname));
+            G_BeginIntermission(CreateTargetChangeLevel(level.mapname));
             return;
         }
-        BeginIntermission(ent);
+        G_BeginIntermission(ent);
+    }
+}
+
+/*
+=================
+CheckNeedPass
+
+Publishes whether the server wants a password, in the `needpass` serverinfo key
+that browsers and the client's own join code read: bit 0 for `password`, bit 1
+for `spectator_password`.
+
+Restored.  The cvar is registered CVAR_SERVERINFO in InitGame and this is its
+only writer, so without it a passworded server advertised `needpass 0` and read
+as open.  Identical in q2pro's baseq2 and in RA2, which is why the merge could
+lose it without either side's shape changing.
+=================
+*/
+static void CheckNeedPass(void)
+{
+    int need;
+
+    // if password or spectator_password has changed, update needpass
+    // as needed
+    if (password->modified || spectator_password->modified) {
+        password->modified = spectator_password->modified = false;
+
+        need = 0;
+
+        if (*password->string && Q_stricmp(password->string, "none"))
+            need |= 1;
+        if (*spectator_password->string && Q_stricmp(spectator_password->string, "none"))
+            need |= 2;
+
+        gi.cvar_set("needpass", va("%d", need));
     }
 }
 
@@ -734,7 +797,7 @@ static void G_RunFrame(void)
     // the clock, the entity loop, the rules check -- is what must not happen.
     // Clients still get their playerstates, so the banner is drawn and a menu
     // still answers.
-    if (G_Ruleset() == RULESET_TOURNEY && match_paused >= 2) {
+    if (G_IsOspRuleset() && match_paused >= 2) {
         OSP_pauseFrame();
         ClientEndServerFrames();
         return;
@@ -743,7 +806,7 @@ static void G_RunFrame(void)
     level.framenum++;
     level.time = level.framenum * FRAMETIME;
 
-    if (G_Ruleset() == RULESET_TOURNEY)
+    if (G_IsOspRuleset())
         OSP_frameStart();
 
     // R-BOT-20 steps 1 and 2.  A queued bot is created here rather than inside
@@ -760,7 +823,7 @@ static void G_RunFrame(void)
     if (level.exitintermission) {
         // Tourney can restart the match in place instead of changing level;
         // true means it did, and ExitLevel must not also run.
-        if (G_Ruleset() == RULESET_TOURNEY && OSP_exitLevel())
+        if (G_IsOspRuleset() && OSP_exitLevel())
             return;
         ExitLevel();
         return;
@@ -803,7 +866,7 @@ static void G_RunFrame(void)
 
     // exit intermission right now to avoid annoying fov change
     if (level.exitintermission) {
-        if (G_Ruleset() == RULESET_TOURNEY && OSP_exitLevel())
+        if (G_IsOspRuleset() && OSP_exitLevel())
             return;
         ExitLevel();
         return;
@@ -826,12 +889,15 @@ static void G_RunFrame(void)
     // dispatch row, not a second direct call.
     G_CheckRules();
 
+    // see if needpass needs updated
+    CheckNeedPass();
+
     // build the playerstate_t structures for all players
     ClientEndServerFrames();
 
     // A pause asked for during this frame takes effect after it: freezing
     // mid-frame would leave half the entities thought and half not.
-    if (G_Ruleset() == RULESET_TOURNEY) {
+    if (G_IsOspRuleset()) {
         // R-OSP-11: `bots_warmuptime` readies bots up.  After the rules check,
         // because readying the last outstanding client starts the match and
         // that must be this frame's last word about the match state.

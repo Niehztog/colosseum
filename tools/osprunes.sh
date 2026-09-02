@@ -1,5 +1,5 @@
 #!/bin/sh
-# osprunes.sh -- do the tourney runes actually do anything? (R-VER-27, R-132)
+# osprunes.sh -- do the OSP runes actually do anything? (R-VER-27, R-132)
 #
 # WHY THIS EXISTS BESIDE playtest.sh.  The 81-row battery asks `sv ruleset` and
 # `sv slots` and believes them, which is right for a dispatch and wrong for a
@@ -20,13 +20,13 @@
 #                            and %r in a say_team names it
 #   two powerups, no rune -> every rune slot stays zero and %r says "no runes"
 #
-# The second is the cross-talk case: ordinals 29 and 30 are tourney's OWN second
+# The second is the cross-talk case: ordinals 29 and 30 are the OSP map's OWN second
 # powerup timer, so before the fix a player holding an invulnerability read as
 # holding the STRENGTH and HASTE runes -- doubled damage and haste fire rate from
 # a pent.
 #
 # ...and it detects R-132's other half without reaching any of that, because a
-# pre-fix library cannot survive `g_ruleset tourney` with `runes 1`:
+# pre-fix library cannot survive an OSP ruleset with `runes 1`:
 # OSP_spawnRuneAt incremented r_count[-6] rather than r_count[0..4], so
 # OSP_checkMinRunes never saw its count rise and the two tail-called each other
 # until the edict pool was gone -- `ED_Alloc: no free edicts` at map load.  The
@@ -34,7 +34,7 @@
 #
 # NOT PART OF `make check`, for the same reason none of the server-driven scripts
 # are: it needs a built engine, retail paks, and about two minutes -- most of it
-# waiting out match_countdown, because tourney makes nothing pickable until a
+# waiting out match_countdown, because a match ruleset makes nothing pickable until a
 # match is actually running (Touch_Item, sync_stat < 4).
 #
 # REQUIREMENTS -- the same set playtest.sh documents.

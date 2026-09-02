@@ -25,6 +25,15 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 // than being merged into a spine file (R-CORE-7).  The reconstruction's
 // asm-matching address comments are stripped -- SPECS.md N1 makes those oracles
 // meaningless here, and they survive at the pin.
+//
+// THIS IS src/ctf/p_menu.h's ENGINE, ONE GENERATION EARLIER.  Threewave wrote
+// `pmenu_t`; OSP took a copy and CTF kept developing theirs, so the two
+// engines R-MENU-1 ships side by side are forks of one file rather than two
+// designs.  The `arg`-per-entry here against `arg`-on-the-handle there is the
+// visible divergence (R-MENU-2 struck, and this is why), and until 1.31 the
+// invisible ones were that this copy had none of the three departures
+// `src/ctf/p_menu.c` documents.  It has them now; `p_menu.c` says what each
+// one is for.
 enum {
     osp_PMENU_ALIGN_LEFT,
     osp_PMENU_ALIGN_CENTER,
@@ -44,11 +53,31 @@ typedef struct osp_pmenu_s {
     void (*SelectFunc)(edict_t *ent, struct osp_pmenu_s *entry);
 } osp_pmenu_t;
 
-void osp_PMenu_Open(edict_t *ent, osp_pmenu_t *entries, int cur, int num);
+void osp_PMenu_Open(edict_t *ent, const osp_pmenu_t *entries, int cur, int num);
 void osp_PMenu_Close(edict_t *ent);
+// The select callback is spelled out rather than typedef'd, which ctf/p_menu.h
+// does not have to do.  tools/donorgate.py builds this donor's surface out of
+// this header with a regex, and `typedef void (*osp_SelectFunc_t)(...)` reads
+// to it as a declaration of `void` -- which then makes every `void` in every
+// spine file an ungated use of tourney's surface.  ctf/ is not a donor
+// directory, so its typedef is never scanned.
+void osp_PMenu_UpdateEntry(osp_pmenu_t *entry, const char *text, int align,
+                           void (*SelectFunc)(edict_t *ent, struct osp_pmenu_s *entry));
+// Re-copy `entries` into this client's private rows.  Every leaf in
+// osp_menus.c that restages a table calls it before osp_PMenu_Update(); see
+// p_menu.c for why it is silent when no menu is open.
+void osp_PMenu_Sync(edict_t *ent, const osp_pmenu_t *entries);
+// Compose and write the layout now.  osp_PMenu_Update() is the rate-limited
+// door to it, and ClientThink is what flushes what that door defers.
+void osp_PMenu_Do_Update(edict_t *ent);
 void osp_PMenu_Update(edict_t *ent);
 void osp_PMenu_Next(edict_t *ent);
 void osp_PMenu_Prev(edict_t *ent);
 void osp_PMenu_Select(edict_t *ent);
+// R-OSP-13.  The menu key, both of them.  `reverse` is `invdrop` rather than
+// `invuse`, and it is the STEP DIRECTION the settings rows read off
+// `resp.osp_r264`, not a second kind of selection.  Carries the donor's
+// two-frame debounce, which belongs with the key and not with its caller.
+void OSP_menuSelect(edict_t *ent, bool reverse);
 
 #endif // OSP_P_MENU_H

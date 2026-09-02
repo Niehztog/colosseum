@@ -1,7 +1,7 @@
 #!/bin/sh
 # bootmatrix.sh -- R-VER-2's boot matrix, run rather than remembered.
 #
-# Every g_ruleset x xatrix x rogue combination (5 x 2 x 2 = 20) starts, loads a
+# Every g_ruleset x xatrix x rogue combination (7 x 2 x 2 = 28) starts, loads a
 # map the ruleset can hold, runs past 100 frames, and is asked `sv ruleset`.  A
 # row passes when the server reached that frame count, printed no ERROR and no
 # "!!" contradiction, and reported the ruleset and layers that were asked for.
@@ -135,7 +135,7 @@ if [ "$CONTROL" = 1 ]; then
 fi
 
 printf '%-9s %-7s %-6s %-9s %-7s %s\n' ruleset xatrix rogue map frames verdict
-for rs in dm ctf arena tourney sp; do
+for rs in dm dmpro tdm duel ctf arena sp; do
   case $rs in
     ctf) map=q2ctf1; dm=1; coop=0 ;;
     sp)  map=base1;  dm=0; coop=0 ;;
@@ -153,6 +153,12 @@ for rs in dm ctf arena tourney sp; do
     done
   done
 done
+
+# `g_ruleset tourney` has no row and no control of its own.  It was the selector
+# for OSP's four modes until spec 1.36 and it is now simply not a ruleset name --
+# which is what the `banana` control already covers: an unknown value warns,
+# falls back to `dm`, and does not abort.  A row asserting that `tourney`
+# specifically does that would be asserting it is still special.
 
 echo
 echo "$((pass+fail)) row(s), $pass passed, $fail failed"

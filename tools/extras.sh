@@ -150,10 +150,13 @@ if [ "$CONTROL" = 1 ]; then
   else
     ok "control/log-writes" "the write count is not fixed at zero"
   fi
-  # 3. the observer line is per ruleset, so dm must not report tourney's.
+  # 3. the observer line is per ruleset, so the `dm` control must not report
+  #    arena's.  It compared against TOURNEY's until spec 1.36, and `dm` is
+  #    tourney's code path now -- that control had become a thing compared
+  #    against itself, which passes for the wrong reason.
   l6=$(line_for 6 "$DIR/c1.log")
-  if have "tourney" "$l6"; then
-    bad "control/observer" "dm reported tourney's observer"
+  if have "arena" "$l6"; then
+    bad "control/observer" "dm reported arena's observer"
   else
     ok "control/observer" "the observer line follows the ruleset"
   fi
@@ -200,7 +203,7 @@ if [ "$CONTROL" = 1 ]; then
   # here by stripping every block from the real one.
   sed -E '/^[a-z0-9_]+ *\{/,$d' "$ROOT/colosseum/arena.cfg" > "$DIR/c6-arena.cfg"
   blocks=$(grep -cE '^[a-z0-9_]+ *\{' "$DIR/c6-arena.cfg" || true)
-  picks=$(grep -cE '^[[:space:]]*pickup:' "$DIR/c6-arena.cfg" || true)
+  picks=$(grep -cE '^[[:space:]]*pickup:[[:space:]]*1' "$DIR/c6-arena.cfg" || true)
   if [ "${blocks:-0}" -lt 20 ] || [ "${picks:-0}" -lt 1 ]; then
     ok "control/arena.cfg is an example" \
        "$blocks block(s), $picks pickup(s) in the stripped copy -- rejected"
@@ -283,7 +286,7 @@ fi
 
 # ---------------------------------------------- R-EXTRA-3/4, the classnames
 EXTRA_SETS=''
-for rs in dm ctf arena tourney sp; do
+for rs in dm dmpro tdm duel ctf arena sp; do
   case $rs in
     ctf) map=q2ctf1 ;;
     sp)  map=base1 ;;
@@ -312,9 +315,9 @@ for rs in dm ctf arena tourney sp; do
   fi
   l6=$(line_for 6 "$DIR/cls-$rs.log")
   case $rs in
-    tourney) want=tourney ;;
-    arena)   want=arena ;;
-    *)       want="dm/sp/ctf" ;;
+    dm|dmpro|tdm|duel) want=osp ;;
+    arena)             want=arena ;;
+    *)                 want="ctf/sp" ;;
   esac
   have "$want" "$l6" && ok "R-EXTRA-6/$rs observer" "$l6" \
                      || bad "R-EXTRA-6/$rs observer" "$l6"
@@ -326,7 +329,7 @@ done
 # is not "does it change anything" -- it is that an operator who execs one gets
 # the ruleset it names, that nothing in it is a command this library does not
 # have, and that RA2's arena.cfg PARSES rather than being reported unreadable.
-for rs in dm ctf arena tourney sp; do
+for rs in dm dmpro tdm duel ctf arena sp; do
   case $rs in
     ctf) map=q2ctf1 ;;
     sp)  map=base1 ;;
@@ -368,13 +371,23 @@ for rs in dm ctf arena tourney sp; do
     # valid, and empty of the data the arena ruleset exists for.  A play test
     # found it as "the join menu offers only Start New Team", because a pickup
     # team is a TEAM in that menu and no arena was marked to have one.
+    #
+    # COUNT `pickup: 1`, NOT `pickup:`.  The bare key was counted until R-189 and
+    # reported as "N pickup arena(s)", which is wrong twice over: three of the
+    # 35 designations in the file are `pickup: 0` and turn a pickup arena OFF,
+    # and two of the 32 that remain are map-level defaults for maps with no
+    # arena subdivision rather than arenas of their own.  30 arenas carry it,
+    # which is the number `colosseum/README.md` uses in its other sentence about
+    # the same set.  The threshold is unaffected -- this is a check that the file
+    # is RA2's own and not a 69-line example of its format -- but a check that
+    # prints a figure is read for the figure.
     blocks=$(grep -cE '^[a-z0-9_]+ *\{' "$ROOT/colosseum/arena.cfg" || true)
-    picks=$(grep -cE '^[[:space:]]*pickup:' "$ROOT/colosseum/arena.cfg" || true)
+    picks=$(grep -cE '^[[:space:]]*pickup:[[:space:]]*1' "$ROOT/colosseum/arena.cfg" || true)
     if [ "${blocks:-0}" -lt 20 ] || [ "${picks:-0}" -lt 1 ]; then
       bad "D6/arena.cfg is RA2's own" \
           "$blocks per-map block(s), $picks pickup designation(s) -- an example, not the file"
     else
-      ok "D6/arena.cfg is RA2's own" "$blocks per-map block(s), $picks pickup arena(s)"
+      ok "D6/arena.cfg is RA2's own" "$blocks per-map block(s), $picks \`pickup: 1\` key(s)"
     fi
   fi
 done
@@ -459,11 +472,13 @@ else
       +set basedir "$DIR" +set homedir "$DIR" +set game colosseum \
       +set dedicated 1 +set net_port 0 +set maxclients 16 \
       +set deathmatch 1 +set coop 0 +set g_ruleset dm +set bots 1 \
-      +set minimumplayers 0 +map q2dm1 >"$log" 2>&1 )
+      +set minimumplayers 0 +set bots_minplayers 0 +map q2dm1 >"$log" 2>&1 )
+  # BOTH spellings, and the second one is not belt and braces.  `dm` reads
+  # tourney's `bots_minplayers` since spec 1.36 (R-OSP-11) and that cvar
+  # defaults to 4, so a server setting only the Gladiator name gets four bots
+  # back the moment `sv removebot all` runs -- and this row then measures item
+  # respawn on a map that is not empty.  It failed exactly that way once.
   rc=$?
-  field() { sed -n "s/^census weapon_: \([0-9]*\) spawned, \([0-9]*\) in world, \([0-9]*\) waiting.*/\$1/p" "$log" | sed -n "$2p"; }
-  s0=$(field 1 1); w0=$(field 1 1)
-  spawned=$(sed -n 's/^census weapon_: \([0-9]*\) spawned.*/\1/p' "$log")
   inworld=$(sed -n 's/^census weapon_: [0-9]* spawned, \([0-9]*\) in world.*/\1/p' "$log")
   waiting=$(sed -n 's/^census weapon_: [0-9]* spawned, [0-9]* in world, \([0-9]*\) waiting.*/\1/p' "$log")
   n0=$(printf '%s' "$inworld" | sed -n 1p)

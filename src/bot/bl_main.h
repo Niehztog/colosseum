@@ -165,31 +165,33 @@ void BotPerfReport(void);
 // osp-tourney defines TOURNEY at g_local.h:16 -- LIVE, not `#if 0` -- and every
 // bl_*.c includes g_local.h first, so the donor's own `//#define TOURNEY` lines
 // are inert text and all seventeen blocks are active library-wide.  Neither
-// state is acceptable here: on, dm/ctf/arena lose `minimumplayers`, `botfile`
+// state is acceptable here: on, ctf/arena lose `minimumplayers`, `botfile`
 // and the SDK's loading-screen swap; off, OSP's runes stop reaching the brain.
 // So each block becomes a branch on the ACTIVE ruleset, and the tourney state
 // the blocks read is reached through these rather than through an extern that
 // would resolve to tourney's globals in every ruleset.
 //
-// BotTourneyMode() is a VALUE accessor, not a predicate.  bl_main.c compares
-// `m_mode == MODE_TEAM` to drive the brain's `teamplay` libvar and that
-// comparison is exactly right as written: 1v1 is two teams of one, the brain
-// has no ally, and `teamplay 0` is the correct answer for m_mode 3.  An
-// accessor that generalised it to "is this a team mode" would give every duel
-// bot an imaginary teammate.  Preserve the comparison; abstract only the value.
-#define MODE_TEAM   0x02
-int  BotTourneyMode(void);          // m_mode, or -1 when not tourney
+// There is no BotTourneyMode() any more: `m_mode` is gone and the mode of play
+// IS the ruleset (R-OSP-12).  What the accessor existed to protect survives and
+// is worth restating, because the flattening makes the wrong answer look more
+// natural than it did: the brain's `teamplay` libvar is `RULESET_TDM` ALONE.
+// `duel` is two teams of one, the brain has no ally, and telling it otherwise
+// gives both duellists an imaginary team-mate the moment they wear the same
+// model.  So do NOT reach for G_IsOspRuleset(), OSP_IsTeams() or
+// G_TeamplayEnabled() at that call site -- all three are true under `duel`, and
+// all three are a different question (R-BOT-29).
 int  BotTourneyRunes(void);         // rune_stat, or 0
 bool BotTourneyHook(void);          // hook_enable, or false
 int  BotTourneyVotedIn(void);       // bots_votedin, or 0
-// The cvar names are per ruleset (R-OSP-11): tourney's own `bots_minplayers`
-// and `bots_botfile`, everyone else's `minimumplayers` and `botfile`.
+// The cvar names are per ruleset (R-OSP-11): the OSP four use tourney's own
+// `bots_minplayers` and `bots_botfile`, ctf and arena `minimumplayers` and
+// `botfile`.
 const char *BotMinPlayersCvar(void);
 const char *BotFileCvar(void);
-// ...and so is the name of the switch that replaces the flat count with a target
-// read off the game: `ra_botfill`, `ctf_botfill`, `dm_botfill`, or NULL for the
-// two rulesets that have no such switch (R-RA-7, R-CTF-8, R-DM-1).
-const char *BotFillCvar(void);
+// The switch that replaces the flat count with a target read off the game is
+// ONE cvar, `botfill`, for every ruleset (R-RA-7, R-CTF-8, R-DM-1).  It was
+// three names on R-OSP-11's authority and that rule never covered it -- see the
+// comment on BotFillEnabled().
 bool BotFillEnabled(void);
 // ...and the cvars themselves, obtained once with the RULESET's default.
 // R-COMPAT-6: osp_main.c registers `bots_minplayers` with a default of "4" and

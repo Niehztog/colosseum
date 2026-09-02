@@ -9,8 +9,8 @@ base, and restores full Gladiator Bot command and botlib support on top of it.
 | **Project name** | Colosseum |
 | **Artifact** | `game<cpu>.so` / `game<cpu>.dll` (Q2PRO game API), gamedir `colosseum` |
 | **Working directory** | `<workspace>/colosseum` |
-| **Spec version** | 1.35 — 2026-08-28 |
-| **Status** | Draft for review. No code written yet. |
+| **Spec version** | 1.49 — 2026-09-02 |
+| **Status** | **Phase 8 of nine.** Built, played and audited: seven rulesets and two content layers from one library, bots in the six that take them, ten build configurations warning-clean under gcc and clang at both game ABIs. `README.md` has the short version. |
 | **Amendment 1.1** | Re-measured against the three replay bundles (§3.2), the two donor port write-ups and `q2pro/doc/mission-packs.md`. Changed: §3, §3.1, new §3.2, D8–D9, R-CORE-8, R-CORE-10, R-CORE-11, new R-CORE-12/13, R-MODE-5, R-MP-5, new R-KEY group, R-SAVE-3, R-OSP-7, new R-SEC-8/9, R-CONV-1, new R-TOOL group, §7 rules 1/6/9, §9 phase order, §10, §11, Q1/Q2/Q9 closed |
 | **Amendment 1.2** | Thirty-one design decisions settled with the author; §12 closed and emptied. **Scope cut:** Colored Hitman and `sp_dm` dropped entirely. **Posture:** public server software, released by staged exposure. **§7 rule 6 gains four exemptions** — observers, map rotation, stats logging and menus are per-ruleset. Eleven corrections of fact, the largest being that `gladq2_src` is *not* `gladiator-bot-restored/game` and that the harness scratchpad was never lost. Changed: §1.1, §2, §3, §3.2, §5.2, R-CORE-14, R-MODE-2/4/5/7, R-BOT-1/4/6/29, R-MENU-1/2, R-EXTRA-6, R-SP-6 struck, §6.7 struck, R-OSP-7, R-COMPAT-6, R-BUILD-5, §7 rule 6, §9 re-cut to nine phases, §10, §11, §12, Appendix B |
 | **Amendment 1.3** | Re-measured `m_mode` against `osp-tourney@ab0e13a`. **One correction of fact, one new requirement.** OSP Tourney DM selects among **four** modes of play, not three: 1.0–1.2 omitted `match_mode 3`, the 1v1 duel mode, which carries 34 dedicated sites in 10 files, six `OSP_1v1*` helpers, its own client command, its own statusbar branch and three of the fifteen shipped configs. All four are inherited, not work. Changed: R-MODE-2, R-MODE-7 matrix, R-OSP-1, new R-OSP-12, new R-OSP-13, R-BOT-29, new R-VER-16, §9 Phase 5 exit. R-OSP-2's counts were re-measured and are unchanged — the gap was in prose, not in the measured surface. |
@@ -41,14 +41,25 @@ base, and restores full Gladiator Bot command and botlib support on top of it.
 | **Amendment 1.28** | **A play test in an arena found two defects and an asset that does not exist.** **"Leave Team" left the player with no menu at all** -- in arena 0, spectating, unable to rejoin or spawn, with `inven` doing nothing. `UseMenu` reads `curmenulink` **before** it calls the row's callback and unlinks that menu afterwards; `init_player()` is the tail of both Leave Team rows and it *drops* the queue rather than walking it, because a reused client slot must not inherit the previous occupant's TAG_LEVEL menus. So the captured menu is orphaned with its `prev` still pointing at the queue HEAD, and `remove_from_queue` then writes `menuqueue.next = NULL` -- **taking the brand-new team menu the callback had just built**. `curmenulink` ends up NULL, which is the exact field the `inven` reopen tests. The donor cannot have this defect: its `init_player` does not touch the queue, so the old menu is still queued and the unlink is correct. Ours added those three lines in 1.19 and this is their cost. `UseMenu` now asks whether the captured menu is still in the queue and, when it is not, frees it without touching a queue it is no longer in (R-130). **And the bots were in the wrong arena, which is 1999's default doing exactly what it says.** The `arena` cvar picks the arena a new bot joins, default **1**, clamped to `1..num_arenas` -- `gladq2_src/bl_spawn.c`, copied faithfully here. On a deathmatch map that is the only arena and it is right; on `ra2map6` the human is in arena **8**, because that is where RA2's own `arena.cfg` puts the pickup arena, and four bots sat in arena 1 building teams of their own. **0 now means "follow the people"** -- the lowest-numbered arena with a human on a team, then the lowest-numbered pickup arena, then 1 -- resolved at join time rather than when the bot was added, and 1..N still behaves exactly as 1999 did. D6's `configs/arena.cfg` asked for **`botarena 0`**, a name nothing in this tree or any donor has ever read, with a comment describing behaviour that never existed; it is `set arena 0` now (R-131). **The asset is the finding underneath both.** Bots cannot play *any* RA2 map: the brain needs an `.aas` per map, the 16 that ship are `q2dm1`-`q2dm8` and `q2ctf1`-`q2ctf8`, and every attempt on `ra2map6` printed `Fatal: no AAS file available` and destroyed the bot. Measured end to end by making one: `bspc -bsp2aas` then a single load of the map for the brain to compute reachability and write it back, **about five minutes** for `ra2map6` on this host, after which four bots join `#8 Pickup Red`/`#8 Pickup Blue`, the round starts in arena 8 and the person spawns into it. **All 28 were then generated** at the author's request -- 17 to 127 seconds each, three workers, ten minutes for the set, 33 MB -- and each one verified to load and seat a bot, with bots fighting on three of them. `ra2map10` and `ra2map28` need `bspc -nocsg`: their hulls leak, so the flood fill cannot run and `bspc` exits **0 without writing a file**. The meshes stay out of this repository for R-126's reason -- they are the brain's assets. Changed: R-MENU-3, R-ARENA-2, D6. `doc/reconciliation.md` R-130..R-131. |
 | **Amendment 1.29** | **The old game API is a build target, and building for it found a defect that had never run.** `make API=old` builds the same sources against `GAME_API_VERSION_OLD` (3) -- `gclient_old_t`, `pmove_old_t`, 32 stat slots -- for a 1997-vintage engine or a Q2PRO built without `USE_NEW_GAME_API`; Q2PRO's loader accepts either (`q2pro/src/server/game.c:1014`), and **new stays the default and the shipped configuration**. **The compile was the easy half**: every linked translation unit already built clean at both settings, because `g_save.c`, `p_client.c` and `g_local.h` carry Q2PRO's own `#if USE_NEW_GAME_API` arms and R-BOT-1's contract was already decoupled from the engine's `MAX_STATS`. Three things did change: `config.h`'s switch is `#ifndef`-guarded so a `-D` can win without the redefinition R-BUILD-2 fails on; the build directories diverge as `<dir>-oldapi`, because the switch changes **struct layouts** and mixed objects link cleanly and run wrong while `-MMD -MP` cannot see it -- R-48's failure with the one mechanism that stops it removed; and **R-OSP-7 clause 6's ceiling was one bound and needed two.** It asked only whether the client had negotiated protocol extensions, which was complete while the API was fixed on; the two switches are independent in *both* directions, so `game.csr.extended` can be true on a library whose `player_state_t` holds 32 slots, and CTF's timer pair at 32/33 would then be written **off the end of the struct, per client, per frame**, for every client holding a second powerup. `stat_ceiling()` is now the lower of what the array holds and what the wire carries. Observed rather than reasoned: the `API=old` release on the same `q2proded` that loads the 3302 library prints `ruleset ctf (extensions on, api 3, so slots 0..31 are reachable)` with both rows dropped, and the full battery is **identical across the two ABIs on every ctf row but that one**. **AND THEN THE INTERESTING PART (R-132).** `-Warray-bounds` at `API=old -O2` refused one line, and under it was **R-OSP-7's own abstraction being paid for four phases late**. Replacing the donor's `#define STAT_RUNE_RESIST 22` with a `statslot_t` changed what the token MEANS -- a logical id, ordinal 28 -- and the port renamed every consumer while migrating **one of the four uses**. The rune item's `quantity` stayed 22, so `G_SetStat(other, item->quantity, 1)` set **an arena stat tourney does not map** and picking up a rune granted nothing; fourteen reads indexed `stats[]` by ordinal, landing on 28..32 where the runes sat at 22..26 -- two of them tourney's *own* second-powerup-timer pair, so **holding a pent read as holding the STRENGTH and HASTE runes**, doubled damage and haste fire rate, while resist, regen and vampire could never fire; and `r_count[quantity - SID_OSP_RUNE_RESIST]` was `r_count[-6]`, which is the counter `OSP_checkMinRunes` terminates on -- so it never rose, the spawner and the checker tail-called each other, and **`g_ruleset tourney` with `runes 1` died at map load, every time**, with `ED_Alloc: no free edicts`. A shipped configuration was an instant server death and the whole rune feature had never run once. **Nothing could see it because everything asked the map and the map was right** -- 22..26, no collisions, right kinds; the compiler sees a well-typed enum-to-int conversion, the boot matrix runs tourney with runes off, and the battery ran `runes 1` under *ctf*. The fix restores the donor's idiom in this tree's vocabulary -- `quantity` holds the identity, and the identity is now a `SID_` -- which makes all three uses right at once, plus `G_GetStat` for the reads and a `_Static_assert` for the contiguity `r_count[]` silently needs. Two new `slotkind.py` questions, and **the first attempt at the second was wrong in an instructive way**: "the id argument must be a `SID_` literal" rejects the *fixed* code as loudly as the broken code, so the real invariant is a join between two files -- if an accessor reads `item->quantity`, every `IT_RUNE` item must spell it as an id. **Seven controls; 19 findings on the pre-fix tree, 0 after.** And a behaviour claim rather than a static one: new `tools/osprunes.sh` (R-VER-27) drives a real TeamPlay match and asserts in **both signs** -- a rune sets its own slot and only its own and `%r` names it; two powerups and no rune leave all five zero and `%r` says "no runes". It reads stat VALUES off the wire with slot numbers taken from `sv slots` by name, which is the only channel that could have caught this: **the diagnostic here was not vague, it was correct**, and still could not report that nothing ever wrote there. 33 rows, clean on both ABIs; on the pre-fix library its first row reports the `ED_Alloc` death. **And a diagnostic with a reader has a format (R-133)**: `sv slots` gained the api version, inserted ahead of the `(extensions <on|off),` anchor R-VER-27's harness matches on, so the battery reported `extensions on` failing on a server that had them on while the next row contradicted it. Appended instead. The harness now reads that field and asserts the **ABI-appropriate** outcome for ctf's timer pair -- resolved on 3302, dropped on 3 -- so both are 86/0 where the old ABI previously reported correct behaviour as broken. Changed: R-ENG-1, new R-ENG-1a, R-OSP-7 clauses 6/7, R-TOOL-1, `Makefile` (new `API`/`oldapi`/`bothapis`), `.gitignore`, `config.h`, `src/g_items.c`, `src/g_stats.{c,h}`, `src/tourney/osp_runes.c`, `src/tourney/osp_players.c`, `tools/slotkind.py`, new `tools/osprunes.sh`, `README.md`, `doc/regression.md`. `doc/reconciliation.md` R-132..R-133. |
 | **Amendment 1.30** | **Two play tests, five defects, and only two of them are ours.** **Bots and people ended up in different arenas, and R-131's answer was right but asked once.** `arena 0` means "follow the people" and 1.28 resolved it at the bot's join; `CheckMinimumPlayers` adds its first bot at `level.framenum` **32**, before a person who typed `map` has finished the motd and the team list, so that bot has nobody to follow, takes the fallback arena and stays there for the level while every later bot follows the person. Reproduced exactly with a headless client on `ra2map9`: `Quad Bitch` on `#1 Pickup Red`, the person on `#2 Pickup Blue`, and both remaining bots on `#2 Pickup Red` -- one person against two, with a third bot alone next door. **The balance is not the defect**: three bots joining the smaller of two pickup teams settles at 2v2 on its own, and losing one to the other arena is the whole of "me vs 2". `RA_BotFollowPeople()` re-asks on the same 32-frame cadence, and moves a bot only when its `arena` key is out of `1..N` (so `arena 3` is still 1999's literal request), somebody is on a team somewhere, **nobody** is on a team in the arena it is already in, and the target would accept it -- checked *before* `remove_from_team`, so a refused move cannot strand it in arena 0 (R-134). **Two fighters spawned on one point and neither of RA2's two answers works during a countdown.** A pickup arena gives the two sides alternate spawn indices and picks at random, so `ra2map9` arena 2's twelve points are six a side and three bots on one side collide 44% of the time. The telefrag cannot fire -- an arena fighter is `takedamage DAMAGE_NO` until `ASTATE_FIGHTING`, and `!tr.ent->takedamage` is exactly the condition for taking the push branch **instead of** `T_Damage` -- and the push does not push apart, because `KillBox` adds **the same random vector to both bodies**, so the pair drifts and the distance between them never changes. That is `g_utils.c` character for character from the donor, and it is the sentence in the report. Measured with eleven players: **20 of 25 dumps had a fighter pair inside 50 units, worst case eight pairs, 36 pair-observations with both clients `SOLID_BBOX`** -- two solid bodies at one origin is `allsolid` in `PM_StepSlideMove`, which is a player who can shoot and cannot walk. Fixed at the root, by preferring a point with the 50 units of clearance `SelectFarthestArenaSpawnPoint` already calls usable and falling back to a clash only when the whole side is taken, which is RA2's own stated fallback; and at the mechanism, by giving the second body the opposite vector. **KillBox pushes 11 -> 0** on the same map with the same eleven players. Rewriting the walk found a **third** defect: the donor's index loop dereferences `G_Find`'s result without testing it, and `side == 1` on an arena with ONE spawn point asks for index 1 of one -- a server-killing NULL read reachable from `arena.cfg` alone (R-135). **The team list said "Players: 0" while the scoreboard showed the bots, and both halves are the donors'.** `menuRefreshTeamList` bakes the counts in when the menu is built and RA2's answer is its "Refresh List" row; R-MENU-3 made `inven` a *reopen* rather than a rebuild on purpose, because closing an RA2 menu is hiding it. Correct separately, wrong together. Rebuilding on open is refused -- `FinishMenu` pushes a menu onto the queue and nothing pops the old one, so a rebuild on a key pressed all match long turns a bounded 1999 leak into an unbounded one -- so `RA_RefreshMenuCounts()` updates the numbers **in place** from `MenuThink`, which already repaints every ten frames, making them live rather than fresh-on-open (R-136). **Then CTF, where the brain never knew whose side it was on.** `clientsettings[].skin` is the ONLY currency the Gladiator brain has for teams -- `BotCTFTeam()` is `strstr(skin, "ctf_r") ? RED : BLUE` and `BotSameTeam()` compares the half after the `/` -- and `bl_main.c` fills it from `Info_ValueForKey(pers.userinfo, "skin")`, which Threewave never rewrites: `CTFAssignSkin` writes the `playerskins` configstring and stops, because a client is the only thing Threewave has to convince. So every bot read its own chosen skin, found no `ctf_r`, **believed it was blue** -- wrong flag, wrong base -- and no two bots were ever team-mates. **The donor already fixes it and the merge dropped the fix**: `gladq2_src/g_ctf.c` adds the userinfo write to all three arms under `#ifdef BOT` and **moves the call after the `pers.userinfo` save**, leaving the note that says why; we kept ZOID's position, so even the write would have been overwritten. The libvar half is the other necessary piece and is an omission rather than a line: the donor sets **no** `teamplay` under ctf, because `BotSameTeam` tests it first and a whole-string compare makes `male/ctf_r` and `female/ctf_r` enemies -- the opposite of R-ARENA-2's answer, for the stated reason that under arena the skin is a synthetic team id and under ctf its second half already IS the team (R-137). **The check needed an instrument and saying why is half the finding**: under ctf the world barely answers, because `T_Damage` calls `CheckTeamDamage()` -- which refuses a team-mate's damage before knockback or an obituary -- for everything except `DAMAGE_NO_PROTECTION`, which is why the report says bots *attack* team-mates rather than kill them; the one thing that gets through is a **telefrag**, a spawn collision rather than an act of aim that Threewave expects and docks a frag for, so the obituary row counts those apart and neither build produces a non-telefrag same-team kill; and the `playerskins` configstring is no better, because it was always right and both builds pass 4/4. `sv ruleset`'s ctf `botplace` row gains **`teamskin=`**, the count of bots whose `pers.userinfo` skin carries `ctf_`, which is the string the brain is handed: **0 of 4 before, 4 of 4 after**. **And `bind e "+hook"` bound a key to nothing.** The offhand hook is implemented -- `hookon`/`hookoff` drive R-CTF-3's latch and `ClientThink` fires it -- and unreachable, because `+hook` and `-hook` are **console aliases and no Quake II client ships them**. uGladQ2 stuffs both at the top of `ClientBegin`, with no `cmd` prefix because an unrecognised console command is forwarded to the server, and skips a bot; `tourney` has done the same since Phase 5, which is why the gap was ruleset-shaped rather than visible (R-138). **A new `sv arenadump` (R-VER-34) is what made three of the five legible**, and `spawn_recheck` is its sharpest field: nothing but `KillBox`'s push branch sets it, so a non-zero value IS the record of two clients placed on one point. `scenarios/ctfteams` is new -- the hook aliases read off the wire through a new `playtest.Bot.Stuffs()`, the wire skin, the brain skin, and every obituary checked against the roster -- and `playtest.Bot` gains `Stuffs()`/`WaitStuff()`. Changed: R-ARENA-2, R-MENU-3, R-CTF-3, R-CTF-4, new R-VER-34. **Then the sweep the author asked for before committing, and it found three more of the same shape.** Every `stuffcmd` and every direct `svc_stufftext` in all five donors, checked against this tree: **one more missing client half, and it is the same defect in the other ruleset** -- RA2 stuffs `alias +grap grap_on` and `alias +hook grap_on` at the top of its own `ClientBeginDeathmatch`, `grap_on`/`grap_off` were carried into `ClientCommand` and the aliases were not, so the arena grapple was reachable only by typing the command by hand. All **78** `#ifdef BOT` fences in `gladq2_src` -- 66 of them in the shared files, which is where a merge can lose one -- and two more are missing: **`PrecacheCTFItems()`**, because `weapon_grapple` is always owned and never stands in a map, so `PrecacheItem` is never reached for it and its six sounds, view model, icon and pickup sound were registered on first use, one configstring at a time, mid-round, with no HUD icon until then (the hook model joins the row too -- `CTFGrappleFire` takes its index at the moment it fires).  **That one is inherited rather than ours, and from further back than Threewave**: `q2pro/src/ctf` carries the same dead list today and the row documents the condition two lines above it, *"always owned, never in the world"* -- and 1.17 had already ADDED `grhurt.wav` to that list without noticing nothing walked it, which is the lesson: extending a list is not evidence that the list is read; and **the brain's client table is only ever written**, because `BotLib_UpdateAllClientSettings` skips a slot whose edict is not `inuse` and `ClientDisconnect` clears `inuse`, so a client that leaves stays in it with its name and its skin, and `BotNumTeamMates` counts by `strlen(netname)`. Five further fences are differences rather than defects and are left alone with the reason stated, one of them because it is **unreachable here**: `g_phys.c`'s `case MOVETYPE_WALK` cannot fire when all four assignments of that movetype in this tree are on clients and `G_RunFrame` never runs a client through `G_RunEntity`. **And the RA2 pin is two commits stale.** `ddba883` and `6b8d058` are both bug fixes; of their five halves this tree already had two -- the `menu_centerprint` NULL deref (1.17, by reading) and the observer ranging (R-77, 1.18) -- and was missing three: the grapple precache, and the two remaining halves of "farthest from any player is a minimum, and which players it is taken over is three separate decisions". Those two compound R-135, so they are carried: the arena selectors ask their own question now (`ArenaFightersRangeFromSpot` -- fighters, in this arena, excluding the one being placed) and `PlayersRangeFromSpot` keeps R-77's arm because `PutClientInServer` still reaches the shared deathmatch selectors under `arena`. The pin **stays** at `d20e1ce`: `arena.c` has diverged here by R-131, R-134, R-135 and R-77's own different answer, so a merge would have to choose between two fixes for one defect rather than take one. **And the question that started the sweep is answered against upstream rather than by reasoning: upstream did not fix the push.** `rocketarena2` `main` -- 1999's v2.25 -- and `q2pro-enhancements` HEAD both still read `VectorAdd(tr.ent->velocity, forward, ...)` and `VectorAdd(ent->velocity, forward, ...)`, the same vector into both bodies, unchanged by four commits of fixes to that file. R-135's `VectorSubtract` is new work. Changed also: R-CTF-3, `doc/provenance.md`. `doc/reconciliation.md` R-134..R-139. |
-
 | **Amendment 1.31** | **A bot that fired before the bell, and a brain reading somebody else's ammo.** Two reports from an `ra2map9` pickup round, and the second is a half of R-BOT-1's contract nobody had written down. **The bots shot at the reporter all through the round countdown**, when RA2 has granted no damage yet (`set_damage(DAMAGE_AIM)` fires on the frame the countdown reaches zero) and has already handed out the round's only ammo load — so every such shot is spent ammo and nothing else. A person is told by the HUD and the announcer; the brain has no concept of a round and R-BOT-6's libvar set is fixed, so there is nowhere to tell it. The answer is the **button**, which is what this side of the seam owns: `RA_RoundFighting()` asks whether a client's arena is in `ASTATE_FIGHTING` and `BotExecuteInput` declines to put `BUTTON_ATTACK` in the command when it is not — aiming, tracking and weapon choice untouched, and a person's pre-fire untouched with them. **Both** arms are gated, the `ACTION_RESPAWN` one included, because that arm latches the button directly on the client and `ClientLagThink` runs `Think_Weapon` on a latched attack whether the bot is dead or not; the grapple is exempt, being movement rather than damage (R-140). **Then the second report — "the bots prefer the machinegun and never use the chaingun" — which is a pattern, and not the one the character files describe.** R-100 made `bot_updateclient_t.inventory` the same LENGTH at both ends; **no part of the contract ever said what a slot MEANS**, and the brain has a definite opinion — `botfiles/inv.h` out of the 1999 pak, slot 10 the Machinegun and slot 19 Bullets, read by `weapons.c`'s `weaponindex`/`ammoindex`, `items.c`'s `index` and every `switch(INVENTORY_*)` in a character's `_w.c` and `_i.c`. So the numbering is contract carried as **data**. `inv.h` is baseq2's itemlist with Gladiator's additions appended; this tree's is R-CORE-2's union of five donors, which agrees for six rows and diverges at the seventh where `weapon_grapple` sits. A straight `memcpy` therefore showed a fighter carrying 100/200/150/50/50 as **`shells 1 bullets 1 cells 0 rockets 0 slugs 1`** — each of them a weapon-owned flag one to five rows away — and `fw_weap.c` zeroes any weapon whose ammo test fails, so of nine weapons the brain could see six, the Railgun only because slot 16 lands on `weapon_grenadelauncher`. Which of the six a bot picks is an accident of that accident: measured, the control's 1059 fighting samples hold the Railgun 363 times and `give_ammo`'s starting Rocket Launcher 353 more **because nothing ever scored high enough to issue a `use`** — and arithmetic over the seventeen weight files in `pak7.pak` says that with the GL granted the broken winner is the Railgun for nine of them, while with the GL absent from an arena's `weapons:` line it is the **Machinegun for twelve of seventeen**, which is where the report's own word comes from. `BotFillInventory()` translates slot by named slot, holding **classnames rather than numbers** because the game's numbering is the side that moves; 73 of 73 rows resolve, the Tag token by `pickup_name`; `INVENTORY_HEALTH` and everything from `ENEMY_HORIZONTAL_DIST` (200) up are left to the brain, guarded by the resolver's range check. **The chaingun half is not a defect** — with the indices right it tops exactly one of sixteen stock characters (Trash) and loses to the Machinegun in eleven — and **the defect is not only arena's**, because `fw_items.c`'s goal weights index the same slots, so bot item-seeking under `dm`, `ctf` and `tourney` was reading the wrong rows too (R-141). **Nothing in the tree could see it, and that is the lesson**: every instrument printed the GAME's numbers and the game's numbers were right — `sv inventory` the itemlist, `botabi.py` the struct sizes, seven `_Static_assert`s the lengths. New **`sv botinv`** is written in `inv.h`'s terms and prints the brain's slots and the client's own inventory on adjacent lines, plus `hold`/`asked`/`dropped` for R-140, which is the only shape that shows a disagreement about MEANING rather than about bytes. Checks: new `scenarios/ra2holdfire`, A/B against a control library carrying this tree with both behaviour changes reverted and the diagnostic kept — 93 of 93 out-of-fight attack frames held against 0 of 14, ammo intact in every countdown sample against two bots down a slug, and `brain` == `game` for every bot and every ammo type across 1200 samples. `tools/playtest.sh` 194 checks, 190 passed; the four arena menu-toggle failures are the pre-existing set and fail identically on the control and on a second run of the fixed library. `make check` clean. `doc/botlib-contract.md` gains **"Item indices — the DATA half of the contract"**; `doc/reconciliation.md` R-140..R-141; `doc/commands.md` and `doc/regression.md` carry the command and the A/B tables. |
-
 | **Amendment 1.32** | **The sweep R-141 asked for, and two donors' new work.** R-141's root -- a fact crossing a boundary this tree does not own, carried by a number whose meaning is fixed on the other side -- was swept over every such crossing, and the botlib's whole data contract came back clean but one: `WEAP_*` is not a name but a POSITION, the ordinal of a weapon's `#w_*.md2` in SP_worldspawn's precache block, because ChangeWeapon puts it in `s.skinnum`'s high byte and the client draws `weaponmodel[skinnum >> 8]`. Each donor numbers its own extras from 12 -- CTF's grapple, Xatrix's phalanx, Rogue's disruptor, each self-consistent ALONE -- and R-CORE-2 unions the content, so **seven weapons drew somebody else's model**: a phalanx and a disruptor appeared as grapples, a ripper and an ETF rifle as phalanxes, and so on down a list of nineteen. The Gladiator donor met the same problem merging the same packs and renumbered to 12..18; this does the same against its own block, and no shipped bot data file reads the per-weapon enemy slots, so the brain loses nothing. New **`tools/dupvalue.py`** asks the two questions separately, because a value check alone passes a header that is internally consistent and still disagrees with its list: every define family and enum for two names on one integer (failing only for families that ARE ordered lists, reporting the other twenty-nine pairs), and `WEAP_*` against the precache block itself. Two controls (R-142). **Two more from the same sweep.** An arena observer could shoot the fighters: `ClientLagThink` sends an observer's ATTACK to the chase cam and returns, except under arena where that arm is deliberately not taken -- RA2 has four observer modes and no chase cam, so ATTACK cycles them -- and the press then fell through to `Think_Weapon`, which has no observer guard. An arena observer has no ammo and the Blaster needs none, so a player in the queue could stand in the arena and plink a live round. The donor shares the fall-through, so it is 1999's, fixed at the root (R-143). And **every ruleset libvar but `dmflags` was stale for the life of the map** -- pushed once at library init, while all five are derived from cvars and dmflags a person can change mid-map, so bots went on using a grapple the server had turned off. `BotRulesetLibVars()` joins `dmflags` in the per-frame loop; the donor's narrower answer pushes `usehook` from its bot menu through `BotLib_BotLibVarSet`, **which this tree ported and never called**, so the wrapper goes with the fix (R-144). **Then both donors' new work, and one of them corrected this tree's reasoning.** `rocketarena2@f90a8fb` fixes the trackcam horizon lean, which this tree had already fixed differently and more widely -- but its measurement says the note here was wrong: `gi.Pmove` IS the camera's integrator, and it returns early for exactly one pm_type. The donor writes the literal `pm_type = 3`; **this port read that as "stop this client moving" and wrote PM_FREEZE, which is 4** -- so `track_think`'s clear-path branch, which sets a velocity and expects pmove to cover it, moved the camera not at all, and its blocked branch, which teleports, became the only thing that ever did. The follow camera did not follow; it snapped when something got in the way -- though not by sitting still, and the first measurement of it asserted the wrong thing: the pre-fix library still covered 1837 units with 9 of 15 intervals moving, because the blocked branch fires often. The defect is the shape -- measured, 13 of 15 intervals moving in steps up to 274 units with the fix against 6..8 of 15 in jumps up to 548 without it -- and the reading that settles it is the pm_type off the wire, 3 against 4. And where the teleport stamp survived into the mode only YAW followed the mouse, because `PM_ClampAngles` pins the other two and the countdown that clears the flag sits below the PM_FREEZE return. Both halves kept: the donor's pm_type, and this tree's wider `VectorClear` (R-145). `rocketarena2@811af42` is the other: `ArenaFightersRangeFromSpot` returned 0 with no fighters to measure against and a note here called that deliberate, because it drops the caller through to the random selector -- **it does the reverse**, since random spots collide, and in the staging area everybody is FIGHT_SPECTATING so the fighter pass counts nobody every single time. Two arrivals on one spot is R-135's siamese twins by the other road, and neither KillBox nor check_telefrag will touch a spectating client. Two passes now: fighters first, every live body only when there are none (R-146). **And `q2pro`'s mission-packs branch was rewritten**, with its fixes folded into the commits that add the libraries, so the pin names commits no longer on the branch. Diffed old pin against new tip over every path this tree took: `src/game` and `src/shared` are byte-identical, and of the CTF and mission-pack changes only two were not already here -- `PMenu_Close` before `PutClientInServer`'s memset, since every menu handle lives in the part about to be zeroed and R-MENU-3 had fixed only the disconnect path (R-147), and `!(self->flags & FL_FLY)` in `ai_run_slide`, **which reverses R-30**: that decision kept the broken grouping because turning the clamp on changes how every Ground Zero monster sidesteps, and the donor has now made the call, so §7 rule 7 takes it and the clamp operates for the first time since 1998 -- a behaviour change in sp and coop, recorded as one (R-148). Everything else upstream fixed was already here and is tabulated. Neither pin moves, for R-139's reason. `doc/reconciliation.md` R-142..R-148; `doc/provenance.md` records the rewritten branch; new `scenarios/ra2trackcam` reads the pm_type and the camera's travel off the wire. |
-
-| **Amendment 1.33** | **The donor had the countdown gate and this tree dropped it.** Asked while working out which of 1.31's and 1.32's fixes belong upstream: `gladq2_src/p_client.c` guards BOTH its `Think_Weapon` call sites with `!(ent->flags & FL_OBSERVER) && ent->movetype != MOVETYPE_NOCLIP && !(ra->value && ent->takedamage == DAMAGE_NO)`, and that third clause is R-140 and R-143 in one line -- broader than either, because it stops a PERSON pre-firing a countdown as well as a bot. So both are **dropped donor halves** rather than the new work their entries claimed, and both entries are corrected in place. R-140's gate is still right and still needed (it stops the brain's request at the button, which keeps `sv botinv`'s asked/dropped honest), and observers are airtight either way because `ClientBeginServerFrame`'s site already carries `!G_IsObserver`. **What is still missing is the human fighter, and the donor's fix is not adoptable verbatim**: it gates `Think_Weapon` wholesale, and a weapon CHANGE completes inside that call -- `Use_Weapon` sets `newweapon`, `Weapon_Generic` reaches `ChangeWeapon` through WEAPON_DROPPING, and RA2's `fastswitch` only skips the raise animation (`p_weapon.c:544`) -- so taking it would freeze weapon selection for the whole countdown, which is how a Rocket Arena round is prepared. Trading a wasted shot for that is the wrong way round. Doing it properly gates the FIRING rather than the think, which is a per-`weaponthink` change and wants its own increment; the first attempt here put the guard on `ClientLagThink`'s outer `if` and would have broken chase-target switching for every non-arena spectator, which is recorded so the next attempt starts past it. **Left open deliberately**, and a person can pre-fire an RA2 countdown in `rocketarena2` too. `doc/reconciliation.md` R-149, and corrections in R-140 and R-143. |
+| **Amendment 1.33** | **The donor had the countdown gate and this tree dropped it.** Asked while working out which of 1.31's and 1.32's fixes belong upstream: `gladq2_src/p_client.c` guards BOTH its `Think_Weapon` call sites with `!(ent->flags & FL_OBSERVER) && ent->movetype != MOVETYPE_NOCLIP && !(ra->value && ent->takedamage == DAMAGE_NO)`, and that third clause is R-140 and R-143 in one line -- broader than either, because it stops a PERSON pre-firing a countdown as well as a bot. So both are **dropped donor halves** rather than the new work their entries claimed, and both entries are corrected in place. R-140's gate is still right and still needed (it stops the brain's request at the button, which keeps `sv botinv`'s asked/dropped honest), and observers are airtight either way because `ClientBeginServerFrame`'s site already carries `!G_IsObserver`. **What is still missing is the human fighter, and the donor's fix is not adoptable verbatim**: it gates `Think_Weapon` wholesale, and a weapon CHANGE completes inside that call -- `Use_Weapon` sets `newweapon`, `Weapon_Generic` reaches `ChangeWeapon` through WEAPON_DROPPING, and RA2's `fastswitch` only skips the raise animation (`p_weapon.c:544`) -- so taking it would freeze weapon selection for the whole countdown, which is how a Rocket Arena round is prepared. Trading a wasted shot for that is the wrong way round. Doing it properly gates the FIRING rather than the think, which is a per-`weaponthink` change and wants its own increment; the first attempt here put the guard on `ClientLagThink`'s outer `if` and would have broken chase-target switching for every non-arena spectator, which is recorded so the next attempt starts past it. **Left open deliberately**, and a person can pre-fire an RA2 countdown in `rocketarena2` too. `doc/reconciliation.md` R-149, and corrections in R-140 and R-143. **Both halves of that last sentence are corrected in 1.48**: the gate landed later in this same spec version (`doc/reconciliation.md` R-151, `RA_HoldFire()` and `ClientLagThink`'s clear at the latch, measured by `scenarios/ra2prefire`) and no row here ever said so; and `rocketarena2` gates four `p_weapon.c` fire arms, so the comparison was wrong as well. |
 | **Amendment 1.34** | **Bots that size themselves to the arena, the person who could still pre-fire a countdown, and three donor commits nobody had read.** **`ra_botfill`** (new **R-RA-7**, default 0) makes the bot count follow the arena rather than the server: `minimumplayers` is one number for a whole map and Rocket Arena runs up to 32 games at once out of one, so a flat four is a crowd in `ra2map8` arena 3 and an empty room in `ra2map9` arena 2. The answer comes from two places **because the mod keeps it in two places, and that split is the whole rule**: a non-pickup arena is `arena.cfg`'s own `playersperteam` times the two teams a round is fought between -- not advisory, since `AddtoArena` admits a team of exactly that size and `check_teams` ejects one that grows past it -- while a pickup arena has no such number at all, because `arena_init()` overwrites `playersperteam` with **128** for every one of them and all thirty of RA2's own pickup arenas leave the key unset. For those the map is the only signal, and the two sides take **alternate** spawn indices, so the arena seats two out of every pair. **Counting spawn points for the other kind would be wrong and it is recorded because it is the obvious thing to try**: only 55 of 141 non-pickup arenas have as many `info_player_deathmatch` as `2 * playersperteam`, and `ra2map8` arena 3 has thirteen while declaring 1v1 -- filling it to its spawn count builds teams that `check_teams` then deletes. Measured on the wire: `ra2map9` reports want=10, 12, 2, 2, 2, 2, 4, 4 across its eight arenas, and `q2dm1` settles at exactly 10 of 10 with zero removals over three dumps and two rounds. Two things came with it -- a bot **pairs up** on an under-full bot-only team before inventing one, so the sixteen arenas declaring `playersperteam` 2 or 3 can reach their size for the first time (2v2 measured, against four teams of one with the switch off), and the census counts bots **in transit**, because `CheckMinimumPlayers` runs before `G_CheckRules` on the same 32-frame tick and `RA_ArenaPlayers` now shares `RA_BotFollowPeople`'s predicate so the two cannot disagree (R-150). **R-149 is closed, and not the way the donor closed it.** A person could still empty a magazine into an opponent who cannot be hurt, spending ammo `give_ammo` hands out once a round. `gladq2_src` guards `Think_Weapon` at both call sites and one of those runs EVERY FRAME and is the weapon state machine -- `Use_Weapon` sets `newweapon`, `Weapon_Generic` walks WEAPON_DROPPING to `ChangeWeapon`, and `fastswitch` only skips the raise -- so the donor's clause freezes weapon SELECTION for the countdown, and choosing a weapon during the countdown is how a round is prepared. So the think keeps running and **the button goes**, which is what R-140 already does for bots one seam away; every weaponthink in the merged tree reads `client->buttons` or `latched_buttons`, so one clear at the latch reaches baseq2's weapons, the mission packs' and Threewave's. Observers keep ATTACK (it is RA2's camera-mode key, R-RA-4) and so does a player holding the grapple, which is movement rather than damage -- R-140's own two exemptions. A/B on `ra2map7` arena 6: **STAT_AMMO 50 -> 46 through the countdown before, 50 -> 50 after**, both builds still spending after the bell and both still able to change weapon while held back (R-151). **Then the four failing play-test rows, and the game was right about all four.** `arena/score closes the menu` and the three that cascade from it encoded the contract `30503c6` deliberately replaced: RA2's menu is a per-client `CS_STATUSBAR` overwrite rather than a layout, so the board and the menu are two channels, RA2's own `Cmd_Score_f` has no menu test, and keeping one meant an observer's press was always spent closing the menu `move_to_arena()` had just reopened. Read off the wire rather than argued: `score` leaves the menu up and produces a 175-byte layout, and `inven` toggles cleanly four times running. The scenario asserted a fixed open/close/open parity from an assumed starting state; it drives to a known one now, and `ra2menuleak`'s respawn driver was wrong in the same shape -- it waited for `spectator_respawn` to repeat, which it cannot, because `PutClientInServer` sets `resp.spectator = pers.spectator` on both arms (R-152). **And three donor commits had gone unanalysed.** `rocketarena2@28a8af7` is two leaks and this tree had both: `PutClientInServer` memsets `gclient_t` while `menuqueue`, `curmenulink` and `selected` sit outside `pers` and `resp`, and R-147's close is **not** enough on its own because under arena closing is HIDING by design -- the arbiter repaints and frees nothing -- so every respawn orphaned the menu the previous one opened, on a function that ends in the `move_to_arena` that opens it. Lifting the teardown out as `free_menu()` showed the second: `AddMenuItem` makes three allocations per row and it released two, leaking one `menuitem_t` per row every time anybody closed a menu by picking one. Measured with `ra2menuleak` on `ra2map7`: **+15 blocks and ~851 bytes per respawn before, +0 and +0 after**, over four pairs, with the menu still opening and closing to the same three byte counts on both builds. `osp-tourney@11563de` is a third and it is the BOT layer's, so it is not tourney's at all: `BotLib_BotUpdateClient` copied `ps.pmove.pm_time` straight into the frozen 1999 botlib ABI, which is a byte of 8 ms tics, while the source field is MILLISECONDS on an extended server -- so every hold the brain saw ran eight times long, 1600 ms for a spawn. `units.py` had an exemption naming that exact line and arguing it was safe *because* it was a copy; the reasoning was wrong -- a copy constructs no duration but can still cross a unit boundary -- and the check now flags a copy between two fields of different kinds, with a control that restores the old line and fires. `osp-tourney@48408f1` is the `match_mode` clamp, which this tree already has as R-OSP-13, reached independently from the harness's own finding; the two differ only on invalid input (the donor clamps 4 up to 3, this falls back to 0 with a message) and neither is a defect, so the divergence is recorded rather than resolved (R-153). **And `armorprotect` is 1 in the shipped `arena.cfg`**, at the author's request: both 1 and 2 exempt a team-mate's splash, the difference is you, and 2 leaves your own rocket to eat your armour. The nine arenas that name their own are untouched -- `ra2map22` reports aprot=1 on the arena that asks for it and 0 on the seven that ask for that -- and `sv arenadump` prints `aprot=`/`hprot=` now, because being hit by something was the only other way to see the value in force. The file's byte-identity claim in `doc/provenance.md` was **already stale** before this and is corrected rather than restated (R-154). **And the three things this report flagged and left are closed in the same increment (R-155).** The bot menu's RA2 page loses twelve rows that toggled cvars **registered and read by `gladq2_src/g_arena.c`** -- the Gladiator SDK's own arena, which R-ARENA-1 does not carry -- while the real Rocket Arena keeps every one of those concepts as a per-arena setting out of `arena.cfg`; they are not re-pointed at `arenas[n]`, because one shared menu tree cannot say whose arena's value it is showing, and RA2's own `arenaadmin` propose-and-vote menu is the per-arena path that already exists. `ra2join` and `ra2spawn` failed because they set **no cvars at all**: right for a library selected by its gamedir, wrong for one that reads `g_ruleset`, so Colosseum booted them as `dm` where there is no menu to click -- and sweeping for the same omission found **three more**, `ra2twins` and both servers of each ctf scenario, five in one cause. `ra2camera` was failing on two counts besides: loadout rows hardcoding a 100/100 the file stopped granting in 1.27, and -- this increment's own doing -- a row that proved the rocket had detonated by watching the attacker's armour drop, which `armorprotect 1` is precisely the setting that prevents. The witness is the KNOCKBACK now, which T_Damage applies before either protect arm returns: 121 units either way, `200 -> 200` under 1 and `200 -> 158` under 2, which is also R-154's behavioural proof. **And chasing that found a feature that had never run once**: `pers.showmotd` is read by `init_player()` and cleared by `menuMotdContinue()`, and nothing ever set it TRUE -- the merge kept the field, the reader and the clear and dropped the single write, so `motd.txt` was loaded at every map load, announced on the console, and shown to nobody. The donor's two halves are carried (the write in `ClientConnect`, the preserve across `InitClientPersistant`'s memset) and a client now gets `"Message of the Day"`, 9 rows, on connect. That moved the menu parity a third time and exposed R-152's bug in `ra2menuleak`'s own closing guard, whose numbers had been read backwards all along. **The provenance sweep found four stale claims, three older than the increment that noticed the first**: `arena.cfg`'s byte-identity and md5, `genptr.py`'s byte-identity, R-CORE-5's CONDITIONAL claim flattened into an absolute one about a five-donor merge (measured: 19 of 72 still identical, 52 diverged, 7 with no upstream counterpart), and an rr-cache count of 411 that is 407. Everything else in the file was checked and is recorded as checked. Changed: new R-RA-7, R-ARENA-2, R-ARENA-1, R-BOT-28, R-OSP-13, R-CORE-5, D6. `doc/reconciliation.md` R-150..R-155. |
 | **Amendment 1.35** | **`ra_botfill` for the other two rulesets, and the reason tourney does not get one.** 1.34 gave `arena` a bot count read off the game instead of off the server and left the same complaint standing next door: `minimumplayers` is one number for a whole rotation, and it is a number an operator has to re-guess every map change. **New `ctf_botfill` (R-CTF-8) and `dm_botfill` (R-DM-1), both default 0**, so a tree with neither set behaves exactly as it did. **Neither ruleset declares a capacity, which is why the answer is the map**: Threewave has no `team_maxplayers` -- `matchlock` locks a match rather than sizing one and `warn_unbalanced` only warns -- and deathmatch has nothing at all, so both fall into the case R-RA-7 already named for a pickup arena. **The pool is two short of the count, and both rules rest on that fact**: `SelectRandomDeathmatchSpawnPoint` and `SelectCTFSpawnPoint` each find the two spots nearest a player, refuse them, and draw from `count - 2`, so `G_SpawnPointPool()` is one function in `g_utils.c` and both fills ask it. **Arena's own answer stays what it was and is not a contradiction**: `SelectRandomArenaSpawnPoint` refuses NOTHING -- it walks every candidate on the side's parity and takes the first with 50 units of clearance -- so a pickup arena still seats its whole even count. Two selectors, two pools, one rule. `dm_botfill` is the plain case, one pool: measured over the eight `q2dm` entity lumps, **8, 5, 5, 9, 7, 6, 4, 4** against raw counts of 10, 7, 7, 11, 9, 8, 6, 6 -- and the first row is the number each of those maps is actually played at, which is the argument for the subtraction rather than a taste for it. `DF_SPAWN_FARTHEST`'s selector does use every spot and is **not** given the two seats back, deliberately: `dmflags` is not latched, so a target that moved with the flag would add two bots on the write and take them away on the next one. Under `teamplay` the target is rounded down to even. **`ctf_botfill` has three pools, because a CTF client draws from two different ones** -- `SelectCTFSpawnPoint` sends a player to its own base while `resp.ctf_state` is 0 and to `info_player_deathmatch` for every spawn after, one line that decides the whole rule -- so a side seats the smaller of its base and half the shared pool and the target is twice that. Measured across the eight shipped maps: **16, 12, 14, 4, 20, 14, 14, 16**, and both halves of the `min` earn their place (four maps bounded by the shared pool, three by a base that cannot seat the side at the whistle, `q2ctf4` by a shared pool of five on a map whose bases would claim 8v8). **Taking the base pools alone would be wrong and it is recorded because it is the obvious thing to try**: `q2ctf1` carries 14 and 16 team spawn points and is played 8v8 -- Threewave's mappers used them for variety, the same trap R-RA-7 records for a non-pickup arena. One consequence the rule owns: **the bot a fill removes is named**, because `removebot` with no name takes the lowest client slot and a server filled to an even target could otherwise be shrunk 4v4 -> 4v3 -> 4v2 as people arrived; `CTFBotFillName()` takes one off the larger side, which is `RA_ArenaBotName` for the same reason one ruleset over. R-150's finding about the clamp holds unchanged for two more rulesets -- a switch cannot carry a count, so `BotFillNoMore()` holds the ceiling in `bl_spawn.c` and `BotSpawn()` clears it -- and `CheckMinimumPlayers` gains **one** variable rather than two arms, because these two differ from arena's in exactly one way: arena's census is per arena and these fill the whole server, which the function's own loop already counts. **The switch is read above the 32-frame gate and the target below it**, which the first version of this got wrong: everything above that gate runs on every frame and the target is not a cvar read but a walk of the entity list, three times under `ctf`. Arena's has never had the problem -- `RA_BotFillArena()` is a cvar and a walk of `game.maxclients` -- which is why the shape was easy to copy wrong. **The menu row moves off the RA2 page onto the BOTS page**, directly under `minimum players`, labelled with the ruleset's own cvar name out of `BotFillCvar()` and absent under the two rulesets that have none -- three rulesets sharing one concept do not want three pages carrying it, and nothing 1999 put on the RA2 page moved. **And the tourney question is asked and answered: it already has the concept, and what it has is better than what these two needed.** `bots_minplayers` (default 4) is the flat count under R-OSP-11's spelling, `bots_autoload 4` tops the roster up regardless of the player count, and `m_mode == 3 && bots_autoload == 2` zeroes the count because a duel has no seat for a bot -- one mode-aware clause, and it is an off switch. What tourney has that the other two lack is **`team_maxplayers`**: 4 by default, forced to 1 `CVAR_NOSET` under mode 3, clamped so twice it fits `maxclients`, compared against `OSP_teamCount` at six sites and enforced by `OSP_addTeamMember`. That IS `playersperteam` for an arena and it is exactly what `ctf` and `dm` had to read off the map for want of one, so `2 * team_maxplayers` is available to a tourney operator as a value they set rather than a rule the port infers. Modes 0 and 1 would fall to dm's map-sized answer; that is **not** done, because R-OSP-11 preserves tourney's bot contract rather than redesigning it, and `sv ruleset`'s tourney row prints the finding rather than a blank line. Checks: new `scenarios/botfill`, five servers, **24 of 24 passed** -- `dm` filling 0->8 on `q2dm1` and holding at 8 across three fill ticks, two people arriving costing exactly two bots, the control at `dm_botfill 0` settling at `minimumplayers 4` and not at 8, `q2ctf1` reporting `want=4 of seats=16, shared=17 base=12+14` under a latched `maxclients 4`, `q2ctf4` reporting `seats=4` with the sides level (2v2, then 1v1) before and after two arrivals, and a `tourney` server printing `no fill switch -- bots_minplayers 4 is the target` and settling there, which is the only place R-156's finding is observable from outside the library. **Two of those rows were wrong on their first run and the game was right about both**: a ctf client that has not picked a team is an OBSERVER, `G_IsObserver()` is `ctf_team == CTF_NOTEAM` under ctf and `BotCountsAsPlayer` excludes it (R-CTF-5, the Gladiator SDK's own exclusion), so two clients sitting in the join menu do not raise the census and the fill was right not to remove anybody -- they issue `team red`/`team blue` now; and "the two sides are equal" read `red=0 blue=0` and passed on nothing, because `clients` counts a CONNECTED bot while R-CTF-4 assigns its team inside the deferred `ClientBegin`, so the scenario now settles on every bot having reached a side and asserts both halves. `tools/playtest.sh` 196 checks / 0 failed (the 1.34 baseline, unmoved), `make check` 25 audits clean, `-Werror` clean on both build halves. **And the header said `Spec version 1.33` while the table's last row was 1.34** -- corrected here rather than restated. Changed: new R-CTF-8, new §6.12 R-DM with R-DM-1, R-RA-7, R-BOT-28, D6. `doc/reconciliation.md` R-156. |
+| **Amendment 1.36** | **The second selector is gone: OSP's four modes of play are four rulesets, and `dm` is now one of them.** `g_ruleset` chose among five values and then the `tourney` ruleset chose again, among four, with `match_mode` cached into the global `m_mode` -- two latched selectors, two validation paths, two diagnostics, for one kind of choice. R-MODE-2 called them *orthogonal*; they never were. The four modes become **`dm`, `dmpro`, `tdm` and `duel`** (R-OSP-12), `match_mode` and `m_mode` are **deleted**, and the ruleset name `tourney` is **removed outright** -- not aliased, not mapped, not special-cased: it is simply not a ruleset name, so it takes R-MODE-1's unknown-value path and gets the same message any other unknown value gets. **`dm` is therefore no longer baseq2's deathmatch**, and the thing that had to be separated first is that `ops_dm` was two things wearing one name: the `dm` ruleset's row *and* the table every NULL row inherits from. It is **`ops_base`** now, selectable by nothing, and R-MODE-6 and §7 rule 2 are reworded to match. **None of its five functions could be deleted**, and not for the reason the plan assumed: `ctf`, `arena` and the OSP family call them **by name** from their own C -- `ctf_CheckRules` and `RA_CheckRules` both call `CheckDMRules`, `OSP_EndLevel` and `RA_EndLevel` both fall back to `EndDMLevel`, and `PutClientInServer` calls `G_SelectSpawnPoint()` before arena and the OSP family re-place the client. `DeathmatchScoreboardMessage` is **not** among them, and new **R-OSP-14** says why: under that name the donor keeps its own page dispatcher rather than baseq2's board, so tourney's three callers reach the `ScoreboardMessage` row through the gate. **What *was* unique to the old `dm` is four things and they are deleted**: `sb_dm_tail()`, reached only through a `switch (r)` `default:` that only `RULESET_DM` took; the **`dm` column of `STATSLOT_MAP`**, read by `RULESET_DM` alone, so five stat numberings become four (`osp`, `ctf`, `arena`, `sp`) and R-OSP-7 clause 3's "one column per ruleset -- including `dm`'s own, which owns 18/19" is false in both halves; `BotRulesetLibVars()`'s `default:` arm, which after this only `sp` could reach and `sp` has no bots; and the `ch` acceptance -- Colored Hitman has been out of scope since 1.2 (N7) and a cvar that is read, ignored and warned about is a third way of saying nothing. The **`ch` libvar survives**, pushed as `"0"`, because that one belongs to the frozen botlib and not to this dispatch (R-BOT-6). **The measured surface**: `m_mode` was **234 sites across 22 files**, twelve of them shared files rather than `src/tourney/`'s own, and `RULESET_TOURNEY` a further **97 across 19**; `RULESET_DM`, by contrast, appeared at **12**, which is the whole argument for why the old `dm`'s identity was never its own name. **Every comparison form was translated mechanically** rather than by reading -- `m_mode == 2` to `RULESET_TDM`, `m_mode > 1` to `OSP_IsTeams()`, and so on -- so the rewrite is equivalent by construction rather than by review. **The traps were the tables, and one of them is why this needed a plan.** `modifier_ok[MOD_COUNT][RULESET_COUNT]` is designated on its outer dimension and **positional** on its inner rows, so growing `RULESET_COUNT` pads the three new columns with `false` and `tdm` silently loses `MOD_TEAMPLAY` -- with `-Wno-missing-field-initializers` in the build flags there is no warning, and no audit in the tree can see it. The rows are designated now. Three more of the same family: a missing `ruleset_ops[]` row is NULL and `G_InitRuleset`'s `?:` hands that ruleset **baseq2**; a missing `ruleset_names[]` row is NULL rather than `"?"`; a missing `slotdef_t.slot[]` column is **0**, a real slot, not the `-1` sentinel. And `G_GladiatorObserver()` is an "everything except" test naming `RULESET_ARENA` and `RULESET_TOURNEY`, so `dmpro`, `tdm` and `duel` would each have switched on the *Gladiator* observer underneath OSP's own -- two live observer systems, which is the bug §7 rule 6 names. **`teamplay` is refused across the family** (R-MODE-4), because once team play is a ruleset a modifier that also reaches it is the second selector this amendment exists to remove; the refusal costs nothing measurable, since `G_TeamplayEnabled()` has exactly **two** callers here and R-MODE-5's "20 call sites" describes `q2pro-ng`'s prior art rather than this tree. R-BOT-29's rule survives the deletion of the value it was written about: the brain's `teamplay` libvar reads `RULESET_TDM` **alone**, not the family and not the family's team half, because a duellist and an opponent in the same model would otherwise become team-mates. **One thing lapses and it is recorded rather than found later (R-MODE-3):** `gamerules` reaches Ground Zero's `DMGame` vtable through `CheckDMRules()`, which `OSP_CheckRules()` does not call -- so Tag has never run under `tourney` and now does not run under `dm` either. It keeps working under `ctf` and `arena`. **And the three bot-fill switches become one.** `ra_botfill`, `ctf_botfill` and `dm_botfill` are one bare **`botfill`** (R-RA-7, R-CTF-8, R-DM-1). R-OSP-11 did not cover them and never did: that rule governs cvars a **donor** named, so each donor's readme keeps spelling its own; all three are Colosseum's own invention from 1.34 and 1.35, appear in no donor's documentation, and name one concept -- so §7 rule 6 governs instead. The logic was already unified behind `BotFillCvar()`/`BotFillTarget()`; what was not was the clamp, which `arena.c` carried as its own copy of the same three lines over its own `static int botfill_ceiling`, so R-DM-1's claim that "the ceilings are shared" was true of two rulesets and not the third. **This also closes what R-156 deferred.** R-156 recorded that modes 0 and 1 "have no teams and would fall to the same map-sized answer `dm` gets" and declined to give them one, on R-OSP-11's authority; once mode 0 **is** `dm`, the same ruleset cannot be both the rule's subject and its exception. `dm` and `dmpro` take the map-sized answer, `tdm` and `duel` take `2 * team_maxplayers` -- the capacity R-156 itself named as the better one. **R-OSP-11's one unavoidable migration** is stated rather than smoothed over: `dm` reads `bots_minplayers` now, so a hand-written config setting `minimumplayers` stops being read -- **and a check walked into it before a person could.** `tools/extras.sh`'s R-VER-20 row waits past an item's think deadline and asserts it came back, and it failed on the first run after the flattening: **5 of 11 weapons back 50 seconds after the last bot left**, where a build of the previous commit settles at 11 and stays. Not a respawn defect -- the row sets `minimumplayers 0` so that `sv removebot all` empties the map, `bots_minplayers` defaults to **4**, and the fill put four bots straight back, so the row was measuring item respawn on a map still being played in. With the name the ruleset actually reads, the new library is indistinguishable from the old one at every sample. Every driver that means "do not fill" now sets both spellings, which is what `scenarios/botfill` already did. **R-OSP-13 is struck** -- there is no `match_mode` left to validate, and what it defended is true by construction: an unknown ruleset warns and falls back, there is no numeric range to sit outside of, no banner block choosing on a bare `else`, and `match_type` is derived from the ruleset so serverinfo cannot drift from behaviour. R-VER-16's out-of-range arm goes with it and its four positive rows become four rows of the ruleset sweep, which is the point: one selector, one matrix. R-VER-2 grows from **20 rows to 28**, with no row for `tourney` -- the `banana` control already covers an unknown value, and a row asserting that `tourney` in particular falls back would be asserting it is still special. And `tools/botmatrix.sh` gained the wildcard arm its `case $rs` never had -- without it a new ruleset reuses the previous iteration's variable and asserts something stale instead of failing. `tools/donorgate.py` had to learn that a donor's surface can sit behind **four** rulesets rather than one; its `DONORS` map was 1:1 and its gate regex looked for a single `RULESET_` name. **Measured on the wire rather than claimed.** `tools/bootmatrix.sh` is **28 of 28** -- the seven rulesets across both content layers -- and its three controls all fire, the first of them being the unknown value that `tourney` is now one of. `tools/extras.sh` is **52 of 52** with 6 controls, and its D6 rows exec all seven shipped configs clean. `tools/playtest.sh` is **234 of 234**, its headless clients reading the composed bar, the slot map, the spawn placement and the obituaries off the wire under all seven. `tools/botmatrix.sh` is **18 of 18** -- and two of those rows are new evidence rather than a re-run, because `tdm` and `duel` are asked for sixteen bots and correctly refuse: `tdm entered=8 ready=8 team0=4 team1=4` at twice the default `team_maxplayers`, `duel entered=2 ready=2 team0=1 team1=1` with `FL_BOTCLIENT=16`, the other fourteen in R-OSP-12's queue. R-BOT-23's frame cost is unmoved (mean 2439 us, worst 8036 us) and R-VER-6's index tables read 175/8192 and 175/256 as before. `tools/smoke.sh` passes with both its controls, `make check` is 25 audits clean, all ten build configurations are warning-free under `-Werror`, and R-ENG-1a's **old game API** builds clean too. `tools/playtest.sh` found the last stale control: R-VER-27's "a modifier the matrix refuses" server was `dm` + `runes`, which is an **acceptance** now that `dm` is OSP's RegularDM -- so the control is `dm` + `teamplay`, the pair this amendment actually refuses, and the old one is kept as the acceptance check that exercises R-88's derivation under the four rulesets that gained runes. **And `scenarios/botfill`'s `dm` phase repeated one ruleset over the exact finding R-156 records against its `ctf` phase**: two clients connected to a filled server did not cost two bots, because a client under an OSP ruleset connects as an **observer** and `BotCountsAsPlayer` asks for `osp_entered == ENTERED_ENTERED`. Connecting is not playing, in either donor's model; `ctf`'s people already issue `team red`/`team blue` and `dm`'s now issue `join`. **And with them entering, the row was still one bot out, for a second reason that is also the donor's**: tourney's removal test is `(numplayers - bots_votedin - 1) > want` where every other ruleset's is `numplayers > want`, so its arms add up to `want` and remove down to `want + 1`. `dm` is inside that contract now, so under all four a filled server keeps one bot more than the target once people are on it -- 1999's behaviour for the ruleset those four came from, and `ctf`'s phase is the control that shows the other arm still gives both seats back. Four checks in this increment were the checks being wrong and the game being right, which is worth stating plainly: a flattening that changed what `dm` *is* was always going to invalidate assumptions written when `dm` was baseq2, and every one of them surfaced as a red row rather than as a silent difference. The composed statusbar (R-OSP-7a) re-measured over the seven: `dm` **770**, `dmpro` 770, `tdm` **759**, `duel` 759, `ctf` 658, `arena` 578, `sp` 310 -- `dm` composes the bar `tourney` composed, where baseq2's was 442, and the three untouched rulesets are unchanged to the byte. And the bot fill's per-ruleset targets all land on the figures their own requirements record: `dm` **8** on `q2dm1`'s pool, `ctf` want=**12** clamped from seats=**16** with shared=17 base=12+14, `arena` **10** on an idmap, `tdm` **6** from `team_maxplayers 3`, `duel` **2** from the 1 it forces `CVAR_NOSET`. Changed: R-MODE-1, R-MODE-2, R-MODE-3, R-MODE-6, R-MODE-7, R-OSP-7, R-OSP-11, R-OSP-12, R-OSP-13 struck, new R-OSP-14, R-BOT-29, R-CTF-8, R-RA-7, R-DM-1, R-VER-2, R-VER-16, R-VER-27, §2, §6.7, §7 rule 2, §9 Phase 1. `doc/reconciliation.md` R-157. |
+| **Amendment 1.37** | **A deep read of `arena` against its donor, and fifteen things came back.** Method: `git diff baseq2 port_ra2` out of the vendored replay bundles is RA2's own feature set by construction (R-PROV-3), so every hook it contains was checked against this tree rather than the files being read side by side. Two of the findings are scoring and both were visible to any player inside one round. **A death with no player attacker cost TWO frags**: `ClientObituary` calls `RA_Obituary()` and then reaches its own `resp.score--` on the same paths, so every fall, lava bath, drowning and self-rocket in an arena has been charged twice since Phase 4. **And a team kill paid +1**, because `RA_Obituary` never implemented the kill half at all and baseq2's stand-in keys the penalty on `MOD_FRIENDLY_FIRE`, which `T_Damage` raises only for dmflags teamplay -- which arena never sets, and which R-ARENA-1 had already re-pointed `OnSameTeam` away from. `scorebydamage` suppressed neither. All of RA2's arithmetic is in `RA_Obituary` now, in the donor's shape, and the three baseq2 sites are gated; the obituary TEXT is still baseq2's (sec 7 rule 1, unmoved). **Four stat columns had never been written**: `RA2_STAT_GRENADEKILLS`, `ROCKETKILLS`, `RAILKILLS` and `OTHERKILLS` were declared and incremented by nothing, so the per-weapon breakdown in every round record ever written was a column of zeroes -- bucketed by `meansOfDeath` rather than by the donor's inflictor-model test, which cannot see forty-odd means of death and mis-files a held grenade as whatever the shooter was carrying. **A fifth thing was hiding under the fourth**: RA2's suicide announcer (`ra/outstand.wav` and two more) grades the opponent you took yourself away from, reads `self->enemy`, and could never have fired -- `Killed()` overwrites that field with the victim on a self-kill, and the donor guards it with `if (targ != attacker)`. **Three features were dead code.** `teamskins_precache*` is read by `RA_SkinIcon()` and was written nowhere, so the four arrays were zero, the match could not succeed and RA2's team colour in stat slot 0 has never once been drawn (`RA_Precache()`, R-161). `rocket_speed` is parsed by maploop.c, stored in `arenas[n]` and pinned by a `_Static_assert` -- and `Weapon_RocketLauncher_Fire` passed the literal 650, so a server that set the key got nothing (R-163). `fastswitch` was half carried: RA2 skips the raise AND seeks the drop to `FRAME_DEACTIVATE_LAST`, and only the raise was here, so every weapon change in every arena paid a deactivate sequence 1999 skips -- and `colosseum/arena.cfg` ships `fastswitch: 1` globally (R-162). **Two were leaks of the wrong kind.** `say_team` reached the WHOLE SERVER, because inherited baseq2 asks dmflags whether team chat means anything and an arena team is `resp.teamnum`; and plain `say` was server-wide too, which made RA2's own `say_world` a synonym for it and left `show_string` -- the donor's arena-scoped print, still in arena.c -- with no chat caller (R-165). **The offhand grapple obeyed the wrong switch entirely**: `grap_on` reached `CTFHookThink`, whose gate is `ctf_hook`, which CTFInit registers "1" for every ruleset (R-42) -- so it worked in an arena whose `arena.cfg` says `grapple: 0`, which the shipped file does, during a countdown, and for an observer. `give_ammo` was already right, which is what hid it: the ITEM obeyed the setting and the offhand hook did not. `RA_HookThink()` is the donor's own two conditions, and the brain was being told from a fourth switch again -- `usehook` came from the Gladiator SDK's `MOD_HOOK` rather than from `allow_grapple`, wrong in both directions (R-164). **The intermission never closed the arena menu.** `clear_menus(ent)` is `MoveClientToIntermission`'s first line in the donor and the merge dropped it; an RA2 menu IS the client's statusbar, so it stayed on screen over the end-of-level board with the real bar never written back -- and g_spawn.c's clearing loop had been silently carrying every map change rather than the console `map` its comment describes (R-159). Two more lines of `BeginIntermission` went with it: **a round still being fought when the timelimit ended the level was never written out**, and **an empty server never left the intermission at all** -- for a deathmatch ruleset the only other writer of `exitintermission` is a button press from a connected client (R-160, taken under arena only; the hole is baseq2's under `dm` and `ctf` and is recorded rather than widened). **`arena.cfg` and `motd.txt` were still read relative to the working directory** -- the same defect `ra2stats.c` and `gslog.c` each carry a written correction for, on the two files that sweep missed, so a server started from anywhere but the installation ran on built-in defaults and said so once (R-167). And four smaller ones: `drop` was live where RA2 empties it, on the same reasoning already written against `TossClientWeapon` (R-166); `ra2map13`'s crouch-to-die escape hatch was gone and that map is in the shipped maploop (R-168); observers grunted when they jumped, where the matching landing sound was already gated (R-169); `CheckTeamDamage` had no arena arm, so a team-mate on your hook heard `grhurt.wav` while healthprotect cancelled the damage a function later (R-171). **One finding was investigated and REFUSED, and the check is what refused it.** RA2 dispatches `kill` to nothing; gating it here broke `ra2observer`, which asserts that a round outlives a fighter's suicide and that wiping a side still ends it. SPECS.md's own "dead functions are live again" names `Cmd_Kill_f` in RA2's retired list and says every one of them is live in Colosseum. So the difference from the donor stands and is written down as a decision rather than corrected as a defect (R-166). **And one was the audit's, not the code's.** R-161's precache loop is the first array of image indices in the tree, and `slotkind.py` learned the SUBSCRIPT rather than the array -- so `i` was taught to hold an image index and six correct `num` writes were reported as `pic`. Its self-test could not have caught it either: the writer scan reads injected controls and the learner did not, so a kind error laundered through a variable declared in a control was invisible. Both fixed, with a new `indexed array` control (R-172). Checks: `make` clean under gcc and clang at both API settings, 24 audits clean, `tools/playtest.sh` **234 of 234**, `bootmatrix.sh` 28 of 28, `extras.sh` 52 of 52, `osprunes.sh` 33 of 33, `smoke.sh` pass, and the arena scenarios re-run one at a time -- `ra2spawn`, `ra2join`, `ra2menuleak` (+0 blocks over four respawn pairs), `ra2twins`, `ra2prefire`, `ra2queuefire`, `ra2holdfire`, `ra2camera`, `ra2gslog`, `ra2teamfire` (6 cross-team kills, 0 same-team) and `ra2observer`. Changed: R-ARENA-1, R-RA-4, R-MENU-3, R-SEC-7, R-TOOL-5. `doc/reconciliation.md` R-158..R-172. |
+| **Amendment 1.38** | **Five reports from one play test, and three of them wanted a requirement rather than a patch.** `g_ruleset arena` with `xatrix 1`, then `rogue 1`, on `ra2map11` and `ra2map12`; `doc/reconciliation.md` R-186 carries the findings and this row carries what they changed here. **R-RA-2a is new and it AMENDS A DEFAULT R-182 chose deliberately.** R-182 gave the `weapons:` key's pack half no default and reasoned that a cfg naming none of the six leaves the key meaning what it always meant; the premise is true and the conclusion does not follow, because 137 of the shipped `arena.cfg`'s 171 arena blocks name a `weapons:` line of their own and the other 34 inherit the default -- so between them the file covered every arena and neither path could grant a pack weapon. `xatrix 1` drew two menu rows reading NO and changed nothing else, on any arena of any map. The key has two halves with separate defaults now, `nopack` is how an arena refuses all six out loud, and what an arena STORES is separated from what it GRANTS because an `arena.cfg` is served by servers running either pack, both or neither. The same row gates the five pack ammunitions per layer, which two of them require rather than merely benefit from: `ammo_tesla` and `ammo_trap` are the weapon as well as the ammunition, so an ungated count is an item in the weapon cycle and not a number on a HUD -- fifty Teslas and five Traps were being handed out by servers running neither pack. `sv arenadump` grew a `loadout` row, because R-182 recorded that all of this was `sv`-invisible and had to be measured with a probe compiled into `give_ammo`. **R-MENU-6 is new and it is R-MENU-5's missing sibling**: R-MENU-5 bounds a layout in bytes and nothing bounded it in PIXELS, so a page size was a constant rather than a number derived from the pic the menu draws over. `inventory.pcx` is 256x192 at `yv 8` with a flat interior at pic rows 18..174, glyphs paint eight rows, and the row grid starts at `yv 40` -- seventeen rows fit and the donor's eighteen paints across the frame while its "(More)" marker lands on the bevel outside the box. That was always true of RA2's own 26-row menu; R-182's two extra weapon rows only moved the damage onto a row somebody reads. Checked against R-SEC-2's kept-bugs ledger first -- all seventeen entries, none of them this -- so it is a deliberate divergence from `port_ra2` and recorded as one. Seventeen and not sixteen because sixteen collides with R-RA-8: it pushes the "Allow Bots" row off page 1, which is the position that row was placed for, and `scenarios/ra2botvote` now prints the boundary rather than the presence. **R-KEY-5 is new and it is the group's fourth contract, a LIFETIME rather than a name**: where a level-scoped allocation is indexed by a field that survives the level, the clear belongs where the allocation is DROPPED. The rule already lived as a comment in `g_spawn.c`'s loop at `gi.FreeTags(TAG_LEVEL)` -- "the free is what invalidates them, so the free is what clears them" -- at four menu-handle sites, and `teams[]` indexed by `resp.teamnum` was the fifth and was not in it. That is a SIGSEGV rather than a leak, and it needed the bot layer to become reachable: `BotStarted()` defers a bot's `ClientBegin`, which is where `InitClientResp` would have reset the field, so Phase 6 turned a 200-millisecond window into twenty seconds of frames on the first visit to a map whose `.aas` came out of bspc with an empty REACHABILITY lump, and a client pressing `score` in it walked the client list into a NULL slot. The donor's reads were safe by accident in 1999 and neither donor is wrong on its own, which is why §7 could not decide it and R-KEY had to. Writing the requirement moved the fix: 1.38's first cut cleared the field at `arena_init()`'s TagMalloc and it is in the free loop now, beside the four it belongs with. **Two reports were not defects and are recorded as checked.** `track_change` is byte-identical to `rocketarena2-public/arena.c:615`, where the tracking restriction applies only under `competition` -- with `playersperteam 1` the only FIGHT_ALIVE client in an arena is the opponent, which is what looked like a filter pointed the wrong way. And RA2's id-view row pointed at `playerskins + n`, which `stat_string` draws verbatim, so it read "Sarge\male/red"; Threewave answered the identical question in 1998 by keeping the bare name in `general + n` (R-CTF-6) and the write is made under arena too now, with the stat cleared in `SetObserverMode` where the camera's subject goes and `UpdateStatusBars`' two literal slot numbers resolved through the map that the writes beside them already use. Changed: §0 header, R-RA-2a new, R-MENU-6 new, R-KEY-5 new. |
+| **Amendment 1.39** | **The base moved and three latent bugs came with it, one of which this tree had already fixed.** `q2pro@eefadf25` on `feature/mission-packs` carries three repairs to the imported mission packs that no compiler can see, and §7 rule 1 decides all three without a judgement call. **FindSubstituteItem's three dmflag filters tested the item being REPLACED inside the loop choosing the item to replace it WITH**, which is loop-invariant and the inverse of its own comment -- and R-183 item 11 found exactly that, described it correctly and DECLINED it on two grounds that have both since expired. Upstream no longer has it, and the other ground understated the defect: this is not an inverted filter, it is the trigger for a **use-after-free**. `SpawnItem` carries its own correctly-written copy of the same three guards, each of which calls `G_FreeEdict` and returns; `DoRandomRespawn` returns its `newEnt` whether or not that happened; and `g_items.c`'s caller reads non-NULL as success, frees the original, adopts the freed substitute, writes to it and calls `gi.linkentity` on it. All three guards free, so all three dmflags reach it, and the broken filter is what steers items into them -- reachable on a Ground Zero server with `randomrespawn 1` and any of DF_NO_SPHERES / DF_NO_NUKES / DF_NO_MINES, which is an ordinary configuration. The repair is one `SubstituteItemAllowed(it)` predicate shared by the count pass and the pick pass, which closes a SECOND defect R-183 did not reach: the two passes disagreed about eligibility -- the count filtered spheres and the pick did not -- harmless only while the test was loop-invariant, and making it depend on the candidate is precisely what would have made the disagreement matter. Spheres are identified by `Pickup_Sphere`, the same test `SpawnItem` uses for that dmflag, which retires the third classname literal as well: R-183 fixed Ground Zero's `item_spehre_defender` spelling, and a function pointer cannot be misspelled at all (R-141's argument, one file over). **`m_move.c`'s blocked-by-tesla chain compares `ent->enemy->classname` with `"telsa"`**, so the branch it guards -- the monster is ALREADY angry at a tesla, leave it alone -- never ran and control reached the final `else`, calling `TargetTesla` and setting `AI_BLOCKED` on every blocked frame. `TargetTesla` skips the enemy switch for the same tesla, but its `AI_MEDIC` bail runs BEFORE that test, so a blocked medic called `cleanupHealTarget` on a tesla once per frame; and when the blocking area belongs to a DIFFERENT tesla the monster switched to it and overwrote `oldenemy` with a tesla, losing the player it was chasing, which is the field `oldenemy` exists to protect. **Not previously recorded here, and the reason is a gap in the method rather than in the sweep**: R-183 resolved classname-shaped literals against the ITEMLIST, and `"telsa"` is compared against an `edict_t`'s classname, so `tools/itemnames.py` is outside it by construction. `m_move2.c` carries the same line and is fixed too although R-MP-5 does not build it -- a reference copy that disagrees with the built one is a trap. **And the third was already fixed here, before the base did it**: Xatrix's `NoAmmoWeaponChange` looked up `FindItem("ionrippergun")`, which matches no pickup_name, and its two Xatrix-added branches lacked the `return` every other branch has, so neither Ionripper nor Phalanx could ever be the out-of-ammo fallback -- R-183 item 5, same reasoning, same result, verified against `eefadf25` rather than assumed. One sweep, one hit and one miss, and the miss is the instructive half. **R-PROV-5a is new and it is R-PROV-5 clause 1 arriving.** `feature/mission-packs` was re-committed a second time -- `09d3c499` -> `eefadf25` -> `92849303`, same three-commit shape, same titles, same author dates -- and `c751d316` and `3ffc4642` both still RESOLVE, so identity is not the problem. The CONTENT moved: the pinned commit has none of the three fixes. So a re-pin now states whether the content moved and names the evidence either way, because that difference is what decides whether anything must be imported. Checked, and the obligation is smaller than the diff: `3ffc4642..eefadf25` touches 37 files under the pack dirs and the two raw import commits differ in 29 more, but the sample is upstream applying repairs this tree had already made independently -- `CS_GENERAL` -> `game.csr.general` (R-62), a literal `pm_time` -> `112 >> PM_TIME_SHIFT`, `strcpy` -> `Q_strlcpy`, `CTFSay_Team_Location` gaining its `size` parameter. Convergence, not a queue. Changed: §0 header, §3.3 `q2pro` pin -> `92849303` (source `eefadf25`), new R-PROV-5a. `doc/reconciliation.md` R-187, and R-183 item 11's declined half is struck there rather than deleted. |
+| **Amendment 1.40** | **The second resolver, and the rule that says why there are two.** R-187 closed `"telsa"` and recorded that no audit in the tree could have found it: `itemnames.py` collects classname-shaped literals by SHAPE and resolves them against the ITEMLIST, and both halves are narrower than they look -- a classname belonging to a monster, a projectile or a runtime `->classname =` assignment is in neither space, and a bare `"tesla"` is not even collected. **`tools/classnames.py` asks the other question**: can any code path put this string in an `edict_t.classname`? The universe is three sets and all three are needed -- `g_spawn.c`'s spawn table, the itemlist's `.classname` rows, and every `->classname = "literal"` assignment -- because a check that knew only one would report the other two as findings. Partial comparisons stay partial: `strncmp` and `strstr` resolve against any producible classname that starts with or contains the literal, so `strstr(classname, "item_rune")` is live against `item_rune1..5` rather than reported as dead. Case follows the function. **Validated in both signs against the real tree, not only the selftest**: clean it reports 0 dead comparisons over 146 literal comparisons against 279 producible classnames with 3 exempt, and with `"telsa"` reintroduced at `m_move.c:467` it reports that line and exits 1. Thirteen controls of its own, including the two an audit of this shape most needs -- a `gi.dprintf("%s", ent->classname)` format string is NOT a comparison and must not be reported, and a stale exemption IS a finding. **The three exemptions are the only legitimate case** and both classname resolvers now carry them for the same reason: Ground Zero accepts `weapon_nailgun`, `ammo_nails` and `weapon_heatbeam` from MAPS and renames them in `ED_CallSpawn` before the spawn lookup, so the tree compares against three names it deliberately never assigns. **R-TOOL-6 is new and it is the generalisation rather than the tool**: a literal that names something the game looks up at runtime is resolved against the space that can produce it, and there is one resolver per SPACE -- not one per file and not one per literal shape, which is the mistake that cost twenty-seven years of a dead branch. Three spaces exist and each fails silently in its own way; the requirement tables them with their resolvers and their failure modes. `make check` 33 audits clean. Changed: §0 header, new R-TOOL-6, new `tools/classnames.py` wired into `audit.py`. `doc/reconciliation.md` R-188. |
+| **Amendment 1.41** | **A tidy-up sweep of the whole repository, and the code was the half that was clean.** Asked for as docs, tools, comments and annotations. Outside the inherited trees there is no trailing whitespace but 1999's own, no file missing a final newline, every source valid UTF-8, all 33 audits green, and every `tools/` script a document names present -- so this amendment is almost entirely about prose that stopped describing the code. **One amendment caused most of it.** 1.36 made seven rulesets out of five and deleted `tourney` and `match_mode`; six files tracked it and four did not, all four of them what a reader meets first. `README.md`'s ruleset table still listed `tourney`, still said bots reach *four* rulesets rather than six, and still counted *five* server-driven scripts above a block listing six. **`doc/botlib-contract.md`'s libvar table was wrong in four of its five rows**, and that file opens by declaring itself authoritative over Appendix A: `dm` described a ruleset now inside the OSP four's branch, `ctf` had `laserhook` following the cvar after R-179 made it a constant 0, `arena` had `usehook` on the `hook` modifier after R-164 moved it to `arena.cfg`'s `grapple:` key, and the fifth row drove `teamplay` off an `m_mode` R-OSP-12 deleted. Rewritten from `BotRulesetLibVars`, split into the latched half and the per-frame half R-144 created. **`doc/regression.md` carried a green row for a check that does not exist** -- `check-tourney`, deleted in 1.21 exactly as R-VER-26 asked; a ledger whose rule is *an entry with no check is not done* had a green one, which answers the question before anybody asks it. **`meson.build` listed 66 of 111 sources** and had since Phase 2: R-BUILD-3's in-tree build would have produced a library with no CTF, arena, tourney or bots, while the file's header claimed it mirrored the Makefile. **`colosseum/arena.cfg` lost every CR** in `cdb9df2`, a whole-file rewrite -- `.gitattributes` governs what git does to the bytes, not what is handed to it, and the parser takes CR as whitespace, so three documents went on describing a property the file no longer had. Restored. **Numbers: R-TOOL-2 was right and the practice was not.** 23 audits is 19 checks in 33 runs; 20 boot-matrix rows is 28; `playtest.sh` had three figures in three files; the rr-cache was 411+85 and 407+85 and all of them counted directories while saying resolutions (516 resolutions, 492 directories, 486 hashes); `tools/` was 30+25 and is 28+28. The fix is that the scripts already print their own totals and the documents now quote them -- or, where a wrapper cannot count, publish nothing. **Three unreachable things in `tools/`**: `audit.py`'s `if not donors:` nested inside `if donors:`, its dead `auditsave` parser, and `extras.sh`'s `field()` with `\$1` inside double quotes plus two variables nothing read. **And a repair that was recorded and never made** -- `mech.py`'s astyle path, which 1.4 both found and prescribed the fix for, thirty-six amendments ago. **Deleted:** 27 `thisimage` files (rerere working state), `tools/mkvariant.py` and `tools/savemach.py` (replay-era, referenced by nothing, still in the pin). **And this table was broken**: blank lines at three places inside it ended it early, so 1.31-1.40 rendered as raw pipe text; the Status cell above still read *"Draft for review. No code written yet."* Changed: header Status, this table's rendering, R-TOOL-1, R-TOOL-4, R-VER-26 headline, Appendix B. `doc/reconciliation.md` R-189. |
+| **Amendment 1.42** | **The one person who certainly is the server was the one person who could not open its menu.** Reported from a listen server: `menu` answered *need rcon password to open the menu* to the host player. The gate is R-BOT-28's, verbatim from 1999, and it is right about what it is for -- a password typed as argument 1 is what a REMOTE operator needs -- but it had no way to say who was asking, and **`ClientCommand` carries no authority at all**: q2pro hands `ge->ClientCommand` the host's `clc_stringcmd` exactly as it hands over a stranger's, because `menu` is not a client command and the console forwards it verbatim. The engine never solved this problem either, which is the part that reframes it: it does not identify the host PLAYER, it distinguishes CONSOLE execution from the network, and rcon exists to lend console authority to somebody who has not got it. The host has it already and is asked for nothing -- and cannot use it here, because a menu needs a client to draw on and `ServerCommand` has none, which is what `sv menu` answers with *only clients can open the menu*. **So the exemption is the two facts the engine does give the library**: `dedicated` 0 (CVAR_NOSET, so it cannot move under a running server) and userinfo `ip` `"loopback"`, which `parse_userinfo` force-sets in the connect packet from `NET_AdrToString` and which only the in-process client ever carries -- the same test `osp-tourney` used for its own host-only menu rows, and a fact this tree already half knew, since `ClientConnect`'s ZBot arm comments that *a local client connects without* a port. **It is latched, not read, and that is the whole of the security argument**: the engine owns `ip` in the connect packet and nowhere else -- `SV_ParseFullUserinfo` replaces the entire string and `SV_ParseDeltaUserinfo` writes any key unfiltered, `SV_UpdateUserinfo` validating only the name and the info-bans -- so `setu ip loopback` would otherwise hand the bot menu to every client on the server, and the menu is bot management: its rows reach `addbot`/`removebot` through `BotServerCommand`, i.e. as CONSOLE commands, so whoever gets it open has them whatever `serveronlybotcmds` says. `pers.listenhost` therefore survives `InitClientPersistant`'s memset unconditionally -- on both arms and under every ruleset, unlike the arena motd beside it -- because `PutClientInServer` calls that on the deathmatch arm of every single spawn, and a wipe would mean the host lost the exemption the first time they spawned. It is written unconditionally rather than set-if-true, because the seat may have been the host's before. The exemption is the MENU's alone: `BotCmdRefused` asks whether the caller is the console, a host player is not, and every other bot command still refuses them (R-BOT-25 unchanged, and measured -- the host's `botpause` comes back *not allowed to pause the bots* in the same run in which their `menu` opens). **And the second half is the default server, which was the worse of the two.** An unset `rcon_password` is the empty string, `menu ""` reaches the library as argc 2 with an EMPTY argv(1) -- q2pro's `Cmd_TokenizeString` registers the argument before it parses the quotes, and a client command is tokenized from the raw text the client forwarded -- so the donor's bare `strcmp` MATCHED: the honest `menu` was refused to everybody, the host included, while two quote marks admitted anybody. Measured on the wire under `ctf` before the fix, and the `listkeys ""` probe reads the empty argument off the wire rather than arguing it from the tokenizer. Unset is now *the menu needs the rcon password, and this server has not set one*, which is a different sentence from *need rcon password* on purpose: one is a configuration an operator can fix and the other is a password they mistyped. `rcon_password none` still disables the gate, 1999's own escape hatch, and it is tested before the empty check because `none` is not empty. Checks: `scenarios/botmenugate` rewritten to two whole servers and **13 of 13** under `arena`, 12 under `ctf` -- both signs of every direction, plus the spoof (a client that pushes `ip=loopback` into its own userinfo is still refused), plus `sv menu` refusing the console, plus the toggle CLOSING with no password because the gate is on opening. **The exemption itself is not observable from a dedicated server at all** -- q2proded has no local client and a libq2 client is a real UDP peer at 127.0.0.1, never NA_LOOPBACK -- so `tools/play.sh` grew **`-L`**, one q2pro process hosting its own map, and `tools/drive/listen-botmenu.cfg` drives it: `Connected to loopback`, the `botpause` control, no refusal, and a screenshot of the menu standing open with no password set and `serveronlybotcmds` at its default. That is the first thing in this tree that needed a listen server to be seen, and it is why R-VER-23's client harness gains a mode rather than a flag. Changed: R-BOT-28, R-BOT-25 note, `doc/commands.md`, `doc/cvars.md`, `doc/regression.md`. `doc/reconciliation.md` R-190. |
+| **Amendment 1.43** | **A tourney client was an observer on the scoreboard and a body in the world, and the two halves of the defect hid each other.** Reported from play: `tdm` with `xatrix 1` on `xdm7`, and `dm` on `q2dm1`. The scoreboard said observer; the player collected items, and under `dm` -- where `sync_stat` is 8 and the match is live from the first frame -- shot and killed while `g_combat.c`'s `entered != ENTERED_ENTERED` test made them unkillable in return. **The donor's PutClientInServer has TWO arms and the merge took the second one unconditionally.** A tourney client arrives as an observer -- `OSP_clientBeginPre` sets `osp_entered` to 2 -- and the donor places it `MOVETYPE_NOCLIP`, `SOLID_NOT`, `SVF_NOCLIENT`, with no view weapon and no KillBox; the entered arm's three bookkeeping writes were kept, its `svflags &= ~SVF_NOCLIENT` and its two track-state clears were not, and the observer arm was gone entirely. That is R-RA-4 row 15's defect one ruleset over, and the comment beside that fix names the witness this one was found with: **a headless client reading back its own pmove type**, which is the one question about observing a mod's own HUD cannot fake. `ops_tourney` says "SelectSpawnPoint stays dm's: tourney places players through OSP_startObserve()", which is true of the `observe` COMMAND and was never true of a placement -- that function prints, scores and re-sorts, so it is not what a spawn may call. **The twin is `resp.osp_r240`, and it is why neither half could be found alone.** It is the donor's "this client has a body" flag, 2 after placement and 0 for an observer, read by `ChangeWeapon`'s gunindex, the KillBox and the autocam's candidate test -- and the merge kept the field and all three readers and dropped **every write of 2**, which is R-155's shape exactly (`pers.showmotd` had a reader, a clear and no write). So the autocam could never find a subject, and the two `ClientThink` readers that complete the mechanism were missing too. **That mechanism is how a tourney client gets a body at all, and it is not obvious**: none of the six entering paths places anybody -- `join`, the team join, the two menus, the 1v1 queue, a bot's join and a recovered seat all set `osp_entered` to ENTERED_ENTERED and clear `osp_r240` -- and the next `ClientThink` notices the pair and calls `respawn`, freezing the client (`PM_FREEZE`) in between. One trigger serves all six, and a **seventh** case comes free: a placement that is refused leaves the flag 0, so the retry is the same line. With the flag never set, a trigger on its own would have respawned every client on every frame: both halves or neither, which is why this had to be read out of the donor rather than patched at the symptom. **Two more sites of the same state.** `STAT_FRAGS` carried the **-100 sentinel** to an arriving client's HUD -- `OSP_clientBegunPost` sets that score on arrival and `OSP_startObserve` on every later exit, and the donor draws a 0 for a client that has not entered -- and `Cmd_Kill_f` let an observer suicide, where the donor's own combined condition refuses it. **And `ENTERED_QUEUED 3` was an invention**: the donor's states are BITS compared for equality -- 1 playing, 2 observing, 4 chasecam, 8 in-eyes, 16 autocam -- and no donor site writes or reads a 3. The header said "four states" and named three plus a fabrication. **One design was considered and declined.** R-CTF-5's `G_IsObserver()` is "one predicate, four answers" and has no tourney answer, which is the actual reason `Cmd_Kill_f` was wrong -- but adding one would move two of its other call sites AWAY from the donor: `ClientBeginDeathmatch` announces an arriving observer (the donor's `OSP_playerAnnounce` is unconditional there) and `p_view.c` would route it to `G_SetSpectatorStats`, which the donor does not have at all, having deleted baseq2's spectator system in favour of this very field. So the two sites that need the question ask it by name, and the reasoning is recorded rather than the predicate widened. **And one divergence is recorded and NOT fixed**: the donor's `SelectSpawnPoint` returns false when a player is within 60 units of the chosen spot and freezes the spawner instead of telefragging them -- which is safe precisely because of the retry restored here -- while `G_SelectSpawnPoint` is a `void` ops row and KillBoxes. Making it a predicate touches every ruleset's spawn hook, so it is R-191's own entry rather than this increment's. Checks: new `scenarios/ospenter`, **24 checks over the four OSP rulesets, 8 failing before and 0 after**, both signs of every phase -- PM_SPECTATOR and STAT_FRAGS 0 before the join, PM_NORMAL after it, and the entering broadcast absent before and present after. **The scenario was wrong twice and the game was right both times**: `join 1` is not a team, because `OSP_teamjoin_cmd` matches its argument against the team's netname, and `duel` announces NOTHING, because `OSP_addTeamMember` guards that broadcast with `m_mode == 2` -- so the silent ruleset now asserts the silence. `tools/playtest.sh` 234 of 234 (the 1.42 baseline, unmoved), `make check` 33 audits clean, `-Werror` clean under gcc, clang and `API=old`. Changed: R-OSP-1, R-OSP-4 note. `doc/reconciliation.md` R-191. |
+| **Amendment 1.44** | **The refusal R-191 left recorded, and then a sweep for its whole class -- which found two more, cleared four, and reported one finding that was the SCAN's mistake.** R-191 restored the retry and recorded the thing that needs it: the donor's `SelectSpawnPoint` returns false when a player is within 60 units of the chosen spot, and `PutClientInServer` then leaves the client frozen and bodiless instead of telefragging whoever is standing there. **`G_SelectSpawnPoint` is a predicate now** -- the ops row, both other implementations (`ctf_SelectSpawnPoint`, `DBall_SelectSpawnPoint`) and `dm_game_rt`'s row with it -- and the refusal lives in `OSP_spawnRefused` on tourney's side of the seam, because the arithmetic is tourney's. **Two exclusions the shared `PlayersRangeFromSpot` does not make are load-bearing rather than tidy**, and both are the donor's: the client being placed is not measured against ITSELF -- its body is still where it was observing from, and a client parked near the spot it is about to be given would refuse its own spawn forever, since the retry finds the same spot and the same body -- and an OBSERVER is not a player, or one client hovering over a spawn point blocks it for everybody, which is the finding R-RA-4 already records for arena's farthest-spawn one ruleset over. Measured on `q2dm1`'s ten spawn points with eleven clients, which cannot walk and therefore park on them: **4 telefrag obituaries and nobody refused before, 1 frozen client and 0 telefrags after**, and the frozen one placed within four seconds of four clients leaving. **Then the sweep, and it is a TOOL rather than a reading**, because the class is defined by absence: the merge keeps a field and its readers and drops the write, and nothing warns -- `if (x != 2)` is a valid comparison that is simply always true. `tools/deadvalue.py` is R-TOOL-6's fourth resolver and its space is **the set of values a field can hold**, asked three ways: in-tree (a constant compared for equality that no write produces), against each DONOR (a `(field, value)` write the donor makes and this tree cannot -- the sharper question, because the donor is the authority on what a field is supposed to hold), and one dispatch question (a function-pointer row assigned through a named object and never called through one). Zero is never a finding: a memset, an `InitClientResp` and a designated initialiser all produce it. **Eight donor trees compared -- five donors and three q2pro mission packs -- and after triage it is two defects, four cleared and one open.** `osp_r24c = 8` is the PLAYER CARD, one of `OSP_ScoreboardMessage`'s five pages, with a `case 8:` arm and no writer: the donor's toggle is in `Cmd_InvUse_f` rather than in `score` -- pressing USE on an open scoreboard is how OSP asks for your own card -- and porting it brought the two guards around it, an intermission arm and **another `entered` gate**, since an observer carries a blaster and could use it. `DMGame.SelectSpawnPoint` looked like the second and **is the scan's own error, kept as a note because it is instructive**: a grep found the row assigned in `g_newdm.c` and no caller anywhere, and the tool -- which strips comments before it reads -- reported nothing, because Ground Zero's whole `case RDM_DEATHBALL` is commented out here and byte-identically commented out in q2pro. The row has never been installed; a caller for it would be unreachable code, and the first draft of this amendment added one. **Four cleared with the reason written down**: `isbot = 0`, `osp_r2a8 = 0` and `osp_r2bc = 0` are the memset's zero, which is why zero is exempt by construction rather than by a list; `entered = true` is RA2's and is baseq2's bool rather than tourney's enum, whose only RA2 reader is a reconnect arm this tree does not have (R-58). **One is open and says so in the exemption list**: `osp_entered = 8` is in-eyes chase mode, and the write alone would change nothing -- the donor's entire chasecam input branch is unported, zoom and free-look and the ATTACK cycle, and `osp_t018`, the field the free-look writes, is read nowhere here. It is a feature to port, not a line to restore. `osp_r2bc` is recorded beside it: written here, read nowhere, and the donor's reader is `G_SetStats`' early-out, whose sense in the reconstruction would blank every PLAYER's HUD -- so it is recorded rather than guessed at. Controls: six, including the two an audit of this shape most needs -- a mutant must use a FRESH field name, because a name the clean tree also writes resolves against that and the control passes while testing nothing; and an exemption for a donor that was not compared must not be reported stale, or `make check`, which passes one donor, reports four false stale entries on every run. Checks: `scenarios/ospenter` grew a crowded phase and is **27 of 27** over the four OSP rulesets, `tools/playtest.sh` 234 of 234, `make check` **35** audits clean, `-Werror` clean under gcc, clang and `API=old`. Changed: R-OSP-1, R-TOOL-6 (a fourth space), new `tools/deadvalue.py` wired into `audit.py`. `doc/reconciliation.md` R-192. |
+| **Amendment 1.45** | **"Why was the in-eyes camera not ported, and what else is missing?" -- the answer to the first is that nothing decided it, and the answer to the second took two sweeps and a predicate.** R-OSP-1 has named *the observer and camera system* since 1.0 and no document, comment or reconciliation entry ever recorded a decision to leave part of it out; R-192's exemption list was the first time it was written down at all. What was here: the entry commands, `camera_depth` and `camera_pitch` registered and clamped, `osp_t018` and `wav_file` carried. What was not: **the input and the consumer**. So the chase camera sat at baseq2's fixed 30 units with no controls, and `entered == 8` -- in-eyes -- was a state two menu rows tested and nothing could reach. **The camera has four controls and all four are now spent in `UpdateChaseCam`**: forward/back zooms between `camera_depth` and the eye, strafe free-looks in four-degree steps, ATTACK cycles chasecam -> in-eyes -> out, jump cycles the target. The two modes differ in three ways the donor writes out and baseq2 has no room for -- the pitch allowed (56 against 1), the camera twelve units IN FRONT of the eye rather than behind the head, and the 30-unit floor lift that in-eyes does not get -- and the free-look reaches the VIEW angles as well as the placement, which is the donor's second `vangles` copy and the difference between moving the camera and moving the picture. **Two things the donor does that are NOT carried, each for its own reason**: its `avelocity` write, which its own comment calls a frame-to-frame delta and which nothing in the donor reads -- porting it would add exactly the dead state R-192 exists to find -- and its float punned into the int `osp_t018`, which is always an integral degree count because the donor takes `% 360` of it as an int, so it is kept as the int it is declared to be. **R-CTF-5 gains its fifth answer, declined twice before it was taken.** `G_IsObserver()` had no tourney spelling, which is why R-191 answered `Cmd_Kill_f` by hand; by this increment it was six sites, four of them the chase camera's own target search -- so without it the camera would have offered an OBSERVER as something to watch. The two callers that then diverge from the donor carry an arm each: `ClientBeginDeathmatch` announces an arriving observer and `p_view.c` keeps `G_SetStats`, because the donor deleted baseq2's spectator system and has no `G_SetSpectatorStats` at all. And tourney's observer INPUT replaces baseq2's rather than joining it: a free-flying observer gets a menu on the first press and the autocam after it, so baseq2's chase toggle and jump-cycle are excluded under the OSP four or two systems would read one key. **Then the second sweep, for everything else of this shape, and it is two questions.** Which cvars are registered and never read, and which functions does nothing reach? The first found four features: **`numgibs`** (the gib count, default 4 -- which is why nothing looked wrong), **`match_endmusic`** with `wav_file`'s five tunes and the team win/lose split, and **`nextlevel_click`/`nextlevel_lazy`**, the two intermission timers, one of which the map loop even WROTE and neither of which anything read: an intermission ended on the first press after baseq2's five seconds, or never. Porting the music brought the whole per-client end-of-level block it lives in -- the demo stop with its screenshot, the automatic accuracy page, the menu close, the recover latch -- and the board a player who died into the intermission is owed, whose `osp_r2dc == 2` had no reader and whose write carried a comment naming a function that reads the value 1. **Ten cvars remain unread and all ten are correct**: six the donor never reads either (they are published for clients or the engine), `bots_botfile` read by name through `BotFile()`, and the two power armour settings read through a helper's local alias -- which is why the sweep is a lens and not a verdict. **The function sweep says the tree is clean, and it took three passes to say it**: 390 findings when it counted only calls (a monster's frame table references by NAME), 972 when its prototype filter swallowed every plain call (`[\\w \\t*]+` matches leading whitespace), 75 when `return foo();` still looked like a declaration, and 72 once it did not -- every one of which is the donors' own dead code or an inherited q2pro utility. `UpdateEyeCamera` and `Log_Write` are uncalled **in the donors too**, and the DBall set is behind the `case RDM_DEATHBALL` q2pro comments out. Checks: new `scenarios/ospcamera`, **11 of 11 under `dm` and 11 under `tdm`** -- the camera is measured off the wire, because the observer's own edict origin IS the camera: 34 units back at `camera_depth` 20, 34 -> 29 -> 34 through a zoom in and out, a free-look yaw walking 0 -> 48 degrees away from the target's own, 26 units at the eye in-eyes with the offset dropped, and PM_SPECTATOR again on the way out. A row that wanted the shipped `camera_depth` 60 would have been asserting the MAP: the placement is traced, so at 100 the camera stands at xy 38 against a wall and fifteen units of zoom change nothing. `scenarios/ospenter` 15 of 15, `tools/playtest.sh` **234 of 234** with the predicate widened, `make check` 35 audits clean, `-Werror` clean under gcc, clang and `API=old`. **One thing is still open and unchanged**: `osp_r2bc`, whose reader in the reconstruction would blank every player's HUD (R-192). Changed: R-OSP-1, R-CTF-5, R-OSP-2's cvar claim. `doc/reconciliation.md` R-193. |
+| **Amendment 1.46** | **Five reports from one `tdm` play test, and the first thing to establish was WHICH BUILD they came from.** Two of the five -- an observer that could only look left and right, and an observer that had weapons and could fire -- did not reproduce on HEAD, and the reason is that 1.45 had already fixed them four hours before the report: both are R-193 teaching `G_IsObserver()` to answer for the OSP four, and neither was recorded as a symptom because both were found from the predicate rather than from the game. The A/B is the evidence and the method: the same scenario against `a3eea8d` reads `pm_flags` **0x20 `PMF_TIME_TELEPORT`** on a `PM_SPECTATOR` observer with the view pinned at 0.0 however the mouse moves, and a gunframe high-water of 56; against HEAD, 0x00, full pitch, and 0. **`PMF_TIME_TELEPORT` does not expire on a client that never runs the countdown** -- `Pmove()` clears it below the `PM_SPECTATOR` early-out and `PM_ClampAngles()` answers it above, by pinning PITCH and ROLL and letting only YAW follow -- so a spectator handed it keeps it, on the client as well as the server. **A play-test report is evidence about a build**, and this tree moved three amendments in the twelve hours between the sitting and the report; reproducing on HEAD reproduced neither. **What was real: the match start left the map dirty.** `OSP_checkSync` kills everybody into a fresh spawn and then sweeps the world in the same frame -- gibs freed, every `bodyque` unlinked and hidden -- and the sweep was ported while the thing it works on was not: the donor's `Cmd_Kill_f` ends `ent->deadflag = DEAD_DEAD; respawn (ent);`, and a corpse exists only because `respawn()` -> `CopyToBodyQue()` made one. Without it the kills made nothing for the sweep to find, every player lay dead until they pressed fire, and the body queued THEN -- after the sweep -- stayed lit in a live match. Measured: both players **PM_DEAD** with **`STAT_HEALTH` 0** at "Match has started!" and 123 non-client edicts against a 120 baseline; after, PM_NORMAL, 100, and 120. Its two dropped companions are not cosmetic either -- `CopyToBodyQue` copies `s.effects` and `s.renderfx` to the corpse, so a quad shell or a rune glow would go on glowing on the floor. **The same class, narrower**: `ClientBeginServerFrame` asked `!G_IsObserver(ent)` where the donor asks `resp.osp_r240 == 2`, and the two disagree for exactly one state -- a player whose placement was REFUSED (R-191, R-192), which is `MOVETYPE_NOCLIP`, `SOLID_NOT`, `SVF_NOCLIENT`, `PM_FREEZE` and keeps its view weapon, so an observer in every visible respect ran its weaponthink. **What was not a defect: the countdown clock.** Read off the wire for a player AND an observer -- slot 17 -> configstring 1569, `"0:14"` -> `"0:11"`, `Time` panel in the 759-byte bar the client received. There is no clock during WARMUP and that is the donor's: both arms of `OSP_updateClock` need `sync_stat > 0`, and warmup draws `WARMUP` in the team cells instead. **What was a config value: friendly fire.** `team_hurtteam` 1 -> 0 in `configs/tdm.cfg`, and checked against the world rather than the switch, because a per-team seed can arrive and be read by nothing -- which is the shape the `runes` modifier had. New `scenarios/ospff` fires a live rocket straight down between two teammates on two whole servers: at 0 the teammate goes 100 -> 100 while the shooter takes 55 of its own splash, at 1 the same shot takes them to 17. **The shooter's own health is the receipt that the rocket went off**, without which a missed shot and a gated shot are the same observation. `doc/reconciliation.md` R-194 carries all five. **Checks**: new `ospwarmup` 17 of 17 and `ospff` 4 of 4, `ospwarmup` 6 failures on `a3eea8d`, new `ospobsmodes` sweeping every observer mode, `tools/playtest.sh` 234 of 234, 35 audits clean. |
+| **Amendment 1.47** | **A function-by-function diff of all five donors against this tree, and the seven things it found -- one of which is a sentence in this document rather than a line of code.** R-CORE-10 states the merge load per FILE in diff lines and nothing had ever asked the per-DEFINITION question uniformly: *for each definition a donor touched, is that donor's behaviour here?* **New `tools/fnsweep.py` (R-VER-35)** takes R-PROV-3's five diffs and compares three texts per definition -- spine, donor, tree -- classifying each pair `as_donor` / `as_spine` / `merged` / `absent` / `donor_deleted`, and `doc/donor-fdiff.md` is the read-through with the tool authoritative over every table in it. **The shape of the answer first**: 3,197 definitions touched, 2,860 in files this tree carries; Rogue 388 of 555 shared definitions byte-identical at 0.93 median similarity and Xatrix 132 of 222 at 0.88 with **zero** absent identifiers, against CTF's 9 of 99 and tourney's 16 of 233 -- which is not a worse merge but R-MODE-5, since a gated hunk cannot be textually identical. Of **4,080** donor-added lines not at their own site, 1,165 are elsewhere in the tree verbatim and 1,381 name an identifier this tree does not have -- and **all 1,381 attribute to a recorded decision**: 490 to R-SEC-1's libc replacements, 222 to `match_mode`'s deletion, 168 to the ngLog stack `osp_stats.c` replaced, down to nine. **The nine are the findings and only two of the seven findings are inside the check's own space**, which is written into the tool rather than left to a reader: five turn on identifiers that are all present, so what is missing is a condition, a reader, an argument or a call site, and `NOT_MECHANISED` names them with the resolver each shape would need. **R-195.1 IS WITHDRAWN IN 1.48 and the sentence that follows was wrong when it was written** -- the gate has been in this tree since 1.31 (R-151), R-149's "Open, deliberately" was stale, and the sweep believed it. What survives is the half about the donor. As published: *"The one worth reading is R-195.1, because the correction is to a claim.* RA2 adds `ent->takedamage && arenas[…].state == ASTATE_FIGHTING` at FOUR `p_weapon.c` sites -- `Weapon_Generic`'s fire arm, `Weapon_HyperBlaster_Fire`, `Machinegun_Fire` and `Chaingun_Fire`'s gunframe-21 loop -- at the pin `d20e1ce` as well as the bundle tip, and this tree's four counterparts are the spine's. R-149 closes *"A person can still pre-fire an RA2 countdown here, as they can in `rocketarena2` itself"* and, two paragraphs above, says the right fix is *"the `buttons & BUTTON_ATTACK` test inside each `weaponthink` … or one gate in `Weapon_Generic`'s fire arm"* and wants an increment for it: **the donor has exactly that design at exactly those places**, so it is a port and not an invention, and R-143's "this is 1999's" is true of `p_client.c` and false of `p_weapon.c`.* **R-195.2 is a fifth space for R-TOOL-6**: RA2's chat-spam punishment (six lines in two seconds -> a broadcast and `stuffcmd(ent, "disconnect")`) is gone while `gclient_t.spamcount`/`.spamtime` are declared AND savegame-persisted and read by nothing -- a field with no reader and no writer, which `deadvalue.py` cannot see because its space is the values a field can hold and this one holds none. **R-195.3/.6 are one question in three places and only the call delta asks it**: `stats_logchat` reaches `talkto` and not `Cmd_Say_f`, `TossClientWeapon` logs neither the quad drop nor its expiry and never clears the entnum `p_view.c` reads, and `ShutdownGame`'s accuracy dump for a match still running has no counterpart -- in each case the function exists and has callers, and the missing thing is a call at a site. **R-195.4 and .7 are what `--check` fails on**: tourney's second ZBot heuristic with the `osp_r008` that fed it, and three one-line deltas (`SVF_PROJECTILE` on CTF's blaster bolts, the `MOD_GRAPPLE` obituary text where two donors claim one MOD, and Ground Zero's `FindSubstituteItem` typo that this tree spells correctly). **R-195.5 extends R-191's own argument by one call**: its two exclusions reach the refusal and not the selection, so `DF_SPAWN_FARTHEST` under the OSP four still measures against the body being placed and against observers. **The negative result is the larger half and is why the report exists**: 20 of RA2's 27 added files and 15 of tourney's 47 are correctly not carried -- including `g_monsters.c`, 161 lines holding 25 monster spawn stubs that would have compiled, linked and emptied every map -- eight cases where the sweep said "missing" and the donor's own copy cannot run, all 27 `OSP_Stats_*` entry points wired, and all four OSP client handshakes intact, which is this sweep confirming 1.30's `stuffcmd` audit. **The sweep re-derived eleven ledger claims independently and contradicted one** (R-KEY-1, R-40 including the exact `SVF_PROJECTILE` line that row names, R-CORE-8 with R-64's sixth rule, R-91, R-114, R-CORE-3, R-OSP-7a, R-OSP-12, R-MENU-1, R-191, R-77), which is the calibration worth having: on this tree the answer is seven findings, four of them single call sites. Controls: **eight**, two of them about the check's own blind spots, and the extractor is asserted against the shape that broke it -- a signature ending in a trailing `//PGM` under a commented-out prototype, which a name-by-regex extractor merges into its predecessor. Checks: `make check` **37** audits clean, `fnsweep.py --check` under 20 s over the five donors, and `-Werror` unchanged under gcc, clang and `API=old` **because no source file changed by this increment** -- the diff is one new tool, one new document, `audit.py`'s two rows and four documentation corrections. Also corrected: `doc/reconciliation.md`'s status line said 182 findings for seven increments (190, quoted with its counter), and `README.md`'s two audit figures are gone rather than restated, per its own precedent. Changed: new R-VER-35, new `tools/fnsweep.py` wired into `audit.py`, new `doc/donor-fdiff.md`. `doc/reconciliation.md` R-195. |
+| **Amendment 1.48** | **The port of R-195.1, which turned out to be a withdrawal -- and the refusal is a measurement rather than an opinion.** Asked to port RA2's four `p_weapon.c` firing gates, and the first thing to establish was whether this tree needs them. **It does not: R-151 closed that question inside spec 1.33 itself** (commit `1aa6429`), at the latch in `ClientLagThink` rather than at four fire arms, with `scenarios/ra2prefire` measuring `STAT_AMMO` 50 -> 46 through a countdown before and 50 -> 50 after. 1.47's sweep was right that the donor's four gate lines are absent here and wrong about what that meant, and **what made it believable is that TWO documents still said it was open**: `doc/reconciliation.md` R-149 ends "Open, deliberately. A person can still pre-fire an RA2 countdown here" two entries before the one that closed it, and the amendment row for 1.33 -- the very version the gate landed in -- ends "Left open deliberately". R-151 records the closure in full, with a measurement and a scenario, and **no amendment row has ever named it**, so the table and the ledger disagreed for fifteen versions. A ledger entry that records something as open has to be closed where it is recorded, or the next sweep reads it as the state of the code; that is the lesson and it cost a false finding. **What survives is the half about the donor, and three texts had it backwards**: RA2 gates neither `Think_Weapon` call site (true, and what R-151 needed) but does gate four fire arms (`Weapon_Generic` 417, `Weapon_HyperBlaster_Fire` 818, `Machinegun_Fire` 897, `Chaingun_Fire` 997, at `d20e1ce` and at the bundle tip), so "a person can pre-fire a countdown in 1999's mod too" does not follow -- and the design R-151 chose is the donor's own answer reached independently rather than a divergence from it. Corrected in place in R-149, R-151, the 1.33 amendment row and `RA_HoldFire()`'s docstring. **And the port is refused with the enumeration that decides it**: asked of this MERGED tree rather than of RA2's weapon set, "where does a press become a shot" has **nine** answers, not four -- the generic fire arm, the hyperblaster, the machinegun and the chaingun loop that RA2 gates, plus `Throw_Generic` (the hand grenade and Ground Zero's tesla), the Reckoning Trap, the chainfist, the ETF rifle and the plasma beam, which it does not. **All five of those are reachable under `arena`**: three through R-182's grant bits in `give_weapons`' second pass and two through the ammunition that is also the weapon (`ammo_grenades` in every arena, `ammo_trap`/`ammo_tesla` with their layer). Porting the donor's four would have stopped the weapons RA2 noticed and left a fighter throwing hand grenades, dropping Traps, laying teslas, sawing with a chainfist and holding a plasma beam through the whole countdown -- one clear at the latch covers all nine, and that argument was unavailable while three documents said the donor had no gate to compare with. **Nine and not eleven**: a grep for `BUTTON_ATTACK` in `p_weapon.c` returns eleven, and two of them are inside baseq2's own `Weapon_Grenade`, which sits in a BLOCK COMMENT because Ground Zero replaced that weaponthink -- the third place this tree has had to record that a census which reads comments counts behaviour that does not exist. **One real divergence is recorded rather than left latent**: the donor QUEUES the press, because its clear of `latched_buttons` sits inside the gated arm, so a tap during a countdown fires on the bell; this tree drops it, and holding through the bell fires either way. The queue is refused because it cannot be had at the latch, only per site, and because a queued press is a shot at the bell with no reaction time in it. Checks: `make check` 37 audits clean and the native gcc build `-Werror` clean. **The other build legs are deliberately not re-run and this row says so rather than implying them**: the only change under `src/` is prose inside a block comment, and the file it is in compiled, so clang and `API=old` have nothing to disagree about -- a claim of three clean legs would be three assertions and one measurement. Changed: `src/arena/arena.c`'s `RA_HoldFire()` docstring, the stale claims in R-149, R-151 and the 1.33 amendment row, `doc/donor-fdiff.md` §3, §3.1, §5 and §6, `tools/fnsweep.py`'s `NOT_MECHANISED` note. `doc/reconciliation.md` R-195.1. |
+| **Amendment 1.49** | **Five of R-195's findings ported, and the port found two defects that no sweep could have named.** Asked to close everything `doc/donor-fdiff.md` §3 still listed, in priority order. **R-195.3 and R-195.6 are one shape in three places and close together**: `OSP_Stats_Chat` is called from `Cmd_Say_f` now, at the donor's own position (after the 150-byte truncation, before the newline) -- ONE call and not two, because the donor routes `say_team` under TeamPlay to `OSP_sayteam_cmd` before `Cmd_Say_f` can see it and does not log there either, so `tdm`'s `say_team` stays out of the log **as the donor's gap rather than ours**; `TossClientWeapon` gained the quad drop and expiry events and the `resp.osp_r200` clear; `ShutdownGame` gained `if (!level.intermission_framenum) OSP_Stats_AccuracyAll()` between `sl_GameEnd` and the end event. **One token of the expiry arm is deliberately not the donor's**: `osp_r200` is set by the INVULNERABILITY pickup as well as the quad -- in the donor too -- so the donor's guard has three reachable cases and only one is the event it names, double-logging the second and writing a "Quad" expiry for an invulnerability in the third. `p_view.c`'s own reader tests `quad_framenum &&` before the comparison for exactly that reason and this arm now does too; nothing correct is lost, because a still-running quad fails `< level.framenum` either way (§7 rule 3). **R-195.5 threads the client being placed through three signatures** -- `PlayersRangeFromSpot(spot, ent)` and both selectors, `NULL` at the one caller with no such client -- and the donor's two exclusions are enabled by `ent != NULL && G_IsOspRuleset()`, which is not tidiness: `osp_entered` is maintained only by the OSP four, so applying it elsewhere would exclude every player on the server and hand every spot the same 9999999. **R-195.7's two text deltas are decided, and one takes neither donor's line**: the `MOD_GRAPPLE` obituary is per ruleset (tourney's "was hooked to death by", which its own log has said all along), and `SVF_PROJECTILE` on CTF's blaster bolts is set IN ADDITION to `SVF_DEADMONSTER` rather than instead of it, because q2pro's `SVF_PROJECTILE` arm is inside `if (svs.csr.extended)` and its `SVF_DEADMONSTER` arm is not -- the donor's line verbatim would leave a bolt on a non-extended server flagged with nothing at all, solid to `MASK_PLAYERSOLID`. R-195.2 and R-195.4 stay open as **decisions**: a policy call about a game library disconnecting a client, and a heuristic weak enough that declining it is defensible. **THE STALE-EXEMPTION RULE FIRED ON ITS FIRST REAL OCCASION** and that is worth more than the two lines it guarded: porting R-195.7's two made `fnsweep.py`'s `SVF_PROJECTILE` and `hooked` exemptions match no donor line, and the next `make` went red naming both -- before any test ran, from a rule written for a hazard that had never happened. A fix and its exemption have to retire together and the build now enforces it. **And two defects the sweep is blind to by construction, both reported by playing the game.** **The match started on a chorus of screams**: the donor puts `if (sync_stat != 2)` in front of BOTH of `player_die`'s death sounds, because OSP begins a match by killing every player into a fresh spawn, and this tree carried neither guard -- an ADDED CONDITION around a call that was already present, which no line-level rule and no call delta can see (`doc/donor-fdiff.md` §6 item 1, first specimen). **And the tdm match clock was gone from the bell onward**: `OSP_restartStats` points tourney's HUD panels at their configstrings and this tree called it forty-five lines BEFORE `memset(&ent->client->ps, 0, sizeof(client->ps))`, so every placement wrote the indices and wiped them. The donor's own call is the last statement before "force the current weapon up". Warmup looked right because `OSP_CheckReady` sets the same stat at the countdown and nothing respawns anybody between then and the bell. That one is §6 item 4 -- "two calls in the wrong order are two calls present" -- arriving as a call in the wrong PLACE, which is a fifth instrument nobody has built. **Evidence: two new scenarios, both in both signs.** `scenarios/ospchatlog` (20 rows, 0 failed) -- a `say` writes exactly one `chat` event AND a `stats_logchat 0` control writes none while logging five events of other kinds; dying with an active quad writes one `item_drop "Quad"` whose `from` is the entity the `item_pickup` named AND a bare death writes none; `map` typed mid-match on a `dm` server with four brain-driven bots writes four `accuracy` events with real tables before `shutdown{reason:"map"}`. Bots are not decoration there: `OSP_Stats_Accuracy` writes nothing for an empty per-weapon table and a libq2 client cannot fire, so the first version of that phase passed vacuously. `scenarios/ospclock` reads the clock at all four layers separately -- the composed bar, the client's copy of it, the stat, the configstring -- so a failure names the layer; it reported `stats[17]=0` and everything else correct, which is what identified the memset. **Three harness defects, each found by the row it made vacuous**: libq2 parsed `svc_sound` and never dispatched it, `ParseSound` defined `SoundIndex16` and did not honour it (one byte of desync for the rest of the packet on any sound index above 255), and `KillAndConfirm` exists because `Cmd_Kill_f` refuses a suicide within five seconds of a respawn AND PRINTS NOTHING WHEN IT REFUSES -- two scenarios asked what dying does, got a refusal, saw nothing and reported a pass. **The silence rows CALIBRATE THEMSELVES, and the reason is that they nearly lied.** "No death scream at the match start" is satisfied by a working guard and by a client that cannot hear a death at all, which are opposite facts -- and for three runs it was the second, because `KillAndConfirm` matched the wrong obituary verb and every suicide it thought it had made was refused. So the ordinary mid-match death is the calibration and the silence row hangs off it: same function, same client, same channel, `sync_stat` 4 instead of 2. Measured: **two CHAN_VOICE sounds from the player after the suicide and zero across the countdown and the bell**. When the calibration fails both rows skip and say why, because a row that cannot fail is worse than no row. Checks: `make check` 37 audits clean, `fnsweep.py --check` clean with two exemptions instead of four and `NOT_MECHANISED` down to R-195.1 and R-195.2, native gcc `-Werror` clean. Changed: `src/g_cmds.c`, `src/g_main.c`, `src/g_weapon.c`, `src/p_client.c`, `src/p_view.c`, `src/g_local.h`, `src/ctf/g_ctf.c`, `src/rogue/dm_ball.c`, `src/rogue/dm_tag.c`, `tools/fnsweep.py`, `doc/donor-fdiff.md` §3. `doc/reconciliation.md` R-196. |
 
 **Why "Colosseum".** The Colosseum is the arena the gladiators fought in, and it
 was one venue that hosted many different kinds of games. That is exactly this
@@ -160,7 +171,9 @@ Produce one Quake II game library that:
 
 | Term | Meaning |
 |---|---|
-| **Ruleset** | The primary game mode. Exactly one is active. `dm`, `ctf`, `arena`, `tourney`, `sp` |
+| **Ruleset** | The primary game mode. Exactly one is active. `dm`, `dmpro`, `tdm`, `duel`, `ctf`, `arena`, `sp` |
+| **OSP family** | The four rulesets that run OSP Tourney DM's code path — `dm`, `dmpro`, `tdm`, `duel`. `G_IsOspRuleset()` is the predicate |
+| **Base ops** | Q2PRO's baseq2 implementations, inherited by any ruleset that fills no row (R-MODE-6). Not selectable |
 | **Content layer** | An orthogonal, latched content/behaviour set: `xatrix`, `rogue` |
 | **Modifier** | A composable option within a ruleset: `teamplay`, `hook`, `runes`/`techs`, bots |
 | **Donor** | An upstream tree contributing code or behaviour (§3) |
@@ -316,7 +329,7 @@ identifiers were stale, not the measurements.
 
 | donor | 1.0–1.3 pin | 1.4 pin | evidence the content is the same |
 |---|---|---|---|
-| `q2pro` | `b1f2c18f` (`r1504-2231-gb1f2c18f`) | **`c751d316`** (`c751d316845ac4b27456d5cbd97f837979b24b26`) | `feature/mission-packs`, same branch, same three-commit shape: `bee7f7f0` *Add ctf, xatrix and rogue game libraries* → `3ffc4642` *Mission packs: portability and latent-bug fixes* → `c751d316` *README*. `src/{game,ctf,xatrix,rogue}` reproduce 72 / 31 / 79 / 92 files and 42,276 / 27,178 / 51,258 / 67,568 lines |
+| `q2pro` | `b1f2c18f` (`r1504-2231-gb1f2c18f`) | `c751d316` → **`92849303`** in 1.39 | `feature/mission-packs`, same branch, same three-commit shape: `bee7f7f0` *Add ctf, xatrix and rogue game libraries* → `3ffc4642` *Mission packs: portability and latent-bug fixes* → `c751d316` *README*. `src/{game,ctf,xatrix,rogue}` reproduce 72 / 31 / 79 / 92 files and 42,276 / 27,178 / 51,258 / 67,568 lines. **Re-pinned again in 1.39, and this time the CONTENT moved** — see R-PROV-5a |
 | `rocketarena2-public` | `c7d0f3a` | **`cd0708b`** (`cd0708b0d87a988df4bbc32ec4a474ce7563433d`) | `q2pro-enhancements`, still four commits over reconstruction `main`; 44 files / 30,192 + `shared/` |
 | `osp-tourney` | `ab0e13a` | **`a8e30d0`** (`a8e30d01357d13dc359b47bdf59ddaae0582544a`) | `q2pro-enhancements`, still three commits over reconstruction `main`; 71 files / 49,034 + `shared/` |
 
@@ -331,6 +344,38 @@ identifiers were stale, not the measurements.
   2. `789895b` — the RA2 commit R-RA-1a and R-OSP-10 name for the GameSpy
      removal — **does** resolve on this machine and is not re-pinned. Where a
      SHA still resolves it is left alone; only the three above moved.
+* **R-PROV-5a.** *New in 1.39, and it is clause 1 of R-PROV-5 arriving.* The
+  `q2pro` pin moved a second time, and **the content moved with it** — which is
+  the case clause 1 anticipated and the first case where "where a SHA still
+  resolves it is left alone" is not enough. `feature/mission-packs` was
+  re-committed as `09d3c499` → `eefadf25` → `92849303`, the same three-commit
+  shape with the same titles and the same author dates; `c751d316` and
+  `3ffc4642` both still RESOLVE, so identity is not the problem. What changed is
+  that `eefadf25` carries three latent-bug fixes to the imported packs that
+  `3ffc4642` does not:
+
+  | | `3ffc4642` (1.4 pin) | `eefadf25` (1.39 pin) |
+  |---|---|---|
+  | `"telsa"` in `src/rogue/m_move.c` | present | fixed |
+  | `FindItem("ionrippergun")` | present | fixed |
+  | `SubstituteItemAllowed` | absent | present |
+
+  So the pin is `92849303` (tip, README-only) with `eefadf25` as the commit the
+  source comes from, and the rule this adds is: **a re-pin states whether the
+  content moved, and names the evidence either way.** An identity-only re-pin
+  says so; a content re-pin lists what changed, because the difference decides
+  whether anything has to be imported. §7 rule 1 makes the base's answer the
+  tree's answer, so a content move is a merge obligation and an identity move is
+  bookkeeping.
+
+  *Checked, and the obligation is smaller than the diff.* `3ffc4642..eefadf25`
+  touches 37 files under `src/{ctf,xatrix,rogue}` and the two raw import commits
+  differ in 29 more, but the sample is upstream applying repairs this tree had
+  already made independently — `CS_GENERAL` → `game.csr.general` (R-62), a
+  literal `pm_time` → `112 >> PM_TIME_SHIFT`, `strcpy` → `Q_strlcpy`,
+  `CTFSay_Team_Location` gaining its `size` parameter. Convergence, not a queue.
+  The three rows above are what was owed and they are imported in 1.39
+  (`doc/reconciliation.md` R-187).
 * **R-PROV-6.** *The bundles did not move and that is the point.* Every ref of
   §3.2 resolves byte-exactly as recorded: root `C0` `7ceeeed`, spine tip
   `baseq2` `5d180cb` (the tip R-PROV-3 computes every donor diff against),
@@ -741,22 +786,51 @@ calls `gi.error` on `ctf && ra`, `ctf && ch` and `ra && ch`. That is a
 constraint expressed as an error message. Colosseum expresses it as a type.
 
 * **R-MODE-1.** One latched cvar `g_ruleset` selects the primary ruleset:
-  `dm` | `ctf` | `arena` | `tourney` | `sp`. Default `dm`. Invalid values fall
-  back to `dm` with a warning; they never abort startup.
+  `dm` | `dmpro` | `tdm` | `duel` | `ctf` | `arena` | `sp`. Default `dm`.
+  Invalid values fall back to `dm` with a warning; they never abort startup.
+
+  *Seven since 1.36, and four of them are one code path.* `dm`, `dmpro`, `tdm`
+  and `duel` are OSP Tourney DM's four structures of play, which until 1.36 were
+  selected by a **second** latched selector inside the `tourney` ruleset —
+  `match_mode`, cached into the global `m_mode` (R-OSP-12). Two selectors for
+  one kind of choice is what this flattens: the ruleset now *is* the mode, and
+  `m_mode`, `match_mode` and the ruleset name `tourney` are gone. `dm` is
+  therefore no longer baseq2's deathmatch; it is OSP's `RegularDM`, and baseq2's
+  own implementations survive as the **base** ops that R-MODE-6 inherits from.
 * **R-MODE-2.** Legacy cvars are honoured as aliases, evaluated once at
   `InitGame`, so existing configs and 1999 documentation keep working:
-  `ctf 1` → `ctf`; `rocketarena 1` → `arena`. A legacy `ch 1` is accepted and
-  ignored with one warning, because Colored Hitman is out of scope (§1.2).
-  Two conflicting aliases produce a warning naming both, and the first in the
-  order `ctf`, `arena`, `tourney` wins. OSP's `m_mode` continues to select the
-  mode of play **within** the `tourney` ruleset, and it selects among **four**,
-  not three (R-OSP-12). `g_ruleset` and `m_mode` are orthogonal: the ruleset
-  picks the code path, `m_mode` picks the match structure inside it.
+  `ctf 1` → `ctf`; `rocketarena 1` → `arena`. Two conflicting aliases produce a
+  warning naming both, and the first in the order `ctf`, `arena` wins.
+
+  *1.36 removes two things this rule used to carry.* `ch 1` is no longer read
+  at all — Colored Hitman has been out of scope since 1.2 (N7) and a cvar that
+  is accepted, ignored and warned about is a third way of saying nothing; the
+  `ch` **libvar** is still pushed to the brain as `"0"`, because that one is the
+  frozen botlib's, not this dispatch's (R-BOT-6). And `tourney` is **removed
+  outright**: not aliased, not mapped, and not special-cased. It is simply not
+  a ruleset name, so it takes R-MODE-1's path for any unknown value — warn,
+  list the seven that are valid, fall back to `dm`, never abort. `match_mode`
+  is not read either, so a `tourney` config selects `dm` whichever mode it
+  asked for. A tailored message naming the four replacements was written and
+  then removed: it would have made `tourney` the one unknown value that behaves
+  differently from the others, which is a smaller copy of the special case this
+  amendment exists to delete.
 * **R-MODE-3.** `xatrix` and `rogue` are independent latched content layers,
   valid with every ruleset. Both may be on at once. The union content is always
   spawnable; the cvars gate *behaviour* (Ground Zero's plat2/danger-area logic,
   DM rules, `gamerules`) exactly as the 1999 build gated it — measured: 14 uses
   of `rogue->value`, 1 of `xatrix->value` in `gladq2_src`.
+
+  *One narrowing, recorded in 1.36 rather than discovered later.* `gamerules`
+  reaches Ground Zero's `DMGame` vtable through `CheckDMRules()`, and
+  `OSP_CheckRules()` does not call it — it reimplements the fraglimit, timelimit
+  and overtime tests itself. So Tag has never run under `tourney`, and after the
+  flattening it does not run under `dm`, `dmpro`, `tdm` or `duel` either. It
+  keeps working under `ctf` and `arena`, both of whose `CheckRules` rows call
+  `CheckDMRules()` by name. The layers stay valid with every ruleset — every
+  Ground Zero item, monster and weapon still spawns and behaves — what narrows
+  is this one DM-rules hook, and it narrows because the ruleset that used to
+  carry it is now somebody else's code.
 * **R-MODE-4.** Modifiers: `teamplay`, `hook`, `runes`/`techs`, and bots. Each
   modifier declares which rulesets accept it; an unsupported combination is
   refused at `InitGame` with one message naming the ruleset, the modifier and
@@ -768,7 +842,7 @@ constraint expressed as an error message. Colosseum expresses it as a type.
   together with Phase 6's `bots`, because they are the same question* (R-88,
   R-96). **A modifier is the resolved answer, not the request.** Where the
   ruleset already has a switch that decides the thing — `DF_CTF_NO_TECH` under
-  `ctf`, the `runes_enable` bitmask under `tourney` — the modifier reports what
+  `ctf`, the `runes_enable` bitmask under the OSP four — the modifier reports what
   that switch says, and the cvar is folded into it beforehand as a request that
   can only ever turn something **on**. So `runes 0` means "do not ask" rather
   than "turn them off", a default server is untouched, `runes 1` clears
@@ -838,45 +912,82 @@ constraint expressed as an error message. Colosseum expresses it as a type.
   `ClientBeginDeathmatch`. All three placement paths coexist in Colosseum, so
   anything that must run after placement hangs off one hook rather than being
   copied into three functions.
-* **R-MODE-6.** A ruleset that does not implement a hook inherits the `dm`
-  implementation. `dm` implements all of them.
+* **R-MODE-6.** A ruleset that does not implement a hook inherits the **base**
+  implementation, which is Q2PRO's baseq2 code: `CheckDMRules`, `EndDMLevel`,
+  `DeathmatchScoreboardMessage`, `BeginIntermission` and `SelectSpawnPoint`.
+  The base fills every row and is **not itself selectable** — no value of
+  `g_ruleset` dispatches to it.
+
+  *Reworded in 1.36, and the rewording is the point.* Until then the base and
+  the `dm` ruleset were the same table, `ops_dm`, so "inherits the `dm`
+  implementation" was true by accident of naming. `dm` is OSP's `RegularDM`
+  now and fills its own rows, while the five baseq2 functions still have to
+  exist — not only for the NULL-row fallback, but because `ctf`, `arena` and
+  the OSP family call them **by name** from their own C: `ctf_CheckRules` and
+  `RA_CheckRules` both call `CheckDMRules`, `OSP_EndLevel` and `RA_EndLevel`
+  both fall back to `EndDMLevel`, `OSP_highscores_cmd` / `OSP_showinfo_cmd` /
+  `OSP_setStats` call `DeathmatchScoreboardMessage` as an alternate scoreboard
+  view, and `PutClientInServer` calls `G_SelectSpawnPoint()` for every ruleset
+  before arena and the OSP family re-place the client. The table is `ops_base`.
 * **R-MODE-7.** Composability matrix — the contract:
 
-  | | dm | ctf | arena | tourney | sp |
-  |---|---|---|---|---|---|
-  | bots | yes | yes | yes | yes | no |
-  | `xatrix` layer | yes | yes | yes | yes | yes |
-  | `rogue` layer | yes | yes | yes | yes | yes |
-  | `teamplay` | yes | implied | via teams | via `m_mode` 2 or 3 † | no |
-  | `hook` | opt | yes | yes (grapple) | yes (OSP hook) | no |
-  | `runes`/`techs` | no | yes (techs) | no | yes (runes) | no |
-  | monsters | yes | yes (unproven — R-VER-2) | no | no | yes |
-  | savegames | — | — | — | — | yes |
+  | | dm | dmpro | tdm | duel | ctf | arena | sp |
+  |---|---|---|---|---|---|---|---|
+  | bots | yes | yes | yes | yes | yes | yes | no |
+  | `xatrix` layer | yes | yes | yes | yes | yes | yes | yes |
+  | `rogue` layer | yes | yes | yes | yes | yes | yes | yes |
+  | `teamplay` modifier | no † | no † | no † | no † | implied | via teams | no |
+  | team play | no | no | **is the ruleset** | **is the ruleset** ‡ | implied | via teams | no |
+  | `hook` | yes (OSP hook) | yes | yes | yes | yes | yes (grapple) | no |
+  | `runes`/`techs` | yes (runes) | yes | yes | yes | yes (techs) | no | no |
+  | monsters | no | no | no | no | yes (unproven — R-VER-2) | no | yes |
+  | `gamerules` (R-MODE-3) | no | no | no | no | yes | yes | — |
+  | savegames | — | — | — | — | — | — | yes |
 
   *The bot row was measured in full in 1.23*, via `sv ruleset`'s new `bots` and
   `botplace` lines: four bots on `q2ctf1` split 2/2 across the CTF teams, four
-  on `q2dm1` under `arena` in arena 1 and on teams, four under `tourney`
-  entered, ready and split 2/2 in `match_mode 2`, and `sp` refusing the modifier
-  by name. `CheckMinimumPlayers` runs under `arena` as of 1.23 -- Phase 6's
+  on `q2dm1` under `arena` in arena 1 and on teams, four entered, ready and
+  split 2/2 under what 1.36 renames `tdm`, and `sp` refusing the modifier by
+  name. That measurement predates the flattening and its four OSP rows are
+  re-measured under the new names by `tools/botmatrix.sh`, which is why the
+  matrix above is seven columns and the evidence below is still five.
+  `CheckMinimumPlayers` runs under `arena` as of 1.23 -- Phase 6's
   early-out rested on there being no arena roster a bot could reach, which
   R-ARENA-2 changed -- so `minimumplayers 4` under `arena` settles at exactly
   four (`doc/reconciliation.md` R-109).
 
   *The monster row was measured in 1.6*, on `base1`, via `sv ruleset`
-  (R-VER-18): `dm` 0 live monsters, `ctf` **19**, `arena` 0, `tourney` 0, `sp`
-  17 plus 12 corpses. `deathmatch` is 1 in the first four, which is the point —
+  (R-VER-18), under the five ruleset names of the time: `dm` 0 live monsters,
+  `ctf` **19**, `arena` 0, `tourney` 0, `sp` 17 plus 12 corpses. Only `ctf` and
+  `sp` answer yes, and neither changes in 1.36 — the four OSP rulesets all
+  answer what `dm` and `tourney` already answered, which is 0.
+  `deathmatch` is 1 in the first four, which is the point —
   the inherited `if (deathmatch->value) G_FreeEdict(self)` would have suppressed
   the monsters this row promises under `ctf`, so the row is only true because
   R-MODE-5's predicate replaced that test (`doc/reconciliation.md` R-6). Q14's
   "unproven rather than broken" is now "spawns; behaviour under `ctf` still
   unproven", which is what R-VER-2 is for.
 
-  † `tourney` reaches team play by two routes. `m_mode 2` is team play proper;
-  `m_mode 3` is 1v1, which is *also* two teams — of one player each, forced
-  (`osp_main.c:479-484` sets `team_maxplayers` to 1 and re-registers it
-  `CVAR_NOSET`). The team machinery, scoreboard and overtime rules are shared;
-  what differs is the roster size and the queue. A reader who takes the row as
-  "team play means `m_mode 2`" will wire 1v1 wrongly — see R-BOT-29.
+  † The `teamplay` **modifier** is refused across the OSP family, with R-MODE-4's
+  one-line message naming `tdm` as the answer. That is the flattening applied to
+  itself: once team play is a ruleset, a modifier that also reaches it is the
+  second selector this amendment exists to remove. The refusal costs nothing
+  measurable — `G_TeamplayEnabled()` has exactly **two** callers in this tree
+  (R-MODE-5's "20 call sites" describes `q2pro-ng`'s prior art, not Colosseum):
+  `DM_BotFillSeats()`, which rounds a bot-fill target down to even, and the
+  `default:` arm of `BotRulesetLibVars()`, which after 1.36 only `sp` could
+  reach and `sp` has no bots. The predicate answers from the ruleset now —
+  `ctf`, `tdm`, `duel`.
+
+  ‡ `duel` is team play of a particular size, not a mode beside it: two teams of
+  **one**, forced — `osp_main.c` sets `team_maxplayers` to 1 and re-registers it
+  `CVAR_NOSET`. The team machinery, scoreboard and overtime rules are shared
+  with `tdm`; what differs is the roster size and the queue. **The brain is told
+  otherwise on purpose**: `BotRulesetLibVars()` sets the botlib's `teamplay`
+  libvar from `RULESET_TDM` alone, because on real skins a duellist and their
+  opponent wearing the same model would become team-mates. R-BOT-29 is that
+  rule, and 1.36 preserves it by making the test name the ruleset rather than
+  the mode number.
 
 ### 5.4 Bot subsystem
 
@@ -1211,6 +1322,20 @@ is observed on the way through.
   `give_ammo` read out of `arenas[n]`. The rows this requirement actually names
   are untouched; what went was a second, dead control path for one set of
   settings (`doc/reconciliation.md` R-155).
+
+  *1.42: the gate keeps the password and gains the one caller it cannot ask for
+  one.* **The host of a listen server is exempt**, on `pers.listenhost` — a
+  fact about the connection, latched in `ClientConnect` from the userinfo the
+  ENGINE force-set (`dedicated` 0 and `ip` `"loopback"`, which only the
+  in-process client ever has) and preserved across `InitClientPersistant`'s
+  memset on both arms and under every ruleset. It must not be read live: `ip`
+  is the engine's in the connect packet only, and `setu ip loopback` is a
+  command every client has. The exemption is the MENU's alone —
+  `serveronlybotcmds` still refuses the host every other bot command, which is
+  R-BOT-25 unchanged. And **an unset `rcon_password` is no longer a password of
+  `""`**: the donor's bare `strcmp` matched the empty argv(1) that `menu ""`
+  produces, so a default server refused the honest form to everybody and
+  admitted anybody who typed two quote marks (`doc/reconciliation.md` R-190).
 * **R-BOT-29.** *The `TOURNEY` block becomes a runtime gate.* This is the largest
   single piece of work in §5.4 and 1.0–1.1 did not mention it.
   *Done in 1.22, and the seventeen are six different things rather than one*
@@ -1231,7 +1356,7 @@ is observed on the way through.
   | site | what it does when on |
   |---|---|
   | `bl_main.c` rune→tech translation | rewrites `bue.modelindex` to `TECH1..5_INDEX` for `IT_RUNE` items so the brain sees OSP runes as CTF techs |
-  | `bl_main.c` libvar block | drives `usehook`/`laserhook` from `hook_enable`, `teamplay` from `m_mode == MODE_TEAM`, `runes` from `rune_stat` |
+  | `bl_main.c` libvar block | drives `usehook`/`laserhook` from `hook_enable`, `teamplay` from `RULESET_TDM` alone, `runes` from `rune_stat` |
   | `bl_botcfg.c` ×2 | `botfile` → **`bots_botfile`**, default `botcfg/bots.cfg` |
   | `bl_spawn.c` minimum players | `minimumplayers` → **`bots_minplayers`**; count gated on `resp.entered == ENTERED_ENTERED`; arithmetic subtracts `bots_votedin`; a `bots_autoload == 4` arm and an `old_botcount` guard |
   | `bl_spawn.c` name collision | a duplicate bot name is auto-suffixed rather than refused |
@@ -1245,13 +1370,22 @@ is observed on the way through.
   units are linked — `m_mode`, `hook_enable`, `OSP_serverbotsRemove`,
   `bots_votedin`, and `rune_stat`, which is a plain `int` in `osp_main.c` whose
   lifecycle `OSP_endClean` owns. Each needs a ruleset-neutral accessor.
-  The `m_mode` accessor is a **value** accessor, not a predicate. `bl_main.c:1035`
-  compares `m_mode == MODE_TEAM` (`0x02`) to drive the brain's `teamplay` libvar,
-  and that comparison is exactly right as written: 1v1 is two teams of one, the
-  brain has no ally, and `teamplay 0` is the correct answer for `m_mode 3`. An
-  accessor that generalises the test to "is this a team mode" would set
-  `teamplay 1` in 1v1 and give every duel bot an imaginary teammate. Preserve the
-  comparison; abstract only where the value comes from.
+  The `m_mode` accessor was a **value** accessor, not a predicate. `bl_main.c`
+  compared `m_mode == MODE_TEAM` (`0x02`) to drive the brain's `teamplay`
+  libvar, and that comparison is exactly right as written: 1v1 is two teams of
+  one, the brain has no ally, and `teamplay 0` is the correct answer for a duel.
+  A test generalised to "is this a team mode" would set `teamplay 1` in 1v1 and
+  give every duel bot an imaginary teammate.
+
+  *1.36 deletes `m_mode` and the accessor with it, and the rule survives
+  unchanged in substance.* The libvar now reads `G_Ruleset() == RULESET_TDM`,
+  which is the same set of one ruleset that `m_mode == MODE_TEAM` selected —
+  **not** `G_IsOspRuleset()`, and **not** the family's team half (`tdm` **or**
+  `duel`), either of which would be the generalisation this clause forbids. The
+  hazard is if anything worse now than it was: `duel` is visibly a team ruleset
+  in R-MODE-7's matrix, so the wrong test reads as the natural one. It is not.
+  `G_TeamplayEnabled()` is a different question with different callers and must
+  not be substituted here either (R-MODE-7 †).
 * **R-BOT-30.** Fixes to take from `osp-tourney`'s `bl_*` verbatim, each verified
   present: `TECH5_INDEX 255` (**both** Gladiator trees carry `#define
   TECH4_INDEX 254` followed by `#define TECH4_INDEX 255`, and `TECH5_INDEX` is
@@ -1481,6 +1615,38 @@ input:
   the position and the text treated as one item: emitting the `yv`/`xv` pair and
   then dropping the string would move the cursor and draw nothing. The same 1400
   and the same discipline apply to the composed statusbar (R-OSP-7a).
+* **R-MENU-6.** *New in 1.38, and it is R-MENU-5's sibling.* R-MENU-5 bounds a
+  layout in **bytes**. A layout also has a **pixel** budget, and nothing bounded
+  it: **a composed layout fits inside the pic it draws over, and a page size is
+  DERIVED from that pic rather than being a constant.**
+
+  For the arena menu the derivation is arithmetic and every term is measured
+  rather than chosen. `menu.c` draws over `picn inventory` at `xv 32 yv 8`;
+  `inventory.pcx` is 256x192 and its flat interior -- palette index 175
+  throughout -- is pic rows 18..174, so the text area is statusbar y 26..182. A
+  `string2` at `yv Y` paints Y..Y+7, because every printable glyph in
+  `conchars.pcx` uses all eight rows. Rows start at `yv 40` and step by 8. So
+  `40 + 8k + 7 <= 182` gives k <= 16 -- **seventeen rows** -- and the "(More)"
+  marker, which is not a row and which only some pages carry, takes the 7px that
+  are left.
+
+  *Inherited or new (§0 rule 6): new.* The donor's `MAXMENUITEMS` is 18 and its
+  marker sits at `y + 10`, and neither has ever fitted -- 18 rows end at
+  `yv 176`, painting 176..183 across the frame line, and the marker lands on the
+  bevel outside the box. RA2's own settings menu is 26 rows, so every page it
+  ever drew showed it. This is therefore a deliberate divergence from `port_ra2`
+  rather than a preservation, and it is **not** in R-SEC-2's kept-bugs ledger:
+  all seventeen entries were read, 3 and 14 touch `UpdateStatusBars` and
+  `SendStatusBar`, and neither is this.
+
+  **Seventeen and not sixteen, and the difference is one requirement colliding
+  with another.** Sixteen would fit the marker with clear space below it and
+  would push R-RA-8's "Allow Bots" row onto page 2, which is the position that
+  row was placed for. Every *content* row is inside the interior either way;
+  what seventeen spends the remainder on is a hint marker touching the frame.
+  Testable from outside the process: `scenarios/ra2botvote` reads a client's own
+  statusbar and prints `page 1 is 17 row(s), ending "Allow Bots: YES"` -- the
+  boundary, and not merely the row's presence.
 
 ### 5.7 Engine features used
 
@@ -1969,6 +2135,20 @@ struck through and kept.
   `Cmd_Kill_f` tests `solid == SOLID_NOT`, which is also true of a dead player,
   and `ClientThink` gates the attack button on `movetype != MOVETYPE_NOCLIP`,
   which is the right set under `ctf` only by coincidence.
+
+  *1.45: the FIFTH answer, and it was declined twice before it was taken.*
+  Tourney's spelling is `resp.osp_entered != ENTERED_ENTERED` — the donor
+  deleted baseq2's spectator system too — and R-191 answered two sites by hand
+  rather than widening the predicate, on the grounds that two of its callers
+  would then diverge from the donor. By R-193 that was six sites, four of them
+  the chase camera's own target search, so the answer is in the predicate and
+  the two divergent callers carry an explicit arm each: `ClientBeginDeathmatch`
+  announces an arriving observer (the donor's is unconditional) and `p_view.c`
+  keeps `G_SetStats` for one, because the donor has no `G_SetSpectatorStats` at
+  all. Tourney's OBSERVER INPUT is not baseq2's either and the two must not both
+  run: baseq2 gives a spectator one key, and the donor gives it a menu, an
+  autocam, a chase camera with a zoom and a free-look, an in-eyes mode and a
+  target cycle (`doc/reconciliation.md` R-193).
 * **R-CTF-6.** Player id display is on by default and shows the team icon
   (uGladQ2 v0.98.2u).
 
@@ -2004,9 +2184,14 @@ struck through and kept.
   arrives at a client is the team's skin. The v0.93 userinfo half is still
   structural: it needs a drive script that changes `skin` mid-game.
 
-* **R-CTF-8.** `ctf_botfill` — under `ctf` the bot count may follow the map and
-  its two bases instead of the server. Default **0**, which is off:
+* **R-CTF-8.** `botfill` — under `ctf` the bot count may follow the map and its
+  two bases instead of the server. Default **0**, which is off:
   `minimumplayers` is the target exactly as it has always been.
+
+  *Named `ctf_botfill` in 1.35 and unified into one bare `botfill` in 1.36*,
+  with `ra_botfill` and `dm_botfill` — R-OSP-11 for why the per-ruleset naming
+  rule never covered these three, §7 rule 6 for why one concept keeps one
+  implementation. One switch, and the target still computed per ruleset.
 
   R-RA-7's argument, one ruleset over. A flat count is one number for a whole
   rotation, and **Threewave declares no capacity anywhere**: there is no
@@ -2075,6 +2260,55 @@ struck through and kept.
   not GameSpy code despite the prefix. Colosseum keeps this state, and `netlog`
   stays the only socket user in the tree.
 * **R-RA-2.** All 47 RA2 cvars and all 39 RA2 client commands work.
+* **R-RA-2a.** *New in 1.38, and it amends a default rather than adding a key.*
+  `arena.cfg`'s `weapons:` names the nine baseq2 weapons by the digit that
+  selects them (`2`..`9`, `0`) and the mission packs' six by word (`ripper`,
+  `phalanx`, `etfrifle`, `proxlauncher`, `plasmabeam`, `chainfist`).
+  **The two halves have separate defaults and separate inheritance**, because
+  they have separate histories: the digits span exactly the nine weapons the key
+  was invented for, so a line written before the packs existed says everything
+  there was to say about the baseq2 half and nothing about the pack half.
+
+  * the baseq2 half defaults to every weapon but the BFG -- `0xff`, the donor's;
+  * the pack half defaults to every weapon of a content layer that is **on**;
+  * a `weapons:` line owns the pack half only if it names a pack token, or
+    `nopack`, which is how an arena refuses all six out loud;
+  * a line that names none of them inherits the pack half from the enclosing
+    block, and ultimately from that default.
+
+  **What an arena STORES and what it GRANTS are two values.** A bit whose
+  content layer is off is carried, not cleared -- an `arena.cfg` is written once
+  and served by servers running the Reckoning, Ground Zero, both or neither, and
+  switching a layer back on must restore the arena as written -- so
+  `RA_ArenaGrantsMask()` is the honoured mask and `give_ammo()` reads that.
+  `sv arenadump` prints both numbers side by side, which is what makes the
+  difference reviewable without a probe.
+
+  **The five pack ammunitions are each gated on their own layer**, and two of
+  them have to be: `ammo_tesla` and `ammo_trap` are the weapon as well as the
+  ammunition -- which is why neither has a `weapons:` bit, the donor treating
+  `ammo_grenades` the same way -- so an ungated count is not a number on a HUD,
+  it is an item in the weapon cycle. Gated by zeroing rather than skipping,
+  because `give_ammo()` assigns and the inventory carries across a round.
+
+  *Why this is an amendment and not new scope.* R-182 gave the pack half no
+  default and reasoned that a cfg naming none of the six leaves the key meaning
+  what it always meant. The premise is true and the conclusion does not follow:
+  137 of the shipped `arena.cfg`'s 171 arena blocks name a `weapons:` line of
+  their own and the other 34 inherit the default, so between them the file
+  covered every arena and neither path could grant a pack weapon. `xatrix 1`
+  drew two menu rows reading NO and changed nothing else. Measured on `ra2map11`
+  arena 1 with the shipped file, `sv arenadump`:
+
+  | layers | mask | grants | pack | ammo |
+  |---|---|---|---|---|
+  | neither | `0x00ff` | `0x00ff` | none | all five 0 |
+  | `xatrix 1` | `0x06ff` | `0x06ff` | ripper phalanx | magslug 50, trap 5 |
+  | `rogue 1` | `0x78ff` | `0x78ff` | the four | flechettes 200, prox 50, tesla 50 |
+  | both | `0x7eff` | `0x7eff` | all six | all five |
+
+  The first row is the report that opened this: Teslas and Traps handed out by a
+  server running neither pack. `doc/reconciliation.md` R-186 §1 and §2.
 * **R-RA-3.** The arena state machine keeps its seven states (`WARMUP`,
   `COUNTDOWN`, `FIGHTING`, `ROUNDEND`, `INTERMISSION`, `RESULTS`, `NEXTROUND`).
 * **R-RA-4.** The uGladQ2 arena fixes are all present, each as its own
@@ -2134,15 +2368,21 @@ struck through and kept.
   every side would empty the arena of bots. `doc/reconciliation.md` R-109.
 * **R-RA-6.** Monsters do not spawn in `arena`. The classnames still exist
   (R-CORE-2); the ruleset suppresses them.
-* **R-RA-7.** `ra_botfill` — under `arena` the bot count may follow the arena
+* **R-RA-7.** `botfill` — under `arena` the bot count may follow the arena
   instead of the server. Default **0**, which is off: `minimumplayers` is the
   target exactly as it has always been, and nothing in the tree behaves
   differently.
 
+  *Named `ra_botfill` in 1.34 and unified into one bare `botfill` in 1.36*, with
+  `ctf_botfill` and `dm_botfill`. `arena` is the one of the three that had a
+  `cvar_t *` of its own and its own copy of the clamp; both are gone, and the
+  shipped `configs/arena.cfg` sets `botfill 1` where it used to set
+  `ra_botfill 1`.
+
   `minimumplayers` is one number for a whole server, and under every other
   ruleset that is the right shape — one map, one game, one roster. Rocket Arena
   runs up to 32 games at once and they are not the same size, so a flat count is
-  a crowd in one arena and an empty room in the next. `ra_botfill 1` asks the
+  a crowd in one arena and an empty room in the next. `botfill 1` asks the
   arena that `RA_AutoArena()` is feeding bots into — the same function
   `RA_BotJoinArena` uses, so the census and the destination cannot disagree.
 
@@ -2175,7 +2415,7 @@ struck through and kept.
   own, so a `playersperteam: 2` arena played 1v1 and its declared size was
   unreachable with bots — a bot now joins an under-full **bot-only** team in
   that arena first, which is `menuAddtoTeam`'s shape, and never a person's team
-  uninvited. That is gated on the switch too, so `ra_botfill 0` is off in every
+  uninvited. That is gated on the switch too, so `botfill 0` is off in every
   sense and not only in the count. **The census counts bots in transit**: `CheckMinimumPlayers` runs
   before `G_CheckRules` and both gate on `level.framenum & 31`, so on a fill
   tick the bots `RA_BotFollowPeople` is about to move have not moved yet —
@@ -2197,6 +2437,49 @@ struck through and kept.
   referee and vote system, **all four modes of `m_mode` (R-OSP-12)**, the runes,
   the OSP hook, the observer and camera system, hi-scores, the accuracy/stats
   commands, the map system and the menu engine.
+
+  *1.43: connecting is not entering, and the placement has to say so.* A
+  tourney client arrives as an OBSERVER and enters through a command, so
+  `PutClientInServer` has **two arms** keyed on `resp.osp_entered`: a client
+  that has not entered is placed `MOVETYPE_NOCLIP`, `SOLID_NOT`,
+  `SVF_NOCLIENT`, with no view weapon and no KillBox. `resp.osp_r240` is the
+  other half of the same fact -- 2 for a client that has been given a body, 0
+  for one that has not -- and it is what `ChangeWeapon`'s gunindex, that
+  KillBox and the autocam's candidate test read. **No join path places
+  anybody**: all six set `osp_entered` and clear `osp_r240`, and `ClientThink`
+  respawns the client on the next think, freezing it (`PM_FREEZE`) until it
+  does. One trigger serves the six, and a placement that was refused retries
+  through the same line (`doc/reconciliation.md` R-191).
+
+  *1.44: and a placement CAN be refused, which is what the retry is for.*
+  `G_SelectSpawnPoint` is a predicate rather than a `void` row: tourney refuses a
+  spot with a player within 60 units of it, and `PutClientInServer` leaves the
+  client frozen and bodiless rather than telefragging whoever is standing there.
+  Measured on `q2dm1`'s ten spawn points with eleven clients — **4 telefrag
+  obituaries before, 1 frozen client and 0 telefrags after**, and the frozen one
+  placed as soon as four left. Two exclusions the shared `PlayersRangeFromSpot`
+  does not make are load-bearing and both are the donor's: the client being
+  placed is not measured against itself, and an observer is not a player
+  (`doc/reconciliation.md` R-192).
+
+  *1.45: the observer and camera system, which this requirement has named since
+  1.0 and which was carried without its input or its consumer.* The chase camera
+  has FOUR controls — forward/back zooms it between `camera_depth` and the
+  target's eye, strafe free-looks it in four-degree steps, ATTACK cycles
+  chasecam → in-eyes → out, jump cycles the target — and `UpdateChaseCam` is
+  where they are spent: the two modes differ in the pitch they allow (56 against
+  1), in whether the camera is behind the target or twelve units in front of its
+  eye, and in whether it is lifted 30 units off the floor. What tourney does to
+  each client **when the level ends** is here too, and was missing whole: the
+  demo it was recording is stopped (with a screenshot at `demo_*` 2), the
+  end-of-match music plays from `wav_file`'s five tunes or from
+  `match_endmusic`, a team ruleset plays the winner and the loser different
+  ones, an entered client is shown its accuracy page, its menus are closed, and
+  the board a player who died into the intermission is owed arrives 1.25
+  seconds in. `nextlevel_click` (15s) is how long a press is ignored for and
+  `nextlevel_lazy` (45s) ends the intermission with no press at all; `numgibs`
+  is the gib count. All of those were registered cvars and carried tables with
+  no reader (`doc/reconciliation.md` R-193).
 * **R-OSP-2.** All 259 tourney cvars and all 137 tourney client commands work.
 * **R-OSP-3.** The NetGames USA subsystem does **not** come back. Events are
   written locally as one JSON object per line to `<statsname>`, controlled by
@@ -2281,15 +2564,23 @@ struck through and kept.
      no baseq2 spectator flag (R-CTF-5), and RA2 and tourney qualify through
      their own observer systems;
   3. 18 upward is ruleset-private, one numbering per ruleset, declared in one
-     header — **including `dm`'s own**, which owns 18/19. *Implemented in 1.11*
-     as `src/g_stats.h`'s `STATSLOT_MAP(E)` X-macro: one row per logical stat,
-     one column per ruleset, the kind beside the number, `-1` for absent. The
-     X-macro form is not decoration — clause 3 wants one header and clause 7
-     wants a tool to check it, and in C those pull opposite ways; this is the one
-     text the compiler and `tools/slotkind.py` both read. `arena` and `tourney`
-     inherit `dm`'s column until their own bars land in Phases 4 and 5, per
-     R-MODE-6: a column that renumbers a slot while the bar still says 18 is
-     worse than inheriting, and the checker would have to be told to ignore it;
+     header. *Implemented in 1.11* as `src/g_stats.h`'s `STATSLOT_MAP(E)`
+     X-macro: one row per logical stat, one column per **numbering**, the kind
+     beside the number, `-1` for absent. The X-macro form is not decoration —
+     clause 3 wants one header and clause 7 wants a tool to check it, and in C
+     those pull opposite ways; this is the one text the compiler and
+     `tools/slotkind.py` both read. `arena` and `tourney` inherited `dm`'s
+     column until their own bars landed in Phases 4 and 5, per R-MODE-6: a
+     column that renumbers a slot while the bar still says 18 is worse than
+     inheriting, and the checker would have to be told to ignore it.
+
+     *1.0–1.35 read "one column per ruleset … **including `dm`'s own**, which
+     owns 18/19", and 1.36 makes both halves false.* A column is a numbering,
+     and four rulesets now share one: `dm`, `dmpro`, `tdm` and `duel` all take
+     the `osp` column, because they are one code path emitting one bar. And
+     baseq2's own numbering — the 18/19 that sentence names — is **deleted**,
+     not renamed: it was read by `RULESET_DM` alone, and `dm` uses OSP's now.
+     Five columns become four: `osp`, `ctf`, `arena`, `sp`;
   4. a **shared mechanic** that needs a private slot in every ruleset declares
      it once per ruleset in that header and is compiled against the ruleset's
      map, never against a bare `#define`. The second powerup timer is the
@@ -2440,13 +2731,30 @@ struck through and kept.
   ruleset. Both replacements for the dead upload services are **inherited, not
   work** (§0 rule 6): `rocketarena2-public@789895b` removed the GameSpy `gstats`
   SDK and `osp-tourney@a8e30d0` the NetGames USA layer.
-* **R-OSP-11.** *Bot cvars are per ruleset.* Under `tourney` the names are
-  tourney's — `bots_autoload`, `bots_minplayers` (default 4, so bots are on out
-  of the box), `bots_botfile`, `bots_delayload`, `bots_warmuptime`,
-  `bots_noclients`, `vote_bots_max` — and under every other ruleset they are
-  `minimumplayers` and `botfile`. Both sets are registered; `doc/cvars.md` states
-  which is authoritative per ruleset. Bots under `tourney` keep the behaviour the
-  port already implements and it is more nuanced than "parity or match-only":
+* **R-OSP-11.** *Bot cvars are per ruleset.* Under the **OSP family** — `dm`,
+  `dmpro`, `tdm`, `duel` — the names are tourney's: `bots_autoload`,
+  `bots_minplayers` (default 4, so bots are on out of the box), `bots_botfile`,
+  `bots_delayload`, `bots_warmuptime`, `bots_noclients`, `vote_bots_max`. Under
+  `ctf` and `arena` they are `minimumplayers` and `botfile`. Both sets are
+  registered; `doc/cvars.md` states which is authoritative per ruleset.
+
+  *1.36 widens the first set from one ruleset to four and narrows the second
+  from four to two*, because `dm` is OSP's `RegularDM` now. The contract is
+  preserved, not redesigned — which is this rule's own closing clause — but an
+  operator's hand-written `dm` config that sets `minimumplayers` stops being
+  read, and that is the one migration this amendment cannot make silently.
+  `configs/dm.cfg` carries the new name and `colosseum/README.md` says so.
+
+  **The bot-*fill* switch is the exception, and 1.36 unifies it.** `ra_botfill`,
+  `ctf_botfill` and `dm_botfill` became one bare `botfill` (R-RA-7, R-CTF-8,
+  R-DM-1). They are not covered by this rule and never were: this rule governs
+  cvars a **donor** named, so that each donor's own readme and configs keep
+  spelling its cvars its own way. All three fill switches are Colosseum's own
+  invention from amendments 1.34 and 1.35, appear in no donor's documentation,
+  and name one concept — so §7 rule 6 governs them instead, and it says keep
+  one. `BotFillCvar()` is deleted with them. Bots under the OSP four keep the
+  behaviour the port already implements and it is more nuanced than
+  "parity or match-only":
   bots ready themselves up after `bots_warmuptime`, join teams and are counted,
   but are already excluded from 1v1 (`bots_autoload == 2` zeroes
   `bots_minplayers`), from hi-scores, from team captaincy and from vote quorum,
@@ -2454,37 +2762,46 @@ struck through and kept.
   `vote_enable_bots`. That is the contract; it is preserved rather than redesigned.
 
   *And in 1.23 it turns out the port states the contract and does not implement
-  the half that needs a bot to act.* A client under `tourney` connects as an
+  the half that needs a bot to act.* A client under the OSP four connects as an
   **observer** and enters by pressing a key; nothing presses it for a bot, in
   this tree or in `osp-tourney`. The brain cannot — its whole client-command
   vocabulary is `say`, `say_team`, `use`, `drop`, `invuse`, `invdrop`, `wave`
   and `EA_Command` — and neither `bl_*.c` nor `bots.cfg` issues a join. So
   `OSP_botJoin` calls `OSP_startObserve`, the donor's own toggle, which already
-  handles all four modes including `OSP_1v1AllowJoin` under mode 3 and
-  `OSP_addTeamMember(ent, 2)` under 2 and 3; and `OSP_botReady` implements
+  handles all four modes including `OSP_1v1AllowJoin` under `duel` and
+  `OSP_addTeamMember(ent, 2)` under `tdm` and `duel`; and `OSP_botReady` implements
   `bots_warmuptime` as documented, with "all other real clients have readied"
   read as vacuously true on a server with no humans — which is the reading
   `OSP_ready_cmd`'s own "everybody left is a bot, start without waiting them
   out" shortcut already takes, and that shortcut was unreachable until something
   readied a bot. Measured across all four modes on `q2dm1`.
   `doc/reconciliation.md` R-105.
-* **R-OSP-12.** *Tourney has four modes of play, not three.* The latched cvar
-  `match_mode` is cached into the global `m_mode` (`osp_main.c:23`) and selects
-  among four. All four ship and all four are **inherited, not work** (§0 rule 6)
-  — `osp-tourney@a8e30d0` implements them. Measured 2026-08-21:
+* **R-OSP-12.** *Tourney's four modes of play are four rulesets.* Until 1.36 the
+  latched cvar `match_mode`, cached into the global `m_mode`, selected among
+  four structures of play **inside** the `tourney` ruleset. They are now
+  `g_ruleset` values in their own right — `dm`, `dmpro`, `tdm`, `duel` — and
+  `match_mode`, `m_mode` and the name `tourney` are gone (R-MODE-1, R-MODE-2).
 
-  | `match_mode` | `match_type` (serverinfo) | banner | structure | shipped configs |
-  |---|---|---|---|---|
-  | `0` | `RegularDM` | `*** REGULAR DEATHMATCH ***` | Plain FFA. No ready-up, `sync_stat` starts at 8. The only mode with hi-scores and with `qualifier_numspots` forced to 0. | 7 |
-  | `1` | `QualifierDM` | `*** DM QUALIFIER ***` | FFA behind a ready gate; the top `qualifier_numspots` fraggers qualify and are starred on the scoreboard. Adds `qualifier_skinname` and `qualifier_forceskins`. | 1 |
-  | `2` | `TeamPlay` | `*** DM TEAM-PLAY MODE ***` | Two teams: captains, join codes, invites, team lock/unlock, `switchteam`, `kickplayer`, overtime. | 4 |
-  | `3` | `1-vs-1` | `*** DM 1V1 MODE ***` | Duel. Two teams of one, forced. Adds a **spectator queue**: winner stays, the next in line has `team_nextuptime` seconds to claim the slot or forfeits it. Timeouts are per individual, not per team. | 3 |
+  What the four *are* is unchanged, and all four remain **inherited, not work**
+  (§0 rule 6) — `osp-tourney@a8e30d0` implements them. Measured 2026-08-21, with
+  the 1.36 name against each:
 
-  The banner block is `osp_main.c:564-586`; the mod documents the same four at
-  `docs/server-settings.txt:413-419`.
+  | ruleset | was | `match_type` (serverinfo) | banner | structure | shipped configs |
+  |---|---|---|---|---|---|
+  | `dm` | `match_mode 0` | `RegularDM` | `*** REGULAR DEATHMATCH ***` | Plain FFA. No ready-up, `sync_stat` starts at 8. The only mode with hi-scores and with `qualifier_numspots` forced to 0. | 7 |
+  | `dmpro` | `match_mode 1` | `QualifierDM` | `*** DM QUALIFIER ***` | FFA behind a ready gate; the top `qualifier_numspots` fraggers qualify and are starred on the scoreboard. Adds `qualifier_skinname` and `qualifier_forceskins`. | 1 |
+  | `tdm` | `match_mode 2` | `TeamPlay` | `*** DM TEAM-PLAY MODE ***` | Two teams: captains, join codes, invites, team lock/unlock, `switchteam`, `kickplayer`, overtime. | 4 |
+  | `duel` | `match_mode 3` | `1-vs-1` | `*** DM 1V1 MODE ***` | Duel. Two teams of one, forced. Adds a **spectator queue**: winner stays, the next in line has `team_nextuptime` seconds to claim the slot or forfeits it. Timeouts are per individual, not per team. | 3 |
 
-  **1v1 is a first-class mode, not a corner of team play**, and this is the
-  clause that matters for the port: **34** `m_mode == 3` sites across **10**
+  The banner block was `osp_main.c:564-586`; the mod documents the same four at
+  `docs/server-settings.txt:413-419`. The banners and `match_type` survive the
+  flattening — `match_type` is still published to serverinfo, derived from the
+  ruleset now rather than from a cvar, because server browsers read it and
+  `osp_stats.c` writes it into every JSON record.
+
+  **`duel` is a first-class ruleset, not a corner of `tdm`**, and this is the
+  clause that mattered for the port and now for the flattening: **34**
+  `m_mode == 3` sites across **10**
   files, six dedicated helpers in `osp_teams.c` (`OSP_1v1Team` :329,
   `OSP_1v1AllowJoin` :370, `OSP_1v1Add` :421, `OSP_1v1Remove` :435,
   `OSP_1v1QueueCheck` :471, `OSP_1v1queue_cmd` :1658), its own client command
@@ -2496,38 +2813,38 @@ struck through and kept.
   (`osp_main.c:479-484`), its own `team_maxplayers` default of 1 rather than 4
   (`osp_main.c:404-407`), `bots_minplayers` → 0 when `bots_autoload == 2`
   (`osp_main.c:651-653`), and a `match_latejoin` override (`osp_main.c:2137`).
-  A merge that treats mode 3 as "mode 2 with two players" loses every one of them.
-* **R-OSP-13.** *`match_mode` is validated; every other bounded tourney cvar
-  already is.* This one is **work, not inherited.** `match_mode` is registered
-  raw at `osp_main.c:270` and never range-checked, while its immediate
-  neighbours all are — `match_countdown` clamped to ≥14, `match_readypercent`
-  to 1..100, `qualifier_numspots` to ≥0, `damage_railgun` to ≥1. The banner
-  block's final `else` therefore catches everything outside 0..2, so
-  `match_mode 4` announces `*** DM 1V1 MODE ***` and sets `match_type` to
-  `1-vs-1` while skipping all 34 `m_mode == 3` branches: no queue, no forced
-  `team_maxplayers 1`, team-scoped timeouts. The server tells clients it is a
-  duel server and is not one. A negative value does the same.
+  A merge that treats mode 3 as "mode 2 with two players" loses every one of
+  them, and so does a flattening that gives `duel` `tdm`'s ops row and stops
+  there. Measured again in 1.36 against this tree rather than the donor: **36**
+  `m_mode == 3` sites, in a `m_mode` surface of **234** sites across **22**
+  files, twelve of them shared files rather than `src/tourney/`'s own.
+* ~~**R-OSP-13.** *`match_mode` is validated; every other bounded tourney cvar
+  already is.*~~ **Struck in 1.36 — there is no `match_mode` left to validate.**
 
-  *Implemented in 1.21 as `OSP_clampMatchMode()`, and it was still open when
-  R-VER-16 first ran: `match_mode 4` announced `*** DM 1V1 MODE ***` and set
-  `match_type` to `1-vs-1` on a server that was running mode 0's rules.* The
-  clamp also corrects the cvar itself, so the menus, the vote system and
-  serverinfo all read the mode that is actually running.
+  The rule existed because the cvar that chose the mode of play was the one
+  bounded tourney cvar the donor never range-checked, so the banner block's
+  final `else` caught everything outside 0..2 and `match_mode 4` announced
+  `*** DM 1V1 MODE ***`, set `match_type` to `1-vs-1`, and skipped all 34
+  `m_mode == 3` branches: no queue, no forced `team_maxplayers 1`, team-scoped
+  timeouts. **The server told its clients it was a duel server and was not
+  one**, and a negative value did the same. It was never implemented until 1.21
+  (`OSP_clampMatchMode()`), was found unimplemented by R-VER-16, and 1.34
+  recorded that the donor reached the same finding independently in
+  `osp-tourney@48408f1` — the two differing only on what an out-of-range value
+  becomes (the donor clamps 4 → 3, this fell back to 0).
 
-  Colosseum clamps `match_mode` to 0..3 at `InitGame`, warns once naming both
-  the supplied and the substituted value, and falls back to `0` — the same
-  posture R-MODE-1 sets for `g_ruleset`: correct the value, warn, never abort
-  startup. The mode is then read from the clamped value everywhere, so the
-  banner, `match_type` and the behaviour cannot disagree.
+  The flattening removes the class of defect rather than the check. A mode is a
+  `g_ruleset` value now, and an unknown one takes R-MODE-1's path: warn, fall
+  back to `dm`, never abort. There is no numeric range to sit outside of, no
+  banner block choosing on a bare `else`, and no way for the announced mode and
+  the running one to disagree, because they are the same enum. `match_type` is
+  derived from the ruleset, so serverinfo cannot drift from behaviour either.
+  What R-OSP-13 was defending is now true by construction (R-MODE-1, R-OSP-12).
 
-  *1.34: the donor reached the same finding independently and fixed it in
-  `osp-tourney@48408f1`, and the two agree on everything that matters* — one
-  validator, called at **both** `InitGame` and `SP_worldspawn` rather than once,
-  because a referee's live `set match_mode 4` would otherwise reach the next map
-  unvalidated. They differ only on what an out-of-range value becomes: the donor
-  clamps to the nearest end (4 → 3, −1 → 0), this falls back to 0. Neither is a
-  defect and the difference shows only for input that is already wrong, so the
-  divergence is recorded rather than resolved (`doc/reconciliation.md` R-153).
+**R-OSP-14.** *Tourney's scoreboard is reached through the `ScoreboardMessage` row, never by name.* OSP **deleted** baseq2's `DeathmatchScoreboardMessage` and put its own five-page dispatcher under that name (`port_osp@205a89c` `p_hud.c:140-151`): `resp.osp_r24c` picks the player card, the MOTD, the match parameters or the previous match's scores, and only then does the mode pick a board. Three of tourney's own functions select a page and then draw it -- `OSP_setStats`' ten-second MOTD window, `OSP_highscores_cmd` and `OSP_showinfo_cmd` -- so each of them is `G_ScoreboardMessage()` here, because here that dispatcher **is** the row.
+
+*The name is the trap, and that is why the rule is written down rather than left to whoever reads the donor next.* `DeathmatchScoreboardMessage` exists in this tree and is baseq2's grid board. A call to it from tourney compiles, links, runs and puts a scoreboard on the screen; the only thing wrong with it is that OSP has no such screen, so the MOTD window would answer a connecting player with an avatar grid and `highscores` would set `resp.osp_r034` for nobody to read. Neither is visible to a compiler or to any audit that asks whether a symbol exists. This row is therefore gate-only, and an exemption for it would be a claim about a donor that the donor's own source contradicts.
+
 
 ### 6.7 R-CH — Colored Hitman — **struck in 1.2**
 
@@ -2540,7 +2857,9 @@ rule that a dropped requirement is struck rather than deleted.
 * ~~**R-CH-2.** The brain is told through the `ch` libvar (R-BOT-6).~~ The
   libvar survives, pushed as a constant `"0"` — see R-BOT-6.
 * ~~**R-CH-3.** `ch` is refused with a message under `ctf`, `arena`, `tourney`
-  and `sp`.~~ R-MODE-2 now accepts a legacy `ch 1` and ignores it with a warning.
+  and `sp`.~~ 1.2 replaced this with R-MODE-2 accepting a legacy `ch 1` and
+  ignoring it with a warning; **1.36 removes that too**, so the cvar is read
+  nowhere in the game library. Only the libvar of R-CH-2 survives.
 * ~~**R-CH-4.** The CH stat slot is allocated by R-OSP-7, not hard-coded to 30.~~
   This was R-OSP-7 clause 5's only worked example; see the note there.
 
@@ -2648,6 +2967,37 @@ merges six donors' worth of the same tables, so they get their own group.
 * **R-KEY-4.** A statusbar slot's *kind* is the third such contract; it lives
   under R-OSP-7 clause 7 rather than here, because the slot table is where it is
   enforced.
+* **R-KEY-5.** *New in 1.38.* The fourth such contract is a LIFETIME rather than
+  a name: **where a level-scoped allocation is indexed or pointed at by a field
+  that survives the level, the index is cleared where the allocation is DROPPED,
+  not where it is next read.** Reads additionally ask both halves of "is this
+  index live" -- is it in range, and is the slot it names occupied -- through one
+  named accessor rather than at each call site.
+
+  `g_spawn.c`'s loop at `gi.FreeTags(TAG_LEVEL)` is where this rule already
+  lived as a comment, at four sites: `menu_owner`, `ctf_menu`, `osp_menu` and
+  `menustate`, plus RA2's `menuqueue`/`curmenulink`/`selected` -- "the free is
+  what invalidates them, so the free is what clears them". The fifth is
+  `teams[]`, TAG_LEVEL and reallocated empty by `arena_init()`, indexed by
+  `resp.teamnum`, which is in `client_respawn_t` and survives because `g_save.c`
+  carries it. It was not in the loop, and the accessor did not exist:
+  `Serverwide_ScoreboardMessage` tested the range and not the slot,
+  `Pickup_ScoreboardMessage` tested neither and would index `teams[-1]`, and
+  `UpdateStatusBars` tested neither. `RA_TeamOf()` is the accessor now, and the
+  clear is in that loop rather than at `arena_init()`'s TagMalloc, which is where
+  1.38's first cut put it before this requirement was written.
+
+  **Why this is R-KEY and not R-SEC.** No compiler and no three-way merge can see
+  it, which is this group's criterion; and the window it opens stays invisible
+  until something unrelated lengthens it. Here that was the bot layer:
+  `BotStarted()` defers a bot's `ClientBegin`, which is where `InitClientResp`
+  would have reset the field, so Phase 6 turned a 200-millisecond window into
+  twenty seconds of frames on the first visit to a map whose `.aas` came out of
+  bspc with an empty REACHABILITY lump. **The donor's unguarded reads were safe
+  by accident in 1999 and became reachable when this tree added a feature RA2
+  never had** -- which is the shape §7's rules cannot decide, because neither
+  donor is wrong on its own. Reproduced and fixed in 1.38;
+  `doc/reconciliation.md` R-186 §5 and `scenarios/ra2reachscore`.
 
 ### 6.10 R-SEC — security posture
 
@@ -2845,16 +3195,44 @@ had none, because R-BASE covers baseq2 **parity** and R-MODE covers the
 dispatch, and until now every `dm` requirement was one or the other. The section
 is appended rather than inserted so that no existing §6.x number moves.*
 
-* **R-DM-1.** `dm_botfill` — under `dm` the bot count may follow the map instead
-  of the server. Default **0**, which is off: `minimumplayers` is the target
-  exactly as it has always been, and nothing in the tree behaves differently.
+* **R-DM-1.** `botfill` — under `dm` and `dmpro` the bot count may follow the map
+  instead of the server. Default **0**, which is off: `bots_minplayers` is the
+  target exactly as it has always been, and nothing in the tree behaves
+  differently.
+
+  *Named `dm_botfill` in 1.35 and unified into one bare `botfill` in 1.36*, with
+  `ra_botfill` and `ctf_botfill` — see R-OSP-11 for why those three were never
+  covered by the per-ruleset naming rule, and §7 rule 6 for why one concept
+  keeps one implementation. The switch is one cvar; the **target** is still
+  computed per ruleset, because what a map can seat is a different question in
+  each of them.
 
   R-RA-7's argument, a third time, and the plainest instance of it. A flat count
   is one number and a server plays a rotation: eight is a full house on `q2dm1`
-  and four more bodies than `q2dm7` has anywhere to put. **Deathmatch declares no
-  capacity anywhere** — there is no `arena.cfg`, no `playersperteam`, no
-  `team_maxplayers` — so the map is the only signal there is, and its spawn
-  points are the map saying how many people it was built for.
+  and four more bodies than `q2dm7` has anywhere to put. **Neither `dm` nor
+  `dmpro` declares a capacity** — no `arena.cfg`, no `playersperteam`, and no
+  `team_maxplayers`, because those two are the OSP family's *teamless* half —
+  so the map is the only signal there is, and its spawn points are the map
+  saying how many people it was built for.
+
+  *1.35 wrote that as "**deathmatch** declares no capacity anywhere", which was
+  a claim about baseq2's `dm`.* `dm` is OSP's `RegularDM` after 1.36 and OSP
+  does have a declared capacity — `team_maxplayers` — so the sentence needed
+  re-deriving rather than renaming. It survives, and the reason is narrower than
+  it was: `team_maxplayers` sizes a **team**, and `dm` and `dmpro` have none.
+  R-OSP-12's own table is the evidence — modes 0 and 1 are FFA, and every
+  `team_*` cvar is inert there.
+
+  **And this closes what `doc/reconciliation.md` R-156 deferred.** R-156
+  recorded that modes 0 and 1 "have no teams and would fall to the same
+  map-sized answer `dm` gets", and did not give them one, because R-OSP-11
+  preserves tourney's bot contract rather than redesigning it. Once mode 0 **is**
+  `dm`, that deferral cannot be restated — the same ruleset cannot both be the
+  one the rule is about and the one it is deferred for. So `dm` and `dmpro` take
+  the map-sized answer, `tdm` and `duel` take `2 * team_maxplayers` (the
+  capacity they *do* declare, which is R-156's own preferred answer), and the
+  bot contract is preserved in the only sense that survives the flattening:
+  nothing changes for a server that leaves `botfill` at 0.
 
   The number is `G_SpawnPointPool()`'s and not the raw count.
   `SelectRandomDeathmatchSpawnPoint` finds the two spots nearest a player,
@@ -2871,12 +3249,16 @@ is appended rather than inserted so that no existing §6.x number moves.*
   rounded down to even**, because two sides that cannot be the same size is the
   one thing a fill can get wrong for free.
 
-  The ceilings and the roster-exhausted clamp are shared with R-CTF-8 and live in
-  `bl_spawn.c` — `BotFillTarget()` for the first, `BotFillNoMore()` for the
-  second, cleared by `BotSpawn()` because a new level is a new question. The
-  switch cannot carry a count, which is why the clamp is not written back into
-  the cvar the way `minimumplayers` is. `sv ruleset` prints `want=`, `seats=` and
-  `spawns=` (R-VER-19). `doc/reconciliation.md` R-156.
+  The ceilings and the roster-exhausted clamp are shared with R-CTF-8 and R-RA-7
+  and live in `bl_spawn.c` — `BotFillTarget()` for the first, `BotFillNoMore()`
+  for the second, cleared by `BotSpawn()` because a new level is a new question.
+  *1.36 makes that sharing real*: until then `arena.c` carried its own copy of
+  the same three clamp lines over its own `static int botfill_ceiling`, so "the
+  ceilings are shared" was true of two rulesets and not of the third. The switch
+  cannot carry a count, which is why the clamp is not written back into the cvar
+  the way `bots_minplayers` is. `sv ruleset` prints one `botfill` line naming
+  the ruleset, the target and where the number came from (R-VER-19).
+  `doc/reconciliation.md` R-156, R-157.
 
 ## 7. Reconciliation rules
 
@@ -2891,9 +3273,14 @@ decision is made twice or by taste.
    so they carry no more authority than RA2 or tourney does.
 2. **A donor owns its own feature, and the diff says which.** Where the
    difference *is* the donor's feature, the donor wins and Q2PRO's baseq2
-   behaviour becomes the `dm` branch of the dispatch. Which is which is not a
-   judgement call: `git diff baseq2 port_<donor>` in the bundles of §3.2 is by
+   behaviour becomes the **base** branch of the dispatch. Which is which is not
+   a judgement call: `git diff baseq2 port_<donor>` in the bundles of §3.2 is by
    construction that donor's own feature set and nothing else (R-PROV-3).
+
+   *Said "the `dm` branch" until 1.36, and that stopped being true when `dm`
+   became OSP's `RegularDM`.* The rule is unchanged — baseq2 still wins where
+   the difference is not a donor's feature — but the place it wins into is
+   `ops_base`, which no `g_ruleset` value selects. See R-MODE-6.
 3. **Content unions, behaviour gates.** Two donors adding different things
    (items, classnames, weapons, entities) both get added. Two donors changing
    the same thing get a gate, and the gate is the ruleset or the content-layer
@@ -3087,8 +3474,15 @@ audits this spec asks for. They are not rewritten from the prose here.
   `keycontract`, `auditems`) run in the build, not on request. A new finding
   fails the build the way a warning does (R-BUILD-2).
 * **R-TOOL-4.** `git config rerere.enabled true` for any replay done in this
-  tree, and the `rr-cache` is committed — both the 496 resolutions rescued per
-  R-PROV-2a and everything this tree records subsequently. Note the rescued
+  tree, and the `rr-cache` is committed — both the ~~496~~ **516** resolutions
+  rescued per R-PROV-2a and everything this tree records subsequently. *496 was
+  the two caches' DIRECTORY counts added, and one of those two was itself wrong;
+  re-counted in 1.41 — 516 resolutions in 492 directories, because a merge whose
+  conflict hashes collide across several paths stores them numbered inside one
+  directory, and one holds 24. `doc/provenance.md` §1.3 gives all three figures
+  and says which is which. 27 `thisimage` files went at the same time: rerere
+  writes them for the conflict in front of it and never reads them back, so they
+  are working state and not cache.* Note the rescued
   cache resolves *baseq2-history-onto-donor* conflicts; Colosseum's merge runs
   the other way (donor features onto the spine), so it saves no labour here. Its
   value is provenance and the ability to re-run or audit the donor ports.
@@ -3102,6 +3496,45 @@ audits this spec asks for. They are not rewritten from the prose here.
   | `tools/divergence.py` | R-CORE-10 — "regenerated by `tools/divergence.py` rather than transcribed", and the generated copy is declared **authoritative over the spec's own table** | **does not exist.** Written in Phase 0; until then the R-CORE-10 matrix is a transcription, which is the one thing that requirement forbids |
   | the classname / cvar / command counters | R-TOOL-2, and every count in §3 and §6 acting as an acceptance criterion — 157 / 173 / 192 / 259 / 137 and the rest | **does not exist.** §3's counting-method paragraph already concedes it. Until it ships, no count gates a phase, which means R-BASE-1/2/3, R-MP-1, R-OSP-2 and R-RA-2 are **unenforceable as written** |
   | the pristine-statusbar availability check | R-OSP-7 clause 7 and §9 Phase 3, as "closing `slotkind.py`'s known gap" | ~~`slotkind.py` exists and the gap is real, recorded in its own docstring. An extension, not a new tool~~ **done in 1.11**, and it was an extension: same tool, one more question |
+
+* **R-TOOL-6.** *New in 1.40.* **A literal that names something the game
+  looks up at runtime is resolved against the space that can produce it, and
+  there is ONE RESOLVER PER SPACE.** Not one per file, and not one per literal
+  *shape* — which is the mistake this requirement exists to prevent, because it
+  has already cost twenty-seven years of a dead branch.
+
+  Three of these spaces exist and each fails silently in its own way:
+
+  | space | resolver | how a miss presents |
+  |---|---|---|
+  | `gitem_t.pickup_name` / `.classname` — what `FindItem()` and `FindItemByClassname()` match | `itemnames.py` (R-183) | NULL assigned is a weapon never selected; NULL through `ITEM_INDEX` is a negative subscript into `pers.inventory[]` |
+  | `edict_t.classname` — what the spawn table, the itemlist and every `->classname =` assignment can produce | `classnames.py` (R-188) | a `strcmp` that is always false, so the branch it guards is dead and control falls to whatever the chain's final `else` does |
+  | model, sound and image paths — what a donor actually ships | `assets.py` (R-184) | `gi.soundindex()` cannot check, so a misspelled sound is silence that looks like a design choice |
+  | **the set of values a FIELD can hold** — every constant any write in the tree, or in a donor, produces | `deadvalue.py` (R-192, *new in 1.44*) | a comparison that is always false, so a whole feature does the other thing forever: R-191's `osp_r240 == 2`, R-155's `pers.showmotd`, R-192's five-page scoreboard whose fifth page nothing could open |
+
+  *1.44: the fourth space is STATE rather than a name, which is why it took three
+  amendments to see.* The first three resolve a literal against a table; this one
+  resolves it against the writes, and it has a second question no other resolver
+  has — **against a DONOR**, because the donor is the authority on which values a
+  field is supposed to take. A merge drops a write far more easily than it drops
+  a reader: the reader still compiles.
+
+  **The two classname resolvers are not redundant and the overlap is the trap.**
+  `itemnames.py` collects literals by SHAPE (`weapon_*`, `ammo_*`, `item_*`,
+  `key_*`) and resolves them against the ITEMLIST. Both halves are narrower than
+  they look: a classname belonging to a monster, a projectile or a runtime
+  assignment is in neither space, and a bare `"tesla"` is not even collected.
+  Ground Zero's `"telsa"` in `m_move.c` sat in that gap — misspelled, compared
+  against `ent->enemy->classname`, invisible to a check that asks the itemlist
+  about `item_*` names (R-187 §2). So `classnames.py` asks the other question:
+  can ANY code path put this string in an `edict_t.classname`?
+
+  Each resolver carries its own controls and each runs in the build (R-TOOL-3),
+  and a resolver's exemption list is checked for going stale — an exemption for a
+  name that no longer appears, or that the space can now produce, is itself a
+  finding. That is not a nicety: an exemption list is how a check dies quietly,
+  and both classname resolvers exempt the same three Ground Zero map aliases for
+  the same reason, which is exactly the kind of duplicated licence that rots.
 
   R-TOOL-1's own line counts do check out — 30 scripts, 1,696 lines, twelve
   `mech.py` transforms — so the inventory is accurate about what it holds. The
@@ -3143,12 +3576,15 @@ row.
 
 ### Phase 1 — Ruleset dispatch
 `g_ruleset`, the alias layer, the modifier system, the **26** gate locations of
-R-MODE-5 including `ClientPlaced`, `dm` implementing all of them. (1.0–1.3 said
-25 here; the list has always had 26.)
+R-MODE-5 including `ClientPlaced`, the base ops implementing all of them.
+(1.0–1.3 said 25 here; the list has always had 26. Said "`dm` implementing all
+of them" until 1.36, when `dm` became a ruleset like any other and `ops_base`
+became the table that fills every row.)
 **Exit — met 2026-08-21.** R-MODE-1..7, each observed live via `sv ruleset`
 (R-VER-18): an invalid `g_ruleset` warns and falls back to `dm` without aborting;
 `ctf 1` and `rocketarena 1` select their rulesets and conflicting aliases warn
-and resolve in R-MODE-2's order; `ch 1` is accepted and ignored; both content
+and resolve in R-MODE-2's order (`ch 1` was accepted and ignored until 1.36
+removed it); both content
 layers compose; and a modifier the ruleset does not accept is disabled with one
 message. Switching between `dm` and `sp` changes behaviour through the dispatch,
 and `tools/gates.py` fails the build on any ruleset cvar tested at a call site,
@@ -3559,14 +3995,17 @@ change checkable without one.
   v0.96u–v0.99u list, the RA2 kept-bugs set, R-OSP-4 — with the symptom, the
   trigger and the check. An entry with no check is not done.
 * **R-VER-2.** Boot matrix: every `g_ruleset` × `xatrix` × `rogue` combination
-  (5 × 2 × 2 = 20) starts, loads a map appropriate to the ruleset, and runs 100
-  frames with no crash and no assertion. *Mechanised in 1.20 as
+  (**7 × 2 × 2 = 28** since 1.36, 5 × 2 × 2 = 20 before it) starts, loads a map
+  appropriate to the ruleset, and runs 100 frames with no crash and no
+  assertion. *Mechanised in 1.20 as
   `tools/bootmatrix.sh`, having been run by hand once per phase, which is how a
   matrix stops being run.* A row passes only if the server also **reports back
   the ruleset and the layers that were asked for** — the boot alone proves the
   process survived, not that the resolution happened — and it ships two positive
   controls (`--control`): an unknown ruleset, which must be seen falling back to
-  `dm`, a layer comparison against the wrong value, and — new in 1.23 — a boot
+  `dm` — and since 1.36 that control covers the retired name too, because
+  `g_ruleset tourney` is now exactly an unknown value and nothing more
+  (R-MODE-2) — a layer comparison against the wrong value, and — new in 1.23 — a boot
   that completes its census and is then killed by `SIGSEGV`, because **the row
   now reads the exit status too**. The frame count already caught a crash before
   the census; a crash after it left every field correct, which is exactly what a
@@ -3830,7 +4269,9 @@ change checkable without one.
   site that tests one and means the other compiles. If they ever diverge, this
   is where it shows. `doc/reconciliation.md` R-112.
 * **R-VER-26.** *A donor's files are compiled even before they are linked.*
-  `make check-tourney`.
+  ~~`make check-tourney`.~~ *— the target was deleted when the requirement was
+  discharged in 1.21; see the closing paragraph. Struck here rather than only
+  recorded there, because the headline is what a reader runs.*
 
   `src/tourney/` is imported and cannot be linked: its twenty translation units
   reference `match_paused`, `pause_time`, `endlvl_frame`, three armor tables,
@@ -3870,8 +4311,13 @@ change checkable without one.
   userinfo and the two `sv` diagnostics, all deterministic.
 
   Every check must be a **difference** — the thing one ruleset does that another
-  must not — because one library serves five rulesets and "ctf maps the CTF stats"
-  is true of the table, not of the dispatch. The three control servers are part of
+  must not — because one library serves **seven** rulesets (five before 1.36)
+  and "ctf maps the CTF stats" is true of the table, not of the dispatch. The
+  four OSP rulesets sharpen this rather than diluting it: they share a code
+  path, so a check that passes under all four proves only that the path runs,
+  and the sweep's `dmpro`, `tdm` and `duel` rows must each assert what that
+  ruleset does and the other three do not — `qualifier_numspots`, `Score_A`/
+  `Score_B`, and `team_maxplayers 1 CVAR_NOSET` respectively. The three control servers are part of
   the requirement, not an extra: a modifier the matrix accepts, a modifier it
   refuses, and `g_protocol_extensions 1` as the control for R-38's dropped rows.
 
@@ -4214,17 +4660,51 @@ change checkable without one.
   the record of two clients having been placed on one spawn point, and counting
   those is how R-135's fix was measured -- 11 before, 0 after, eleven players on
   the same map.
-* **R-VER-16.** Tourney mode matrix: for each `match_mode` in 0..3, the server
-  starts, prints the banner R-OSP-12 tabulates, sets `match_type` to the string
-  in that row, and runs a match to completion. Three assertions per mode: the
-  `match_type` serverinfo string matches the banner; the mode-gated client
-  commands accept and reject per `g_cmds.c`'s guards (`highscores` only in 0,
-  `queue`/`line`/`order` only in 3, `captain`/`invite`/`lockteam` only in 2);
-  and for mode 3 specifically, `team_maxplayers` reads 1 and is `CVAR_NOSET`.
-  Then the out-of-range arm (R-OSP-13): `match_mode 4` and `match_mode -1` each
-  warn once and run as mode 0, with `match_type` reading `RegularDM` — not
-  `1-vs-1`. This is the check that would have caught the 1.0–1.2 omission, and
-  it is cheap: four boots and two negatives.
+* **R-VER-35.** *Every donor's feature set is walked definition by definition*
+  (new in 1.47). `tools/fnsweep.py` takes R-PROV-3's five diffs and, for each
+  top-level definition a donor added, changed or removed against the spine,
+  compares three texts -- the spine's, the donor's and this tree's -- and
+  classifies the pair: `as_donor`, `as_spine` (the tree kept the BASE, so the
+  donor's change is not here), `merged`, `absent`, `donor_deleted`. For a
+  `merged` definition every donor-added line is then looked for at its own site
+  and, failing that, anywhere in `src/`. `doc/donor-fdiff.md` is the
+  read-through and **the tool is authoritative over every table in it**, the way
+  R-CORE-10 makes `doc/reconciliation-matrix.md` authoritative over §3's.
+
+  It exists because R-CORE-10 measures the merge load per FILE, in diff lines,
+  and a line count cannot say whether a donor's change to a particular function
+  survived. The neighbouring checks are each narrower on purpose: `lostref.py`
+  asks the question of the symbols a donor DELETED (R-VER-24), `donorgate.py` of
+  whether a donor's surface is gated (R-VER-25), `deadvalue.py` of the values a
+  field can hold (R-TOOL-6). None of them walks a donor's own feature set.
+
+  **The finding is narrow and the report is not, and the difference is written
+  into the tool.** `--check` fails on a donor line whose identifiers exist
+  NOWHERE in `src/` and that no recorded decision explains -- because a line
+  missing from its own site is the *normal* case under R-MODE-5, and 1,165 of
+  them are elsewhere in this tree verbatim. Of R-195's seven findings that rule
+  contains two; the other five turn on identifiers that are all present and are
+  missing a condition, a reader, an argument or a call site, so the tool's
+  `NOT_MECHANISED` list names them and names the resolver each shape would
+  need. A clean run of this check is not a claim that the donors are fully
+  carried, and it says so.
+* **R-VER-16.** OSP-family matrix: for each of `dm`, `dmpro`, `tdm` and `duel`
+  the server starts, prints the banner R-OSP-12 tabulates, sets `match_type` to
+  the string in that row, and runs a match to completion. Three assertions per
+  ruleset: the `match_type` serverinfo string matches the banner; the
+  ruleset-gated client commands accept and reject per `g_cmds.c`'s guards
+  (`highscores` only under `dm`, `queue`/`line`/`order` only under `duel`,
+  `captain`/`invite`/`lockteam` only under `tdm`); and for `duel` specifically,
+  `team_maxplayers` reads 1 and is `CVAR_NOSET`.
+
+  *Was a `match_mode` matrix until 1.36, with an out-of-range arm.* That arm is
+  gone with R-OSP-13 — there is no number to put out of range — and nothing
+  replaces it: `tourney` is not a ruleset name, so R-VER-2's existing
+  unknown-value control is all that remains to check. The four positive rows
+  are unchanged in substance and are
+  now four rows of the ruleset sweep rather than a matrix of their own, which is
+  the point of the flattening: one selector, one matrix. This is still the check
+  that would have caught the 1.0–1.2 omission of the fourth mode.
 
 ---
 
@@ -4431,7 +4911,7 @@ Versioned by R-BOT-1 — *not frozen; corrected in 1.4, the freeze was lifted in
 | Gladiator, reconstruction | `gladiator-bot-restored/game` — **reference only, read this one.** *Not* the same tree as `gladq2_src`; 17 files differ |
 | Gladiator botlib (the brain) | `gladiator-bot-restored/botlib` |
 | Gladiator runtime assets | `gladiator-bot-restored/assets` — `bots.cfg`, `Gladiator.gsl`, `default/`, `maps/`, `pak7.pak`, **32** prebuilt `.aas` (1.0–1.3 said 17) |
-| **Rescued harness archive** | `../colosseum-harness-archive` — `rr-cache` (411+85), `commit_paths.txt`, `style_residual.patch`, `osp/`, id's five source releases, astyle 3.1, and the harness `TODO.md` (R-PROV-2a, R-VER-15) |
+| **Rescued harness archive** | `../colosseum-harness-archive` — `rr-cache` (516 resolutions in 407+85 directories), `commit_paths.txt`, `style_residual.patch`, `osp/`, id's five source releases, astyle 3.1, and the harness `TODO.md` (R-PROV-2a, R-VER-15) |
 | uGladQ2 cleanup | `ugladq2` — **reference only** |
 | Port method write-ups | `rocketarena2-public/doc/q2pro-port.md`, `osp-tourney/doc/q2pro-port.md`, `q2pro/doc/mission-packs.md` |
 | Replay bundles (§3.2) | `../osp-q2pro-port-replay.bundle`, `../ra2-q2pro-port-replay.bundle`, `../q2pro-mission-pack-replay.bundle` |

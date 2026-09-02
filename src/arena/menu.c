@@ -25,7 +25,40 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "g_local.h"
 #include "arena/arena.h"
 
-#define MAXMENUITEMS    18
+// HOW MANY ROWS FIT INSIDE THE BOX, measured off the box.
+//
+// The menu is drawn over `picn inventory` at `xv 32 yv 8`.  That pic is
+// 256x192 and its FLAT INTERIOR -- the field inside the bevel, palette index
+// 175 throughout -- is pic rows 18..174, so in statusbar coordinates the text
+// area is y 26..182.  A `string2` line at `yv Y` paints Y..Y+7 (every printable
+// glyph in conchars.pcx uses all eight rows), so the last line that fits starts
+// at 175, and the row grid below starts at 40 and steps by 8:
+//
+//     yv 24    the title            (the donor's, 2px over the top bevel)
+//     yv 32    "(More)" above       32..39
+//     yv 40..  MAXMENUITEMS rows
+//     +8       "(More)" below
+//
+// 40 + 8*16 = 168 for the seventeenth row, which ends at 175 -- the last line
+// the interior holds -- and the "(More)" marker, which is not a row and which
+// only some pages have, takes the 7px that are left.
+//
+// The donor's 18 does not fit and was never made to: 18 rows end at yv 176,
+// which paints 176..183 ACROSS the frame line, and its marker at `y + 10` =
+// 186 lands on the bevel outside the box entirely.  1999 never noticed because
+// its longest menu is 26 rows and both pages showed the fault equally; a play
+// test with `xatrix 1` did, because R-182's two extra weapon rows put "Allow
+// Phalanx" in the eighteenth slot where the damage is legible.  Screenshotted
+// through tools/play.sh before and after.
+//
+// SEVENTEEN AND NOT SIXTEEN, and the extra row is load bearing rather than
+// greed.  Sixteen would put the marker wholly inside as well, and it would also
+// push "Allow Bots" off the first page of the propose menu -- which is a
+// property R-RA-8 chose that row's POSITION for and `scenarios/ra2botvote`
+// asserts by name.  Seventeen keeps every CONTENT row inside the interior and
+// spends the leftover on the marker; a "(More)" hint touching the frame is a
+// different thing from a settings row doing it.
+#define MAXMENUITEMS    17
 
 char *
 LoPrint(char *string)
@@ -176,9 +209,12 @@ DisplayMenu(edict_t *ent)
         p = string + strlen(string);
     }
 
+    // `y + 10` was the donor's and is 2px off the row grid, which put the
+    // marker below the last line the box has room for.  On the grid it takes
+    // the slot the row count above leaves for it.
     if (shown == MAXMENUITEMS && node->next)
         Q_snprintf(p, sizeof(string) - (p - string),
-                   "yv %d string2 \"(More)\" ", y + 10);
+                   "yv %d string2 \"(More)\" ", y + 8);
 
     SendStatusBar(ent, string, false);
 }
@@ -204,7 +240,7 @@ CreateQMenu(edict_t *ent, char *title)
 }
 
 qmenu_t *
-AddMenuItem(qmenu_t *menu, char *text, char *value, int num, menuselect_t select)
+AddMenuItem(qmenu_t *menu, const char *text, const char *value, int num, menuselect_t select)
 {
     menuinfo_t  *info;
     menuitem_t  *item;

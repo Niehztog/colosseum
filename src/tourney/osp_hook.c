@@ -252,7 +252,7 @@ void FireGrapple(edict_t *self, vec3_t start, vec3_t dir, int damage, int speed,
     grapple->s.frame = 4;
     grapple->s.modelindex = 1;
 
-    if (m_mode < 2 || (unsigned)self->client->resp.team >= 2)
+    if (!OSP_IsTeams() || (unsigned)self->client->resp.team >= 2)
         grapple->s.skinnum = strtoul(hook_color->string, &tailp, 0);
     else
         grapple->s.skinnum = strtoul((char *)osp_teams[self->client->resp.team].osp_m0c0,

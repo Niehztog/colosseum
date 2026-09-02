@@ -44,9 +44,9 @@ void OSP_ChaseCam(edict_t *ent)
     if (level.intermission_framenum != 0)
         return;
 
-    if (match_paused && m_mode > 1 && clp->resp.osp_entered != ENTERED_ENTERED) {
+    if (match_paused && OSP_IsTeams() && clp->resp.osp_entered != ENTERED_ENTERED) {
         gi.cprintf(ent, PRINT_HIGH,
-                   "Sorry, cannot join osp_teams during a paused match.\n");
+                   "Sorry, cannot join teams during a paused match.\n");
         return;
     }
 
@@ -60,17 +60,17 @@ void OSP_ChaseCam(edict_t *ent)
     // Already chasing -> this is the "rejoin the game" half, the same sequence
     // CameraCmd runs when it leaves camera mode.
     if (clp->chase_target) {
-        if (m_mode == 3 && !OSP_1v1AllowJoin(ent))
+        if (G_Ruleset() == RULESET_DUEL && !OSP_1v1AllowJoin(ent))
             return;
 
-        if (!clp->resp.osp_r030 || m_mode == 3) {
-            if (m_mode > 1 && !OSP_addTeamMember(ent, 2))
+        if (!clp->resp.osp_r030 || G_Ruleset() == RULESET_DUEL) {
+            if (OSP_IsTeams() && !OSP_addTeamMember(ent, 2))
                 return;
 
             clp->resp.osp_r030 = 1;
             clp->resp.enterframe = level.framenum;
         } else {
-            if (m_mode > 1 && !OSP_readdTeamMember(ent))
+            if (OSP_IsTeams() && !OSP_readdTeamMember(ent))
                 return;
 
             if (clp->resp.osp_r030)
@@ -87,7 +87,7 @@ void OSP_ChaseCam(edict_t *ent)
         clp->resp.osp_r09c--;
         active_clients++;
 
-        if (m_mode > 0 && sync_stat < 4) {
+        if (OSP_IsMatch() && sync_stat < 4) {
             clp->resp.osp_r010 -= 2;
             OSP_notready_cmd(ent, true);
         }
@@ -129,7 +129,7 @@ void OSP_ChaseCam(edict_t *ent)
             if (clp->resp.osp_r030 && clp->resp.osp_entered == ENTERED_ENTERED) {
                 clp->resp.osp_r248 = clp->resp.score;
 
-                if (m_mode > 1 && clp->resp.team != 2)
+                if (OSP_IsTeams() && clp->resp.team != 2)
                     OSP_removeTeamMember(ent, false);
             }
 
@@ -148,7 +148,7 @@ void OSP_ChaseCam(edict_t *ent)
                 active_clients--;
                 EntityListRemove(ent);
 
-                if (m_mode == 3)
+                if (G_Ruleset() == RULESET_DUEL)
                     OSP_1v1Remove(ent, false);
             }
 
@@ -157,9 +157,9 @@ void OSP_ChaseCam(edict_t *ent)
             clp->osp_menu = NULL;
             G_MenuClose(&g_edicts[(clp - game.clients) + 1]);
 
-            if (m_mode > 1)
+            if (OSP_IsTeams())
                 OSP_checkHalt(clp->resp.osp_r2cc);
-            else if (m_mode == 1)
+            else if (G_Ruleset() == RULESET_DMPRO)
                 OSP_checkHalt(2);
 
             OSP_DoRankSort();
@@ -208,24 +208,24 @@ void OSP_startObserve(edict_t *ent)
         return;
     }
 
-    if (match_paused && m_mode > 1 && cl->resp.osp_entered != ENTERED_ENTERED) {
+    if (match_paused && OSP_IsTeams() && cl->resp.osp_entered != ENTERED_ENTERED) {
         gi.cprintf(ent, PRINT_HIGH,
-                   "Sorry, cannot join osp_teams during a paused match.\n");
+                   "Sorry, cannot join teams during a paused match.\n");
         return;
     }
 
     if (cl->resp.osp_entered == 2) {
-        if (m_mode == 3 && !OSP_1v1AllowJoin(ent))
+        if (G_Ruleset() == RULESET_DUEL && !OSP_1v1AllowJoin(ent))
             return;
 
-        if (!cl->resp.osp_r030 || m_mode == 3) {
-            if (m_mode > 1 && !OSP_addTeamMember(ent, 2))
+        if (!cl->resp.osp_r030 || G_Ruleset() == RULESET_DUEL) {
+            if (OSP_IsTeams() && !OSP_addTeamMember(ent, 2))
                 return;
 
             cl->resp.osp_r030 = 1;
             cl->resp.enterframe = level.framenum;
         } else {
-            if (m_mode > 1 && !OSP_readdTeamMember(ent))
+            if (OSP_IsTeams() && !OSP_readdTeamMember(ent))
                 return;
 
             if (cl->resp.osp_r030)
@@ -244,7 +244,7 @@ void OSP_startObserve(edict_t *ent)
         cl->resp.osp_r09c--;
         active_clients++;
 
-        if (m_mode > 0 && sync_stat < 4) {
+        if (OSP_IsMatch() && sync_stat < 4) {
             cl->resp.osp_r010 -= 2;
             OSP_notready_cmd(ent, true);
         }
@@ -288,7 +288,7 @@ void OSP_removeChaseCam(edict_t *ent)
     client->chase_target = NULL;
     client->update_chase = false;
 
-    if (sync_stat > 2 && m_mode < 2)
+    if (sync_stat > 2 && !OSP_IsTeams())
         G_SetStat(ent, SID_OSP_STATUS3, 0);
 
     OSP_zeroRuneStats(ent);
@@ -308,10 +308,10 @@ void OSP_removeChaseCam(edict_t *ent)
     if (client->resp.osp_r030 && client->resp.osp_entered == ENTERED_ENTERED) {
         client->resp.osp_r248 = client->resp.score;
 
-        if (m_mode > 1 && client->resp.team != 2)
+        if (OSP_IsTeams() && client->resp.team != 2)
             OSP_removeTeamMember(ent, false);
 
-        if (m_mode == 3)
+        if (G_Ruleset() == RULESET_DUEL)
             OSP_1v1Remove(ent, false);
     }
 
@@ -345,13 +345,126 @@ void OSP_removeChaseCam(edict_t *ent)
             OSP_removeChaseCam(ee);
         }
 
-        if (m_mode > 1)
+        if (OSP_IsTeams())
             OSP_checkHalt(client->resp.osp_r2cc);
-        else if (m_mode == 1)
+        else if (G_Ruleset() == RULESET_DMPRO)
             OSP_checkHalt(2);
     }
 
     OSP_Stats_PlayerMode(ent, "Observe");
+}
+
+/*
+=================
+OSP_clientPolice
+
+R-OSP-4's three enforcement rules, run once per client per frame from
+ClientThink after the pmove -- so the position the inactivity rule compares is
+the one the frame ended on.  True means the client is GONE (disconnected, or
+moved to observer) and the caller must not touch it again.
+
+All three were registered as cvars and read by nobody, so `client_minping`,
+`client_maxping`, `client_maxfps` and `client_nomove` did nothing at all.
+
+  * PING is sampled every three seconds and judged on the mean of sixteen
+    samples, not on one: a single spike is not evidence and a server that
+    kicked on one would be unplayable.  `osp_r1fc` is the next sample frame and
+    -1 means "not watched", which is what OSP_clientBegunPost sets when neither
+    bound is configured or the client is a bot.
+  * INACTIVITY is a TEAM-MATCH warmup rule: a player who is not moving is
+    holding up a match everybody else is waiting to start, so they are moved to
+    observer rather than kicked.  Six seconds per check, and the position AND
+    the view angles both have to be unchanged -- looking around counts as
+    being there.
+  * FRAMERATE is not enforced by kicking but by stuffing `cl_maxfps`, once and
+    then at most once a minute: `ucmd->msec` below the cap is what a client
+    running faster than the server allows looks like from here.
+=================
+*/
+bool OSP_clientPolice(edict_t *ent, usercmd_t *ucmd)
+{
+    gclient_t   *client = ent->client;
+    int          mean;
+
+    if (client->resp.osp_r1fc >= 0 && client->resp.osp_r1fc < level.framenum) {
+        client->resp.osp_r1f4++;
+        client->resp.osp_r1f8 += client->ping;
+        client->resp.osp_r1fc = level.framenum + 30;
+
+        if (client->resp.osp_r1f4 > 15) {
+            mean = client->resp.osp_r1f8 / client->resp.osp_r1f4;
+            client->resp.osp_r1f4 = 0;
+            client->resp.osp_r1f8 = 0;
+
+            if ((int)client_minping->value && mean < (int)client_minping->value) {
+                gi.cprintf(ent, PRINT_HIGH,
+                           "Minimum allowed server ping %d, yours is %d.\n",
+                           (int)client_minping->value, mean);
+                gi.WriteByte(svc_disconnect);
+                gi.unicast(ent, true);
+                ClientDisconnect(ent);
+                return true;
+            }
+
+            if ((int)client_maxping->value && mean > (int)client_maxping->value) {
+                gi.cprintf(ent, PRINT_HIGH,
+                           "Maximum allowed server ping %d, yours is %d.\n",
+                           (int)client_maxping->value, mean);
+                gi.WriteByte(svc_disconnect);
+                gi.unicast(ent, true);
+                ClientDisconnect(ent);
+                return true;
+            }
+        }
+    }
+
+    if ((int)client_nomove->value &&
+        client->resp.osp_entered == ENTERED_ENTERED &&
+        OSP_IsTeams() && sync_stat < 4 &&
+        client->resp.osp_r0d4 < level.framenum &&
+        !(ent->flags & FL_BOTCLIENT)) {
+        int idle;
+
+        client->resp.osp_r0d4 = level.framenum + 60;
+
+        // The two remembered vectors are three consecutive donor-offset ints
+        // each; the cast is the donor's own and is what -fno-strict-aliasing is
+        // for.  A named vec3_t here would renumber the struct.
+        if (!VectorCompare((vec_t *)&client->resp.osp_r0dc, ent->s.angles) ||
+            !VectorCompare((vec_t *)&client->resp.osp_r0e8, ent->s.origin)) {
+            VectorCopy(ent->s.angles, ((vec_t *)&client->resp.osp_r0dc));
+            VectorCopy(ent->s.origin, ((vec_t *)&client->resp.osp_r0e8));
+            idle = 0;
+        } else {
+            idle = client->resp.osp_r0d8 + 6;
+        }
+
+        client->resp.osp_r0d8 = idle;
+        if (idle >= (int)client_nomove->value) {
+            gi.bprintf(PRINT_CHAT,
+                       "%s inactive for %d seconds, moved to OBSERVER mode.\n",
+                       client->pers.netname, idle);
+            OSP_startObserve(ent);
+            return true;
+        }
+    }
+
+    if (client->resp.osp_r024 >= 0 && level.framenum > client->resp.osp_r024 &&
+        ucmd->msec < client_maxframes - 2) {
+        char cmd[64];
+
+        if (!client->resp.osp_r024)
+            gi.cprintf(ent, PRINT_HIGH, "*** Server cl_maxfps capped at %d\n",
+                       (int)client_maxfps->value);
+
+        client->resp.osp_r024 = level.framenum + 60;
+        Q_snprintf(cmd, sizeof(cmd), "cl_maxfps %d\n", (int)client_maxfps->value);
+        gi.WriteByte(svc_stufftext);
+        gi.WriteString(cmd);
+        gi.unicast(ent, false);
+    }
+
+    return false;
 }
 
 /*
@@ -409,7 +522,7 @@ bool OSP_clientThink(edict_t *ent, usercmd_t *ucmd)
             client->resp.score = client->resp.osp_r248;
             OSP_ChaseCam(ent);
             if (client->chase_target) {
-                if (sync_stat > 2 && m_mode < 2)
+                if (sync_stat > 2 && !OSP_IsTeams())
                     G_SetStat(ent, SID_OSP_STATUS3, OSP_CS(4));
                 gi.cprintf(ent, PRINT_HIGH, "Changing to CHASECAM mode.\n");
             } else {

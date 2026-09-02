@@ -38,32 +38,22 @@ static FILE     *stats_f;
 
 // The per-weapon accuracy slots, in ACC_* order, with the names the ngLog
 // Player_Accuracy line used so an old parser needs only be repointed.
-static const char *const acc_names[11] = {
+static const char *const acc_names[ACC_COUNT] = {
     "Blaster", "Shotgun", "Super Shotgun", "Machinegun", "Chaingun",
     "Grenade Launcher", "Rocket Launcher", "HyperBlaster", "Railgun",
-    "BFG10K", "Grenades"
+    "BFG10K", "Grenades",
+    // The content layers' nine, appended (R-MODE-3, R-181).  A parser reads
+    // the eleven above unchanged and gains these only when they are used.
+    "Ionripper", "Phalanx", "Trap",
+    "ETF Rifle", "Prox Launcher", "Plasma Beam", "Chainfist", "Tesla",
+    "Disruptor"
 };
 
-// The allow_* cvars, paired with the name the log reports them under.
-static const struct {
-    const char  *cvar;
-    const char  *name;
-} disabled_items[] = {
-    { "allow_shotgun",           "Shotgun" },
-    { "allow_supershotgun",      "Super Shotgun" },
-    { "allow_machinegun",        "Machinegun" },
-    { "allow_chaingun",          "Chaingun" },
-    { "allow_grenadelauncher",   "Grenade Launcher" },
-    { "allow_rocketlauncher",    "Rocket Launcher" },
-    { "allow_hyperblaster",      "HyperBlaster" },
-    { "allow_railgun",           "Railgun" },
-    { "allow_bfg",               "BFG10K" },
-    { "allow_ammo_grenades",     "Grenades" },
-    { "allow_item_powerscreen",  "Power Screen" },
-    { "allow_item_powershield",  "Power Shield" },
-    { "allow_item_quad",         "Quad" },
-    { "allow_item_invul",        "Invulnerability" },
-};
+// The allow_* cvars and the names this log reports them under are
+// osp_main.c's `osp_allow_items[]` since R-183.  There were three copies of
+// that correspondence -- SpawnItem's inhibit, the scoreboard banner and this
+// list -- and they had already drifted apart before either content layer made
+// them wrong: two rows the inhibit honours are named by neither of the others.
 
 /*
 =================
@@ -272,6 +262,8 @@ void OSP_Stats_GameInit(void)
 
     json_key_string(f, "map", level.mapname);
     json_key_string(f, "level_name", level.level_name);
+    // The record field keeps its 1999 name; the cvar behind it is gone and
+    // `match_type` is derived from the ruleset now (R-OSP-12).
     json_key_string(f, "match_mode", match_type->string);
     fprintf(f, ",\"timelimit\":%d,\"fraglimit\":%d,\"dmflags\":%d",
             (int)timelimit->value, (int)fraglimit->value,
@@ -283,8 +275,8 @@ void OSP_Stats_GameInit(void)
     fprintf(f, ",\"respawn_protection\":%d", (int)client_protect->value);
     fprintf(f, ",\"railgun_damage\":%d", (int)damage_railgun->value);
 
-    if (m_mode > 1) {
-        fprintf(f, ",\"osp_teams\":[");
+    if (OSP_IsTeams()) {
+        fprintf(f, ",\"teams\":[");
         json_string(f, osp_teams[0].netname);
         fputc(',', f);
         json_string(f, osp_teams[1].netname);
@@ -296,12 +288,14 @@ void OSP_Stats_GameInit(void)
     }
 
     fprintf(f, ",\"disabled_items\":[");
-    for (i = 0, first = true; i < q_countof(disabled_items); i++) {
-        if ((int)gi.cvar(disabled_items[i].cvar, "1", 0)->value)
+    for (i = 0, first = true; osp_allow_items[i].cvar; i++) {
+        if (!osp_allow_items[i].logname)
+            continue;   // inhibited but deliberately not named -- R-183
+        if ((int)gi.cvar(osp_allow_items[i].cvar, "1", 0)->value)
             continue;
         if (!first)
             fputc(',', f);
-        json_string(f, disabled_items[i].name);
+        json_string(f, osp_allow_items[i].logname);
         first = false;
     }
     fputc(']', f);
@@ -336,7 +330,7 @@ void OSP_Stats_MatchEnd(const char *reason)
 
     json_key_string(f, "reason", reason);
 
-    if (m_mode > 1) {
+    if (OSP_IsTeams()) {
         fprintf(f, ",\"team_scores\":[%d,%d]",
                 osp_teams[0].osp_m0f8, osp_teams[1].osp_m0f8);
     }
@@ -628,6 +622,28 @@ void OSP_Stats_ItemPickup(const char *name, int entnum, edict_t *ent)
 
 /*
 =================
+OSP_statsPickupMinor
+
+The cheap half of the item log.  `stats_logallpickups` lives in this file, so
+the dozen call sites in g_items.c and p_weapon.c ask through this rather than
+each carrying a copy of the test; the ruleset gate stays visible at the call
+site, where R-VER-25 wants it.
+
+The split between "minor" and the plain OSP_Stats_ItemPickup is the donor's own
+and it is a judgement about what a match report is for: a quad, an
+invulnerability, a mega health, body armour, power armour and a weapon are
+events somebody replays a match to look at, and shells are not.
+=================
+*/
+void OSP_statsPickupMinor(const char *name, edict_t *ent)
+{
+    if (!stats_logallpickups || !(int)stats_logallpickups->value)
+        return;
+    OSP_Stats_ItemPickup(name, 0, ent);
+}
+
+/*
+=================
 OSP_Stats_ItemUse
 =================
 */
@@ -700,6 +716,12 @@ static const char *means_of_death_name(int mod, bool *self_inflicted)
     switch (mod) {
     case MOD_FALLING:           return "Fell";
     case MOD_CRUSH:             return "Crushed";
+    // R-183: HERE, in the SELF-INFLICTED half, and not below with the weapons.
+    // dm_ball.c raises MOD_DBALL_CRUSH from `T_Damage(other, ent, ent, ...)`
+    // where `ent` is the ball, so there is no attacker to credit; it scores
+    // against the victim like every cause around it.  stdlog.c has the same
+    // row in the same half, for the same reason.
+    case MOD_DBALL_CRUSH:       return "DBall";
     case MOD_WATER:             return "Drowned";
     case MOD_SLIME:             return "Melted";
     case MOD_LAVA:              return "Lava";
@@ -736,6 +758,38 @@ static const char *means_of_death_name(int mod, bool *self_inflicted)
     case MOD_BFG_EFFECT:        return "BFG10K";
     case MOD_TELEFRAG:          return "Telefrag";
     case MOD_GRAPPLE:           return "Hook";
+
+    // R-183: the content layers, which R-MODE-3 makes valid with every ruleset
+    // -- so a Reckoning or Ground Zero kill was reaching this table and falling
+    // out of it as "Unknown".  The names are the items' own pickup names, which
+    // is what `acc_names[]` in the accuracy record already uses, so a consumer
+    // joining the two records matches on one spelling.
+    //
+    // The Disruptor's two MODs share a name the way the BFG's three do.  The
+    // monsters' own -- MOD_BRAINTENTACLE, MOD_BLASTOFF, MOD_GEKK, MOD_BLASTER2
+    // -- are deliberately absent: the donor names no monster attack either, and
+    // a monster is not a weapon somebody chose.
+    // Xatrix
+    case MOD_RIPPER:            return "Ionripper";
+    case MOD_PHALANX:           return "Phalanx";
+    case MOD_TRAP:              return "Trap";
+    // Ground Zero
+    case MOD_ETF_RIFLE:         return "ETF Rifle";
+    case MOD_PROX:              return "Prox Launcher";
+    case MOD_HEATBEAM:          return "Plasma Beam";
+    case MOD_CHAINFIST:         return "Chainfist";
+    case MOD_TESLA:             return "Tesla";
+    case MOD_TRACKER:
+    case MOD_DISINTEGRATOR:     return "Disruptor";
+    case MOD_NUKE:              return "A-M Bomb";
+    // ...and Ground Zero's items that kill, which are as attributable as any
+    // weapon: a player carried them and chose the moment.
+    case MOD_VENGEANCE_SPHERE:  return "Vengeance Sphere";
+    case MOD_HUNTER_SPHERE:     return "Hunter Sphere";
+    case MOD_DEFENDER_SPHERE:   return "Defender Sphere";
+    case MOD_DOPPLE_EXPLODE:
+    case MOD_DOPPLE_VENGEANCE:
+    case MOD_DOPPLE_HUNTER:     return "Doppleganger";
     }
 
     return "Unknown";
@@ -784,7 +838,7 @@ void OSP_Stats_Death(edict_t *self, edict_t *inflictor, edict_t *attacker)
         return;
     }
 
-    friendly = (m_mode > 1 && (meansOfDeath & MOD_FRIENDLY_FIRE)) != 0;
+    friendly = (OSP_IsTeams() && (meansOfDeath & MOD_FRIENDLY_FIRE)) != 0;
 
     f = begin_event("kill");
     if (!f)
@@ -832,7 +886,7 @@ void OSP_Stats_Accuracy(edict_t *ent)
 
     acc = &p_acc[cid];
 
-    for (i = 0, any = false; i < 11; i++) {
+    for (i = 0, any = false; i < ACC_COUNT; i++) {
         if (acc->shots[i] || acc->taken[i] || acc->given[i]) {
             any = true;
             break;
@@ -849,7 +903,7 @@ void OSP_Stats_Accuracy(edict_t *ent)
     json_player(f, ent);
     fprintf(f, ",\"weapons\":{");
 
-    for (i = 0, any = false; i < 11; i++) {
+    for (i = 0, any = false; i < ACC_COUNT; i++) {
         if (!acc->shots[i] && !acc->taken[i] && !acc->given[i])
             continue;
         if (any)

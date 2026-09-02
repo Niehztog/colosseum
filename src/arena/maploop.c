@@ -50,7 +50,10 @@ typedef struct {
 
 definition_t    *find_key(char *key, int type, definition_t *items, int count);
 
-static  cvar_t  *gamedir;
+// R-167: the donor's `gamedir` was here and is gone with the two relative paths
+// that were the only things reading it -- G_FsGamePath() asks the engine which
+// directory the game is installed in rather than assuming it is the one the
+// server was started from.
 static  cvar_t  *arenacfg;
 static  char    *line;
 
@@ -61,7 +64,57 @@ int             votetries_setting = 3;
 int             num_definition_blocks = 0;
 definition_t    *definition_blocks;
 
-int     weapon_vals[9] = {1, 2, 4, 8, 16, 32, 64, 128, 256};
+int     weapon_vals[RA_NUM_WEAPON_BITS] = {
+    // 0..8, the donor's, paired with the digits 2..9 and 0 below
+    1, 2, 4, 8, 16, 32, 64, 128, 256,
+    // 9..14, R-182's, paired with the names in ra_pack_weapnames
+    512, 1024, 2048, 4096, 8192, 16384,
+};
+
+// R-182.  Names rather than digits because the digit row is used up at nine,
+// and in THIS order because arena.h pins it: row 0 is bit 9.  The menu labels
+// are padded to 23 characters like the donor's nine, because ra2menus.c reads a
+// row back by comparing its whole label.
+const ra_pack_weapon_t ra_pack_weapons[RA_NUM_PACK_WEAPONS] = {
+    // cfg token       menu label                 layer         ammo
+    { "ripper",       "Allow Ionripper:       ", LAYER_XATRIX }, // cells
+    { "phalanx",      "Allow Phalanx:         ", LAYER_XATRIX }, // magslug
+    { "etfrifle",     "Allow ETF Rifle:       ", LAYER_ROGUE  }, // flechettes
+    { "proxlauncher", "Allow Prox Launcher:   ", LAYER_ROGUE  }, // prox
+    { "plasmabeam",   "Allow Plasma Beam:     ", LAYER_ROGUE  }, // cells
+    { "chainfist",    "Allow Chainfist:       ", LAYER_ROGUE  }, // none
+};
+
+bool RA_PackWeaponOffered(int i)
+{
+    if (i < 0 || i >= RA_NUM_PACK_WEAPONS)
+        return false;
+    return G_LayerEnabled(ra_pack_weapons[i].layer);
+}
+
+int RA_PackWeaponRow(const char *label)
+{
+    int i;
+
+    for (i = 0; i < RA_NUM_PACK_WEAPONS; i++)
+        if (!Q_stricmp(label, ra_pack_weapons[i].menulabel))
+            return i;
+
+    return -1;
+}
+
+int RA_LayerWeaponBits(void)
+{
+    int i, mask;
+
+    mask = 0;
+    for (i = 0; i < RA_NUM_PACK_WEAPONS; i++)
+        if (RA_PackWeaponOffered(i))
+            mask |= weapon_vals[9 + i];
+
+    return mask;
+}
+
 int     weapons;
 int     armor;
 int     health;
@@ -78,6 +131,15 @@ int     slugs;
 int     grenades;
 int     rockets;
 int     cells;
+// R-182: the mission packs' five.  Tesla and Trap are ammo AND weapon in one
+// item, exactly as `ammo_grenades` is, so like `grenades` above they are a
+// count and not a `weapons:` bit.
+int     magslug;
+int     flechettes;
+int     prox;
+int     tesla;
+int     trap;
+int     allow_voting_packweapons;
 int     fastswitch;
 int     armorprotect;
 int     healthprotect;
@@ -104,10 +166,14 @@ int     allow_voting_fallingdamage;
 int     lock_arena;
 int     competition_mode;
 int     damage_scoring;
+int     arena_bots;
+int     allow_voting_bots;
 
 static  blockstack_t    stack[32];
 
-int has_val(char *str, char *key)
+// `key` is const because R-182's caller passes a string literal out of a
+// `const char *const []`; the function only ever strcmp's it.
+int has_val(char *str, const char *key)
 {
     char    buf[1024];
     char    *tok;
@@ -151,6 +217,7 @@ void get_settings(definition_t *items, int count)
 {
     definition_t    *key;
     unsigned int    mask;
+    bool            packnamed;
     int             i, n;
 
     key = find_key("weapons", 1, items, count);
@@ -166,6 +233,26 @@ void get_settings(definition_t *items, int count)
             if (has_val(key->value2, va("%d", n)))
                 mask |= weapon_vals[i];
         }
+
+        // R-182's six, named rather than numbered -- and THE HALVES ARE
+        // DECIDED SEPARATELY.  The digits above span exactly the nine weapons
+        // 1999 had, so a `weapons:` line written before the packs existed says
+        // everything there was to say about the baseq2 half and NOTHING about
+        // the pack half; reading its silence as "none of the six" is what made
+        // `xatrix 1` a menu row and no weapon (see RA_LayerWeaponBits).  A line
+        // that names a pack weapon -- or `nopack`, which is how an arena says
+        // "none of them" out loud -- owns the pack half; a line that names none
+        // inherits it, which is the enclosing block's or the layer default's.
+        packnamed = has_val(key->value2, "nopack");
+
+        for (i = 0; i < RA_NUM_PACK_WEAPONS; i++)
+            if (has_val(key->value2, ra_pack_weapons[i].cfgname)) {
+                mask |= weapon_vals[9 + i];
+                packnamed = true;
+            }
+
+        if (!packnamed)
+            mask |= weapons & RA_PACK_WEAPON_MASK;
 
         weapons = mask;
     }
@@ -229,6 +316,27 @@ void get_settings(definition_t *items, int count)
     key = find_key("cells", 1, items, count);
     if (key)
         cells = atoi(get_val(key->value2, 0));
+
+    // R-182's five, in the shape of the six above them.
+    key = find_key("magslug", 1, items, count);
+    if (key)
+        magslug = atoi(get_val(key->value2, 0));
+
+    key = find_key("flechettes", 1, items, count);
+    if (key)
+        flechettes = atoi(get_val(key->value2, 0));
+
+    key = find_key("prox", 1, items, count);
+    if (key)
+        prox = atoi(get_val(key->value2, 0));
+
+    key = find_key("tesla", 1, items, count);
+    if (key)
+        tesla = atoi(get_val(key->value2, 0));
+
+    key = find_key("trap", 1, items, count);
+    if (key)
+        trap = atoi(get_val(key->value2, 0));
 
     key = find_key("fastswitch", 1, items, count);
     if (key)
@@ -333,6 +441,30 @@ void get_settings(definition_t *items, int count)
     key = find_key("damagescoring", 1, items, count);
     if (key)
         damage_scoring = atoi(get_val(key->value2, 0));
+
+    // R-RA-8.  `bots` is per arena and defaults ON, so a server that has never
+    // heard of this key behaves exactly as it did: `botfill` alone still
+    // decides, and every arena remains a place bots may be sent.  Turning it
+    // off is how one arena is kept for people while the rest of the map fills.
+    key = find_key("bots", 1, items, count);
+    if (key)
+        arena_bots = atoi(get_val(key->value2, 0));
+
+    // ...and whether the people in the arena may move that switch themselves.
+    // OFF by default, which is the conservative half of the donor's own
+    // convention -- `arena.cfg` ships `allowvotingarmorprotect: 0` in the same
+    // spirit -- because a vote that can turn the server's bots off is a bigger
+    // lever than a vote that changes the starting armour.
+    key = find_key("allowvotingbots", 1, items, count);
+    if (key)
+        allow_voting_bots = atoi(get_val(key->value2, 0));
+
+    // R-182.  ON by default, which is where the donor's nine per-weapon
+    // switches sit too (`allow_voting_shotgun = 1` and its eight siblings) --
+    // so a pack weapon an arena grants is as votable as a baseq2 one.
+    key = find_key("allowvotingpackweapons", 1, items, count);
+    if (key)
+        allow_voting_packweapons = atoi(get_val(key->value2, 0));
 }
 
 void set_config(int first, int last)
@@ -344,7 +476,11 @@ void set_config(int first, int last)
         return;
 
     for (; i <= last; i++) {
-        weapons = 0xff;
+        // 0xff is the donor's -- every baseq2 weapon but the BFG.  The pack
+        // half is every weapon of a layer that is ON, so switching a content
+        // layer on arms its weapons instead of only drawing their menu rows;
+        // an arena that wants none says `nopack` (see get_settings above).
+        weapons = 0xff | RA_LayerWeaponBits();
         armor = 200;
         health = 100;
         minping = 0;
@@ -366,6 +502,16 @@ void set_config(int first, int last)
         grenades = 50;
         rockets = 50;
         cells = 150;
+        // R-182: each pack ammo defaults to its own item ceiling, which is the
+        // shape `shells`/`bullets` above already have.  An arena that grants
+        // none of the pack weapons carries them the way a stock arena already
+        // carries 150 cells with no cell weapon on it -- the donor's own
+        // behaviour rather than a new one.
+        magslug = 50;
+        flechettes = 200;
+        prox = 50;
+        tesla = 50;
+        trap = 5;
         fastswitch = 1;
         armorprotect = 2;
         healthprotect = 1;
@@ -392,6 +538,9 @@ void set_config(int first, int last)
         lock_arena = 0;
         competition_mode = 0;
         damage_scoring = 0;
+        arena_bots = 1;
+        allow_voting_bots = 0;
+        allow_voting_packweapons = 1;
 
         get_settings(definition_blocks, num_definition_blocks);
 
@@ -417,6 +566,11 @@ void set_config(int first, int last)
         arenas[i].grenades = grenades;
         arenas[i].rockets = rockets;
         arenas[i].cells = cells;
+        arenas[i].magslug = magslug;            // R-182
+        arenas[i].flechettes = flechettes;
+        arenas[i].prox = prox;
+        arenas[i].tesla = tesla;
+        arenas[i].trap = trap;
         arenas[i].fastswitch = fastswitch;
         arenas[i].armorprotect = armorprotect;
         arenas[i].healthprotect = healthprotect;
@@ -444,6 +598,9 @@ void set_config(int first, int last)
         arenas[i].competition = competition_mode;
         arenas[i].scorebydamage = damage_scoring;
         arenas[i].changed = 0;
+        arenas[i].bots = arena_bots;
+        arenas[i].allow_voting_bots = allow_voting_bots;
+        arenas[i].allow_voting_packweapons = allow_voting_packweapons;
     }
 }
 
@@ -681,23 +838,11 @@ void list_keys(edict_t *ent)
 void load_config(int num_arenas)
 {
     FILE            *fp;
-    char            path[80];
+    char            path[MAX_OSPATH];
     definition_t    *key, *block;
     int             i;
 
-    // "" and not ".": g_svcmds.c re-obtains the same engine cvar and the two
-    // defaults must agree (R-COMPAT-6).  counts.py --duplicates keys on the
-    // default for exactly this reason and reported the pair.
-    gamedir = gi.cvar("game", "", CVAR_LATCH);
     arenacfg = gi.cvar("arenacfg", "arena.cfg", 0);
-
-    Q_strlcpy(path, gamedir->string, sizeof(path));
-#ifdef _WIN32
-    Q_strlcat(path, "\\", sizeof(path));
-#else
-    Q_strlcat(path, "/", sizeof(path));
-#endif
-    Q_strlcat(path, arenacfg->string, sizeof(path));
 
     // every block below hangs off TAG_LEVEL memory the engine has already
     // freed, so clear it before the read -- an unreadable arena.cfg returns
@@ -707,6 +852,22 @@ void load_config(int num_arenas)
     arena_blocks = NULL;
     definition_blocks = NULL;
     num_definition_blocks = 0;
+
+    // R-167.  `<homedir-or-basedir>/<gamedir>/<name>`, not the donor's bare
+    // `<gamedir>/<name>`: that resolves against the server's WORKING DIRECTORY,
+    // so a server started from anywhere but the installation read no arena.cfg
+    // at all -- every per-arena setting silently back to its built-in default,
+    // announced by one dprintf nobody is reading at map load.
+    //
+    // This is the same correction ra2stats.c and gslog.c already carry, with
+    // the same reasoning written against them; these two were the ones the
+    // sweep missed.  `path` grows with it -- 80 bytes could not hold an
+    // absolute path and the composer says so by failing.
+    if (!G_FsGamePath(path, sizeof(path), arenacfg->string)) {
+        gi.dprintf("Error: arena config path too long for %s\n",
+                   arenacfg->string);
+        return;
+    }
 
     fp = fopen(path, "r");
     if (!fp) {
@@ -790,18 +951,16 @@ void load_motd(void)
     char        *end;
     size_t      size;
     motd_t      *node;
-    char        path[80];
+    char        path[MAX_OSPATH];
 
     motd.next = motd.prev = NULL;
 
-    gamedir = gi.cvar("game", "", CVAR_LATCH);
-
-    Q_strlcpy(path, gamedir->string, sizeof(path));
-#ifdef _WIN32
-    Q_strlcat(path, "\\motd.txt", sizeof(path));
-#else
-    Q_strlcat(path, "/motd.txt", sizeof(path));
-#endif
+    // R-167, the second of the two.  See load_config() above for why the
+    // donor's relative path cannot be kept.
+    if (!G_FsGamePath(path, sizeof(path), "motd.txt")) {
+        gi.dprintf("Error: motd path too long\n");
+        return;
+    }
 
     fp = fopen(path, "r");
     if (!fp) {

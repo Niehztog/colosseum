@@ -165,7 +165,7 @@ void OSP_ready_cmd(edict_t *ent, int quiet)
             gi.bprintf(PRINT_HIGH, "%s is ready!\n",
                        ent->client->pers.greenname);
 
-        if (m_mode < 2) {
+        if (!OSP_IsTeams()) {
             if (!(ent->flags & FL_BOT))
                 OSP_clientConfigString(ent, OSP_CS(3), "* WARMUP");
         } else if (!(ent->flags & FL_BOT) && quiet < 2) {
@@ -258,7 +258,7 @@ void OSP_notready_cmd(edict_t *ent, int quiet)
             (cli->flags & FL_BOTCLIENT))
             continue;
 
-        if (m_mode < 2) {
+        if (!OSP_IsTeams()) {
             if (cli->client->resp.osp_r20c)
                 OSP_clientConfigString(cli, OSP_CS(3), "* WARMUP");
             else
@@ -326,7 +326,7 @@ void OSP_showinfo_cmd(edict_t *ent)
         return;
     ent->client->resp.osp_r010 = level.framenum + 2;
 
-    if (m_mode) {
+    if (OSP_IsMatch()) {
         ent->client->resp.osp_r24c = 4;
         ent->client->showscores = true;
         ent->client->resp.osp_r0ac = level.framenum;
@@ -377,7 +377,7 @@ void OSP_accuracyInfo(edict_t *ent, char *name, int cid)
     gi.cprintf(ent, PRINT_HIGH, "\nAccuracy info for \"%s\"\n", name);
     gi.cprintf(ent, PRINT_HIGH, "----------------------------------\n");
 
-    for (k = 0; k < 10; k++) {
+    for (k = 0; a_info[k].name[0]; k++) {
         nindex = a_info[k].index;
         if (p_acc[playerno].shots[nindex]) {
             gi.cprintf(ent, PRINT_HIGH, "%s %.1f%% (%d/%d hits)\n",
@@ -466,7 +466,7 @@ void OSP_oldAccuracyInfo(edict_t *ent, int cid)
     gi.cprintf(ent, PRINT_HIGH,
                "--------------------------------------\n");
 
-    for (k = 0; k < 10; k++) {
+    for (k = 0; a_info[k].name[0]; k++) {
         nindex = a_info[k].index;
         if (o_acc[cid].shots[nindex]) {
             gi.cprintf(ent, PRINT_HIGH, "%s %.1f%% (%d/%d hits)\n",
@@ -1594,7 +1594,7 @@ void OSP_listItems(char *out)
         any = 1;
     }
 
-    if (m_mode > 1) {
+    if (OSP_IsTeams()) {
         if (want & 0x40) {
             if (!(int)teamhurtself->value) {
                 if (any)
@@ -1626,7 +1626,7 @@ void OSP_listItems(char *out)
 
     }
 
-    if (m_mode == 2) {
+    if (G_Ruleset() == RULESET_TDM) {
         if (want & 0x80) {
             if (!(int)teamhurtself->value) {
                 if (any)
@@ -1688,7 +1688,7 @@ void OSP_playertime_cmd(edict_t *ent)
 
     team = ent->client->resp.team;
 
-    if (m_mode == 2 && ent->osp_e39c && !ent->client->resp.osp_r2c4) {
+    if (G_Ruleset() == RULESET_TDM && ent->osp_e39c && !ent->client->resp.osp_r2c4) {
         gi.cprintf(ent, PRINT_HIGH,
                    "Refs can't call timeouts.  Use r_mpause to pause match.\n");
         return;
@@ -1696,11 +1696,11 @@ void OSP_playertime_cmd(edict_t *ent)
 
     if (match_paused == 1)
         return;
-    if (m_mode < 2 ||
+    if (!OSP_IsTeams() ||
         (ent->client->resp.osp_entered != ENTERED_ENTERED && !ent->osp_e39c))
         return;
 
-    if (!ent->client->resp.osp_r2c4 && m_mode == 2 && !ent->osp_e39c) {
+    if (!ent->client->resp.osp_r2c4 && G_Ruleset() == RULESET_TDM && !ent->osp_e39c) {
         gi.cprintf(ent, PRINT_HIGH,
                    "Only team captains can call a timeout\n");
         return;
@@ -1718,19 +1718,19 @@ void OSP_playertime_cmd(edict_t *ent)
         return;
     }
 
-    if (!match_paused && m_mode == 2 && !osp_teams[team].osp_m10c) {
+    if (!match_paused && G_Ruleset() == RULESET_TDM && !osp_teams[team].osp_m10c) {
         gi.cprintf(ent, PRINT_HIGH,
                    "Sorry, you team has no more timeouts to call.\n");
         return;
     }
 
-    if (!match_paused && m_mode == 3 && !ent->client->resp.osp_r2d0) {
+    if (!match_paused && G_Ruleset() == RULESET_DUEL && !ent->client->resp.osp_r2d0) {
         gi.cprintf(ent, PRINT_HIGH,
                    "Sorry, you have no more timeouts to call.\n");
         return;
     }
 
-    if (m_mode == 2) {
+    if (G_Ruleset() == RULESET_TDM) {
         if (!match_paused) {
             for (t = 1; t <= game.maxclients; t++) {
                 cli = g_edicts + t;
@@ -1755,7 +1755,7 @@ void OSP_playertime_cmd(edict_t *ent)
         }
     }
 
-    if (m_mode == 3) {
+    if (G_Ruleset() == RULESET_DUEL) {
         if (!match_paused) {
             for (t = 1; t <= game.maxclients; t++) {
                 cli = g_edicts + t;
@@ -1783,7 +1783,7 @@ void OSP_playertime_cmd(edict_t *ent)
         pause_time = match_pausetime->value;
         who_paused = ent - g_edicts;
 
-        if (m_mode == 2)
+        if (G_Ruleset() == RULESET_TDM)
             osp_teams[team].osp_m10c--;
         else
             ent->client->resp.osp_r2d0--;
@@ -1802,7 +1802,7 @@ void OSP_hud_cmd(edict_t *ent)
     // Four literals in the donor; one emitter and two booleans here (R-OSP-7a).
     OSP_clientConfigString(ent, CS_STATUSBAR,
                            G_StatusbarVariant(ent->client->resp.osp_r00c != 0,
-                                              m_mode >= 2));
+                                              OSP_IsTeams()));
 }
 
 void OSP_oldscores_cmd(edict_t *ent)
@@ -1827,7 +1827,7 @@ void OSP_muzzle_cmd(edict_t *ent)
         gi.cprintf(ent, PRINT_HIGH, "Usage: %s <mode>\nModes:\n", gi.argv(0));
         gi.cprintf(ent, PRINT_HIGH, " %d - Accept all chats.\n", 0);
         gi.cprintf(ent, PRINT_HIGH, " %d - Ignore observers.\n", 1);
-        if (m_mode == 2)
+        if (G_Ruleset() == RULESET_TDM)
             gi.cprintf(ent, PRINT_HIGH, " %d - Ignore opposing team.\n", 2);
         gi.cprintf(ent, PRINT_HIGH, " %d - Ignore all clients.\n\n", 3);
         gi.cprintf(ent, PRINT_HIGH,
@@ -1980,11 +1980,11 @@ void OSP_rhelp_cmd(edict_t *ent)
     gi.cprintf(ent, PRINT_HIGH, "  r_map <mapname>: Loads map <mapname>, if in the map queue\n");
     gi.cprintf(ent, PRINT_HIGH, "  r_timelimit <min>: Sets the timelimit to <min>\n");
     gi.cprintf(ent, PRINT_HIGH, "  r_fraglimit <frags>: Sets the fraglimit to <frags>\n");
-    if (m_mode > 0 && sync_stat < 4) {
+    if (OSP_IsMatch() && sync_stat < 4) {
         gi.cprintf(ent, PRINT_HIGH, "  r_allready: Sets all active clients to \"ready\"\n");
         gi.cprintf(ent, PRINT_HIGH, "  r_allnotready: Set all active clients to \"notready\"\n");
     }
-    if (m_mode > 0)
+    if (OSP_IsMatch())
         gi.cprintf(ent, PRINT_HIGH, "  r_stopmatch: Stops a match in progress\n");
     gi.cprintf(ent, PRINT_HIGH, "  r_plist: Lists info on all active players.\n");
     gi.cprintf(ent, PRINT_HIGH, "  r_ban <name|id>: Bans a playername.\n");
@@ -2178,7 +2178,7 @@ void OSP_rstopmatch_cmd(edict_t *ent)
         return;
     }
 
-    if (m_mode == 1) {
+    if (G_Ruleset() == RULESET_DMPRO) {
         OSP_allnotready_svcmd(false);
         OSP_clearClients();
     } else {
@@ -2411,7 +2411,7 @@ void OSP_allnotready_svcmd(bool announce)
         if (!e->inuse || !e->client)
             continue;
 
-        if (m_mode < 2)
+        if (!OSP_IsTeams())
             G_SetStat(e, SID_OSP_STATUS3, 0);
         G_SetStat(e, SID_OSP_MATCHSTATE, 0);
         e->client->resp.osp_r20c = 0;
@@ -2421,12 +2421,12 @@ void OSP_allnotready_svcmd(bool announce)
         e->client->resp.osp_r028 = 0;
     }
 
-    if (m_mode < 2)
+    if (!OSP_IsTeams())
         gi.configstring(CS_OSP_STATUS_DM, "  WARMUP");
     else {
         gi.configstring(CS_OSP_STATUS_A, "       WARMUP");
         gi.configstring(CS_OSP_STATUS_B, "       WARMUP");
-        if (m_mode == 2) {
+        if (G_Ruleset() == RULESET_TDM) {
             gi.cvar_set("Score_A", "WARMUP");
             gi.cvar_set("Score_B", "WARMUP");
         }

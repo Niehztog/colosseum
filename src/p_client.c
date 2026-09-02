@@ -218,8 +218,19 @@ void ClientObituary(edict_t *self, edict_t *inflictor, edict_t *attacker)
     char        *message2;
     int         ff;
 
+    // R-158: RA_Obituary() is RA2's WHOLE obituary minus the text -- the round
+    // statistics, the announcer and every point that changes hands.  So the
+    // three `resp.score` sites below are somebody else's under arena and are
+    // gated off one by one rather than here, because the printing between them
+    // is still wanted and is what this function is being kept for.
     if (G_Ruleset() == RULESET_ARENA)
         RA_Obituary(self, inflictor, attacker);
+
+    // R-OSP-1: once sudden death has produced a winner the match is decided and
+    // the rules row is about to end the level, so nothing further is announced.
+    // The donor's own first statement.
+    if (G_IsOspRuleset() && OSP_obituaryHush())
+        return;
 
     if (coop->value && attacker->client)
         meansOfDeath |= MOD_FRIENDLY_FIRE;
@@ -323,13 +334,19 @@ void ClientObituary(edict_t *self, edict_t *inflictor, edict_t *attacker)
             }
         }
         if (message) {
-            gi.bprintf(PRINT_MEDIUM, "%s %s.\n", self->client->pers.netname, message);
-            // R-OSP-1: tourney refuses score changes during the countdown and
-            // updates its team totals and rank order on every one that lands.
-            if (G_Ruleset() == RULESET_TOURNEY)
-                OSP_scoreChange(self, -1);
-            else if (deathmatch->value)
-                self->client->resp.score--;
+            // R-OSP-1: tourney prints this per client rather than broadcasting
+            // it, refuses the score change during the countdown, and charges
+            // the death to the team as well as to the player.
+            if (G_IsOspRuleset()) {
+                OSP_obituarySelf(self, message);
+            } else {
+                gi.bprintf(PRINT_MEDIUM, "%s %s.\n", self->client->pers.netname, message);
+                // R-158: RA_Obituary() has already charged this death, and the
+                // arena decides whether it costs anything at all
+                // (`scorebydamage`).
+                if (deathmatch->value && G_Ruleset() != RULESET_ARENA)
+                    self->client->resp.score--;
+            }
             self->enemy = NULL;
             return;
         }
@@ -406,8 +423,21 @@ void ClientObituary(edict_t *self, edict_t *inflictor, edict_t *attacker)
                 message2 = "'s personal space";
                 break;
             case MOD_GRAPPLE:
-                message = "was caught by";
-                message2 = "'s grapple";
+                // R-195.7.  TWO DONORS CLAIM ONE MEANS OF DEATH, and this tree
+                // used Threewave's under every ruleset -- so a hook kill in
+                // `tdm` was announced as CTF's, while the stats log for the
+                // same kill already said tourney's ("Hook", osp_stats.c:760).
+                // Threewave: "X was caught by Y's grapple"
+                // (`port_ctf:p_client.c:344`).  Tourney: "X was hooked to
+                // death by Y", with no second half at all
+                // (`port_osp:p_client.c:316`).  Section 7 rule 4 gives each
+                // donor its own words where the rulesets do not share a text.
+                if (G_IsOspRuleset()) {
+                    message = "was hooked to death by";
+                } else {
+                    message = "was caught by";
+                    message2 = "'s grapple";
+                }
                 break;
             // RAFAEL 14-APR-98
             case MOD_RIPPER:
@@ -483,6 +513,14 @@ void ClientObituary(edict_t *self, edict_t *inflictor, edict_t *attacker)
 //===============
             }
             if (message) {
+                // R-OSP-1 again, and this is the shape that carries the whole
+                // team ledger: the frag or the team kill, the victim's death,
+                // the fraglimit trigger, and both teams' totals.
+                if (G_IsOspRuleset()) {
+                    OSP_obituaryFrag(self, attacker, message, message2, ff != 0);
+                    return;
+                }
+
                 gi.bprintf(PRINT_MEDIUM, "%s %s %s%s\n", self->client->pers.netname, message, attacker->client->pers.netname, message2);
 //ROGUE
                 if (gamerules && gamerules->value) {
@@ -496,9 +534,12 @@ void ClientObituary(edict_t *self, edict_t *inflictor, edict_t *attacker)
                 }
 //ROGUE
 
-                if (G_Ruleset() == RULESET_TOURNEY)
-                    OSP_scoreChange(attacker, ff ? -1 : 1);
-                else if (deathmatch->value) {
+                // R-158: RA_Obituary() has already paid this frag, and it pays
+                // a team kill with `OnSameTeam` rather than with `ff` -- which
+                // is MOD_FRIENDLY_FIRE, which T_Damage only raises when dmflags
+                // carries the team bits, which arena never sets.  Left here, a
+                // team kill scored +1.
+                if (deathmatch->value && G_Ruleset() != RULESET_ARENA) {
                     if (ff)
                         attacker->client->resp.score--;
                     else
@@ -508,8 +549,6 @@ void ClientObituary(edict_t *self, edict_t *inflictor, edict_t *attacker)
             }
         }
     }
-
-    gi.bprintf(PRINT_MEDIUM, "%s died.\n", self->client->pers.netname);
 
 //ROGUE
 //  if (g_showlogic && g_showlogic->value)
@@ -521,9 +560,18 @@ void ClientObituary(edict_t *self, edict_t *inflictor, edict_t *attacker)
 //  }
 //ROGUE
 
-    if (G_Ruleset() == RULESET_TOURNEY) {
-        OSP_scoreChange(self, -1);
-    } else if (deathmatch->value)
+    // R-OSP-1's third shape: a death the tables could not name.  It owns the
+    // announcement too, because tourney suppresses it during the countdown.
+    if (G_IsOspRuleset()) {
+        OSP_obituaryDied(self);
+        return;
+    }
+
+    gi.bprintf(PRINT_MEDIUM, "%s died.\n", self->client->pers.netname);
+
+    // R-158: the third and last of them -- a death with no attacker the switch
+    // above could name.  RA_Obituary() charged it on the way in.
+    if (deathmatch->value && G_Ruleset() != RULESET_ARENA)
 //ROGUE
     {
         if (gamerules && gamerules->value) {
@@ -558,9 +606,48 @@ static void TossClientWeapon(edict_t *self)
     if (item && (strcmp(item->pickup_name, "Blaster") == 0))
         item = NULL;
 
-    if (!((int)(dmflags->value) & DF_QUAD_DROP))
+    // R-195.6.  The donor closes the quad's pickup record HERE, in both arms,
+    // and this tree closed it in neither (`port_osp:p_client.c:513` and `:543`).
+    //
+    // This arm is the last chance the log gets.  player_die zeroes
+    // `quad_framenum` a few lines further down, and p_view.c's per-frame expiry
+    // test needs a NON-zero one -- so whatever is not written here is never
+    // written at all.
+    if (!((int)(dmflags->value) & DF_QUAD_DROP)) {
+        // ONE TOKEN OF THIS IS NOT THE DONOR'S, and it is `quad_framenum &&`.
+        //
+        // The donor's guard is `osp_r200 && quad_framenum < level.framenum`,
+        // and `osp_r200` is set by the INVULNERABILITY pickup as well as the
+        // quad -- in the donor too (`port_osp:g_items.c:183` and `:187`).  So
+        // the donor's arm has three reachable cases and only one of them is the
+        // event it names:
+        //
+        //   held a quad that ran out THIS frame -- p_view.c has not seen it
+        //   yet, `quad_framenum` is still set, and player_die zeroes it below,
+        //   so this is the only place the expiry can ever be written.  Right,
+        //   and the case the arm exists for.
+        //
+        //   held a quad that ran out EARLIER while also holding invulnerability
+        //   -- p_view.c logged the expiry and zeroed `quad_framenum`, but kept
+        //   `osp_r200` for the second powerup.  The donor logs the same expiry
+        //   a second time, same entity.
+        //
+        //   never held a quad at all, only invulnerability -- `osp_r200` is the
+        //   INVULNERABILITY's entity and `quad_framenum` is 0, which is less
+        //   than any frame.  The donor writes a "Quad" expiry for it.
+        //
+        // p_view.c's own reader tests `quad_framenum &&` before the comparison
+        // for exactly this reason.  Adding that conjunct here selects the first
+        // case and excludes the other two; nothing correct is lost, because a
+        // still-running quad fails `< level.framenum` in both versions.
+        if (G_IsOspRuleset() && self->client->resp.osp_r200 &&
+            self->client->quad_framenum &&
+            self->client->quad_framenum < level.framenum) {
+            OSP_Stats_ItemExpire("Quad", self, self->client->resp.osp_r200);
+            self->client->resp.osp_r200 = 0;
+        }
         quad = false;
-    else
+    } else
         quad = (self->client->quad_framenum > (level.framenum + 10));
 
     // RAFAEL
@@ -588,6 +675,22 @@ static void TossClientWeapon(edict_t *self)
         drop = Drop_Item(self, FindItemByClassname("item_quad"));
         self->client->v_angle[YAW] -= spread;
         drop->spawnflags |= DROPPED_PLAYER_ITEM;
+
+        // R-195.6's other arm: a quad DROPPED on death is a drop event, at the
+        // moment of death, naming the edict it became -- which is the entity
+        // OSP_itemFreed will later expire when the dropped quad times out on
+        // the ground (osp_main.c:1299).  The two events are the same object
+        // seen twice, not a double log.
+        //
+        // The clear is unconditional, as the donor's is, even though this
+        // tree's `osp_r200` is shared with Invulnerability and p_view.c clears
+        // it only once BOTH are gone: player_die zeroes `invincible_framenum`
+        // below without an expiry event either way, so there is no second
+        // reader left to keep it for.
+        if (G_IsOspRuleset()) {
+            OSP_Stats_ItemDrop("Quad", drop - g_edicts, self);
+            self->client->resp.osp_r200 = 0;
+        }
 
         drop->touch = Touch_Item;
         drop->nextthink = level.framenum + (self->client->quad_framenum - level.framenum);
@@ -687,7 +790,7 @@ void player_die(edict_t *self, edict_t *inflictor, edict_t *attacker, int damage
 
         // R-OSP-3: both logs record the death, and only while a match is live
         // -- a warmup death is not a statistic.
-        if (G_Ruleset() == RULESET_TOURNEY) {
+        if (G_IsOspRuleset()) {
             if (sync_stat > 2)
                 sl_WriteStdLogDeath(&gi, level, self, inflictor, attacker);
             OSP_Stats_Death(self, inflictor, attacker);
@@ -704,13 +807,13 @@ void player_die(edict_t *self, edict_t *inflictor, edict_t *attacker, int damage
         // a dropped weapon is an item in a ruleset that has none.
         if (G_Ruleset() == RULESET_ARENA) {
             // nothing: the body keeps what it was holding
-        } else if (G_Ruleset() != RULESET_TOURNEY ||
+        } else if (!G_IsOspRuleset() ||
                    (int)client_deathweapdrop->value) {
             TossClientWeapon(self);
         }
 
         // ...and the rune goes with the body, into the rune pool.
-        if (G_Ruleset() == RULESET_TOURNEY && rune_stat)
+        if (G_IsOspRuleset() && rune_stat)
             OSP_deadDropRune(self);
 
         // ...and the grapple, the flag and the tech go with the body.  All three
@@ -724,7 +827,7 @@ void player_die(edict_t *self, edict_t *inflictor, edict_t *attacker, int damage
         // Tourney does the same thing through its own flag rather than through
         // the help computer: `osp_r2dc` is "this client is dead and looking at
         // the board", which p_view.c reads to stop pushing HUD panels at them.
-        if (G_Ruleset() == RULESET_TOURNEY) {
+        if (G_IsOspRuleset()) {
             if (sync_stat != 2 && !(self->flags & FL_BOT))
                 self->client->resp.osp_r2dc = 1;
         } else if (deathmatch->value && !self->client->showscores) {
@@ -794,7 +897,19 @@ void player_die(edict_t *self, edict_t *inflictor, edict_t *attacker, int damage
         if (!(self->flags & FL_NOGIB)) {
             // pmm
             // gib
-            gi.sound(self, CHAN_BODY, gi.soundindex("misc/udeath.wav"), 1, ATTN_NORM, 0);
+            //
+            // R-196.  SILENT AT `sync_stat == 2`, which is the frame OSP kills
+            // everybody into a fresh spawn at the start of a match
+            // (osp_main.c:2456, `Cmd_Kill_f(ent)` per client).  The donor
+            // guards BOTH death sounds with this and nothing else
+            // (`port_osp:p_client.c:642` and `:672`), so a tourney match starts
+            // on the countdown's last tick and not on a chorus of eight death
+            // screams -- which is what the merge shipped, because the guard is
+            // an ADDED line around a call that was already here and no
+            // line-level or call-level sweep can see one of those (donor-fdiff
+            // sec 6 item 1).
+            if (!(G_IsOspRuleset() && sync_stat == 2))
+                gi.sound(self, CHAN_BODY, gi.soundindex("misc/udeath.wav"), 1, ATTN_NORM, 0);
 
             // more meaty gibs for your dollar!
             if ((deathmatch->value) && (self->health < -80)) {
@@ -802,7 +917,13 @@ void player_die(edict_t *self, edict_t *inflictor, edict_t *attacker, int damage
                     ThrowGib(self, "models/objects/gibs/sm_meat/tris.md2", damage, GIB_ORGANIC);
             }
 
-            for (n = 0; n < 4; n++)
+            // R-193: `numgibs` is what the count is under tourney -- a
+            // registered, documented cvar (default 4, which is why nothing
+            // looked wrong) whose value nothing read.  The extra -80 loop above
+            // is baseq2's and stays baseq2's: the donor has one loop, and
+            // deleting the other under tourney would take gibs away rather than
+            // give the cvar its meaning.
+            for (n = 0; n < (G_IsOspRuleset() ? OSP_GibCount() : 4); n++)
                 ThrowGib(self, "models/objects/gibs/sm_meat/tris.md2", damage, GIB_ORGANIC);
             // PMM
         }
@@ -837,7 +958,13 @@ void player_die(edict_t *self, edict_t *inflictor, edict_t *attacker, int damage
                     self->client->anim_end = FRAME_death308;
                     break;
                 }
-            gi.sound(self, CHAN_VOICE, gi.soundindex(va("*death%i.wav", (Q_rand() % 4) + 1)), 1, ATTN_NORM, 0);
+            // R-196, the other half of the same guard.  This is the arm the
+            // match start actually takes: Cmd_Kill_f sets `health = 0`, which
+            // is not below -40, so every client dies the ordinary way and
+            // screams.  The gib arm above is guarded too because the donor
+            // guards it, not because the match start reaches it.
+            if (!(G_IsOspRuleset() && sync_stat == 2))
+                gi.sound(self, CHAN_VOICE, gi.soundindex(va("*death%i.wav", (Q_rand() % 4) + 1)), 1, ATTN_NORM, 0);
         }
     }
 
@@ -875,6 +1002,7 @@ void InitClientPersistant(gclient_t *client, bool full)
     char            netname[16];
     char            greenname[16];
     bool            keep_motd = false;
+    bool            keep_listenhost;
 
 //  gi.dprintf("InitClientPersistant()\n");
 
@@ -893,10 +1021,21 @@ void InitClientPersistant(gclient_t *client, bool full)
     if (G_Ruleset() == RULESET_ARENA)
         keep_motd = client->pers.showmotd;
 
+    // R-BOT-28: and the listen server's host survives the wipe on both arms and
+    // under every ruleset, which the motd deliberately does not.  Who is sitting
+    // at the server's own console is a property of the CONNECTION, not of a
+    // life: ClientConnect is the only writer, every spawn passes through here,
+    // and PutClientInServer calls this on the deathmatch arm of every single
+    // one -- so a wipe would mean the host lost the exemption the first time
+    // they spawned and never got it back until the next map.
+    keep_listenhost = client->pers.listenhost;
+
     memset(&client->pers, 0, sizeof(client->pers));
 
     if (G_Ruleset() == RULESET_ARENA)
         client->pers.showmotd = keep_motd;
+
+    client->pers.listenhost = keep_listenhost;
 
     if (!full) {
         memcpy(client->pers.userinfo, userinfo, sizeof(userinfo));
@@ -944,7 +1083,7 @@ void InitClientPersistant(gclient_t *client, bool full)
     // R-OSP-1: tourney seeds its own per-player state here -- the ammo ceilings
     // a referee has set, the accuracy row, the rune counters -- which is the
     // one place that runs on both a fresh connect and a respawn.
-    if (G_Ruleset() == RULESET_TOURNEY)
+    if (G_IsOspRuleset())
         OSP_seedPlayer(client);
 
     client->pers.connected = true;
@@ -959,10 +1098,36 @@ void InitClientResp(gclient_t *client)
     int ctf_team = client->resp.ctf_team;
     bool id_state = client->resp.id_state;
 
+    // And one outlives it under tourney, for a different reason: `clientid` is
+    // an INDEX handed out once per connection, not per life.  p_acc[] (the
+    // accuracy table), saved_clients[] (the client_recover seat) and every
+    // command that names a player by number are addressed through it, and
+    // OSP_giveClientID() runs in ClientBegin -- BEFORE ClientBeginDeathmatch
+    // gets here.  Letting the memset take it gave every client id 0 and one
+    // shared row of each table.  The donor's InitClientResp carries it across
+    // its own memset for exactly this reason.
+    int clientid = client->resp.clientid;
+
     memset(&client->resp, 0, sizeof(client->resp));
 
     client->resp.ctf_team = ctf_team;
     client->resp.id_state = id_state;
+
+    if (G_IsOspRuleset()) {
+        client->resp.clientid = clientid;
+        // 2 is "no team"; 0 and 1 are the two teams, so the zero the memset
+        // leaves would read as membership of team A.
+        client->resp.team = 2;
+        // The per-client statusbar variant starts at the server's default
+        // rather than at zero -- the composed bar in g_stats.c is built from
+        // the same cvar, so a client that started at 0 on a `client_hud 1`
+        // server had its first `hud` press move it AWAY from what it was
+        // already looking at.
+        client->resp.osp_r00c = client_hud ? (int)client_hud->value : 0;
+        // Which countdown step this client has already been told about, so the
+        // announcer does not replay the whole countdown on a respawn.
+        client->resp.osp_r01c = start_count;
+    }
 
     client->resp.enterframe = level.framenum;
     client->resp.coop_respawn = client->pers;
@@ -972,10 +1137,10 @@ void InitClientResp(gclient_t *client)
 
     // RA2 adds ten assignments after its own memset and the Phase 4 merge kept
     // none of them, because every one is a statement the base does not have and
-    // rule 2 takes the base where the base is unchanged.  Eight are what the
+    // rule 2 takes the base where the base is unchanged.  Seven are what the
     // memset already gives (`context` 0, `fightstate` FIGHT_SPECTATING,
-    // `omode` OMODE_NORMAL, `teammember` NULL, `isbot`, `zbotcount`,
-    // `damagedealt`), which is why nothing noticed.  Two are not:
+    // `omode` OMODE_NORMAL, `teammember` NULL, `zbotcount`, `zbotlastcheck`,
+    // `damagedealt`), which is why nothing noticed.  Three are not:
     //
     //   * `teamnum` MUST be -1, because 0 is a valid team index and
     //     PutClientInServer branches on `>= 0`.  Measured: every client
@@ -988,13 +1153,21 @@ void InitClientResp(gclient_t *client)
     //   * `ra_votes` MUST be votetries_setting, or the client starts with zero
     //     votes and menuVote refuses every one.  arena.c resets it per arena
     //     config change, which is a top-up and not the initial grant.
+    //   * `isbot` is NOT the memset's zero.  RA2 writes it twice -- a zero and
+    //     then a CONDITIONAL seed from `zbotscore`, the port the client
+    //     connected from, which ClientConnect stamps.  Reading it as the
+    //     redundant half cost RA2's ZBot detection its connect-time arm and
+    //     left `zbotscore` written nowhere in the tree; the runtime arm
+    //     (RA_ZBotSample) had been carried all along.
     //
-    // The other eight stay unwritten: a redundant assignment is a claim that
+    // The other seven stay unwritten: a redundant assignment is a claim that
     // the memset above might not do it, and R-CORE-6's union makes that claim
     // false for a field another ruleset owns.
     if (G_Ruleset() == RULESET_ARENA) {
         client->resp.teamnum = -1;
         client->resp.ra_votes = votetries_setting;
+        if (client->zbotscore == RA_ZBOT_PORT)
+            client->resp.isbot = 1;
     }
 }
 
@@ -1049,20 +1222,48 @@ PlayersRangeFromSpot
 Returns the distance to the nearest player from the given spot
 ================
 */
-float PlayersRangeFromSpot(edict_t *spot)
+// R-195.5.  `ent` is the client being PLACED, or NULL where there is none --
+// the two exclusions below need to know which body not to measure against, and
+// a caller asking "how close is the nearest player to this spot" in the
+// abstract (dm_ball's ball spawn, the coop lava scan) has no such body.
+//
+// The donor threads it all the way down -- SelectDeathmatchSpawnPoint(ent) into
+// both selectors into PlayersRangeFromSpot(spot, ent) -- and skips
+// `player == ent` and `resp.entered != ENTERED_ENTERED`.  R-191 put the same
+// two into OSP_spawnRefused, for the 60-unit refusal one call further down, and
+// argued they are "load-bearing rather than tidy"; the argument is unchanged
+// one call up, where it decides WHICH spot instead of whether to take it.
+// With DF_SPAWN_FARTHEST under the OSP four, "farthest from any player" was
+// measured against the body of the client being placed -- so a client joining
+// from the queue was sent as far as possible from where it had been watching --
+// and against every observer that has one, so an observer parked on a point
+// moved everybody off it.
+//
+// BEHIND G_IsOspRuleset(), and that is not tidiness either: `osp_entered` is
+// only maintained by the OSP four (R-OSP-1, "connecting is not entering"), so
+// applying the second test anywhere else would exclude every player on the
+// server and hand every spot the same 9999999.  Section 7 rule 1 keeps q2pro's
+// behaviour where a donor has no feature, and the self-exclusion is inside the
+// same gate for that reason rather than because it is wrong elsewhere.
+float PlayersRangeFromSpot(edict_t *spot, edict_t *ent)
 {
     edict_t *player;
     float   bestplayerdistance;
     vec3_t  v;
     int     n;
     float   playerdistance;
+    bool    osp = ent && G_IsOspRuleset();
 
     bestplayerdistance = 9999999;
 
     for (n = 1; n <= game.maxclients; n++) {
         player = &g_edicts[n];
 
-        if (!player->inuse)
+        if (!player->inuse || !player->client)
+            continue;
+
+        if (osp && (player == ent ||
+                    player->client->resp.osp_entered != ENTERED_ENTERED))
             continue;
 
         if (player->health <= 0)
@@ -1095,7 +1296,7 @@ go to a random point, but NOT the two points closest
 to other players
 ================
 */
-edict_t *SelectRandomDeathmatchSpawnPoint(void)
+edict_t *SelectRandomDeathmatchSpawnPoint(edict_t *ent)
 {
     edict_t *spot, *spot1, *spot2;
     int     count = 0;
@@ -1108,7 +1309,7 @@ edict_t *SelectRandomDeathmatchSpawnPoint(void)
 
     while ((spot = G_Find(spot, FOFS(classname), "info_player_deathmatch")) != NULL) {
         count++;
-        range = PlayersRangeFromSpot(spot);
+        range = PlayersRangeFromSpot(spot, ent);
         if (range < range1) {
             range1 = range;
             spot1 = spot;
@@ -1144,7 +1345,7 @@ SelectFarthestDeathmatchSpawnPoint
 
 ================
 */
-edict_t *SelectFarthestDeathmatchSpawnPoint(void)
+edict_t *SelectFarthestDeathmatchSpawnPoint(edict_t *ent)
 {
     edict_t *bestspot;
     float   bestdistance, bestplayerdistance;
@@ -1154,7 +1355,7 @@ edict_t *SelectFarthestDeathmatchSpawnPoint(void)
     bestspot = NULL;
     bestdistance = 0;
     while ((spot = G_Find(spot, FOFS(classname), "info_player_deathmatch")) != NULL) {
-        bestplayerdistance = PlayersRangeFromSpot(spot);
+        bestplayerdistance = PlayersRangeFromSpot(spot, ent);
 
         if (bestplayerdistance > bestdistance) {
             bestspot = spot;
@@ -1175,7 +1376,7 @@ edict_t *SelectFarthestDeathmatchSpawnPoint(void)
 
 /*
 =================
-`dm_botfill` -- THE BOT COUNT FOLLOWS THE MAP, NOT THE SERVER
+`botfill` UNDER `dm`/`dmpro` -- THE COUNT FOLLOWS THE MAP, NOT THE SERVER
 
 R-DM-1, and R-RA-7's argument one ruleset over.  `minimumplayers` is one number
 and a server plays a rotation: eight is a full house on `q2dm1` and four more
@@ -1213,12 +1414,12 @@ int DM_BotFillSeats(void)
     return want;
 }
 
-static edict_t *SelectDeathmatchSpawnPoint(void)
+static edict_t *SelectDeathmatchSpawnPoint(edict_t *ent)
 {
     if ((int)(dmflags->value) & DF_SPAWN_FARTHEST)
-        return SelectFarthestDeathmatchSpawnPoint();
+        return SelectFarthestDeathmatchSpawnPoint(ent);
     else
-        return SelectRandomDeathmatchSpawnPoint();
+        return SelectRandomDeathmatchSpawnPoint(ent);
 }
 
 //===============
@@ -1287,7 +1488,7 @@ edict_t *SelectLavaCoopSpawnPoint(edict_t *ent)
         if (spawnPoints[index]->s.origin[2] < lavatop)
             continue;
 
-        if (PlayersRangeFromSpot(spawnPoints[index]) > 32) {
+        if (PlayersRangeFromSpot(spawnPoints[index], NULL) > 32) {
             if (spawnPoints[index]->s.origin[2] < lowest) {
                 // save the last point
                 pointWithLeastLava = spawnPoints[index];
@@ -1353,12 +1554,12 @@ SelectSpawnPoint
 Chooses a player start, deathmatch start, coop start, etc
 ============
 */
-void SelectSpawnPoint(edict_t *ent, vec3_t origin, vec3_t angles)
+bool SelectSpawnPoint(edict_t *ent, vec3_t origin, vec3_t angles)
 {
     edict_t *spot = NULL;
 
     if (deathmatch->value)
-        spot = SelectDeathmatchSpawnPoint();
+        spot = SelectDeathmatchSpawnPoint(ent);
     else if (coop->value)
         spot = SelectCoopSpawnPoint(ent);
 
@@ -1385,8 +1586,18 @@ void SelectSpawnPoint(edict_t *ent, vec3_t origin, vec3_t angles)
         }
     }
 
+    // R-OSP-1: and tourney may REFUSE the spot it just chose.  The donor's own
+    // last two lines of this function: a spawn with a player within 60 units of
+    // it is not taken, and PutClientInServer leaves the client frozen and
+    // bodiless instead of telefragging whoever is standing there -- R-191's
+    // respawn trigger is what tries again.  Nothing is written to `origin` on a
+    // refusal, because the caller does not place anybody.
+    if (G_IsOspRuleset() && OSP_spawnRefused(ent, spot))
+        return false;
+
     VectorCopy(spot->s.origin, origin);
     VectorCopy(spot->s.angles, angles);
+    return true;
 }
 
 //======================================================================
@@ -1409,7 +1620,7 @@ void body_die(edict_t *self, edict_t *inflictor, edict_t *attacker, int damage, 
 
     if (self->health < -40) {
         gi.sound(self, CHAN_BODY, gi.soundindex("misc/udeath.wav"), 1, ATTN_NORM, 0);
-        for (n = 0; n < 4; n++)
+        for (n = 0; n < (G_IsOspRuleset() ? OSP_GibCount() : 4); n++)
             ThrowGib(self, "models/objects/gibs/sm_meat/tris.md2", damage, GIB_ORGANIC);
         self->s.origin[2] -= 48;
         ThrowClientHead(self, damage);
@@ -1643,7 +1854,35 @@ void PutClientInServer(edict_t *ent)
     // R-MODE-5: RA2 and tourney both replace spawn selection outright -- RA2
     // places into an arena, tourney into its match slots -- so this is a hook
     // rather than a predicate.
-    G_SelectSpawnPoint(ent, spawn_origin, spawn_angles);
+    // A REFUSED placement is a state of its own, and it is tourney's: the client
+    // keeps no body, cannot move, and R-191's respawn trigger tries again on the
+    // next think, because `osp_r240` stays 0.  The donor's own arm, including
+    // the second reading of `osp_entered` -- SelectSpawnPoint refuses only an
+    // entered client, so this cannot fire for an observer, and the donor tests
+    // it at both ends anyway.
+    if (!G_SelectSpawnPoint(ent, spawn_origin, spawn_angles) &&
+        G_IsOspRuleset() &&
+        ent->client->resp.osp_entered == ENTERED_ENTERED) {
+        ent->movetype = MOVETYPE_NOCLIP;
+        ent->solid = SOLID_NOT;
+        ent->clipmask = 0;
+        ent->svflags |= SVF_NOCLIENT;
+        ent->client->resp.osp_r240 = 0;
+        ent->client->ps.pmove.pm_type = PM_FREEZE;
+        return;
+    }
+
+    // R-OSP-1: and tourney's own answer to "is this client a body?", which the
+    // donor writes here, one line after the spawn point.  `osp_r240` is 2 for a
+    // client that has been PLACED and 0 for one that has not -- an observer, or
+    // a player whose spawn was refused -- and it is what ChangeWeapon, the
+    // KillBox below and OSP_bestTrackTarget all read.  The merge kept the field
+    // and all three readers and dropped every write of 2, so no tourney client
+    // has ever been a body by that test: R-155's shape exactly (`pers.showmotd`
+    // had a reader, a clear and no write), and it survives the memset below
+    // because `resp` is saved and restored across it.
+    if (G_IsOspRuleset())
+        ent->client->resp.osp_r240 = 2;
 
     index = ent - g_edicts - 1;
     client = ent->client;
@@ -1670,7 +1909,7 @@ void PutClientInServer(edict_t *ent)
     // often enough to make it obvious.
     if (deathmatch->value) {
         resp = client->resp;
-        InitClientPersistant(client, G_Ruleset() != RULESET_TOURNEY);
+        InitClientPersistant(client, !G_IsOspRuleset());
     } else if (coop->value) {
 //      int         n;
 
@@ -1722,7 +1961,7 @@ void PutClientInServer(edict_t *ent)
     memset(client, 0, sizeof(*client));
     client->pers = saved;
     if (client->pers.health <= 0)
-        InitClientPersistant(client, G_Ruleset() != RULESET_TOURNEY);
+        InitClientPersistant(client, !G_IsOspRuleset());
     client->resp = resp;
 
     // copy some data from the client to the entity
@@ -1778,14 +2017,59 @@ void PutClientInServer(edict_t *ent)
 
     // R-OSP-1: before the match is live a player spawns with the warmup
     // loadout rather than a blaster, so that warmup is practice rather than a
-    // different game; and the grapple is let go, the accuracy row is opened and
-    // the HUD panels are pointed at their configstrings.
-    if (G_Ruleset() == RULESET_TOURNEY) {
+    // different game; and the grapple is let go and the accuracy row is opened.
+    //
+    // THE HUD PANELS ARE NOT POINTED HERE, and used to be: OSP_restartStats is
+    // at the END of this function, next to the weapon, because `ps` is
+    // memset to zero forty lines below and the panels live in `ps.stats`
+    // (R-196).  These three are safe here -- the loadout is `pers.inventory`,
+    // the accuracy row is p_acc[] and the grapple is an entity.
+    if (G_IsOspRuleset()) {
         if (sync_stat < 2)
             OSP_warmupItems(ent);
         OSP_setSingleAccuracy(ent);
         OSP_hookoff_cmd(ent);
-        OSP_restartStats(ent);
+
+        // *** TOURNEY'S FOURTH PLACEMENT, and connecting is not entering. ***
+        //
+        // A tourney client arrives as an OBSERVER (OSP_clientBeginPre sets
+        // `osp_entered` to 2) and ENTERS through one of six paths -- `join`, the
+        // team menus, a team command, the 1v1 queue, a bot's join, a recovered
+        // seat.  The donor's PutClientInServer therefore has two arms here and
+        // the merge took the second one unconditionally, which left a client
+        // that had not entered standing at a deathmatch spawn as a SOLID,
+        // VISIBLE, walking body while every tourney predicate went on treating
+        // it as an observer.  Played: the scoreboard says observer, the player
+        // collects items, and under `dm` -- where `sync_stat` is 8 and the match
+        // is live from the first frame -- shoots and kills while g_combat.c's
+        // `entered != ENTERED_ENTERED` test makes them unkillable in return.
+        //
+        // This is R-RA-4 row 15's defect one ruleset over, and its own comment
+        // three arms below says how it was found there: a headless client
+        // reading back its own pmove type.  `ops_tourney` says "SelectSpawnPoint
+        // stays dm's: tourney places players through OSP_startObserve()", which
+        // is true of the `observer` COMMAND and was never true of a placement --
+        // that function prints, scores and re-sorts, so it is not what a spawn
+        // may call.  The donor's own five lines are.
+        if (client->resp.osp_entered != ENTERED_ENTERED) {
+            ent->movetype = MOVETYPE_NOCLIP;
+            ent->solid = SOLID_NOT;
+            ent->clipmask = 0;
+            ent->svflags |= SVF_NOCLIENT;
+            client->resp.osp_r2bc = 1;
+            client->resp.osp_r240 = 0;
+        } else {
+            // R-OSP-4: a client placed as a PLAYER is no longer looking at the
+            // death scoreboard, and its speed watch is re-armed ten seconds
+            // out.  `resp` is carried across the memset above, so these three do
+            // not come free with it.
+            ent->svflags &= ~SVF_NOCLIENT;
+            client->osp_t040 = 0;
+            client->osp_t03c = NULL;
+            client->resp.osp_r2dc = 0;
+            client->resp.osp_r2b8 = 0;
+            client->resp.osp_r2b4 = level.framenum + 100;
+        }
     }
 
     // clear playerstate values
@@ -1806,7 +2090,11 @@ void PutClientInServer(edict_t *ent)
     }
 
 //PGM
-    if (client->pers.weapon)
+    // ...and an observer sees no weapon, which under tourney is `osp_r240`
+    // rather than the weapon it is still carrying (the donor's own condition,
+    // here and again in ChangeWeapon).
+    if (client->pers.weapon &&
+        !(G_IsOspRuleset() && client->resp.osp_r240 != 2))
         client->ps.gunindex = gi.modelindex(client->pers.weapon->view_model);
     else
         client->ps.gunindex = 0;
@@ -1816,9 +2104,9 @@ void PutClientInServer(edict_t *ent)
     ent->s.sound = 0;
     ent->s.effects = 0;
     ent->s.renderfx = 0;
-        ent->s.skinnum = ent - g_edicts - 1;
-        ent->s.modelindex = MODELINDEX_PLAYER;  // will use the skin specified model
-        ent->s.modelindex2 = MODELINDEX_PLAYER; // custom gun model
+    ent->s.skinnum = ent - g_edicts - 1;
+    ent->s.modelindex = MODELINDEX_PLAYER;  // will use the skin specified model
+    ent->s.modelindex2 = MODELINDEX_PLAYER; // custom gun model
 
     ent->s.frame = 0;
 
@@ -1925,7 +2213,9 @@ void PutClientInServer(edict_t *ent)
         return;
     }
 
-    if (!KillBox(ent)) {
+    // An observer telefrags nobody: the donor's KillBox is behind the same
+    // `osp_r240 == 2` that decides whether this client is a body at all.
+    if (!(G_IsOspRuleset() && client->resp.osp_r240 != 2) && !KillBox(ent)) {
         // could't spawn in?
     }
 
@@ -1945,6 +2235,32 @@ void PutClientInServer(edict_t *ent)
         }
     }
 
+    // *** R-196: AFTER THE `ps` MEMSET, WHICH IS WHERE THE DONOR HAS IT. ***
+    //
+    // Tourney's HUD panels are `ps.stats` slots holding CONFIGSTRING INDICES --
+    // the match clock at SID_OSP_MATCHSTATE, the frag/rank pair or the two team
+    // columns, the id line -- and OSP_restartStats is what points them at their
+    // strings.  The merge called it in the tourney block near the top of this
+    // function, which is BEFORE `memset(&ent->client->ps, 0, sizeof(client->ps))`
+    // clears the whole playerstate.  So every placement wrote the four or six
+    // indices and then wiped them, and `if <stat>` in the statusbar hid every
+    // panel that depended on one.
+    //
+    // Played, which is the only way it shows: the clock is correct through the
+    // countdown -- OSP_CheckReady sets the same stat when the countdown starts
+    // and nothing respawns anybody between then and the bell -- and vanishes on
+    // the frame the match begins, because the match begins by killing and
+    // respawning every player.  It never comes back, because every later
+    // respawn wipes it again.  `scenarios/ospclock` reads all four layers
+    // separately (the composed bar, the client's copy of it, the stat, the
+    // configstring) so that the failure names this one.
+    //
+    // The donor's own position is `port_osp:p_client.c:1307`, immediately
+    // before these two lines.  The arena arm returns above and needs none of
+    // this.
+    if (G_IsOspRuleset())
+        OSP_restartStats(ent);
+
     // force the current weapon up
     client->newweapon = client->pers.weapon;
     ChangeWeapon(ent);
@@ -1962,7 +2278,20 @@ static void ClientBeginDeathmatch(edict_t *ent)
 {
     G_InitEdict(ent);
 
-    InitClientResp(ent->client);
+    // R-OSP-1: NOT for a recovered tourney client.  `resp.osp_r210` is set by
+    // OSP_recoverClient at connect time and means "this player is coming back
+    // to a seat they already had"; everything that seat is made of --
+    // resp.score, resp.team, resp.osp_entered and osp_r210 itself -- lives in
+    // client_respawn_t, which InitClientResp memsets.  Without the guard
+    // `client_recover` cannot fire at all: OSP_clientBeginPre and
+    // OSP_clientBegunPost both read osp_r210 AFTER this point and would see 0.
+    //
+    // The id is a separate half of the same defect and is fixed inside
+    // InitClientResp, which carries resp.clientid across its own memset the way
+    // the donor's does -- ClientBegin hands the id out through
+    // OSP_clientBeginLevel() BEFORE this runs.
+    if (!(G_IsOspRuleset() && ent->client->resp.osp_r210))
+        InitClientResp(ent->client);
 
     //PGM
     if (gamerules && gamerules->value && DMGame.ClientBegin) {
@@ -1972,7 +2301,7 @@ static void ClientBeginDeathmatch(edict_t *ent)
 
     // R-OSP-1/2: the four things tourney asks a connecting client for, and the
     // entered/active bookkeeping that has to happen before placement.
-    if (G_Ruleset() == RULESET_TOURNEY)
+    if (G_IsOspRuleset())
         OSP_clientBeginPre(ent);
 
     // locate ent at a spawn point
@@ -1987,6 +2316,19 @@ static void ClientBeginDeathmatch(edict_t *ent)
 
     if (level.intermission_framenum) {
         MoveClientToIntermission(ent);
+    } else if (G_IsOspRuleset()) {
+        // R-OSP-1, and UNCONDITIONALLY -- an arriving tourney client is an
+        // observer (R-191) and the donor announces it anyway, because
+        // OSP_playerAnnounce carries the only condition there is: in a live
+        // 1-vs-1 only the two duellists make a noise.  R-193 needs this arm
+        // written out, because G_IsObserver() now answers for this ruleset and
+        // the test below would have silenced every arrival.
+        //
+        // And NO teleport hold: the donor's ClientBeginDeathmatch has no such
+        // line -- respawn() is where it belongs -- and stamping
+        // PMF_TIME_TELEPORT on a client whose pmove type is PM_SPECTATOR pins
+        // its pitch for good (see respawn()'s own note).
+        OSP_playerAnnounce(ent, MZ_LOGIN);
     } else if (!G_IsObserver(ent)) {
         // send effect
         gi.WriteByte(svc_muzzleflash);
@@ -1999,12 +2341,18 @@ static void ClientBeginDeathmatch(edict_t *ent)
         ent->client->ps.pmove.pm_time = 200 >> PM_TIME_SHIFT;
     }
 
-    gi.bprintf(PRINT_HIGH, "%s entered the game\n", ent->client->pers.netname);
+    // NOT UNDER TOURNEY, where connecting is not entering: a client arrives as
+    // an OBSERVER and announces itself as "%s entered the game (clients = N)"
+    // from the six paths that actually put it in the match.  Announcing here
+    // as well called every connection a join and every join twice.  The donor
+    // deletes this line outright.
+    if (!G_IsOspRuleset())
+        gi.bprintf(PRINT_HIGH, "%s entered the game\n", ent->client->pers.netname);
 
     // R-OSP-1: and everything after placement, including the one arm that can
     // refuse the connection outright -- a match already running with
     // `match_latejoin` off.  True means the client is gone.
-    if (G_Ruleset() == RULESET_TOURNEY && OSP_clientBegunPost(ent))
+    if (G_IsOspRuleset() && OSP_clientBegunPost(ent))
         return;
 
     // R-OSP-11's bot half, and the same argument as arena's above: a tourney
@@ -2012,7 +2360,7 @@ static void ClientBeginDeathmatch(edict_t *ent)
     // cannot do.  After OSP_clientBegunPost rather than before it, because that
     // is where `resp.team` becomes 2 ("no team") and the team join reads it --
     // run before, the mode-2 join put every bot on team 0.
-    if (G_Ruleset() == RULESET_TOURNEY)
+    if (G_IsOspRuleset())
         OSP_botJoin(ent);
 
     // make sure all view stuff is valid
@@ -2072,7 +2420,7 @@ void ClientBegin(edict_t *ent)
     // and the 1-vs-1 queue.  Before ClientBeginDeathmatch rather than inside
     // it, because it also has to run for a client who was already here when
     // the level changed.
-    if (G_Ruleset() == RULESET_TOURNEY)
+    if (G_IsOspRuleset())
         OSP_clientBeginLevel(ent);
 
     if (deathmatch->value) {
@@ -2145,7 +2493,7 @@ void ClientUserinfoChanged(edict_t *ent, char *userinfo)
     // or too-frequent rename, forcing a qualifier skin -- and everything below
     // reads the edited copy, which is what makes the edit take effect.  It also
     // owns the rename logging and the green-text copy of the name.
-    if (G_Ruleset() == RULESET_TOURNEY)
+    if (G_IsOspRuleset())
         OSP_userinfoChanged(ent, userinfo);
 
     // set name
@@ -2192,13 +2540,49 @@ void ClientUserinfoChanged(edict_t *ent, char *userinfo)
     // happens to be valid again.  On a real arena map, where each client makes
     // a team of its own, it is a null dereference in ClientUserinfoChanged --
     // which BotSpawn calls for every bot before ClientBegin has reset resp.
-    if (G_Ruleset() == RULESET_ARENA && ent->client->resp.teamnum != -1 &&
-        teams[ent->client->resp.teamnum].it &&
-        ((team_t *)teams[ent->client->resp.teamnum].it)->skin != -1)
+    // *** R-170: `/nullxxx` IS WRITTEN BY THIS TREE, and the note that used to
+    // *** stand here said it was not. ***
+    //
+    // `setteamskin()` ends every one of its four arms with
+    // `stuffcmd(ent, "skin <model>/nullxxx\n")`.  That is 1999's way of forcing
+    // a client to stop drawing ITSELF in its own `skin` cvar and fall back to
+    // the configstring the server just wrote: point the cvar at a skin that
+    // does not exist.  The client obeys, reports the new userinfo, and arrives
+    // back here saying its skin is `male/nullxxx` -- which is exactly the case
+    // the donor's second branch is for, and which the merge dropped as
+    // unreachable.
+    //
+    // What it costs: a player who has since LEFT their team publishes
+    // `playerskins` as `<name>\<model>/nullxxx`, because their `skin` cvar is
+    // still whatever the last stuff set it to and nothing puts it back.  The
+    // donor substitutes `male/grunt` for exactly that client and restores the
+    // saved skin into `userinfo` for everyone else, so the server-side copy
+    // stops carrying a placeholder.
+    if (G_Ruleset() == RULESET_ARENA && strstr(s, "/nullxxx")) {
+        char    saved[MAX_QPATH];
+        team_t  *t = NULL;
+
+        if (ent->client->resp.teamnum != -1)
+            t = teams[ent->client->resp.teamnum].it;
+
+        // Copied out rather than aliased: Info_ValueForKey returns a rotating
+        // static and Info_RemoveKey below is entitled to use it too.
+        Q_strlcpy(saved, Info_ValueForKey(ent->client->pers.userinfo, "skin"),
+                  sizeof(saved));
+        Info_RemoveKey(userinfo, "skin");
+
+        if (!t || t->skin == -1) {
+            Q_strlcpy(saved, "male/grunt", sizeof(saved));
+            gi.configstring(game.csr.playerskins + playernum,
+                            va("%s\\%s", ent->client->pers.netname, saved));
+        }
+
+        Q_strlcat(userinfo, va("\\skin\\%s", saved), MAX_INFO_STRING);
+    } else if (G_Ruleset() == RULESET_ARENA && ent->client->resp.teamnum != -1 &&
+               teams[ent->client->resp.teamnum].it &&
+               ((team_t *)teams[ent->client->resp.teamnum].it)->skin != -1)
         // RA2 does the same thing for the same reason: on a team, the skin is
-        // the team's.  Its `/nullxxx` placeholder branch is not carried -- that
-        // string is written by RA2's own menu and means "no skin chosen", and
-        // nothing in this tree writes it.
+        // the team's.
         setteamskin(ent, userinfo, ((team_t *)teams[ent->client->resp.teamnum].it)->skin);
     else if (G_Ruleset() != RULESET_CTF)
         gi.configstring(game.csr.playerskins + playernum, va("%s\\%s", ent->client->pers.netname, s));
@@ -2209,7 +2593,15 @@ void ClientUserinfoChanged(edict_t *ent, char *userinfo)
     // extended one (13118) and a server without the extensions runs on
     // cs_remap_old, whose end is 2080 -- so the literal drops the server the
     // first time a client connects (doc/reconciliation.md R-62).
-    if (G_Ruleset() == RULESET_CTF)
+    //
+    // ...AND ARENA'S ID VIEW HAD THE SAME PROBLEM AND NO ANSWER TO IT.  RA2
+    // points its `stat_string` row straight at `playerskins + n`, and
+    // `stat_string` draws the configstring VERBATIM -- so an arena observer
+    // watching somebody read "Sarge\male/red" rather than "Sarge", the skin
+    // path and the separator included, and read it wider the longer the model
+    // name was.  Threewave hit that in 1998 and answered it with this line;
+    // 1999's Rocket Arena did not, and the answer transfers unchanged.
+    if (G_Ruleset() == RULESET_CTF || G_Ruleset() == RULESET_ARENA)
         gi.configstring(game.csr.general + playernum, ent->client->pers.netname);
 
     // fov
@@ -2261,6 +2653,25 @@ qboolean ClientConnect(edict_t *ent, char *userinfo)
 
     char    *value;
 
+    // R-RA-9: the connect-time half of RA2's ZBot detection.  The cheat client
+    // of the day announced itself by the port it connected from, so RA2 keeps
+    // the port and InitClientResp seeds `resp.isbot` from it.  Before the ban
+    // check, as the donor has it -- a banned client never reaches either.
+    if (G_Ruleset() == RULESET_ARENA) {
+        value = Info_ValueForKey(userinfo, "ip");
+        if (*value) {
+            // "<addr>:<port>", and an address with no port is not an error --
+            // a local client connects without one.
+            char *colon = strchr(value, ':');
+
+            if (colon) {
+                ent->client->zbotscore = atoi(colon + 1);
+                if (ent->client->zbotscore == RA_ZBOT_PORT)
+                    gi.dprintf("%s connected with ZBOT\n", userinfo);
+            }
+        }
+    }
+
     // check to see if they are on the banned IP list
     value = Info_ValueForKey(userinfo, "ip");
     if (SV_FilterPacket(value)) {
@@ -2306,7 +2717,7 @@ qboolean ClientConnect(edict_t *ent, char *userinfo)
     }
 
     // R-OSP-1: the player list gets a veto, with its own reason in `rejmsg`.
-    if (G_Ruleset() == RULESET_TOURNEY && !OSP_clientAllowed(ent, userinfo))
+    if (G_IsOspRuleset() && !OSP_clientAllowed(ent, userinfo))
         return false;
 
     // R-BOT-15.  This edict may be a BOT's -- G_SpawnClient hands bots the high
@@ -2326,16 +2737,66 @@ qboolean ClientConnect(edict_t *ent, char *userinfo)
     // they can connect
     ent->client = game.clients + (ent - g_edicts - 1);
 
+    // R-BOT-28: is this client the host of a LISTEN server?  Latched here and
+    // nowhere else, because here is the one place the value is the engine's:
+    // q2pro force-sets userinfo `ip` in the connect packet (`parse_userinfo`,
+    // from `NET_AdrToString`, which is the bare string "loopback" for
+    // NA_LOOPBACK and has no port), and it does so because G_FEATURES does not
+    // carry GMF_EXTRA_USERINFO -- with that bit the key arrives in the extra
+    // userinfo block instead.  Afterwards the key is the CLIENT's: a full
+    // userinfo update replaces the whole string and a delta writes any key at
+    // all, unfiltered, so `setu ip loopback` from any remote client would
+    // otherwise be a way into the menu that adds and removes bots.
+    //
+    // Written unconditionally, not set-if-true: this edict's slot may have
+    // belonged to the host before, and the preserve in InitClientPersistant
+    // would carry their exemption to whoever takes the seat next.
+    //
+    // `dedicated` is CVAR_NOSET, so the first half cannot be turned on under a
+    // running listen server.  A bot is never mistaken for the host: a fake
+    // client's userinfo is bl_spawn.c's own and has no `ip` at all.
+    //
+    // The force-set is what makes the key TRUSTWORTHY at connect -- it
+    // overwrites whatever the client sent -- and it is conditional on the
+    // library not asking for extra userinfo, so the condition is asserted
+    // rather than described: under GMF_EXTRA_USERINFO the engine leaves the
+    // normal userinfo alone and passes `ip` in a second infostring after the
+    // terminating NUL, and a client could then supply `\ip\loopback` in its
+    // own connect packet and be taken for the host.
+    _Static_assert(!(G_FEATURES & GMF_EXTRA_USERINFO),
+                   "the host exemption reads userinfo `ip`, which the engine "
+                   "force-sets only while the game does not want extra "
+                   "userinfo -- see ClientConnect");
+    ent->client->pers.listenhost =
+        !dedicated->value &&
+        !strcmp(Info_ValueForKey(userinfo, "ip"), "loopback");
+
     // A player who dropped mid-match gets their seat, score and team back if
     // they come back inside `team_recovertime` -- which is what the pause in
     // ClientDisconnect is waiting for.  Before InitClientResp, because that is
     // what it has to survive.
-    if (G_Ruleset() == RULESET_TOURNEY)
+    if (G_IsOspRuleset())
         OSP_recoverClient(ent, userinfo);
 
     // if there is already a body waiting for us (a loadgame), just
     // take it, otherwise spawn one from scratch
-    if (ent->inuse == false) {
+    //
+    // R-OSP-1: NOT for a client that is taking its own seat back.  `osp_r210`
+    // is what OSP_recoverClient just set, and the seat -- score, team, entered,
+    // client id -- is exactly what these two calls would clear.  The donor
+    // carries the same guard, in this same place.
+    if (ent->inuse == false &&
+        !(G_IsOspRuleset() && ent->client->resp.osp_r210)) {
+        // ...and a client that is NOT recovering must not inherit the previous
+        // occupant of this slot either.  SpawnEntities deliberately carries
+        // four edict fields across a level change (see g_spawn.c), so the
+        // address and the remembered default team have to be cleared for a new
+        // arrival here, where the donor clears them.
+        if (G_IsOspRuleset()) {
+            ent->osp_e37c[0] = 0;
+            ent->osp_e3a0[0] = 0;
+            ent->osp_e3b0[0] = 0;
+        }
         // clear the respawning variables.  Under ctf, force a team join and turn
         // the player-id display on: R-CTF-6 wants id on by default, and
         // InitClientResp preserves both fields rather than setting them, so they
@@ -2376,7 +2837,7 @@ qboolean ClientConnect(edict_t *ent, char *userinfo)
     if (game.maxclients > 1)
         gi.dprintf("%s connected\n", ent->client->pers.netname);
 
-    if (G_Ruleset() == RULESET_TOURNEY)
+    if (G_IsOspRuleset())
         OSP_clientConnected(ent, userinfo);
 
     ent->svflags = 0; // make sure we start with known default
@@ -2404,7 +2865,7 @@ void ClientDisconnect(edict_t *ent)
     if (G_Ruleset() == RULESET_ARENA)
         GSLogExit(ent);
 
-    if (G_Ruleset() == RULESET_TOURNEY) {
+    if (G_IsOspRuleset()) {
         // Tourney announces the departure itself, at the end and with the
         // client count -- "wimped out and left. (clients = 3)" -- so the plain
         // line here would be a duplicate.
@@ -2496,7 +2957,7 @@ void ClientDisconnect(edict_t *ent)
     // R-OSP-1: the half that needs the slot already free -- the recount, the
     // recover seat, the chase cams that were watching this player, and the
     // pause that waits for the last member of a team to come back.
-    if (G_Ruleset() == RULESET_TOURNEY && OSP_clientLeft(ent, osp_team))
+    if (G_IsOspRuleset() && OSP_clientLeft(ent, osp_team))
         return;
 
     // FIXME: don't break skins on corpses, etc
@@ -2602,10 +3063,55 @@ static void ClientLagThink(edict_t *ent, usercmd_t *ucmd)
 
     // fire weapon from final position if needed
     if (client->latched_buttons & BUTTON_ATTACK) {
+        // *** TOURNEY'S OBSERVER INPUT IS NOT BASEQ2'S, and R-193 is where it
+        // arrives. ***  baseq2 gives a spectator one key: ATTACK toggles the
+        // chase cam.  The donor gives a free-flying observer a MENU on the
+        // first press and the AUTOCAM on every one after it, and reaches the
+        // chase camera from the autocam rather than from here -- so this arm
+        // has to run instead of the two below, which the widened G_IsObserver()
+        // would otherwise send an OSP observer into.
+        //
+        // `osp_r02c` is "this client has been offered its menu once", which is
+        // what makes the first press different from the rest; `sync_stat != 4`
+        // is "no match is running", because during a match the menu is not what
+        // ATTACK is for.  The three menus are the donor's own three-way choice:
+        // teams get the team menu, a client that has never entered gets put into
+        // OBSERVE properly, and everybody else gets the DM menu.
+        if (G_IsOspRuleset() && client->resp.osp_entered == ENTERED_OBSERVER &&
+            client->resp.osp_r010 <= level.framenum) {
+            if (G_MenuActive(ent)) {
+                Cmd_InvUse_f(ent);
+            } else if (sync_stat != 4 && !client->resp.osp_r02c) {
+                client->resp.osp_r02c = 1;
+                if (OSP_IsTeams())
+                    OSP_teamMenu(ent);
+                else if (!client->resp.osp_r030)
+                    OSP_startObserve(ent);
+                else
+                    OSP_DMMenu(ent);
+            } else if (active_clients) {
+                client->resp.score = client->resp.osp_r248;
+                CameraCmd(ent, false);
+                gi.cprintf(ent, PRINT_HIGH, "Changing to AUTOCAM mode.\n");
+                client->resp.osp_r010 = level.framenum + 8;
+                return;
+            } else {
+                gi.cprintf(ent, PRINT_HIGH, "No clients to track.\n");
+                client->resp.osp_r010 = level.framenum + 8;
+                return;
+            }
+            client->resp.osp_r010 = level.framenum + 2;
+            client->latched_buttons = 0;
+        } else if (G_IsOspRuleset() && G_IsObserver(ent)) {
+            // A tourney client in a CAMERA -- chasecam, in-eyes or autocam --
+            // had its press read before pmove (the chase branch above, and
+            // OSP_clientThink for the autocam), so there is nothing left to do
+            // with it here and baseq2's chase toggle must not have it.
+            client->latched_buttons = 0;
         // G_IsObserver, not resp.spectator: under ctf an observer is a
         // CTF_NOTEAM player, so the inherited test would let him shoot
         // (R-CTF-3's "observers cannot fire it", R-CTF-5).
-        if (G_IsObserver(ent) && G_Ruleset() != RULESET_ARENA) {
+        } else if (G_IsObserver(ent) && G_Ruleset() != RULESET_ARENA) {
             client->latched_buttons = 0;
 
             if (client->chase_target) {
@@ -2637,7 +3143,11 @@ static void ClientLagThink(edict_t *ent, usercmd_t *ucmd)
         }
     }
 
-    if (G_IsObserver(ent) && G_Ruleset() != RULESET_ARENA) {
+    // Tourney is excluded for the same reason as the ATTACK block above: jump
+    // cycles the chase target INSIDE the chase branch there (R-193), before
+    // pmove, and running baseq2's cycle as well would step two targets per
+    // press.
+    if (G_IsObserver(ent) && G_Ruleset() != RULESET_ARENA && !G_IsOspRuleset()) {
         if (ucmd->upmove >= 10) {
             if (!(client->ps.pmove.pm_flags & PMF_JUMP_HELD)) {
                 client->ps.pmove.pm_flags |= PMF_JUMP_HELD;
@@ -2671,6 +3181,102 @@ void ClientThink(edict_t *ent, usercmd_t *ucmd)
 
     if (level.intermission_framenum) {
         client->ps.pmove.pm_type = PM_FREEZE;
+
+        // *** WHAT TOURNEY DOES TO A CLIENT WHEN THE LEVEL ENDS, and R-193 is
+        // where it arrives: the whole per-client block was missing. ***  Once,
+        // two seconds in, and never for a bot:
+        //
+        //   * the demo it was told to record is STOPPED -- and a referee's or a
+        //     player's demo at setting 2 gets a screenshot of the final board,
+        //     which is the point of taking one at all;
+        //   * it hears the end-of-match music.  `wav_file` -- five 25-byte
+        //     tunes in one array, which this tree carried and never read -- is
+        //     the free-for-all default, `match_endmusic` overrides it, and a
+        //     TEAM ruleset plays the winner and the loser different ones;
+        //   * an entered client is shown its accuracy page, which until now was
+        //     only reachable by typing `accuracy`;
+        //   * whatever menu it had open is closed, and the recover latch is
+        //     dropped so the next level starts it fresh.
+        //
+        // `osp_r01c` bit 0x10 is the "already done" latch -- the same field
+        // whose low three bits are the countdown announcer's, which is why it is
+        // ORed rather than assigned.
+        if (G_IsOspRuleset() &&
+            !(client->resp.osp_r01c & 0x10) &&
+            level.framenum > level.intermission_framenum + 2 * BASE_FRAMERATE &&
+            !(ent->flags & FL_BOT)) {
+            char cmd[64];
+
+            if (client->resp.osp_r234)
+                stuffcmd(ent, ((ent->osp_e39c == 1 && demo_referee->value > 1) ||
+                               demo_player->value > 1)
+                              ? "stop; screenshot\n" : "stop\n");
+
+            if (!OSP_IsTeams()) {
+                if (!match_endmusic || !match_endmusic->string[0] ||
+                    !strcmp(match_endmusic->string, "default"))
+                    Q_snprintf(cmd, sizeof(cmd), "play %s\n",
+                               wav_file + (Q_rand() % 5) * 25);
+                else
+                    Q_snprintf(cmd, sizeof(cmd), "play %s\n",
+                               match_endmusic->string);
+            } else if (OSP_teamLost(client->resp.team)) {
+                Q_strlcpy(cmd, "play makron/laf4.wav\n", sizeof(cmd));
+            } else {
+                Q_strlcpy(cmd, "play world/xian1.wav\n", sizeof(cmd));
+            }
+            stuffcmd(ent, cmd);
+
+            client->resp.osp_r01c |= 0x10;
+            OSP_hookoff_cmd(ent);
+            if (client->resp.osp_entered == ENTERED_ENTERED)
+                OSP_accuracyInfo(ent, client->pers.netname,
+                                 client->resp.clientid);
+            OSP_closeMenus();
+            client->resp.osp_r210 = 0;
+        }
+
+        // ...and the board a player who died into the intermission is owed.
+        // `osp_r2dc` 2 is written by BeginIntermission for exactly that client
+        // and this is its reader -- R-193 again, and p_hud.c's comment beside
+        // the write named OSP_clientThink, which reads the value 1 and not this
+        // one.  1.25 seconds, so the board arrives after the level-end board
+        // rather than under it.
+        if (G_IsOspRuleset() && client->resp.osp_r2dc == 2 &&
+            level.framenum > level.intermission_framenum + 1.25f * BASE_FRAMERATE &&
+            !(ent->flags & FL_BOT)) {
+            client->resp.osp_r2dc = 0;
+            DeathmatchScoreboard(ent);
+        }
+
+        // R-193: TOURNEY'S INTERMISSION HAS TWO TIMERS and neither was wired.
+        // `nextlevel_click` (15s) is how long a press is ignored for, and
+        // `nextlevel_lazy` -- registered under the donor's own spelling
+        // `nextlevel_default`, 45s -- ends the intermission with no press at
+        // all, which is what a server with nobody willing to click needs.  Both
+        // were registered, one of them was even written by the map loop, and
+        // nothing read either: an intermission ended on the first press after
+        // baseq2's five seconds, or never.  A live match (`sync_stat` 4) waits
+        // the full settings; anything else -- warmup, or a manual `map` -- takes
+        // the donor's short 7 and 15.
+        if (G_IsOspRuleset()) {
+            float t = (level.framenum - level.intermission_framenum) /
+                      (float)BASE_FRAMERATE;
+            bool warmup = sync_stat < 4 || manual_map;
+
+            if (((t > nextlevel_click->value && (int)nextlevel_click->value) ||
+                 (warmup && t > 7.0f)) && (ucmd->buttons & BUTTON_ANY)) {
+                level.exitintermission = true;
+                start_count = 0;
+            }
+            if ((t > nextlevel_lazy->value && (int)nextlevel_lazy->value) ||
+                (warmup && t > 15.0f)) {
+                level.exitintermission = true;
+                start_count = 0;
+            }
+            return;
+        }
+
         // can exit intermission after five seconds
         if (level.framenum > level.intermission_framenum + 5.0f * BASE_FRAMERATE
             && (ucmd->buttons & BUTTON_ANY))
@@ -2690,7 +3296,7 @@ void ClientThink(edict_t *ent, usercmd_t *ucmd)
     // R-OSP-1/R-EXTRA-6: tourney's autocam is not a chase cam -- it picks its
     // own subject and its own position -- so it takes the whole frame, before
     // either the chase-cam branch or pmove.
-    if (G_Ruleset() == RULESET_TOURNEY && OSP_clientThink(ent, ucmd))
+    if (G_IsOspRuleset() && OSP_clientThink(ent, ucmd))
         return;
 
     // R-EXTRA-6: the Gladiator observer, in the place the donor put it -- after
@@ -2706,6 +3312,72 @@ void ClientThink(edict_t *ent, usercmd_t *ucmd)
         client->resp.cmd_angles[0] = SHORT2ANGLE(ucmd->angles[0]);
         client->resp.cmd_angles[1] = SHORT2ANGLE(ucmd->angles[1]);
         client->resp.cmd_angles[2] = SHORT2ANGLE(ucmd->angles[2]);
+
+        // *** R-OSP-1'S CHASE CAMERA HAS CONTROLS, and R-193 is where they
+        // arrive. ***  Four inputs, and the observer's own edict holds their
+        // state because a frozen camera has no use for the fields: `speed` is
+        // the zoom distance (seeded from `camera_depth` by OSP_ChaseCam),
+        // `osp_t018` the free-look yaw offset, and `movedir` the pair
+        // UpdateChaseCam adds to the target's view angles.
+        //
+        // The donor stores that yaw as a FLOAT punned into an int field
+        // (`*(float *)&client->osp_t018`) and then takes `% 360` of it as an
+        // int, so the value is always an integral number of degrees; it is kept
+        // as the int it is declared to be, which is the same number without the
+        // type punning.  Its `avelocity` write is NOT carried: the donor's own
+        // comment calls it the frame-to-frame delta for a chained chasecam and
+        // nothing in the donor ever reads it, so porting it would add exactly
+        // the dead state R-192 exists to find.
+        if (G_IsOspRuleset()) {
+            // The latch is computed HERE, as the donor's chase branch does,
+            // because this runs before pmove and ClientLagThink -- which is
+            // where the rest of the tree latches -- runs after it.  Reading the
+            // latch without setting it reads the previous frame's, which
+            // ClientBeginServerFrame has already cleared: measured as a chase
+            // camera whose ATTACK did nothing at all.  ClientLagThink's own
+            // `|=` then adds nothing, since `buttons & ~oldbuttons` is 0 once
+            // this has run.
+            client->oldbuttons = client->buttons;
+            client->buttons = ucmd->buttons;
+            client->latched_buttons = client->buttons & ~client->oldbuttons;
+
+            if (ucmd->forwardmove < 0) {
+                ent->speed += 1.0f;
+            } else if (ucmd->forwardmove > 0) {
+                // Floors at zero, which is the donor's post-decrement written
+                // out: at 0 the test passes, the decrement runs and the clamp
+                // puts it back.
+                if (ent->speed <= 0)
+                    ent->speed = 0;
+                else
+                    ent->speed -= 1.0f;
+            }
+
+            if (ucmd->sidemove > 0)
+                client->osp_t018 = (client->osp_t018 + 4) % 360;
+            else if (ucmd->sidemove < 0)
+                client->osp_t018 = (client->osp_t018 - 4) % 360;
+
+            if ((client->latched_buttons & BUTTON_ATTACK) &&
+                client->resp.osp_r010 <= level.framenum) {
+                if (G_MenuActive(ent)) {
+                    Cmd_InvUse_f(ent);
+                } else if (client->resp.osp_entered == ENTERED_CHASECAM) {
+                    // ...and the mode cycle: chasecam -> in-eyes -> out.
+                    gi.cprintf(ent, PRINT_HIGH, "Changing to IN-EYES mode.\n");
+                    client->resp.osp_entered = ENTERED_INEYES;
+                    OSP_Stats_PlayerMode(ent, "In-eyes");
+                } else {
+                    OSP_removeChaseCam(ent);
+                }
+                client->resp.osp_r010 = level.framenum + 2;
+                client->latched_buttons &= ~BUTTON_ATTACK;
+            } else if (ucmd->upmove && !G_MenuActive(ent) &&
+                       client->resp.osp_r010 <= level.framenum) {
+                ChaseNext(ent);
+                client->resp.osp_r010 = level.framenum + 8;
+            }
+        }
     } else {
         // set up for pmove
         memset(&pm, 0, sizeof(pm));
@@ -2718,6 +3390,17 @@ void ClientThink(edict_t *ent, usercmd_t *ucmd)
             client->ps.pmove.pm_type = PM_DEAD;
         else
             client->ps.pmove.pm_type = PM_NORMAL;
+
+        // R-OSP-1: ENTERED BUT NOT YET PLACED, which is a state of its own and
+        // the donor freezes it.  Tourney's join commands do not place anybody:
+        // they set `osp_entered` and clear `osp_r240`, and the respawn below is
+        // what turns that into a body on the next think.  For the frame or two
+        // in between -- and for as long as a refused spawn keeps retrying -- the
+        // client must not be able to walk, which is what this override is.
+        if (G_IsOspRuleset() &&
+            client->resp.osp_entered == ENTERED_ENTERED &&
+            !client->resp.osp_r240)
+            client->ps.pmove.pm_type = PM_FREEZE;
 
         pm_passent = ent;
         if (ent->health > 0)
@@ -2788,7 +3471,7 @@ void ClientThink(edict_t *ent, usercmd_t *ucmd)
         // has KICKED the client, and the frame ends there rather than running a
         // pmove for an edict that is on its way out -- the corrupt unicast
         // R-OSP-4 names came from doing it the other way round.
-        if (G_Ruleset() == RULESET_TOURNEY && bot_watch &&
+        if (G_IsOspRuleset() && bot_watch &&
             !(ent->flags & FL_BOT) && OSP_botDetect(ent, ucmd))
             return;
 
@@ -2812,7 +3495,18 @@ void ClientThink(edict_t *ent, usercmd_t *ucmd)
         client->resp.cmd_angles[1] = SHORT2ANGLE(ucmd->angles[1]);
         client->resp.cmd_angles[2] = SHORT2ANGLE(ucmd->angles[2]);
 
-        if (~client->ps.pmove.pm_flags & pm.s.pm_flags & PMF_JUMP_HELD && pm.waterlevel == 0) {
+        // R-169: RA2 adds `fightstate == FIGHT_ALIVE` here, and it is the same
+        // thought as the landing sound g_phys.c already gates -- an observer is
+        // a body in the room that nobody is supposed to hear.  It matters in
+        // the lobby rather than in a live arena: move_to_arena() puts observers
+        // in an ACTIVE arena on OMODE_FREEFLYING, which is PM_SPECTATOR and
+        // never raises PMF_JUMP_HELD, while arena 0 leaves them walking.
+        //
+        // Ruleset-gated because `fightstate` is FIGHT_SPECTATING for every
+        // client under every other ruleset, where it means nothing.
+        if (~client->ps.pmove.pm_flags & pm.s.pm_flags & PMF_JUMP_HELD && pm.waterlevel == 0 &&
+            (G_Ruleset() != RULESET_ARENA ||
+             client->resp.fightstate == FIGHT_ALIVE)) {
             gi.sound(ent, CHAN_VOICE, gi.soundindex("*jump1.wav"), 1, ATTN_NORM, 0);
             PlayerNoise(ent, ent->s.origin, PNOISE_SELF);
         }
@@ -2853,7 +3547,7 @@ void ClientThink(edict_t *ent, usercmd_t *ucmd)
         // player on it.  A single pull with tunables would have to reconcile
         // two different state machines, which is the merit choice R-50 refused.
         if (client->ctf_grapple) {
-            if (G_Ruleset() == RULESET_TOURNEY)
+            if (G_IsOspRuleset())
                 GrapplePull(client->ctf_grapple);
             else
                 CTFGrapplePull(client->ctf_grapple);
@@ -2882,6 +3576,12 @@ void ClientThink(edict_t *ent, usercmd_t *ucmd)
     }
 
     if (G_Ruleset() == RULESET_ARENA) {
+        // The latch clear is the donor's own separate statement rather than an
+        // arm of the chain below, because the chain has a second arm now and a
+        // released key has to reach this whichever of them ran.
+        if (ucmd->upmove == 0)
+            client->resp.omode_buttons &= ~2;
+
         if (client->resp.fightstate == FIGHT_SPECTATING &&
             (client->resp.omode == OMODE_TRACKCAM ||
              client->resp.omode == OMODE_EYECAM) && ucmd->upmove != 0) {
@@ -2894,10 +3594,35 @@ void ClientThink(edict_t *ent, usercmd_t *ucmd)
                     track_prev(ent);
                 client->resp.omode_buttons |= 2;
             }
-        } else if (ucmd->upmove == 0) {
-            client->resp.omode_buttons &= ~2;
+        // R-168: RA2's one map-specific hack, and it is an ESCAPE HATCH.
+        // `ra2map13` arena 1 has somewhere above z 388 that a player can reach
+        // and cannot leave, so crouching up there kills them.  The merge
+        // dropped it.  `kill` is live here where it is not in RA2 (R-166), so
+        // the player was not actually trapped -- but a 1999 client is bound for
+        // crouch and not for `kill`, and this is the way out the map was built
+        // with.  `ra2map13` is in the shipped maploop.
+        //
+        // Kept exactly as the donor has it, map name and constant included:
+        // this is a fact about one BSP, not a rule, and generalising it would
+        // be inventing a rule RA2 does not have.
+        } else if (ucmd->upmove < 0 && client->resp.context == 1 &&
+                   ent->s.origin[2] >= 388 &&
+                   !Q_stricmp(level.mapname, "ra2map13")) {
+            T_Damage(ent, ent, ent, vec3_origin, ent->s.origin, vec3_origin,
+                     100000, 0, DAMAGE_NO_PROTECTION, MOD_TELEFRAG);
         }
     }
+
+    // R-OSP-4: the ping, inactivity and framerate rules, from the position the
+    // pmove above just settled on.  True means the client has been
+    // disconnected or moved to observer and nothing below may touch it.
+    //
+    // Not for a client on a chase cam: the donor's block sits inside the arm
+    // that ran a pmove, and the chase arm returns before reaching it.  A
+    // spectator is not holding a match up and is not worth kicking for ping.
+    if (G_IsOspRuleset() && !client->chase_target &&
+        OSP_clientPolice(ent, ucmd))
+        return;
 
     // R-EXTRA-2: everything from here to the end of ClientLagThink is what the
     // lag simulation REPLAYS.  It is the button half -- the latch, the light
@@ -2921,16 +3646,45 @@ void ClientThink(edict_t *ent, usercmd_t *ucmd)
         ClientLagThink(ent, ucmd);
     }
 
+    // *** AND THIS IS HOW A TOURNEY CLIENT GETS A BODY. ***
+    //
+    // None of the six paths that enter the game place anybody: `join`, the team
+    // join, the team menus, the 1v1 queue, a bot's join and a recovered seat all
+    // set `osp_entered` to ENTERED_ENTERED and `osp_r240` to 0, and the donor
+    // lets the next think notice the pair and respawn.  One trigger serves all
+    // six, and it serves a seventh case as well -- a placement that was REFUSED
+    // leaves `osp_r240` 0, so the retry is the same line.
+    //
+    // The merge dropped it along with every write of `osp_r240` 2, which is why
+    // the two halves hid each other: with the flag never set, `!osp_r240` was
+    // always true and a trigger on its own would have respawned every client on
+    // every frame.  Both halves or neither.
+    //
+    // NOT inside ClientLagThink, which is the half R-EXTRA-2 replays once per
+    // delayed command: a respawn is a placement rather than an input, and the
+    // donor's own position for it -- after the buttons, before the ping
+    // sampler -- is this one relative to pmove.
+    if (G_IsOspRuleset() &&
+        client->resp.osp_entered == ENTERED_ENTERED &&
+        !client->resp.osp_r240)
+        respawn(ent);
+
     // CTF regeneration tech.  A no-op without it.
     CTFApplyRegeneration(ent);
 
     // Tourney's regeneration rune is the same concept on the same frame.
-    if (G_Ruleset() == RULESET_TOURNEY && (rune_stat & RUNE_REGEN))
+    if (G_IsOspRuleset() && (rune_stat & RUNE_REGEN))
         OSP_runesApplyRegeneration(ent);
 
     // R-CTF-3's offhand hook fires from here rather than from a weapon think,
-    // which is what makes it offhand.
-    CTFHookThink(ent);
+    // which is what makes it offhand.  R-164: under arena the switch is not
+    // `ctf_hook` -- which is registered for every ruleset and would never say
+    // no -- but arena.cfg's `grapple:` key, and there is a second condition on
+    // it besides.  RA2 asks both in its own Think_Weapon; this is that block.
+    if (G_Ruleset() == RULESET_ARENA)
+        RA_HookThink(ent);
+    else
+        CTFHookThink(ent);
 
     // update chase cam if being followed
     for (i = 1; i <= game.maxclients; i++) {
@@ -2942,9 +3696,19 @@ void ClientThink(edict_t *ent, usercmd_t *ucmd)
     // R-MENU-4: a menu redraw this frame's input earned, rate-limited by the
     // engine rather than by how fast the player presses the key.
     if (client->menudirty && client->menutime <= level.time) {
-        if (G_MenuActive(ent) && client->menu_owner == MENU_CTF) {
-            ctf_PMenu_Do_Update(ent);
-            gi.unicast(ent, true);
+        // Two engines share the pair, because one menu is open at a time
+        // (R-MENU-3) and a per-engine `menutime` would be a second answer to
+        // the question `menu_owner` already answers.  MENU_ARENA is absent on
+        // purpose: it repaints CS_STATUSBAR from its own MenuThink cadence and
+        // never marks this flag.
+        if (G_MenuActive(ent)) {
+            if (client->menu_owner == MENU_CTF) {
+                ctf_PMenu_Do_Update(ent);
+                gi.unicast(ent, true);
+            } else if (client->menu_owner == MENU_TOURNEY) {
+                osp_PMenu_Do_Update(ent);
+                gi.unicast(ent, true);
+            }
         }
         client->menutime = level.time;
         client->menudirty = false;
@@ -2969,14 +3733,12 @@ void ClientBeginServerFrame(edict_t *ent)
 
     client = ent->client;
 
-    // R-OSP-4: the speed-cheat detector, which samples what the client claims
-    // it moved against what the server let it move.  `pers.spectator` is
-    // tourney's strike counter for it and NOT baseq2's spectator flag -- the
-    // two share a name in the merged struct and the first strike would
-    // otherwise have made the player a spectator (SPECS.md 1.19, R-58).
-    if (G_Ruleset() == RULESET_TOURNEY) {
-        OSP_speedDetect(ent);
-    } else if (deathmatch->value &&
+    // baseq2's spectator toggle.  Not under an OSP ruleset: `pers.spectator`
+    // is tourney's speed-cheat strike counter there and NOT baseq2's spectator
+    // flag -- the two share a name in the merged struct, and the first strike
+    // would otherwise have turned the player into a spectator (SPECS.md 1.19,
+    // R-58).  Tourney's own observer path is `observe` / OSP_startObserve.
+    if (!G_IsOspRuleset() && deathmatch->value &&
 
         client->pers.spectator != client->resp.spectator &&
 
@@ -2989,7 +3751,27 @@ void ClientBeginServerFrame(edict_t *ent)
     }
 
     // run weapon animations if it hasn't been done by a ucmd_t
-    if (!client->weapon_thunk && !G_IsObserver(ent))
+    //
+    // *** "IS THIS CLIENT WATCHING" AND "DOES THIS CLIENT HAVE A BODY" ARE NOT
+    // THE SAME QUESTION UNDER TOURNEY, and only the second one may open the
+    // weapon. ***  The donor asks `resp.osp_r240 == 2` here -- placed as a body
+    // -- and G_IsObserver() asks `osp_entered != ENTERED_ENTERED`, which is
+    // "has not joined".  They agree for every client except the one state that
+    // is BOTH: a player whose placement was REFUSED (R-191).  SelectSpawnPoint
+    // says no when every spawn point on the map has somebody standing on it, and
+    // PutClientInServer then returns early leaving that client MOVETYPE_NOCLIP,
+    // SOLID_NOT, SVF_NOCLIENT and PM_FREEZE -- invisible, intangible, exactly an
+    // observer to look at -- with `osp_entered` ENTERED_ENTERED, so this test
+    // called it a player and ran its weaponthink.  The early return also skips
+    // the `gunindex` write and the ChangeWeapon at the end of the function, so
+    // the view model it had before is still on its screen: a client that is an
+    // observer in every visible respect, holding a weapon, able to fire it.
+    //
+    // The retry at the end of ClientThink shortens the window to whatever a
+    // full map lasts, which is why it is a narrow bug rather than a permanent
+    // one -- and is not a reason to leave the gate reading the wrong field.
+    if (!client->weapon_thunk &&
+        (G_IsOspRuleset() ? client->resp.osp_r240 == 2 : !G_IsObserver(ent)))
         Think_Weapon(ent);
     else
         client->weapon_thunk = false;
@@ -3003,8 +3785,27 @@ void ClientBeginServerFrame(edict_t *ent)
             else
                 buttonMask = -1;
 
+            // R-185: `respawn_delay` is the term the import dropped from the
+            // forced-respawn arm -- upstream's `p_client.c:2625` has it and
+            // ours did not, so the cvar was registered and read by nobody.
+            // It answers 0 outside the OSP rulesets, and 0 makes this test the
+            // same one as the `if` above, so nothing changes by default.
+            //
+            // Only the DF_FORCE_RESPAWN arm is delayed.  CTF's match respawn
+            // and the arena's are not the donor's and have no such cvar.
+            //
+            // *** SO THE FIRST ARM MAKES THIS CVAR INVISIBLE TO A BOT. ***
+            // A dead player who presses attack respawns through
+            // `latched_buttons` no matter what the delay is, and a bot holds
+            // attack -- which is why no bot test can measure `respawn_delay`
+            // and why R-185 does not claim one.  The cvar's whole purpose is
+            // the player who does NOT press a button, which is the case
+            // DF_FORCE_RESPAWN exists for.  Upstream reads the same way.
+            int forced_wait = G_IsOspRuleset() ? OSP_forcedRespawnDelay() : 0;
+
             if ((client->latched_buttons & buttonMask) ||
-                (deathmatch->value && ((int)dmflags->value & DF_FORCE_RESPAWN)) ||
+                (deathmatch->value && ((int)dmflags->value & DF_FORCE_RESPAWN) &&
+                 level.framenum > client->respawn_framenum + forced_wait) ||
                 CTFMatchOn() || G_Ruleset() == RULESET_ARENA) {
                 respawn(ent);
                 client->latched_buttons = 0;
@@ -3019,6 +3820,26 @@ void ClientBeginServerFrame(edict_t *ent)
             PlayerTrail_Add(ent->s.old_origin);
 
     client->latched_buttons = 0;
+
+    // R-OSP-4's speed-cheat sampler, LAST in the frame because it can end with
+    // ClientDisconnect(ent) -- nothing below may then touch the edict.
+    //
+    // ALL FIVE TERMS MATTER, and the first is the schedule.  OSP_speedDetect
+    // opens with a reliable `cmd _init_state $timescale` stufftext and ends by
+    // re-arming itself at `level.framenum + rand(0..30) + 200` -- twenty-odd
+    // seconds -- so `osp_r2b4 == level.framenum` is what makes it a sample
+    // rather than a broadcast.  Called under the ruleset gate alone it stuffed
+    // a console command into every client ten times a second (measured: 30 in
+    // three seconds), and `osp_r2b4` was written and read by nobody.
+    // `osp_r2b8 == 16` is "not being watched": set for a bot, and for a client
+    // that connected while `bot_watch` was off.
+    if (G_IsOspRuleset() &&
+        client->resp.osp_r2b4 == level.framenum &&
+        client->resp.osp_r2b8 != 16 &&
+        client->resp.osp_entered == ENTERED_ENTERED &&
+        bot_watch &&
+        !(ent->flags & FL_BOTCLIENT))
+        OSP_speedDetect(ent);
 }
 
 /*

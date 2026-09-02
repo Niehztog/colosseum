@@ -43,8 +43,11 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #define MAX_NETWORKMESSAGE              (0x8000 + 4096)
 // MZ_NUKE8 is 38, not 31.  The 1999 constant of 32 predates Ground Zero's
 // flashes, and with it every rogue row in the table below indexes past the end
-// of muzzleflashsoundindex[] -- harmlessly today, because all ten of them have
-// no sound, and not harmlessly the moment one gains one.
+// of muzzleflashsoundindex[].  That used to be harmless only because all ten of
+// those rows had no sound; R-183 gave two of them one (MZ_ETF_RIFLE at 30 and
+// MZ_TRACKER at 35), so the write at muzzleflashsoundindex[mf] now actually
+// happens above 31 and this constant is the only reason it lands inside the
+// array.
 #define MAX_MUZZLEFLASHES               64
 
 //the gi will be redirected through botimport
@@ -182,17 +185,46 @@ static bot_muzzleflashinfo_t muzzleflashinfo[MAX_MUZZLEFLASHES] =
     {MZ_LOGOUT,         NULL},
     {MZ_RESPAWN,        "misc/spawn1.wav"},
     {MZ_ITEMRESPAWN,    "items/respawn1.wav"},
+    // R-183.  Every mission-pack row arrived NULL and stayed NULL, so a bot
+    // could not HEAR those weapons fire: BotInitMuzzleFlashToSoundindex leaves
+    // muzzleflashsoundindex[] at 0 for a row with no sound, and a flash the
+    // brain has no sound for is a shot it never notices.
+    //
+    // Every name below is the ENGINE'S, read out of q2pro's CL_MuzzleFlash.
+    // This table is the brain's copy of the client's, so a name invented here
+    // would have the bot listening for a sound no client plays -- and the name
+    // has to be one the GAME precaches too, because the lookup below resolves
+    // it against the live configstring sound table and an unprecached name
+    // silently resolves to 0.  All five are in the itemlist's own precache
+    // strings or in an explicit gi.soundindex.
     //RAFAEL
-    {MZ_IONRIPPER,      NULL},
-    {MZ_BLUEHYPERBLASTER, NULL},
-    {MZ_PHALANX,        NULL},
+    {MZ_IONRIPPER,      "weapons/rippfire.wav"},
+    {MZ_BLUEHYPERBLASTER, "weapons/hyprbf1a.wav"},
+    {MZ_PHALANX,        "weapons/plasshot.wav"},
     //END RAFAEL
     //ROGUE
-    {MZ_ETF_RIFLE,      NULL},
+    {MZ_ETF_RIFLE,      "weapons/nail1.wav"},
+    // THE REMAINING ROGUE ROWS STAY NULL, each for its own reason, and none of
+    // them is an omission:
+    //
+    //  * MZ_HEATBEAM and the four NUKES: the ENGINE plays nothing.
+    //    CL_MuzzleFlash's MZ_HEATBEAM case has its S_StartSound commented out
+    //    and the nuke cases only light the room.  A sound here would be one
+    //    that only the bot could hear.
+    //  * MZ_PROX, MZ_SHOTGUN2 and MZ_BLASTER2: this GAME never writes them.
+    //    They are engine enum values (31, 32, 34) that no gi.WriteByte in the
+    //    tree emits, so a sound on them could never fire.  Listed anyway, with
+    //    the reason, so the next reader does not take the gap for the same
+    //    oversight the four rows above it were.
+    //  * MZ_SHOTGUN2 additionally has NO single right answer: the remaster
+    //    overloads it as MZ_ETF_RIFLE_2, so an extended client plays nail1.wav
+    //    and a vanilla one shotg2.wav.  A static row would be wrong for one of
+    //    them, and the game precaches neither under that flash.
+    {MZ_PROX,           NULL},
     {MZ_SHOTGUN2,       NULL},
     {MZ_HEATBEAM,       NULL},
     {MZ_BLASTER2,       NULL},
-    {MZ_TRACKER,        NULL},
+    {MZ_TRACKER,        "weapons/disint2.wav"},
     {MZ_NUKE1,          NULL},
     {MZ_NUKE2,          NULL},
     {MZ_NUKE4,          NULL},
@@ -209,12 +241,24 @@ static bot_muzzleflashinfo_t muzzleflashinfo[MAX_MUZZLEFLASHES] =
 // R-BOT-11 sizes the table from game.csr.  The models are looked up by name in
 // the live table instead, which is the same translation expressed against a
 // table whose size is a runtime fact.
+//
+// R-184: THERE IS NO FIFTH TECH.  OSP has five runes and Threewave has four
+// techs, and the fifth row named `models/ctf/vampire/tris.md2` -- a path that
+// exists in no pak any donor ships.  The lookup below is a strcmp against the
+// live modelindex table, so it could never match and a vampire rune was already
+// reaching the brain as modelindex 0; the name only made it look otherwise.
+//
+// NULL says the same thing and says it out loud, which is the distinction R-183
+// drew between a documented NULL and a name that resolves to nothing.  Mapping
+// vampire onto the regeneration tech would ALSO have worked and would have made
+// bots pick the rune up -- both drain-to-heal -- but that is a change to what
+// the AI values, not a spelling fix, so it is recorded rather than made.
 const char *const bot_tech_models[5] = {
     "models/ctf/resistance/tris.md2",       // RUNE_RESIST   -> tech1
     "models/ctf/strength/tris.md2",         // RUNE_STRENGTH -> tech2
     "models/ctf/haste/tris.md2",            // RUNE_HASTE    -> tech3
     "models/ctf/regeneration/tris.md2",     // RUNE_REGEN    -> tech4
-    "models/ctf/vampire/tris.md2",          // RUNE_VAMPIRE  -> tech5
+    NULL,                                   // RUNE_VAMPIRE  -> no tech exists
 };
 
 //===========================================================================

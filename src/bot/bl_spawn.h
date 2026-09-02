@@ -59,12 +59,14 @@ void AddBotToQueue(edict_t *ent, const char *library, const char *userinfo);
 void AddQueuedBots(void);
 //
 void CheckMinimumPlayers(void);
-// R-CTF-8 and R-DM-1: the target `ctf_botfill` / `dm_botfill` asks for, clamped
+// R-RA-7, R-CTF-8, R-DM-1: the target `botfill` asks for, clamped
 // to two sides, `game.maxclients` and whatever the roster could actually supply,
 // or 0 when the switch is off.  `sv ruleset` prints it, because it is computed
 // rather than stored and there is nowhere else to read it back from (R-VER-19).
 int  BotFillTarget(void);
 void BotFillNoMore(int achieved);
+// Where BotFillTarget()'s number came from, for `sv ruleset` (R-VER-19).
+void BotFillDescribe(char *buf, size_t len);
 // the loading image the SDK paints while a bot is being created (R-BOT-29:
 // emptied under tourney, which has its own bar)
 void ShowLoadImage(edict_t *ent);

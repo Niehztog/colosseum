@@ -41,13 +41,21 @@ What plays today, from one library, chosen by `g_ruleset`:
 
 | ruleset | what it is |
 |---|---|
-| `dm` | baseq2 deathmatch |
+| `dm` | OSP Tourney DM's RegularDM — baseq2 deathmatch, with the tourney match system over it |
+| `dmpro` | OSP QualifierDM |
+| `tdm` | OSP TeamPlay |
+| `duel` | OSP 1-vs-1 |
 | `ctf` | Threewave Capture The Flag 1.52 |
 | `arena` | Rocket Arena 2 v2.25 |
-| `tourney` | OSP Tourney DM v2.75 |
 | `sp` | the three campaigns — baseq2, The Reckoning, Ground Zero — single and co-op |
 
-`xatrix` and `rogue` are content layers, orthogonal to all five and valid with
+The first four are OSP Tourney DM v2.75's four structures of play. They were one
+`tourney` ruleset selected by a second cvar, `match_mode`, until spec 1.36 made
+them four values of `g_ruleset` and deleted the cvar (R-OSP-12). **`tourney` is
+not a ruleset name**: it warns like any other unrecognised value, lists the seven
+that are valid, and runs as `dm`.
+
+`xatrix` and `rogue` are content layers, orthogonal to all seven and valid with
 any of them.
 
 The seven small Gladiator features are cvars rather than `#define`s (R-EXTRA):
@@ -62,10 +70,10 @@ everything the game does, spawns fake clients, drives them through the frame
 loop and gives them the 1999 command set and menu. On `q2dm1` under `dm` they
 load, spawn, navigate and fight.
 
-They load, spawn, navigate, fight and chat in all four rulesets that accept
-them: a CTF team from `botctfteam`, an arena's waiting queue from the `arena`
-key, and a tourney match in all four `match_mode`s, readying themselves up per
-`bots_warmuptime`. With 32 of them on `q2dm1` the bot section of `G_RunFrame`
+They load, spawn, navigate, fight and chat in all six rulesets that accept them
+— every one but `sp` (R-MODE-7): a CTF team from `botctfteam`, an arena's
+waiting queue from the `arena` key, and a match under each of the OSP four,
+readying themselves up per `bots_warmuptime`. With 32 of them on `q2dm1` the bot section of `G_RunFrame`
 costs about 2.5 ms of a 100 ms frame (R-BOT-23, `sv botperf`).
 
 The brain is a sibling repository, `gladiator-bot-restored`, built for whichever
@@ -134,7 +142,7 @@ differs). See R-ENG-1a and R-OSP-7 clause 6.
 A second ABI also earns its keep as a check. `-Warray-bounds` at `API=old -O2`
 refused one line, and under it was a defect that five phases of audits, ten build
 configurations, a twenty-row boot matrix and the play-test battery had all
-passed: the tourney runes had **never worked**, and `g_ruleset tourney` with
+passed: the tourney runes had **never worked**, and any of the OSP four with
 `runes 1` died at map load with `ED_Alloc: no free edicts`. Everything that could
 have caught it asked the stat map, and the stat map was right (R-132).
 
@@ -155,9 +163,12 @@ release builds under `gcc`; it cannot be used with `clang`, for a reason worth
 reading in the `Makefile` if you ever name a struct member `dprintf`.
 
 The contract audits run as part of the build, not on request, and a finding
-fails it the way a warning does. Twenty-three of them, each with a positive
-control that makes it fail — `tools/audit.py --help`, and §10 of `SPECS.md` for what
-each one is for.
+fails it the way a warning does. Most of them ship a positive control that makes
+them fail, and each control is a run of its own. **`audit.py` prints the count
+when it finishes and that is the figure to quote** — the two written down here
+had drifted by the time anything re-read them, so they are gone rather than
+corrected into the next stale pair. §10 of `SPECS.md` says what each check is
+for.
 
 Requires: a C compiler, `python3`, and `make`. Cross targets additionally need
 `gcc-x86-64-linux-gnu`, `gcc-i686-linux-gnu`, `gcc-mingw-w64-i686` and
@@ -165,17 +176,21 @@ Requires: a C compiler, `python3`, and `make`. Cross targets additionally need
 
 ### Running the checks that need a server
 
-`make check` is static. Five scripts drive a real `q2proded`, and none of them
-is part of the build because each needs a built engine, retail paks and a
-minute or more:
+`make check` is static. Six scripts drive a real `q2proded`, and none of them is
+part of the build because each needs a built engine, retail paks and a minute or
+more. **Every one of them prints its own total when it finishes, and that is the
+figure to quote.** The ones that used to be written down here had all drifted —
+the boot matrix by a whole ruleset selector, and the client battery by three
+different numbers in three different files — so they are gone from the comments
+below rather than corrected into the next stale set:
 
 ```sh
-tools/bootmatrix.sh   # 20 rows: every ruleset x xatrix x rogue boots and reports back
+tools/bootmatrix.sh   # 28 rows: every ruleset x xatrix x rogue boots and reports back
 tools/smoke.sh        # one map per ruleset, with a savegame round trip
-tools/playtest.sh     # 187 assertions through headless clients (needs the q2-playtest skill)
+tools/playtest.sh     # the client-side battery, through headless clients (needs the q2-playtest skill)
 tools/botmatrix.sh    # 1, 16 and 32 bots per ruleset: spawned, played, removed, and timed
-tools/extras.sh       # 39 checks: the R-EXTRA features, the shipped configs, an item respawn
-tools/osprunes.sh     # 33 checks: do tourney's five runes actually grant and read? (R-132)
+tools/extras.sh       # the R-EXTRA features, the shipped configs, an item respawn
+tools/osprunes.sh     # do the OSP four's five runes actually grant and read? (R-132)
 ```
 
 And one that asserts nothing on purpose:
@@ -262,7 +277,7 @@ inc/              Q2PRO engine headers, vendored verbatim, never edited
 tools/            the replay and audit toolchain
 vendor/replay/    the three replay bundles: the only copy of the port history
 vendor/harness/   the rescued replay harness state (rerere cache, tool inputs)
-doc/              provenance, reconciliation, coverage, regression
+doc/              provenance, reconciliation, the donor diff, coverage, regression
 ```
 
 ## Credits

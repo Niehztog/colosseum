@@ -125,7 +125,7 @@ void DBall_ClientBegin(edict_t *ent)
 
 //==================
 //==================
-void DBall_SelectSpawnPoint(edict_t *ent, vec3_t origin, vec3_t angles)
+bool DBall_SelectSpawnPoint(edict_t *ent, vec3_t origin, vec3_t angles)
 {
     edict_t *bestspot;
     float   bestdistance, bestplayerdistance;
@@ -145,7 +145,7 @@ void DBall_SelectSpawnPoint(edict_t *ent, vec3_t origin, vec3_t angles)
     bestspot = NULL;
     bestdistance = 0;
     while ((spot = G_Find(spot, FOFS(classname), spottype)) != NULL) {
-        bestplayerdistance = PlayersRangeFromSpot(spot);
+        bestplayerdistance = PlayersRangeFromSpot(spot, ent);
 
         if (bestplayerdistance > bestdistance) {
             bestspot = spot;
@@ -157,12 +157,12 @@ void DBall_SelectSpawnPoint(edict_t *ent, vec3_t origin, vec3_t angles)
         VectorCopy(bestspot->s.origin, origin);
         origin[2] += 9;
         VectorCopy(bestspot->s.angles, angles);
-        return;
+        return true;
     }
 
     // if we didn't find an appropriate spawnpoint, just
     // call the standard one.
-    SelectSpawnPoint(ent, origin, angles);
+    return SelectSpawnPoint(ent, origin, angles);
 }
 
 //==================

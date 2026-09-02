@@ -78,6 +78,53 @@ void InitGameRules(void)
 #define IT_TYPE_MASK    (IT_WEAPON|IT_AMMO|IT_POWERUP|IT_ARMOR|IT_KEY)
 
 
+/*
+=================
+SubstituteItemAllowed
+
+May this item be substituted IN?  The three dmflag filters ask about the
+CANDIDATE, which is the fix R-183 recorded and declined.
+
+Ground Zero tested `ent->classname` -- the item being REPLACED -- inside the loop
+that is choosing the item to replace it with. The condition is loop-invariant, so
+the effect is the inverse of the comment it carried: under DF_NO_SPHERES a sphere
+being respawned got no substitute and stayed a sphere, while every OTHER item
+could still be substituted into one and then be freed by SpawnItem's own
+DF_NO_SPHERES guard -- leaving DoRandomRespawn to hand a freed edict back to its
+caller to relink. Upstream q2pro has it too; id's own rerelease tests the
+candidate, and `q2pro@eefadf25` (feature/mission-packs) is where this tree's
+answer came from.
+
+ONE PREDICATE FOR BOTH PASSES, and that is not tidiness. FindSubstituteItem
+counts eligible items and then walks the list again to pick the `pick`-th one, so
+the two loops must agree on what "eligible" means or the pick runs off the end of
+the count and returns NULL for a legal choice. They did not agree: the first pass
+filtered spheres and the second did not, which was harmless only while the test
+was loop-invariant. Making the test depend on `it` is what would have made the
+disagreement matter.
+
+SPHERES ARE IDENTIFIED BY `Pickup_Sphere`, not by name -- the same test SpawnItem
+already uses for this dmflag (g_items.c), which is what makes the two filters one
+question with one answer. It also retires the third classname literal, which
+Ground Zero spelled `item_spehre_defender` (R-183 item 11 fixed the spelling; a
+function pointer cannot be misspelled at all).
+=================
+*/
+static bool SubstituteItemAllowed(const gitem_t *it)
+{
+    if (((int)dmflags->value & DF_NO_SPHERES) && it->pickup == Pickup_Sphere)
+        return false;
+
+    if (((int)dmflags->value & DF_NO_NUKES) && !strcmp(it->classname, "ammo_nuke"))
+        return false;
+
+    if (((int)dmflags->value & DF_NO_MINES) &&
+        (!strcmp(it->classname, "ammo_prox") || !strcmp(it->classname, "ammo_tesla")))
+        return false;
+
+    return true;
+}
+
 char *FindSubstituteItem(edict_t *ent)
 {
     int     i;
@@ -143,20 +190,11 @@ char *FindSubstituteItem(edict_t *ent)
         if ((itflags & IT_AMMO) && (itflags & IT_WEAPON))
             itflags = IT_AMMO;
 
-        // don't respawn spheres if they're dmflag disabled.
-        if ((int)dmflags->value & DF_NO_SPHERES) {
-            if (!strcmp(ent->classname, "item_sphere_vengeance") ||
-                !strcmp(ent->classname, "item_sphere_hunter") ||
-                !strcmp(ent->classname, "item_spehre_defender")) {
-                continue;
-            }
-        }
-
-        if (((int)dmflags->value & DF_NO_NUKES) && !strcmp(ent->classname, "ammo_nuke"))
-            continue;
-
-        if (((int)dmflags->value & DF_NO_MINES) &&
-            (!strcmp(ent->classname, "ammo_prox") || !strcmp(ent->classname, "ammo_tesla")))
+        // don't respawn spheres, nukes or mines if they're dmflag disabled --
+        // asked about `it`, the candidate, and shared with the pick pass below.
+        // R-183 recorded this filter as read-the-wrong-variable and left it;
+        // R-187 imports the repair from `q2pro@eefadf25`.
+        if (!SubstituteItemAllowed(it))
             continue;
 
         if ((itflags & IT_TYPE_MASK) == (myflags & IT_TYPE_MASK))
@@ -181,11 +219,10 @@ char *FindSubstituteItem(edict_t *ent)
         if ((itflags & IT_AMMO) && (itflags & IT_WEAPON))
             itflags = IT_AMMO;
 
-        if (((int)dmflags->value & DF_NO_NUKES) && !strcmp(ent->classname, "ammo_nuke"))
-            continue;
-
-        if (((int)dmflags->value & DF_NO_MINES) &&
-            (!strcmp(ent->classname, "ammo_prox") || !strcmp(ent->classname, "ammo_tesla")))
+        // The same predicate as the count pass, which the donor's copy of this
+        // loop did not have: it filtered nukes and mines and NOT spheres, so the
+        // two passes disagreed about how many items were eligible.
+        if (!SubstituteItemAllowed(it))
             continue;
 
         if ((itflags & IT_TYPE_MASK) == (myflags & IT_TYPE_MASK)) {

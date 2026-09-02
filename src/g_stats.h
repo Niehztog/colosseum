@@ -94,47 +94,47 @@ typedef enum {
 //
 //     id                        kind     dm  ctf  arena tourney  sp
 #define STATSLOT_MAP(E) \
-    E(SID_CHASE,                 SK_CS,   16,  -1,  -1,  16,  16) \
-    E(SID_SPECTATOR,             SK_NUM,  17,  -1,  -1,  -1,  17) \
-    E(SID_TIMER2_ICON,           SK_PIC,  18,  32,  26,  29,  18) \
-    E(SID_TIMER2,                SK_NUM,  19,  33,  27,  30,  19) \
-    E(SID_CTF_TEAM1_PIC,         SK_PIC,  -1,  17,  -1,  -1,  -1) \
-    E(SID_CTF_TEAM1_CAPS,        SK_NUM,  -1,  18,  -1,  -1,  -1) \
-    E(SID_CTF_TEAM2_PIC,         SK_PIC,  -1,  19,  -1,  -1,  -1) \
-    E(SID_CTF_TEAM2_CAPS,        SK_NUM,  -1,  20,  -1,  -1,  -1) \
-    E(SID_CTF_FLAG_PIC,          SK_PIC,  -1,  21,  -1,  -1,  -1) \
-    E(SID_CTF_JOINED_TEAM1_PIC,  SK_PIC,  -1,  22,  -1,  -1,  -1) \
-    E(SID_CTF_JOINED_TEAM2_PIC,  SK_PIC,  -1,  23,  -1,  -1,  -1) \
-    E(SID_CTF_TEAM1_HEADER,      SK_PIC,  -1,  24,  -1,  -1,  -1) \
-    E(SID_CTF_TEAM2_HEADER,      SK_PIC,  -1,  25,  -1,  -1,  -1) \
-    E(SID_CTF_TECH,              SK_PIC,  -1,  26,  -1,  -1,  -1) \
-    E(SID_CTF_ID_VIEW,           SK_CS,   -1,  27,  -1,  -1,  -1) \
-    E(SID_CTF_MATCH,             SK_CS,   -1,  28,  -1,  -1,  -1) \
-    E(SID_CTF_ID_VIEW_COLOR,     SK_PIC,  -1,  29,  -1,  -1,  -1) \
-    E(SID_CTF_TEAMINFO,          SK_CS,   -1,  30,  -1,  -1,  -1) \
-    E(SID_RA_COUNTDOWN,          SK_NUM,  -1,  -1,  16,  -1,  -1) \
-    E(SID_RA_ARENASTATUS,        SK_CS,   -1,  -1,  17,  -1,  -1) \
-    E(SID_RA_ROUNDINFO,          SK_CS,   -1,  -1,  18,  -1,  -1) \
-    E(SID_RA_LINEPOSITION,       SK_NUM,  -1,  -1,  19,  -1,  -1) \
-    E(SID_RA_ID_VIEW,            SK_CS,   -1,  -1,  20,  -1,  -1) \
-    E(SID_RA_QUEUE1,             SK_NUM,  -1,  -1,  21,  -1,  -1) \
-    E(SID_RA_QUEUE2,             SK_NUM,  -1,  -1,  22,  -1,  -1) \
-    E(SID_RA_SHOWQUEUE,          SK_NUM,  -1,  -1,  23,  -1,  -1) \
-    E(SID_RA_QUEUE1_ICON,        SK_CS,   -1,  -1,  24,  -1,  -1) \
-    E(SID_RA_QUEUE2_ICON,        SK_CS,   -1,  -1,  25,  -1,  -1) \
-    E(SID_OSP_RUNE_RESIST,       SK_NUM,  -1,  -1,  -1,  22,  -1) \
-    E(SID_OSP_RUNE_STRENGTH,     SK_NUM,  -1,  -1,  -1,  23,  -1) \
-    E(SID_OSP_RUNE_HASTE,        SK_NUM,  -1,  -1,  -1,  24,  -1) \
-    E(SID_OSP_RUNE_REGEN,        SK_NUM,  -1,  -1,  -1,  25,  -1) \
-    E(SID_OSP_RUNE_VAMPIRE,      SK_NUM,  -1,  -1,  -1,  26,  -1) \
-    E(SID_OSP_LAYOUT1,           SK_CS,   -1,  -1,  -1,  27,  -1) \
-    E(SID_OSP_MATCHSTATE,        SK_CS,   -1,  -1,  -1,  17,  -1) \
-    E(SID_OSP_STATUS1,           SK_CS,   -1,  -1,  -1,  18,  -1) \
-    E(SID_OSP_STATUS2,           SK_CS,   -1,  -1,  -1,  19,  -1) \
-    E(SID_OSP_STATUS3,           SK_CS,   -1,  -1,  -1,  20,  -1) \
-    E(SID_OSP_STATUS4,           SK_CS,   -1,  -1,  -1,  21,  -1) \
+    E(SID_CHASE,                 SK_CS,  16,  -1,  -1,  16) \
+    E(SID_SPECTATOR,             SK_NUM,  -1,  -1,  -1,  17) \
+    E(SID_TIMER2_ICON,           SK_PIC,  29,  32,  26,  18) \
+    E(SID_TIMER2,                SK_NUM,  30,  33,  27,  19) \
+    E(SID_CTF_TEAM1_PIC,         SK_PIC,  -1,  17,  -1,  -1) \
+    E(SID_CTF_TEAM1_CAPS,        SK_NUM,  -1,  18,  -1,  -1) \
+    E(SID_CTF_TEAM2_PIC,         SK_PIC,  -1,  19,  -1,  -1) \
+    E(SID_CTF_TEAM2_CAPS,        SK_NUM,  -1,  20,  -1,  -1) \
+    E(SID_CTF_FLAG_PIC,          SK_PIC,  -1,  21,  -1,  -1) \
+    E(SID_CTF_JOINED_TEAM1_PIC,  SK_PIC,  -1,  22,  -1,  -1) \
+    E(SID_CTF_JOINED_TEAM2_PIC,  SK_PIC,  -1,  23,  -1,  -1) \
+    E(SID_CTF_TEAM1_HEADER,      SK_PIC,  -1,  24,  -1,  -1) \
+    E(SID_CTF_TEAM2_HEADER,      SK_PIC,  -1,  25,  -1,  -1) \
+    E(SID_CTF_TECH,              SK_PIC,  -1,  26,  -1,  -1) \
+    E(SID_CTF_ID_VIEW,           SK_CS,  -1,  27,  -1,  -1) \
+    E(SID_CTF_MATCH,             SK_CS,  -1,  28,  -1,  -1) \
+    E(SID_CTF_ID_VIEW_COLOR,     SK_PIC,  -1,  29,  -1,  -1) \
+    E(SID_CTF_TEAMINFO,          SK_CS,  -1,  30,  -1,  -1) \
+    E(SID_RA_COUNTDOWN,          SK_NUM,  -1,  -1,  16,  -1) \
+    E(SID_RA_ARENASTATUS,        SK_CS,  -1,  -1,  17,  -1) \
+    E(SID_RA_ROUNDINFO,          SK_CS,  -1,  -1,  18,  -1) \
+    E(SID_RA_LINEPOSITION,       SK_NUM,  -1,  -1,  19,  -1) \
+    E(SID_RA_ID_VIEW,            SK_CS,  -1,  -1,  20,  -1) \
+    E(SID_RA_QUEUE1,             SK_NUM,  -1,  -1,  21,  -1) \
+    E(SID_RA_QUEUE2,             SK_NUM,  -1,  -1,  22,  -1) \
+    E(SID_RA_SHOWQUEUE,          SK_NUM,  -1,  -1,  23,  -1) \
+    E(SID_RA_QUEUE1_ICON,        SK_CS,  -1,  -1,  24,  -1) \
+    E(SID_RA_QUEUE2_ICON,        SK_CS,  -1,  -1,  25,  -1) \
+    E(SID_OSP_RUNE_RESIST,       SK_NUM,  22,  -1,  -1,  -1) \
+    E(SID_OSP_RUNE_STRENGTH,     SK_NUM,  23,  -1,  -1,  -1) \
+    E(SID_OSP_RUNE_HASTE,        SK_NUM,  24,  -1,  -1,  -1) \
+    E(SID_OSP_RUNE_REGEN,        SK_NUM,  25,  -1,  -1,  -1) \
+    E(SID_OSP_RUNE_VAMPIRE,      SK_NUM,  26,  -1,  -1,  -1) \
+    E(SID_OSP_LAYOUT1,           SK_CS,  27,  -1,  -1,  -1) \
+    E(SID_OSP_MATCHSTATE,        SK_CS,  17,  -1,  -1,  -1) \
+    E(SID_OSP_STATUS1,           SK_CS,  18,  -1,  -1,  -1) \
+    E(SID_OSP_STATUS2,           SK_CS,  19,  -1,  -1,  -1) \
+    E(SID_OSP_STATUS3,           SK_CS,  20,  -1,  -1,  -1) \
+    E(SID_OSP_STATUS4,           SK_CS,  21,  -1,  -1,  -1) \
 
-#define STATSLOT_ENUM(id, kind, dm, ctf, arena, tourney, sp)    id,
+#define STATSLOT_ENUM(id, kind, osp, ctf, arena, sp)    id,
 typedef enum {
     STATSLOT_MAP(STATSLOT_ENUM)
     SID_COUNT

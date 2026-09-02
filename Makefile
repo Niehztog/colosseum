@@ -40,7 +40,13 @@ CC_WIN32    ?= i686-w64-mingw32-gcc
 CC_WIN64    ?= x86_64-w64-mingw32-gcc
 
 PYTHON      ?= python3
+
+# Read by tools/mech.py, not by this file -- exported so that the reformat pass
+# and the build agree on which astyle they mean (R-CONV-1a pins the version at
+# 3.1, R-BUILD-6 records that the host's native one is that version and produces
+# byte-identical output).  mech.py falls back to the same default on its own.
 ASTYLE      ?= astyle
+export ASTYLE
 
 # Native CPUSTRING, via the engine's cpuremap.
 NATIVE_MACHINE := $(shell uname -m)
@@ -116,7 +122,7 @@ BASE_CFLAGS = -DHAVE_CONFIG_H $(INCLUDES) -std=gnu99 -MMD -MP \
 # -Werror so that "new warnings are not tolerated" is mechanical rather than
 # aspirational.
 #
-# TWO SUPPRESSIONS, both measured, both forced by R-CORE-5.
+# THREE SUPPRESSIONS, all measured, all forced by R-CORE-5.
 #
 # R-BUILD-2 wants -Wall -Wextra clean; R-CORE-5 wants src/ byte-identical to
 # q2pro/src/game.  On inherited code those two conflict, and R-CORE-5 wins in
@@ -138,12 +144,12 @@ BASE_CFLAGS = -DHAVE_CONFIG_H $(INCLUDES) -std=gnu99 -MMD -MP \
 #                           correct defensive code that -Wsign-compare cannot
 #                           see.  Zero real defects.
 #
-# Note upstream never hit either: q2pro builds with -Wall and a curated set,
-# NOT -Wextra.  Keeping -Wextra minus these two still buys
-# -Wmissing-field-initializers, -Wtype-limits and -Wempty-body, which is the
-# reason to keep it at all -- and they apply to the code Colosseum writes.
-# A phase that adds new code should re-check whether either suppression can be
-# narrowed to the inherited translation units.
+# Note upstream never hit any of them: q2pro builds with -Wall and a curated
+# set, NOT -Wextra.  Keeping -Wextra minus these three still buys -Wtype-limits
+# and -Wempty-body, which is the reason to keep it at all -- and they apply to
+# the code Colosseum writes.  A phase that adds new code should re-check whether
+# any of the three can be narrowed to the inherited translation units; the third
+# below is the closest to it, being two sites in one file.
 #   -Wno-missing-field-initializers
 #                           clang only, and exactly two sites: the `{ NULL }`
 #                           sentinels in itemlist[] -- the index-0 placeholder
@@ -457,8 +463,15 @@ BUILDDIRS = debug release debug-linux64 release-linux64 \
 clean:
 	-rm -rf $(BUILDDIRS) $(addsuffix -oldapi,$(BUILDDIRS))
 
+# ...and the two derived trees `clean` leaves alone.  `src/.g_ptrs.gen*` is
+# GLOBBED: check-ptrs writes the scratch file with the shell's PID appended (see
+# its recipe), so the bare name it used before the -j race fix is a file nothing
+# has created since.  `build/` is tools/divergence.py's and tools/coverage.py's
+# cache of vendor/replay/ -- derived, and .gitignore says so.
 distclean: clean
-	-rm -f src/.g_ptrs.gen
+	-rm -f src/.g_ptrs.gen*
+	-rm -rf build
+	-find . -name __pycache__ -type d -prune -exec rm -rf {} +
 
 help:
 	@echo "Colosseum -- targets (R-BUILD-5):"

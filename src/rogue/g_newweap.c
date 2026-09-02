@@ -18,6 +18,9 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 */
 #include "g_local.h"
+// R-181: the accuracy hooks below.  osp_hooks.h is the surface a shared file may
+// see (the header's own rule); osp_types.h would drag tourney's private names in.
+#include "tourney/osp_hooks.h"
 
 #define INCLUDE_ETF_RIFLE       1
 #define INCLUDE_PROX            1
@@ -72,8 +75,16 @@ void flechette_touch(edict_t *self, edict_t *other, cplane_t *plane, csurface_t 
     G_FreeEdict(self);
 }
 
+// R-181: the content layers' weapons reach tourney's accuracy report too --
+// R-MODE-3 makes both layers valid with every ruleset, so a match fought with
+// them is a match the report has to be able to describe.  OSP_accShot is a
+// no-op outside an OSP ruleset, outside a live match, and for a non-client, so
+// the calls below are safe on the monster paths that share these functions.
 void fire_flechette(edict_t *self, vec3_t start, vec3_t dir, int damage, int speed, int kick)
 {
+    if (G_IsOspRuleset())
+        OSP_accShot(self, MOD_ETF_RIFLE, 1);
+
     edict_t *flechette;
 
     VectorNormalize(dir);
@@ -446,6 +457,9 @@ void prox_land(edict_t *ent, edict_t *other, cplane_t *plane, csurface_t *surf)
 //===============
 void fire_prox(edict_t *self, vec3_t start, vec3_t aimdir, int damage_multiplier, int speed)
 {
+    if (G_IsOspRuleset())
+        OSP_accShot(self, MOD_PROX, 1);
+
     edict_t *prox;
     vec3_t  dir;
     vec3_t  forward, right, up;
@@ -1039,6 +1053,9 @@ void fire_incendiary_grenade(edict_t *self, vec3_t start, vec3_t aimdir, int dam
 #ifdef INCLUDE_MELEE
 void fire_player_melee(edict_t *self, vec3_t start, vec3_t aim, int reach, int damage, int kick, int quiet, int mod)
 {
+    if (G_IsOspRuleset())
+        OSP_accShot(self, mod, 1);
+
     vec3_t      forward, right, up;
     vec3_t      v;
     vec3_t      point;
@@ -1585,6 +1602,9 @@ void tesla_lava(edict_t *ent, edict_t *other, cplane_t *plane, csurface_t *surf)
 
 void fire_tesla(edict_t *self, vec3_t start, vec3_t aimdir, int damage_multiplier, int speed)
 {
+    if (G_IsOspRuleset())
+        OSP_accShot(self, MOD_TESLA, 1);
+
     edict_t *tesla;
     vec3_t  dir;
     vec3_t  forward, right, up;
@@ -1645,6 +1665,11 @@ void fire_tesla(edict_t *self, vec3_t start, vec3_t aimdir, int damage_multiplie
 #ifdef INCLUDE_BEAMS
 static void fire_beams(edict_t *self, const vec3_t start, const vec3_t aimdir, const vec3_t offset, int damage, int kick, int te_beam, int te_impact, int mod)
 {
+    // One shot per frame the trigger is held, which is what the hyperblaster's
+    // own count means and what makes hits-per-frame the right denominator.
+    if (G_IsOspRuleset())
+        OSP_accShot(self, mod, 1);
+
     trace_t     tr;
     vec3_t      dir;
     vec3_t      forward, right, up;
@@ -2092,6 +2117,9 @@ void tracker_fly(edict_t *self)
 
 void fire_tracker(edict_t *self, vec3_t start, vec3_t dir, int damage, int speed, edict_t *enemy)
 {
+    if (G_IsOspRuleset())
+        OSP_accShot(self, MOD_TRACKER, 1);
+
     edict_t *bolt;
     trace_t tr;
 

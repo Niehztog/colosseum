@@ -19,6 +19,7 @@ with this program; if not, write to the Free Software Foundation, Inc.,
 
 #include "g_local.h"
 #include "arena/arena.h"
+#include "tourney/osp_hooks.h"
 
 // Send a console command to one client.  Threewave and RA2 each shipped a
 // byte-identical copy of this; it is a generic engine helper, so it lives here
@@ -567,6 +568,13 @@ Marks the edict as free
 */
 void G_FreeEdict(edict_t *ed)
 {
+    // R-OSP-3: a quad or an invulnerability that ran out its own clock in the
+    // WORLD, with nobody holding it.  Asked in the tourney layer because the
+    // two `use` functions this has to recognise are static to g_items.c; the
+    // other half of the pair, a powerup that expired ON a player, is p_view.c's.
+    if (G_IsOspRuleset() && ed->item)
+        OSP_itemFreed(ed);
+
     gi.unlinkentity(ed);        // unlink from world
 
     if ((ed - g_edicts) <= (game.maxclients + BODY_QUEUE_SIZE)) {

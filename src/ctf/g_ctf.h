@@ -125,7 +125,7 @@ char *CTFOtherTeamName(int team);
 void CTFAssignSkin(edict_t *ent, char *s);
 void CTFForceAssignTeam(gclient_t *who);
 void CTFAssignTeam(gclient_t *who);
-// R-CTF-8: `ctf_botfill`'s two halves -- how many players the map and its two
+// R-CTF-8: `botfill`'s two halves under ctf -- how many players the map and its two
 // bases seat, and which bot to remove when a person takes one of the seats.
 // Both unclamped and neither reads the switch; BotFillTarget() owns that.
 int  CTF_BotFillSeats(void);
@@ -195,7 +195,9 @@ void SP_misc_ctf_small_banner(edict_t *ent);
 void CTFHook_f(edict_t *ent);
 void CTFUnhook_f(edict_t *ent);
 void CTFHookThink(edict_t *ent);
-bool CTFHookIsOffhand(void);
+// ...and the one shot the think is made of, which arena's own think needs
+// (R-164): the hook is Threewave's, the CONDITIONS on it are RA2's.
+void CTFHook_Fire(edict_t *ent);
 
 #define CTF_HOOK_STATE_ON       1
 #define CTF_HOOK_STATE_TURNOFF  2

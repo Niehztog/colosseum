@@ -75,6 +75,54 @@ static const nearbyitem_t nearbyitems[] =
     //CTF
     {"item_flag_team1",         100},
     {"item_flag_team2",         100},
+    // R-183.  The table had already been extended once -- the two flags above
+    // are Colosseum's, under a `//CTF` fence -- and stopped there, so the rest
+    // of what a merged tree can place was invisible to it: every Reckoning and
+    // Ground Zero item, CTF's four techs and its grapple, and three baseq2 rows
+    // the 1999 list simply omitted.
+    //
+    // Weights are by kind rather than invented per item, which is how the rows
+    // above read: a weapon that ends fights is 100, a lesser weapon 40-60,
+    // armour 50-70, a powerup 100, a timed pickup 60, a key 40.
+    {"item_adrenaline",         60},
+    {"key_commander_head",      40},
+    {"key_airstrike_target",    40},
+    // CTF's four techs.  No map places them -- CTFSetupTechSpawn/SpawnTech
+    // create the edicts at runtime -- which is exactly why they belong here:
+    // they ARE world entities and this loop walks g_edicts.
+    //
+    // THE GRAPPLE IS NOT HERE, and checking why is what kept it out: its
+    // itemlist row is documented "always owned, never in the world", nothing
+    // spawns one, and no pak in the test data places one.  This loop matches
+    // `item->classname` on live edicts, so the row could never have fired.
+    //CTF
+    {"item_tech1",              90},
+    {"item_tech2",              90},
+    {"item_tech3",              90},
+    {"item_tech4",              90},
+    //XATRIX
+    {"weapon_boomer",           60},
+    {"weapon_phalanx",          100},
+    {"ammo_trap",               60},
+    {"item_quadfire",           100},
+    //ROGUE
+    {"weapon_etf_rifle",        60},
+    {"weapon_proxlauncher",     100},
+    {"weapon_plasmabeam",       100},
+    {"weapon_chainfist",        20},
+    {"ammo_tesla",              60},
+    {"ammo_nuke",               100},
+    {"item_double",             100},
+    {"item_ir_goggles",         60},
+    {"item_sphere_vengeance",   100},
+    {"item_sphere_hunter",      100},
+    {"item_sphere_defender",    100},
+    {"item_doppleganger",       100},
+    {"key_green_key",           40},
+    {"key_nuke_container",      40},
+    // The Disruptor is absent on purpose: it is IT_NOT_GIVEABLE and carries no
+    // IT_WEAPON bit (R-16), so nothing else in this tree treats it as a weapon
+    // a player would cross a room for.
     {NULL,                      0}
 };
 
@@ -339,9 +387,10 @@ static bool BotServerCmd(const char *cmd, edict_t *ent, int server)
     {
         // R-BOT-24/28: the `menu` command, dropped from osp-tourney's bl_cmd.c
         // because that mod has its own menus, comes back with the bot menu.
-        // ToggleBotMenu does its own rcon check, which is why it is not behind
-        // BotCmdRefused: R-BOT-28 gates the menu on the rcon password, not on
-        // serveronlybotcmds alone.
+        // ToggleBotMenu does its own gating, which is why it is not behind
+        // BotCmdRefused: R-BOT-28 gates the menu on the rcon password rather
+        // than on serveronlybotcmds alone, and exempts the host of a listen
+        // server, which BotCmdRefused's console-or-nothing test cannot express.
         bot_MenuToggle(ent);
     } //end else if
     else

@@ -135,6 +135,18 @@ void sl_WriteStdLogDeath(game_import_t *import, level_locals_t level,
                 weapon = "Crushed";
                 suicide = 1;
                 break;
+            // R-183: HERE and not in the weapon switch below, which is where
+            // reviewing this diff found it.  dm_ball.c raises MOD_DBALL_CRUSH
+            // from `T_Damage(other, ent, ent, ...)` where `ent` is the ball, so
+            // the attacker is not a client, the weapon switch below cannot be
+            // reached, and a row there would have been as dead as the
+            // `ionrippergun` lookup this entry set out to fix.  It is a world
+            // death that costs the victim a point, like every case around it,
+            // and ClientObituary does not name it either.
+            case MOD_DBALL_CRUSH:
+                weapon = "DBall";
+                suicide = 1;
+                break;
             case MOD_WATER:
                 weapon = "Drowned";
                 suicide = 1;
@@ -223,6 +235,64 @@ void sl_WriteStdLogDeath(game_import_t *import, level_locals_t level,
                 case MOD_GRAPPLE:
                     weapon = "Grappling Hook";
                     break;
+
+                // R-183: the content layers, which R-MODE-3 makes valid with every ruleset
+                // -- so a Reckoning or Ground Zero kill was reaching this table and falling
+                // out of it as "UNKNOWN".  The names are the items' own pickup names, which
+                // is what `acc_names[]` in the accuracy record already uses, so a consumer
+                // joining the two records matches on one spelling.
+                //
+                // The Disruptor's two MODs share a name the way the BFG's three do.  The
+                // monsters' own -- MOD_BRAINTENTACLE, MOD_BLASTOFF, MOD_GEKK, MOD_BLASTER2
+                // -- are deliberately absent: the donor names no monster attack either, and
+                // a monster is not a weapon somebody chose.
+                // Xatrix
+                case MOD_RIPPER:
+                    weapon = "Ionripper";
+                    break;
+                case MOD_PHALANX:
+                    weapon = "Phalanx";
+                    break;
+                case MOD_TRAP:
+                    weapon = "Trap";
+                    break;
+                // Ground Zero
+                case MOD_ETF_RIFLE:
+                    weapon = "ETF Rifle";
+                    break;
+                case MOD_PROX:
+                    weapon = "Prox Launcher";
+                    break;
+                case MOD_HEATBEAM:
+                    weapon = "Plasma Beam";
+                    break;
+                case MOD_CHAINFIST:
+                    weapon = "Chainfist";
+                    break;
+                case MOD_TESLA:
+                    weapon = "Tesla";
+                    break;
+                case MOD_TRACKER:
+                case MOD_DISINTEGRATOR:
+                    weapon = "Disruptor";
+                    break;
+                case MOD_NUKE:
+                    weapon = "A-M Bomb";
+                    break;
+                case MOD_VENGEANCE_SPHERE:
+                    weapon = "Vengeance Sphere";
+                    break;
+                case MOD_HUNTER_SPHERE:
+                    weapon = "Hunter Sphere";
+                    break;
+                case MOD_DEFENDER_SPHERE:
+                    weapon = "Defender Sphere";
+                    break;
+                case MOD_DOPPLE_EXPLODE:
+                case MOD_DOPPLE_VENGEANCE:
+                case MOD_DOPPLE_HUNTER:
+                    weapon = "Doppleganger";
+                    break;
                 case MOD_TELEFRAG:
                     weapon = "Telefrag";
                     break;
@@ -234,7 +304,7 @@ void sl_WriteStdLogDeath(game_import_t *import, level_locals_t level,
                 event = "Kill";
                 score = 1;
 
-                if (m_mode == 2 &&
+                if (G_Ruleset() == RULESET_TDM &&
                     attacker->client->resp.team == targ->client->resp.team)
                     score = -1;
             }

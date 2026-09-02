@@ -1,3 +1,12 @@
+# build_replay.sh -- the original donor replay, kept as evidence and NOT run.
+#
+# The SP and Q2 assignments below hold the dead WSL scratchpad and q2pro paths
+# this harness was written against, and they are DELIBERATELY NOT REPAIRED:
+# Colosseum does not re-run the replay -- `vendor/replay/`'s three bundles are
+# its output and supersede it (R-PROV-1) -- and the paths are the record of
+# where the work was done.  SPECS.md R-TOOL-1 and doc/reconciliation.md section
+# 2 both say so.  No shebang and no exec bit, so nothing runs it by accident.
+#
 set -e
 SP=/tmp/claude-1000/-mnt-c-Users-<user>-q2-dev-q2pro/<session>/scratchpad
 Q2=/mnt/c/Users/<user>/q2-dev/q2pro

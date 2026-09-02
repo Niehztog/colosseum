@@ -36,11 +36,17 @@ static const ruleset_ops_t *g_active_ops;
 
 static const char *ruleset_names[RULESET_COUNT] = {
     [RULESET_DM]      = "dm",
+    [RULESET_DMPRO]   = "dmpro",
+    [RULESET_TDM]     = "tdm",
+    [RULESET_DUEL]    = "duel",
     [RULESET_CTF]     = "ctf",
     [RULESET_ARENA]   = "arena",
-    [RULESET_TOURNEY] = "tourney",
     [RULESET_SP]      = "sp",
 };
+
+// The one place the seven are spelled for a human.  Used by the unknown-value
+// warning, so the message cannot list a set the parser does not accept.
+#define RULESET_NAME_LIST   "dm dmpro tdm duel ctf arena sp"
 
 static const char *modifier_names[MOD_COUNT] = {
     [MOD_TEAMPLAY] = "teamplay",
@@ -54,22 +60,71 @@ static const char *modifier_names[MOD_COUNT] = {
 // actually consults, so the table in SPECS.md and the behaviour cannot drift
 // apart without a test noticing.
 //
-//                        dm     ctf    arena  tourney  sp
+// EVERY CELL IS DESIGNATED, and that is not a style choice.  These rows were
+// positional five-element brace lists until the flattening, so adding three
+// rulesets would have padded the new columns with `false` -- silently, because
+// the build sets -Wno-missing-field-initializers, and invisibly, because no
+// audit in the tree reads this table.  `tdm` would have come up with teamplay
+// refused, which is the one cell in the matrix that ruleset cannot do without.
+// A designated cell that is missing reads false too, but it reads false where a
+// reader is looking for it.
 static const bool modifier_ok[MOD_COUNT][RULESET_COUNT] = {
-    [MOD_TEAMPLAY] =    { true,  true,  true,  true,    false },
-    [MOD_HOOK]     =    { true,  true,  true,  true,    false },
-    [MOD_RUNES]    =    { false, true,  false, true,    false },
-    [MOD_BOTS]     =    { true,  true,  true,  true,    false },
+    // Team play is a RULESET now (`tdm`, `duel`), so the modifier that also
+    // reached it is refused across the OSP four -- R-MODE-4, and the whole
+    // argument of the flattening applied to itself.  arena keeps it: its teams
+    // are the arena's, and the modifier is how an operator asks for them.
+    [MOD_TEAMPLAY] = {
+        [RULESET_DM] = false, [RULESET_DMPRO] = false,
+        [RULESET_TDM] = false, [RULESET_DUEL] = false,
+        [RULESET_CTF] = true, [RULESET_ARENA] = true, [RULESET_SP] = false,
+    },
+    [MOD_HOOK] = {
+        [RULESET_DM] = true, [RULESET_DMPRO] = true,
+        [RULESET_TDM] = true, [RULESET_DUEL] = true,
+        [RULESET_CTF] = true, [RULESET_ARENA] = true, [RULESET_SP] = false,
+    },
+    // Runes under the OSP four, techs under ctf.  `dm` gains them by becoming
+    // OSP's RegularDM; baseq2's deathmatch had neither.
+    [MOD_RUNES] = {
+        [RULESET_DM] = true, [RULESET_DMPRO] = true,
+        [RULESET_TDM] = true, [RULESET_DUEL] = true,
+        [RULESET_CTF] = true, [RULESET_ARENA] = false, [RULESET_SP] = false,
+    },
+    [MOD_BOTS] = {
+        [RULESET_DM] = true, [RULESET_DMPRO] = true,
+        [RULESET_TDM] = true, [RULESET_DUEL] = true,
+        [RULESET_CTF] = true, [RULESET_ARENA] = true, [RULESET_SP] = false,
+    },
 };
 
-// ---------------------------------------------------------------- dm ops
+// ---------------------------------------------------------------- base ops
 //
-// dm implements every row (R-MODE-6), and every row here is baseq2's own
-// implementation -- Phase 1 cuts the seam, it does not change what happens on
-// either side of it.  A later ruleset that replaces one of these fills its own
-// row; one that only adjusts it uses a predicate instead.
-static const ruleset_ops_t ops_dm = {
-    .name              = "dm",
+// The BASE fills every row (R-MODE-6), and every row here is baseq2's own
+// implementation -- Phase 1 cut the seam, it did not change what happens on
+// either side of it.  A ruleset that replaces one of these fills its own row;
+// one that only adjusts it uses a predicate instead.
+//
+// NOTHING SELECTS THIS TABLE.  It was `ops_dm` and was two things wearing one
+// name: the `dm` ruleset's row set, and the table every NULL row falls back to.
+// The flattening separated them -- `dm` is OSP's RegularDM now and has its own
+// rows -- and this is only the second.
+//
+// All five functions stay, and not merely for the fallback.  ctf, arena and the
+// OSP four call them BY NAME from their own C: ctf_CheckRules and RA_CheckRules
+// both call CheckDMRules, OSP_EndLevel and RA_EndLevel both fall back to
+// EndDMLevel, and PutClientInServer calls G_SelectSpawnPoint() for every
+// ruleset before arena and the OSP four re-place the client.  Deleting one is
+// not a table edit.
+//
+// DeathmatchScoreboardMessage IS NOT ONE OF THEM, and tourney is the reason it
+// looks as though it should be.  Three of tourney's own functions draw a page
+// they have just selected -- the MOTD window in OSP_setStats, `highscores` and
+// `showinfo` -- and the donor draws it by calling the name it gives its OWN
+// five-page dispatcher.  Here that dispatcher is the ScoreboardMessage row, so
+// all three reach it through G_ScoreboardMessage() and this row is gate-only
+// (R-OSP-14).
+static const ruleset_ops_t ops_base = {
+    .name              = "base",
     .CheckRules        = CheckDMRules,
     .EndLevel          = EndDMLevel,
     .ScoreboardMessage = DeathmatchScoreboardMessage,
@@ -87,11 +142,18 @@ static const ruleset_ops_t ops_sp = {
     .name = "sp",
 };
 
+// A MISSING ROW HERE IS NOT A COMPILE ERROR.  It is NULL, and G_InitRuleset's
+// `?:` below then hands that ruleset the BASE -- i.e. baseq2 deathmatch, quietly,
+// under whatever name the operator asked for.  Every ruleset gets a row.
 static const ruleset_ops_t *ruleset_ops[RULESET_COUNT] = {
-    [RULESET_DM]      = &ops_dm,
+    // The OSP four are one code path selected four ways (R-OSP-12); what differs
+    // between them lives inside tourney's own functions, not in the row set.
+    [RULESET_DM]      = &ops_tourney, // src/tourney/osp_main.c
+    [RULESET_DMPRO]   = &ops_tourney,
+    [RULESET_TDM]     = &ops_tourney,
+    [RULESET_DUEL]    = &ops_tourney,
     [RULESET_CTF]     = &ops_ctf,   // src/ctf/g_ctf.c
     [RULESET_ARENA]   = &ops_arena, // src/arena/arena.c
-    [RULESET_TOURNEY] = &ops_tourney, // src/tourney/osp_main.c
     [RULESET_SP]      = &ops_sp,
 };
 
@@ -114,9 +176,9 @@ static bool ruleset_from_name(const char *s, ruleset_t *out)
 // documentation keep working, so an existing config and a twenty-year-old readme
 // still select what they always selected.  Evaluated once, here.
 //
-// The tie-break order is fixed by R-MODE-2 -- ctf, then arena, then tourney --
-// so two conflicting aliases produce the same ruleset on every machine rather
-// than depending on which cvar the engine happened to register first.
+// The tie-break order is fixed by R-MODE-2 -- ctf, then arena -- so two
+// conflicting aliases produce the same ruleset on every machine rather than
+// depending on which cvar the engine happened to register first.
 static bool resolve_legacy_alias(ruleset_t *out, const char **why)
 {
     static const struct {
@@ -139,7 +201,7 @@ static bool resolve_legacy_alias(ruleset_t *out, const char **why)
             found = true;
         } else {
             gi.dprintf("Colosseum: legacy '%s 1' and '%s 1' both set; "
-                       "using '%s' (R-MODE-2 order: ctf, arena, tourney)\n",
+                       "using '%s' (R-MODE-2 order: ctf, arena)\n",
                        first, aliases[i].cvar, ruleset_names[*out]);
         }
     }
@@ -147,17 +209,6 @@ static bool resolve_legacy_alias(ruleset_t *out, const char **why)
     if (found)
         *why = first;
     return found;
-}
-
-// Colored Hitman is out of scope (N7), but a 1999 config may still say `ch 1`.
-// R-MODE-2: accept it, ignore it, warn once.  Never refuse to start over it.
-static void warn_about_ch(void)
-{
-    if (gi.cvar("ch", "0", 0)->value != 0) {
-        gi.dprintf("Colosseum: 'ch 1' is accepted and ignored -- Colored Hitman "
-                   "is out of scope (SPECS.md N7).  The 'ch' libvar is still "
-                   "pushed to the botlib as 0 (R-BOT-6).\n");
-    }
 }
 
 // The engine and 138 inherited baseq2 sites read `deathmatch` and `coop`, and
@@ -215,9 +266,12 @@ void G_InitRuleset(void)
             via = "g_ruleset";
         } else {
             // R-MODE-1: invalid values fall back to dm with a warning; they
-            // never abort startup.
+            // never abort startup.  `tourney` is one of those values and gets
+            // no sentence of its own -- the message names the seven that are
+            // valid, which is the answer to "what should I have written"
+            // whatever the operator wrote instead.
             gi.dprintf("Colosseum: unknown g_ruleset '%s'; using 'dm'. "
-                       "Valid: dm ctf arena tourney sp\n", rs->string);
+                       "Valid: " RULESET_NAME_LIST "\n", rs->string);
             r = RULESET_DM;
             via = "fallback";
         }
@@ -237,7 +291,6 @@ void G_InitRuleset(void)
     g_active_ruleset = r;
     g_active_ops = ruleset_ops[r] ? ruleset_ops[r] : ruleset_ops[RULESET_DM];
 
-    warn_about_ch();
     reconcile_legacy_cvars();
 
     // R-MODE-3: independent latched content layers, valid with every ruleset,
@@ -280,6 +333,22 @@ void G_InitRuleset(void)
                        "disabling it (R-MODE-4)\n",
                        ruleset_names[g_active_ruleset], modifier_names[m]);
             g_modifier[m] = false;
+
+            // `teamplay` is the one refusal an operator is likely to have meant
+            // something by, because it USED to work here: it reached team play
+            // under the old `dm` and the old `tourney` alike.  Saying only "not
+            // accepted" leaves them to guess where it went, so the line after
+            // says -- and says something different depending on whether they
+            // are already in the ruleset they were asking for.
+            if (m == MOD_TEAMPLAY && G_IsOspRuleset()) {
+                if (OSP_IsTeams())
+                    gi.dprintf("Colosseum: ...'%s' IS team play; the modifier is "
+                               "what it replaced (R-MODE-7)\n",
+                               ruleset_names[g_active_ruleset]);
+                else
+                    gi.dprintf("Colosseum: ...team play is a ruleset here -- "
+                               "'g_ruleset tdm' or 'duel' (R-MODE-7)\n");
+            }
         }
     }
 
@@ -311,7 +380,7 @@ const ruleset_ops_t *G_Ops(void)
 {
     // G_InitRuleset() runs before anything can reach a gate, but a NULL here
     // would be a crash at the first frame rather than a diagnosable mistake.
-    return g_active_ops ? g_active_ops : &ops_dm;
+    return g_active_ops ? g_active_ops : &ops_base;
 }
 
 bool G_ModifierEnabled(modifier_t m)
@@ -513,28 +582,10 @@ void G_Svcmd_Ruleset_f(void)
                        "botplace     ctf red=%d blue=%d noteam=%d teamskin=%d, "
                        "FL_BOTCLIENT=%d (R-CTF-4)\n",
                        red, blue, noteam, teamskin, nbotclient);
-            // R-CTF-8, and a line of its own for R-VER-19's reason: the target
-            // is computed from the map's three spawn pools rather than read from
-            // a cvar, so a play test has nowhere else to read it back from.
-            // `seats` is what the map says and `want` what it survives the
-            // ceilings as -- printing only the second hides a clamp.
-            if (BotFillEnabled())
-                gi.cprintf(NULL, PRINT_HIGH,
-                           "botfill      ctf want=%d of seats=%d, shared=%d "
-                           "base=%d+%d (R-CTF-8)\n",
-                           BotFillTarget(), CTF_BotFillSeats(),
-                           G_SpawnPointPool("info_player_deathmatch"),
-                           G_SpawnPointPool("info_player_team1"),
-                           G_SpawnPointPool("info_player_team2"));
-            else
-                gi.cprintf(NULL, PRINT_HIGH,
-                           "botfill      off -- minimumplayers %d is the "
-                           "target (R-CTF-8)\n", (int)BotMinPlayers()->value);
             break;
         }
         case RULESET_ARENA: {
             int placed = 0, teamed = 0, fighting = 0, arena1 = 0;
-            int fill = RA_BotFillArena();
 
             for (int i = 0; i < game.maxclients; i++) {
                 edict_t *e = &g_edicts[i + 1];
@@ -553,23 +604,12 @@ void G_Svcmd_Ruleset_f(void)
                        "botplace     arena in-arena=%d (arena1=%d) on-team=%d "
                        "fighting=%d, FL_BOTCLIENT=%d (R-RA-4)\n",
                        placed, arena1, teamed, fighting, nbotclient);
-            // R-RA-7, and a line of its own for R-VER-19's reason: the target
-            // is computed from the arena rather than read from a cvar, so a
-            // play test has nowhere else to read it back from.
-            if (fill)
-                gi.cprintf(NULL, PRINT_HIGH,
-                           "botfill      arena %d, %d/%d players%s (R-RA-7)\n",
-                           fill, RA_ArenaPlayers(fill, NULL),
-                           RA_BotFillTarget(fill),
-                           arenas[fill].idarena ? ", pickup: by spawn points"
-                                                : ", duel: by playersperteam");
-            else
-                gi.cprintf(NULL, PRINT_HIGH,
-                           "botfill      off -- minimumplayers %d is the "
-                           "target (R-RA-7)\n", (int)BotMinPlayers()->value);
             break;
         }
-        case RULESET_TOURNEY: {
+        case RULESET_DM:
+        case RULESET_DMPRO:
+        case RULESET_TDM:
+        case RULESET_DUEL: {
             int entered = 0, ready = 0, t0 = 0, t1 = 0;
 
             for (int i = 0; i < game.maxclients; i++) {
@@ -586,52 +626,42 @@ void G_Svcmd_Ruleset_f(void)
                     t1++;
             }
             gi.cprintf(NULL, PRINT_HIGH,
-                       "botplace     tourney m_mode=%d entered=%d ready=%d "
+                       "botplace     %s entered=%d ready=%d "
                        "team0=%d team1=%d, FL_BOTCLIENT=%d (R-OSP-11)\n",
-                       m_mode, entered, ready, t0, t1, nbotclient);
-            // R-156.  Tourney has no `botfill` switch and does not need one, and
-            // the row says why rather than printing nothing: `team_maxplayers`
-            // IS a declared capacity -- 4 by default, forced to 1 CVAR_NOSET
-            // under mode 3, clamped so that twice it fits `maxclients` -- which
-            // is precisely what dm and ctf lack and what R-DM-1 / R-CTF-8 had to
-            // read off the map instead.  Modes 0 and 1 have no teams and would
-            // fall to the same map-sized answer dm gets; that is a change to
-            // tourney's bot contract, which R-OSP-11 preserves rather than
-            // redesigns, so it is recorded here and not made.
-            //
-            // `team_maxplayers` is deliberately NOT printed here: its default is
-            // itself mode-dependent (1 under mode 3, 4 otherwise), so naming a
-            // default at this call site would be R-COMPAT-6's collision -- one
-            // cvar registered twice with two values.  `bots_autoload` has one
-            // default and `bl_spawn.c` already reads it exactly this way.
-            gi.cprintf(NULL, PRINT_HIGH,
-                       "botfill      tourney has no fill switch -- %s %d is the "
-                       "target, bots_autoload %d, capacity is "
-                       "team_maxplayers (R-156)\n",
-                       BotMinPlayersCvar(), (int)BotMinPlayers()->value,
-                       (int)gi.cvar("bots_autoload", "0", 0)->value);
+                       G_RulesetName(G_Ruleset()), entered, ready, t0, t1,
+                       nbotclient);
             break;
         }
         default:
+            // Unreachable: sp is the only ruleset left and G_BotsAllowed() is
+            // false there, which is what this whole block is inside.  Kept so
+            // that a ruleset added later is reported rather than silent.
             gi.cprintf(NULL, PRINT_HIGH,
                        "botplace     %s has no per-ruleset bot placement, "
                        "FL_BOTCLIENT=%d\n", G_RulesetName(G_Ruleset()),
                        nbotclient);
-            // R-DM-1.  `dm` is the arm this reaches, and `sp` has no bots to
-            // report on; BotFillEnabled() is false under both `sp` and
-            // `tourney`, which have no such switch (see BotFillCvar()).
-            if (BotFillEnabled())
-                gi.cprintf(NULL, PRINT_HIGH,
-                           "botfill      dm want=%d of seats=%d, spawns=%d%s "
-                           "(R-DM-1)\n",
-                           BotFillTarget(), DM_BotFillSeats(),
-                           G_SpawnPointPool("info_player_deathmatch"),
-                           G_TeamplayEnabled() ? ", teamplay: even" : "");
-            else
-                gi.cprintf(NULL, PRINT_HIGH,
-                           "botfill      off -- %s %d is the target (R-DM-1)\n",
-                           BotMinPlayersCvar(), (int)BotMinPlayers()->value);
             break;
+        }
+
+        // ONE botfill line for every ruleset, which is the point of there being
+        // one cvar (R-RA-7, R-CTF-8, R-DM-1).  It was four shapes in four arms
+        // while the switch was three cvars, and four shapes is how a play test
+        // ends up with three regexes and a gap.
+        //
+        // `want` is what survives the ceilings and the source text is where the
+        // number came from -- printing only the first hides a clamp, which is
+        // the reason R-VER-19 wants this line at all.
+        if (BotFillEnabled()) {
+            char src[96];
+
+            BotFillDescribe(src, sizeof(src));
+            gi.cprintf(NULL, PRINT_HIGH,
+                       "botfill      %s want=%d from %s\n",
+                       G_RulesetName(G_Ruleset()), BotFillTarget(), src);
+        } else {
+            gi.cprintf(NULL, PRINT_HIGH,
+                       "botfill      off -- %s %d is the target\n",
+                       BotMinPlayersCvar(), (int)BotMinPlayers()->value);
         }
     }
 
@@ -660,11 +690,11 @@ void G_Svcmd_Ruleset_f(void)
 
 // ---------------------------------------------------------------- gates
 //
-// One place implements R-MODE-6.  `dm` fills every row, so falling back to
-// ops_dm is always defined; a NULL row on dm itself means "baseq2 genuinely does
-// nothing here", which is only ClientPlaced today.
+// One place implements R-MODE-6.  The base fills every row, so falling back to
+// ops_base is always defined; a NULL row on the base itself means "baseq2
+// genuinely does nothing here", which is only ClientPlaced today.
 
-#define GATE(row)   (G_Ops()->row ? G_Ops()->row : ops_dm.row)
+#define GATE(row)   (G_Ops()->row ? G_Ops()->row : ops_base.row)
 
 void G_CheckRules(void)
 {
@@ -690,10 +720,23 @@ void G_BeginIntermission(edict_t *targ)
         GATE(BeginIntermission)(targ);
 }
 
-void G_SelectSpawnPoint(edict_t *ent, vec3_t origin, vec3_t angles)
+bool G_SelectSpawnPoint(edict_t *ent, vec3_t origin, vec3_t angles)
 {
+    // NO `DMGame.SelectSpawnPoint` BRANCH, and it is worth a note because rogue
+    // has one: its PutClientInServer chooses between the row and
+    // SelectSpawnPoint on the line this hook replaced.  Reported as a finding by
+    // `tools/deadvalue.py`'s first draft and it is not one -- the row's only
+    // installer is Ground Zero's `case RDM_DEATHBALL`, which is commented out
+    // here and byte-identically commented out in q2pro, so nothing has ever set
+    // it and a caller would be unreachable.  Recorded rather than written
+    // (doc/reconciliation.md R-192); a tree that restores DBall needs this
+    // branch as well as that case.
+    //
+    // R-MODE-6: a NULL row inherits rather than crashes, and "no hook" means
+    // "the spot stands" -- only tourney refuses one.
     if (GATE(SelectSpawnPoint))
-        GATE(SelectSpawnPoint)(ent, origin, angles);
+        return GATE(SelectSpawnPoint)(ent, origin, angles);
+    return true;
 }
 
 void G_ClientPlaced(edict_t *ent)
@@ -708,7 +751,10 @@ bool G_MonstersAllowed(void)
 {
     switch (g_active_ruleset) {
     case RULESET_ARENA:                 // R-RA-6
-    case RULESET_TOURNEY:               // R-OSP-8
+    case RULESET_DM:                    // R-OSP-8, and baseq2's own rule before
+    case RULESET_DMPRO:                 // the flattening: no monsters in a
+    case RULESET_TDM:                   // deathmatch
+    case RULESET_DUEL:
         return false;
     case RULESET_CTF:
         // R-MODE-7 promises monsters under ctf and R-VER-2 adds the combination
@@ -718,9 +764,6 @@ bool G_MonstersAllowed(void)
         // Q14 closed it as "unproven rather than broken".  Answering true here
         // is what makes the boot matrix able to find out.
         return true;
-    case RULESET_DM:
-        // baseq2's own rule, unchanged: no monsters in deathmatch.
-        return false;
     case RULESET_SP:
         return true;
     default:
@@ -735,9 +778,25 @@ bool G_IsCampaign(void)
 
 bool G_TeamplayEnabled(void)
 {
-    if (g_active_ruleset == RULESET_CTF)
-        return true;                    // implied, per R-MODE-7
-    return G_ModifierEnabled(MOD_TEAMPLAY);
+    switch (g_active_ruleset) {
+    case RULESET_CTF:                   // implied, per R-MODE-7
+    case RULESET_TDM:                   // team play IS the ruleset now
+    case RULESET_DUEL:                  // two teams of one, forced
+        return true;
+    default:
+        // arena is the only ruleset left that reaches team play through the
+        // modifier; the OSP four refuse it (R-MODE-4) and sp has no teams, so
+        // both answer false here through modifier_ok rather than by name.
+        return G_ModifierEnabled(MOD_TEAMPLAY);
+    }
+}
+
+// R-OSP-12.  A range test, which is why the four are contiguous and first in
+// the enum -- an `||` chain is a list, and a list is a thing a later ruleset
+// gets left off.
+bool G_IsOspRuleset(void)
+{
+    return g_active_ruleset <= RULESET_DUEL;
 }
 
 bool G_BotsAllowed(void)
@@ -769,9 +828,10 @@ bool G_BotsAllowed(void)
 // Three properties fall out:
 //
 //   * a default server is untouched.  `runes` defaults to 0, which means "do
-//     not ask", not "turn them off", so a CTF map's techs and a tourney
+//     not ask", not "turn them off", so a CTF map's techs and an OSP
 //     server's runes_enable keep deciding exactly what they decided before.
-//   * `runes 1` means something under ctf and tourney for the first time -- it
+//   * `runes 1` means something under ctf and the OSP four for the first
+//     time -- it
 //     clears DF_CTF_NO_TECH, or turns all five runes on where none were.  The
 //     bitmask survives: asking for runes where some are already selected
 //     changes nothing.
@@ -795,6 +855,19 @@ void G_ResolveModifiers(void)
     bool wanted = req->value != 0;
     int flags;
 
+    if (G_IsOspRuleset()) {
+        if (wanted && !rune_stat) {
+            // All five bits.  Which runes is runes_enable's business and this
+            // only ever fires when it has chosen none.
+            gi.cvar_set("runes_enable", "31");
+            rune_stat = 0x1f;
+            gi.dprintf("Colosseum: 'runes 1' sets runes_enable to all five "
+                       "(R-MODE-4, R-88)\n");
+        }
+        g_modifier[MOD_RUNES] = rune_stat != 0;
+        return;
+    }
+
     switch (g_active_ruleset) {
     case RULESET_CTF:
         flags = (int)dmflags->value;
@@ -805,21 +878,10 @@ void G_ResolveModifiers(void)
         }
         g_modifier[MOD_RUNES] = !((int)dmflags->value & DF_CTF_NO_TECH);
         break;
-    case RULESET_TOURNEY:
-        if (wanted && !rune_stat) {
-            // All five bits.  Which runes is runes_enable's business and this
-            // only ever fires when it has chosen none.
-            gi.cvar_set("runes_enable", "31");
-            rune_stat = 0x1f;
-            gi.dprintf("Colosseum: 'runes 1' sets runes_enable to all five "
-                       "(R-MODE-4, R-88)\n");
-        }
-        g_modifier[MOD_RUNES] = rune_stat != 0;
-        break;
     default:
-        // dm, arena and sp: the refusal in G_InitRuleset has already cleared it
-        // and said so.  Restating it here keeps the derived value the only
-        // thing anything reads.
+        // arena and sp: the refusal in G_InitRuleset has already cleared it and
+        // said so.  Restating it here keeps the derived value the only thing
+        // anything reads.
         g_modifier[MOD_RUNES] = false;
         break;
     }

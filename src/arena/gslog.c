@@ -130,6 +130,51 @@ void GSdodeathlog(char *line)
         fprintf(StdLogFile, "%s", line);
 }
 
+/*
+==================
+splash_weapon
+
+Can a player kill themselves with this weapon's own blast?  RA2 asks the question
+by listing three classnames inline, and names the weapon in the suicide record
+only for those three -- so a suicide with anything else is logged with an empty
+weapon field.
+
+R-183: the mission packs bring five more weapons that can do it, and the list had
+none of them, so a Phalanx or Prox Launcher suicide went into the round log
+unattributed.  Named here rather than inline because the answer is a property of
+the weapon and the caller already has three ways to reach the same record.
+
+The TRAP and the TESLA are here although they are thrown rather than fired: both
+damage whatever is nearby including the thrower, which is the only thing this
+predicate is asking, and both carry IT_WEAPON so both can be `pers.weapon`.
+
+THE A-M BOMB IS NOT, and checking why is what removed it: `ammo_nuke` is
+IT_POWERUP in the itemlist, with no IT_WEAPON bit, so it is a use-item and never
+becomes `pers.weapon`.  A row for it would have read plausibly and matched
+nothing -- the same dead-branch shape as item 5's `ionrippergun`, arrived at from
+the other direction.
+==================
+*/
+static bool splash_weapon(const char *classname)
+{
+    static const char *const splash[] = {
+        "weapon_grenadelauncher",   // RA2's three
+        "weapon_rocketlauncher",
+        "weapon_bfg",
+        "weapon_phalanx",           // R-183: Xatrix
+        "ammo_trap",
+        "weapon_proxlauncher",      // R-183: Ground Zero
+        "ammo_tesla",
+    };
+    int i;
+
+    for (i = 0; i < q_countof(splash); i++)
+        if (!strcmp(classname, splash[i]))
+            return true;
+
+    return false;
+}
+
 void GSLogDeath(edict_t *self, edict_t *inflictor, edict_t *attacker)
 {
     char    line[1000];
@@ -145,9 +190,7 @@ void GSLogDeath(edict_t *self, edict_t *inflictor, edict_t *attacker)
 
     if (attacker == self) {
         if (attacker->client->pers.weapon) {
-            if (!strcmp(self->client->pers.weapon->classname, "weapon_grenadelauncher") ||
-                !strcmp(self->client->pers.weapon->classname, "weapon_rocketlauncher") ||
-                !strcmp(self->client->pers.weapon->classname, "weapon_bfg")) {
+            if (splash_weapon(self->client->pers.weapon->classname)) {
                 Q_snprintf(line, sizeof(line), "%s\t\tSuicide\t%s\t-1\t%d\t%d\n",
                            self->client->pers.netname, self->client->pers.weapon->pickup_name,
                            (int)level.time, self->client->ping);

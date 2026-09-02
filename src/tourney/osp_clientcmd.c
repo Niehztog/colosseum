@@ -77,7 +77,7 @@ bool OSP_ClientCommand(edict_t *ent)
         OSP_talkto_cmd(ent);
         return true;
     }
-    if (m_mode == 2 && (!Q_stricmp(cmdstr, "say_team") ||
+    if (G_Ruleset() == RULESET_TDM && (!Q_stricmp(cmdstr, "say_team") ||
                         !Q_stricmp(cmdstr, "steam"))) {
         OSP_sayteam_cmd(ent, gi.args());
         return true;
@@ -104,15 +104,15 @@ bool OSP_ClientCommand(edict_t *ent)
         OSP_joincode_cmd(ent);
         return true;
     }
-    if (m_mode > 0 && !Q_stricmp(cmdstr, "_is_referee")) {
+    if (OSP_IsMatch() && !Q_stricmp(cmdstr, "_is_referee")) {
         OSP_isreferee_cmd(ent);
         return true;
     }
-    if (m_mode > 1 && !Q_stricmp(cmdstr, "_default_team_info")) {
+    if (OSP_IsTeams() && !Q_stricmp(cmdstr, "_default_team_info")) {
         OSP_defaultteam_cmd(ent);
         return true;
     }
-    if (m_mode == 2 && !Q_stricmp(cmdstr, "_default_join_code")) {
+    if (G_Ruleset() == RULESET_TDM && !Q_stricmp(cmdstr, "_default_join_code")) {
         OSP_defaultjoincode_cmd(ent);
         return true;
     }
@@ -176,7 +176,7 @@ bool OSP_ClientCommand(edict_t *ent)
         OSP_motd_cmd(ent);
     else if (!Q_stricmp(cmdstr, "hud") || !Q_stricmp(cmdstr, "display"))
         OSP_hud_cmd(ent);
-    else if (m_mode == 0 && (!Q_stricmp(cmdstr, "highscores") ||
+    else if (G_Ruleset() == RULESET_DM && (!Q_stricmp(cmdstr, "highscores") ||
                              !Q_stricmp(cmdstr, "highscore") || !Q_stricmp(cmdstr, "hiscores") ||
                              !Q_stricmp(cmdstr, "hiscore")))
         OSP_highscores_cmd(ent);
@@ -211,7 +211,7 @@ bool OSP_ClientCommand(edict_t *ent)
         OSP_yes_cmd(ent);
     else if (!Q_stricmp(cmdstr, "no"))
         OSP_no_cmd(ent);
-    else if (m_mode < 2 && (!Q_stricmp(cmdstr, "join") || !Q_stricmp(cmdstr, "joingame")))
+    else if (!OSP_IsTeams() && (!Q_stricmp(cmdstr, "join") || !Q_stricmp(cmdstr, "joingame")))
         OSP_ffajoin_cmd(ent);
     else if (!Q_stricmp(cmdstr, "oldscores") || !Q_stricmp(cmdstr, "oldscore") ||
              !Q_stricmp(cmdstr, "lastscores") || !Q_stricmp(cmdstr, "lastscore"))
@@ -224,46 +224,46 @@ bool OSP_ClientCommand(edict_t *ent)
         if (it)
             it->drop(ent, it);
         return true;
-    } else if (m_mode > 1 && !Q_stricmp(cmdstr, "teamname"))
+    } else if (OSP_IsTeams() && !Q_stricmp(cmdstr, "teamname"))
         OSP_teamname_cmd(ent);
-    else if (m_mode > 1 && !Q_stricmp(cmdstr, "teamskin"))
+    else if (OSP_IsTeams() && !Q_stricmp(cmdstr, "teamskin"))
         OSP_teamskin_cmd(ent);
-    else if (m_mode > 1 && (!Q_stricmp(cmdstr, "join") ||
+    else if (OSP_IsTeams() && (!Q_stricmp(cmdstr, "join") ||
                             !Q_stricmp(cmdstr, "jointeam") || !Q_stricmp(cmdstr, "team")))
         OSP_teamjoin_cmd(ent, NULL);
-    else if (m_mode == 2 && (!Q_stricmp(cmdstr, "invite") ||
+    else if (G_Ruleset() == RULESET_TDM && (!Q_stricmp(cmdstr, "invite") ||
                              !Q_stricmp(cmdstr, "pick") || !Q_stricmp(cmdstr, "pickplayer")))
         OSP_teaminvite_cmd(ent);
-    else if (m_mode == 2 && (!Q_stricmp(cmdstr, "switchteam") ||
+    else if (G_Ruleset() == RULESET_TDM && (!Q_stricmp(cmdstr, "switchteam") ||
                              !Q_stricmp(cmdstr, "switchteams")))
         OSP_switchteam_cmd(ent);
-    else if (m_mode == 2 && (!Q_stricmp(cmdstr, "lockteam") ||
+    else if (G_Ruleset() == RULESET_TDM && (!Q_stricmp(cmdstr, "lockteam") ||
                              !Q_stricmp(cmdstr, "teamlock") || !Q_stricmp(cmdstr, "lock")))
         OSP_lockteam_cmd(ent);
-    else if (m_mode == 2 && (!Q_stricmp(cmdstr, "unlockteam") ||
+    else if (G_Ruleset() == RULESET_TDM && (!Q_stricmp(cmdstr, "unlockteam") ||
                              !Q_stricmp(cmdstr, "teamunlock") || !Q_stricmp(cmdstr, "unlock")))
         OSP_unlockteam_cmd(ent);
-    else if (m_mode == 2 && !(int)match_strictmode->value &&
+    else if (G_Ruleset() == RULESET_TDM && !(int)match_strictmode->value &&
              (!Q_stricmp(cmdstr, "readyteam") || !Q_stricmp(cmdstr, "teamready") ||
               !Q_stricmp(cmdstr, "teamallready")))
         OSP_readyteam_cmd(ent);
-    else if (m_mode == 2 && !(int)match_strictmode->value &&
+    else if (G_Ruleset() == RULESET_TDM && !(int)match_strictmode->value &&
              (!Q_stricmp(cmdstr, "notreadyteam") || !Q_stricmp(cmdstr, "unreadyteam") ||
               !Q_stricmp(cmdstr, "noreadyteam") || !Q_stricmp(cmdstr, "teamnotready")))
         OSP_notreadyteam_cmd(ent);
-    else if (m_mode == 2 && (!Q_stricmp(cmdstr, "captain") ||
+    else if (G_Ruleset() == RULESET_TDM && (!Q_stricmp(cmdstr, "captain") ||
                              !Q_stricmp(cmdstr, "leader") || !Q_stricmp(cmdstr, "teamcaptain")))
         OSP_captain_cmd(ent);
-    else if (m_mode == 2 && !Q_stricmp(cmdstr, "captains"))
+    else if (G_Ruleset() == RULESET_TDM && !Q_stricmp(cmdstr, "captains"))
         OSP_captains_cmd(ent);
-    else if (m_mode == 2 && (!Q_stricmp(cmdstr, "kickplayer") ||
+    else if (G_Ruleset() == RULESET_TDM && (!Q_stricmp(cmdstr, "kickplayer") ||
                              !Q_stricmp(cmdstr, "remove") || !Q_stricmp(cmdstr, "removeplayer")))
         OSP_kickplayer_cmd(ent);
-    else if (m_mode > 1 && (!Q_stricmp(cmdstr, "time") ||
+    else if (OSP_IsTeams() && (!Q_stricmp(cmdstr, "time") ||
                             !Q_stricmp(cmdstr, "matchpause") || !Q_stricmp(cmdstr, "timeout") ||
                             !Q_stricmp(cmdstr, "timein")))
         OSP_playertime_cmd(ent);
-    else if (m_mode == 3 && (!Q_stricmp(cmdstr, "queue") ||
+    else if (G_Ruleset() == RULESET_DUEL && (!Q_stricmp(cmdstr, "queue") ||
                              !Q_stricmp(cmdstr, "line") || !Q_stricmp(cmdstr, "order")))
         OSP_1v1queue_cmd(ent);
     else if (ent->osp_e39c) {
@@ -279,12 +279,12 @@ bool OSP_ClientCommand(edict_t *ent)
             OSP_rtimelimit_cmd(ent);
         else if (!Q_stricmp(cmdstr, "r_fraglimit"))
             OSP_rfraglimit_cmd(ent);
-        else if (!Q_stricmp(cmdstr, "r_allready") && m_mode > 0)
+        else if (!Q_stricmp(cmdstr, "r_allready") && OSP_IsMatch())
             OSP_allready_svcmd();
-        else if (!Q_stricmp(cmdstr, "r_allnotready") && m_mode > 0)
+        else if (!Q_stricmp(cmdstr, "r_allnotready") && OSP_IsMatch())
             OSP_allnotready_svcmd(true);
         else if ((!Q_stricmp(cmdstr, "r_stopmatch") ||
-                  !Q_stricmp(cmdstr, "r_endmatch")) && m_mode > 0)
+                  !Q_stricmp(cmdstr, "r_endmatch")) && OSP_IsMatch())
             OSP_rstopmatch_cmd(ent);
         else if (!Q_stricmp(cmdstr, "r_players") ||
                  !Q_stricmp(cmdstr, "r_plist"))

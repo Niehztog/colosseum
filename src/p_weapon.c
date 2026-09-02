@@ -207,6 +207,14 @@ bool Pickup_Weapon(edict_t *ent, edict_t *other)
         (!deathmatch->value || other->client->pers.weapon == FindItem("blaster")))
         other->client->newweapon = ent->item;
 
+    // R-OSP-1/3.  Both are outside the auto-switch above in the donor too: a
+    // weapon pickup ends `client_protect` spawn protection and is logged
+    // whether or not it was the one that changed the weapon in hand.
+    if (G_IsOspRuleset()) {
+        other->client->resp.osp_r23c = 0;
+        OSP_Stats_ItemPickup(ent->item->pickup_name, 0, other);
+    }
+
     return true;
 }
 
@@ -256,7 +264,15 @@ void ChangeWeapon(edict_t *ent)
 
     ent->client->weaponstate = WEAPON_ACTIVATING;
     ent->client->ps.gunframe = 0;
-    ent->client->ps.gunindex = gi.modelindex(ent->client->pers.weapon->view_model);
+    // R-OSP-1: an observer is carrying this weapon and must not SEE it, which
+    // is the donor's own condition on this line -- `resp.osp_r240` is 2 only
+    // for a client PutClientInServer gave a body to.  Without it every weapon
+    // change put the view model back on a tourney observer's screen, including
+    // the ChangeWeapon that placement itself ends with.
+    if (G_IsOspRuleset() && ent->client->resp.osp_r240 != 2)
+        ent->client->ps.gunindex = 0;
+    else
+        ent->client->ps.gunindex = gi.modelindex(ent->client->pers.weapon->view_model);
 
     ent->client->anim_priority = ANIM_PAIN;
     if (ent->client->ps.pmove.pm_flags & PMF_DUCKED) {
@@ -277,6 +293,43 @@ NoAmmoWeaponChange
 
 // PMM - added rogue weapons to the list
 
+/*
+THREE FIXES AND THREE REFUSALS, R-183.
+
+The list is a descending preference: the first branch that matches is the weapon
+a player out of ammo is switched to.  Xatrix's two entries were both dead, and
+both are still dead in upstream q2pro's `src/xatrix/p_weapon.c`, so this is id's
+own rather than the merge's -- but unlike R-22's Ion Ripper knockback, which
+sec 7 rule 2 keeps because its effect is a balance quirk, these two make a
+branch that cannot fire.
+
+  * `FindItem("ionrippergun")` matches NO pickup name.  The item is
+    `weapon_boomer`, pickup name "Ionripper", so the lookup returned NULL and
+    `newweapon` was set to NULL -- harmless only because the tail of this
+    function always assigns the blaster afterwards, which is also why the
+    Ionripper was never once selected here.  tools/itemnames.py is this defect
+    made into a build check.
+  * neither the phalanx nor the ionripper branch RETURNED, so even a correct
+    name was immediately reconsidered and overwritten by the hyperblaster test
+    below.  Adding the returns changes which weapon a player gets -- a phalanx
+    now beats a hyperblaster, as the order here has always claimed -- and that
+    is the point of fixing it.
+  * the Prox Launcher is missing, and Ground Zero's own copy of this list omits
+    it too.  It is a real IT_WEAPON with its own ammo, so it goes in beside its
+    siblings.
+
+Three that are deliberately NOT added, because each would be worse:
+
+  * the CHAINFIST needs no ammo, which makes it tempting as the last resort --
+    but the blaster needs none either and is strictly better at range, so
+    forcing melee on a player who just ran dry is a downgrade.
+  * the DISRUPTOR carries no IT_WEAPON bit at all (R-16, Ground Zero's own
+    KILL_DISRUPTOR), so `give weapons` and the weapon-cycling keys already skip
+    it; selecting it from here would be the one place in the tree that treats it
+    as a weapon.
+  * the TESLA and the TRAP are thrown devices that are their own ammunition, and
+    baseq2's list omits hand grenades for exactly that reason.
+*/
 static void NoAmmoWeaponChange(edict_t *ent)
 {
     if (ent->client->pers.inventory[ITEM_INDEX(FindItem("slugs"))]
@@ -288,11 +341,13 @@ static void NoAmmoWeaponChange(edict_t *ent)
     if (ent->client->pers.inventory[ITEM_INDEX(FindItem("mag slug"))]
         && ent->client->pers.inventory[ITEM_INDEX(FindItem("phalanx"))]) {
         ent->client->newweapon = FindItem("phalanx");
+        return;
     }
     // RAFAEL
     if (ent->client->pers.inventory[ITEM_INDEX(FindItem("cells"))]
         && ent->client->pers.inventory[ITEM_INDEX(FindItem("ionripper"))]) {
-        ent->client->newweapon = FindItem("ionrippergun");
+        ent->client->newweapon = FindItem("Ionripper");
+        return;
     }
 
     if (ent->client->pers.inventory[ITEM_INDEX(FindItem("cells"))]
@@ -319,6 +374,13 @@ static void NoAmmoWeaponChange(edict_t *ent)
     if (ent->client->pers.inventory[ITEM_INDEX(FindItem("flechettes"))]
         &&  ent->client->pers.inventory[ITEM_INDEX(FindItem("etf rifle"))]) {
         ent->client->newweapon = FindItem("etf rifle");
+        return;
+    }
+    // R-183: beside its sibling, which is where Ground Zero's own list would
+    // have put it if it had one.
+    if (ent->client->pers.inventory[ITEM_INDEX(FindItem("prox"))]
+        &&  ent->client->pers.inventory[ITEM_INDEX(FindItem("prox launcher"))]) {
+        ent->client->newweapon = FindItem("prox launcher");
         return;
     }
     // -ROGUE
@@ -537,16 +599,32 @@ static void Weapon_Generic2(edict_t *ent, int FRAME_ACTIVATE_LAST, int FRAME_FIR
             }
         }
 
-        ent->client->ps.gunframe++;
+        // R-OSP-1's `client_fastweap`: three frames of the lower animation per
+        // server frame instead of one, so a weapon change costs a third of the
+        // time without skipping the animation the way `instantweap` does.  The
+        // clamp is the donor's -- overshooting FRAME_DEACTIVATE_LAST would run
+        // the state machine past its own end.
+        if (G_IsOspRuleset() && (int)client_fastweap->value) {
+            ent->client->ps.gunframe += 3;
+            if (ent->client->ps.gunframe > FRAME_DEACTIVATE_LAST)
+                ent->client->ps.gunframe = FRAME_DEACTIVATE_LAST;
+        } else {
+            ent->client->ps.gunframe++;
+        }
         return;
     }
 
     if (ent->client->weaponstate == WEAPON_ACTIVATING) {
-        // No raise animation.  Threewave spells it `instantweap` (a cvar,
-        // registered in every ruleset and 0 by default, so this reads as baseq2
-        // elsewhere); RA2 spells it `fastswitch` and makes it a per-arena
-        // setting -- R-RA-4's `ra_fastswitch`.  One concept, one owner at a time.
-        if (ent->client->ps.gunframe == FRAME_ACTIVATE_LAST || instantweap->value ||
+        // No raise animation.  Threewave spells it `instantweap`; RA2 spells it
+        // `fastswitch` and makes it a per-arena setting -- R-RA-4's
+        // `ra_fastswitch`.  One concept, one owner at a time, and each read is
+        // gated on the ruleset that owns it: `instantweap` is REGISTERED for
+        // every ruleset only because CTFInit runs for every ruleset and a null
+        // cvar pointer is what R-42 fixed, so reading it ungated handed a
+        // deathmatch or campaign server Threewave's weapon switch the moment an
+        // operator set the cvar it also advertised to them (R-179).
+        if (ent->client->ps.gunframe == FRAME_ACTIVATE_LAST ||
+            (G_Ruleset() == RULESET_CTF && instantweap->value) ||
             (G_Ruleset() == RULESET_ARENA &&
              arenas[ent->client->resp.context].fastswitch)) {
             ent->client->weaponstate = WEAPON_READY;
@@ -554,17 +632,40 @@ static void Weapon_Generic2(edict_t *ent, int FRAME_ACTIVATE_LAST, int FRAME_FIR
             return;
         }
 
-        ent->client->ps.gunframe++;
+        // The raise half of `client_fastweap`, same shape as the lower above.
+        if (G_IsOspRuleset() && (int)client_fastweap->value) {
+            ent->client->ps.gunframe += 3;
+            if (ent->client->ps.gunframe > FRAME_ACTIVATE_LAST)
+                ent->client->ps.gunframe = FRAME_ACTIVATE_LAST;
+        } else {
+            ent->client->ps.gunframe++;
+        }
         return;
     }
 
     if ((ent->client->newweapon) && (ent->client->weaponstate != WEAPON_FIRING)) {
         ent->client->weaponstate = WEAPON_DROPPING;
-        if (instantweap->value) {
+        if (G_Ruleset() == RULESET_CTF && instantweap->value) {
             ChangeWeapon(ent);
             return;
         }
-        ent->client->ps.gunframe = FRAME_DEACTIVATE_FIRST;
+        // R-162: and no LOWER animation either, which is the other half of
+        // `fastswitch` and had been left out -- only the raise above was
+        // carried, so a switch under arena still paid the full deactivate
+        // sequence and was slower than 1999 by it.  `arena.cfg` ships
+        // `fastswitch: 1` as its global default, so that was every switch in
+        // every arena.
+        //
+        // The donor's shape, not Threewave's: it seeks to the LAST deactivate
+        // frame rather than calling ChangeWeapon here, so the drop still costs
+        // one think -- the WEAPON_DROPPING arm at the top of this function is
+        // what completes it on the next frame.  `instantweap` above is the
+        // zero-frame version and stays a separate answer to a separate cvar.
+        if (G_Ruleset() == RULESET_ARENA &&
+            arenas[ent->client->resp.context].fastswitch)
+            ent->client->ps.gunframe = FRAME_DEACTIVATE_LAST;
+        else
+            ent->client->ps.gunframe = FRAME_DEACTIVATE_FIRST;
 
         if ((FRAME_DEACTIVATE_LAST - FRAME_DEACTIVATE_FIRST) < 4) {
             ent->client->anim_priority = ANIM_REVERSE;
@@ -642,12 +743,12 @@ static void Weapon_Generic2(edict_t *ent, int FRAME_ACTIVATE_LAST, int FRAME_FIR
                     // R-OSP-1's strength rune is the fourth claimant on the same
                     // channel and takes the same place in the chain as CTF's
                     // tech: after quad, because it is the rarer thing to hear.
-                    else if (G_Ruleset() == RULESET_TOURNEY &&
+                    else if (G_IsOspRuleset() &&
                              (rune_stat & RUNE_STRENGTH))
                         OSP_runesApplyStrengthSound(ent);
                 }
                 CTFApplyHasteSound(ent);
-                if (G_Ruleset() == RULESET_TOURNEY && (rune_stat & RUNE_HASTE))
+                if (G_IsOspRuleset() && (rune_stat & RUNE_HASTE))
                     OSP_runesApplyHasteSound(ent);
 
                 fire(ent);
@@ -697,7 +798,7 @@ void Weapon_Generic(edict_t *ent, int FRAME_ACTIVATE_LAST, int FRAME_FIRE_LAST, 
     // than skipping it ahead.  Each predicate is a no-op in a ruleset that does
     // not have its pickup.
     if ((CTFApplyHaste(ent) || grapple ||
-         (G_Ruleset() == RULESET_TOURNEY && (rune_stat & RUNE_HASTE) &&
+         (G_IsOspRuleset() && (rune_stat & RUNE_HASTE) &&
           OSP_runesHasHaste(ent)))
         && oldstate == ent->client->weaponstate) {
         Weapon_Generic2(ent, FRAME_ACTIVATE_LAST, FRAME_FIRE_LAST,
@@ -1140,6 +1241,13 @@ static void Weapon_RocketLauncher_Fire(edict_t *ent)
     int     damage;
     float   damage_radius;
     int     radius_damage;
+    // R-163.  `rocket_speed` is a per-arena setting out of arena.cfg -- parsed
+    // by maploop.c, stored in arenas[n], asserted at a fixed struct index in
+    // arena.h -- and NOTHING READ IT: this call passed baseq2's literal 650, so
+    // a server that set the key got nothing and had no way to tell.  The
+    // shipped file does not set it and the parser's own default is 650, which
+    // is why every test agreed with a broken read.
+    int     speed = 650;
 
     damage = 100 + (int)(random() * 20.0f);
     radius_damage = 120;
@@ -1158,9 +1266,13 @@ static void Weapon_RocketLauncher_Fire(edict_t *ent)
     VectorScale(forward, -2, ent->client->kick_origin);
     ent->client->kick_angles[0] = -1;
 
+    if (G_Ruleset() == RULESET_ARENA &&
+        arenas[ent->client->resp.context].rocket_speed > 0)
+        speed = arenas[ent->client->resp.context].rocket_speed;
+
     VectorSet(offset, 8, 8, ent->viewheight - 8);
     P_ProjectSource(ent->client, ent->s.origin, offset, forward, right, start);
-    fire_rocket(ent, start, forward, damage, 650, damage_radius, radius_damage);
+    fire_rocket(ent, start, forward, damage, speed, damage_radius, radius_damage);
 
     // send muzzle flash
     gi.WriteByte(svc_muzzleflash);

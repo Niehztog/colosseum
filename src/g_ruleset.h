@@ -27,11 +27,18 @@
 #ifndef G_RULESET_H
 #define G_RULESET_H
 
+// The four OSP rulesets are CONTIGUOUS AND FIRST, and both halves are load
+// bearing.  Contiguous makes G_IsOspRuleset() a range test rather than a
+// four-way or that a later ruleset could be forgotten from.  First keeps
+// RULESET_DM at zero, which `g_active_ruleset`'s initialiser and every
+// zero-initialised copy of a ruleset_t already assume.
 typedef enum {
-    RULESET_DM,             // baseq2 deathmatch.  Implements every hook (R-MODE-6)
+    RULESET_DM,             // OSP RegularDM   -- was tourney + match_mode 0
+    RULESET_DMPRO,          // OSP QualifierDM -- was match_mode 1
+    RULESET_TDM,            // OSP TeamPlay    -- was match_mode 2
+    RULESET_DUEL,           // OSP 1-vs-1      -- was match_mode 3
     RULESET_CTF,            // Threewave CTF 1.52          -- Phase 3
     RULESET_ARENA,          // Rocket Arena 2 v2.25        -- Phase 4
-    RULESET_TOURNEY,        // OSP Tourney DM v2.75        -- Phase 5
     RULESET_SP,             // single player and co-op
     RULESET_COUNT
 } ruleset_t;
@@ -41,7 +48,7 @@ typedef enum {
 typedef enum {
     MOD_TEAMPLAY,
     MOD_HOOK,
-    MOD_RUNES,              // techs under ctf, runes under tourney
+    MOD_RUNES,              // techs under ctf, runes under the OSP four
     MOD_BOTS,
     MOD_COUNT
 } modifier_t;
@@ -56,17 +63,20 @@ typedef enum {
 
 // ---------------------------------------------------------------- dispatch
 //
-// A NULL row means "inherit the dm implementation" (R-MODE-6).  Rows are added
-// when a phase brings a ruleset that replaces the behaviour, not in advance.
+// A NULL row means "inherit the BASE implementation" (R-MODE-6) -- `ops_base`
+// below, which is Q2PRO's baseq2 code and which no g_ruleset value selects.
+// Rows are added when a phase brings a ruleset that replaces the behaviour, not
+// in advance.
 typedef struct {
     const char  *name;
 
-    // Match rules: fraglimit/timelimit for dm, capturelimit for ctf, the round
-    // state machine for arena, the match system for tourney, nothing for sp.
+    // Match rules: fraglimit/timelimit for the base, capturelimit for ctf, the
+    // round state machine for arena, the match system for the OSP four, nothing
+    // for sp.
     void        (*CheckRules)(void);
 
-    // Where the level goes next.  dm rotates or repeats; sp follows
-    // target_changelevel chains; arena and tourney own their own rotation
+    // Where the level goes next.  The base rotates or repeats; sp follows
+    // target_changelevel chains; arena and the OSP four own their own rotation
     // (R-OSP-9, and note that is one of §7 rule 6's four exemptions).
     void        (*EndLevel)(void);
 
@@ -81,7 +91,7 @@ typedef struct {
     // tourney's to ClientBeginDeathmatch.  All three placement paths will
     // coexist here, so anything that must run after placement hangs off one
     // hook instead of being copied into three functions.
-    void        (*SelectSpawnPoint)(edict_t *ent, vec3_t origin, vec3_t angles);
+    bool        (*SelectSpawnPoint)(edict_t *ent, vec3_t origin, vec3_t angles);
     void        (*ClientPlaced)(edict_t *ent);
 } ruleset_ops_t;
 
@@ -89,7 +99,8 @@ typedef struct {
 // `extern` in g_ruleset.c so the file that DEFINES each one sees the same
 // declaration and the compiler checks the two against each other (R-SEC-8).
 extern const ruleset_ops_t ops_arena;    // src/arena/arena.c
-extern const ruleset_ops_t ops_tourney;  // src/tourney/osp_main.c
+extern const ruleset_ops_t ops_tourney;  // src/tourney/osp_main.c -- all four
+                                         // OSP rulesets share this one row set
 
 // ---------------------------------------------------------------- accessors
 
@@ -106,10 +117,21 @@ const ruleset_ops_t *G_Ops(void);       // never NULL after G_InitRuleset()
 bool        G_ModifierEnabled(modifier_t m);
 bool        G_LayerEnabled(content_layer_t l);
 
+// Is the OSP Tourney DM code path active?  `dm`, `dmpro`, `tdm` and `duel` are
+// one donor's code selected four ways (R-OSP-12), so a gate that means "this is
+// tourney's" asks this rather than naming four rulesets -- naming them is how
+// the fifth one gets forgotten.  A gate that means one MODE still names it:
+// `G_Ruleset() == RULESET_TDM` is a different question and R-BOT-29 depends on
+// the two staying apart.
+//
+// `tools/donorgate.py` knows this predicate by name and accepts it as the gate
+// for `src/tourney/`'s surface in a shared file.
+bool        G_IsOspRuleset(void);
+
 // ---------------------------------------------------------------- gates
 //
 // Call these, not G_Ops()->row directly.  R-MODE-6's "a ruleset that does not
-// implement a hook inherits the dm implementation" then lives in exactly one
+// implement a hook inherits the base implementation" then lives in exactly one
 // place instead of being re-implemented as a null check at every call site --
 // which is how Rogue's dm_game_rt ended up with ~21 hand-written null checks
 // around a table that has no default row.
@@ -117,7 +139,7 @@ void     G_CheckRules(void);
 void     G_EndLevel(void);
 void     G_ScoreboardMessage(edict_t *ent, edict_t *killer);
 void     G_BeginIntermission(edict_t *targ);
-void     G_SelectSpawnPoint(edict_t *ent, vec3_t origin, vec3_t angles);
+bool     G_SelectSpawnPoint(edict_t *ent, vec3_t origin, vec3_t angles);
 void     G_ClientPlaced(edict_t *ent);
 
 // `sv ruleset` -- see the comment on the implementation.  The only way to
@@ -129,8 +151,9 @@ void     G_Svcmd_Ruleset_f(void);
 // One named question per concept, per R-MODE-5.  A call site asks the question
 // it means; it does not test a cvar and hope the cvar still means that.
 
-// Do monsters spawn?  R-MODE-7: yes for dm, ctf and sp; no for arena
-// (R-RA-6) and tourney (R-OSP-8).  This one is load-bearing rather than
+// Do monsters spawn?  R-MODE-7: yes for ctf and sp; no for arena (R-RA-6) and
+// no for the OSP four (R-OSP-8) -- which includes `dm`, and did before the
+// flattening too, by baseq2's own rule.  This one is load-bearing rather than
 // cosmetic: baseq2 asks `if (deathmatch->value) G_FreeEdict(self)` in 24 places,
 // and `deathmatch` is 1 under ctf, so the inherited test would suppress the
 // monsters R-MODE-7 promises under ctf.  See doc/reconciliation.md R-6.
@@ -141,11 +164,19 @@ bool G_MonstersAllowed(void);
 // server forces deathmatch 1 unless coop is set (R-VER-17).
 bool G_IsCampaign(void);
 
-// Are players on teams?  The q2pro-ng/quake2-rerelease shape, which is one
-// predicate with ~20 call sites rather than a hook.  Under tourney this must
-// stay `m_mode == MODE_TEAM` exactly -- 1v1 is two teams of one, the brain has
-// no ally, and generalising the test would give every duel bot an imaginary
-// teammate (R-BOT-29).
+// Are players on teams?  The q2pro-ng/quake2-rerelease shape -- one predicate
+// rather than a hook.  Note the shape is borrowed and the ~20 call sites are
+// NOT: this tree has exactly two, DM_BotFillSeats() and the default arm of
+// BotRulesetLibVars().
+//
+// Ruleset-derived since the flattening: ctf implies it, `tdm` and `duel` ARE it,
+// and the MOD_TEAMPLAY modifier is refused across the OSP four (R-MODE-4) so it
+// only ever answers for arena now.
+//
+// NOT the same question as the brain's `teamplay` libvar, which reads
+// RULESET_TDM alone.  `duel` is two teams of one, the brain has no ally, and
+// telling it otherwise gives every duellist an imaginary team-mate the moment
+// both wear the same model (R-BOT-29).  Do not substitute one for the other.
 bool G_TeamplayEnabled(void);
 
 // May bots exist?  Every ruleset but sp (R-MODE-7, N6: the Gladiator botlib is

@@ -524,7 +524,7 @@ menuApplyAdmin(edict_t *ent, qmenu_t *menu, qmenu_t *item, int arg)
     e->map = gi.TagMalloc(maplen, TAG_LEVEL);
     memcpy(e->map, map, maplen);
 
-    BeginIntermission(e);
+    G_BeginIntermission(e);
 
     return 0;
 }
@@ -579,6 +579,7 @@ menuApplyArenaAdmin(edict_t *ent, qmenu_t *menu, qmenu_t *item, int arg)
     int         *settings = NULL;
     int         arenanum = 0;
     int         weapons;
+    int         i;              // R-182's pack-weapon walk
 
     node = (qmenu_t *)menu->it;
 
@@ -629,6 +630,18 @@ menuApplyArenaAdmin(edict_t *ent, qmenu_t *menu, qmenu_t *item, int arg)
             if (!settings[36])
                 weapons |= (settings[2] & weapon_vals[8]) ? weapon_vals[8] : 0;
 
+            // R-182, and the same rule the nine above follow: a bit is CARRIED
+            // when the menu has no row to re-set it from, and cleared when it
+            // has one.  For the six that is two questions -- is the layer on,
+            // and does this arena allow voting on them -- and getting it wrong
+            // in either direction is silent: carry when there is a row and a
+            // player cannot switch the weapon off, clear when there is none and
+            // an admin changing the round count strips every pack weapon from
+            // the arena.
+            for (i = 0; i < RA_NUM_PACK_WEAPONS; i++)
+                if (!settings[49] || !RA_PackWeaponOffered(i))
+                    weapons |= settings[2] & weapon_vals[9 + i];
+
             settings[2] = weapons;
         } else if (!settings) {
             continue;       // no "Arena:" row, so there is no base to write to
@@ -674,6 +687,17 @@ menuApplyArenaAdmin(edict_t *ent, qmenu_t *menu, qmenu_t *item, int arg)
             settings[39] = (it->value[0] == 'Y');
         } else if (!Q_stricmp(it->text, "Damage Scoring:        ")) {
             settings[40] = (it->value[0] == 'Y');
+        } else if (!Q_stricmp(it->text, "Allow Bots:            ")) {
+            settings[42] = (it->value[0] == 'Y');     // R-RA-8
+        } else {
+            // R-182's six, read back through the one table that also draws them
+            // and parses them out of arena.cfg, so a label cannot drift from a
+            // bit.  -1 for every row that is not one of them, which is every
+            // row the chain above already handled.
+            int k = RA_PackWeaponRow(it->text);
+
+            if (k >= 0)
+                settings[2] |= (it->value[0] == 'Y') ? weapon_vals[9 + k] : 0;
         }
     }
 
@@ -719,6 +743,7 @@ Cmd_arenaadmin_f(edict_t *ent, unsigned mode)
     int             *live;
     int             arenanum = 0;
     int             code;
+    int             i;          // R-182's pack-weapon walk
 
     switch (mode) {
     case 0:
@@ -803,12 +828,24 @@ Cmd_arenaadmin_f(edict_t *ent, unsigned mode)
             AddMenuItem(m, "Allow Railgun:         ", (vals[2] & weapon_vals[7]) ? "YES" : "NO ", -1, changeyesno);
         if ((vals[2] & weapon_vals[8]) != (live[2] & weapon_vals[8]))
             AddMenuItem(m, "Allow BFG10K:          ", (vals[2] & weapon_vals[8]) ? "YES" : "NO ", -1, changeyesno);
+        // R-182: and the six, on the same rule -- a row per weapon whose
+        // proposed state differs from the live one, and only for a layer that
+        // is switched on.
+        for (i = 0; i < RA_NUM_PACK_WEAPONS; i++)
+            if (RA_PackWeaponOffered(i) &&
+                (vals[2] & weapon_vals[9 + i]) != (live[2] & weapon_vals[9 + i]))
+                AddMenuItem(m, ra_pack_weapons[i].menulabel,
+                            (vals[2] & weapon_vals[9 + i]) ? "YES" : "NO ", -1, changeyesno);
         if (vals[17] != live[17])
             AddMenuItem(m, "Health: ", StringForProtect(vals[17]), -1, changeprotect);
         if (vals[16] != live[16])
             AddMenuItem(m, "Armor:  ", StringForProtect(vals[16]), -1, changeprotect);
         if (vals[18] != live[18])
             AddMenuItem(m, "Falling Damage:        ", vals[18] ? "YES" : "NO ", -1, changeyesno);
+        // Same order as the propose menu above, so a voter reads the change in
+        // the place they made it (R-RA-8).
+        if (vals[42] != live[42])
+            AddMenuItem(m, "Allow Bots:            ", vals[42] ? "YES" : "NO ", -1, changeyesno);
         if (vals[39] != live[39])
             AddMenuItem(m, "Competition Mode:      ", vals[39] ? "YES" : "NO ", -1, changeyesno);
         if (vals[40] != live[40])
@@ -862,12 +899,35 @@ Cmd_arenaadmin_f(edict_t *ent, unsigned mode)
             AddMenuItem(m, "Allow Railgun:         ", (vals[2] & weapon_vals[7]) ? "YES" : "NO ", -1, changeyesno);
         if (!mode || vals[36])
             AddMenuItem(m, "Allow BFG10K:          ", (vals[2] & weapon_vals[8]) ? "YES" : "NO ", -1, changeyesno);
+        // R-182's six, WHENEVER THEIR LAYER IS ON.  Immediately after the
+        // donor's nine because that is where a reader looks for a weapon
+        // switch, and `mode`/vals[49] gate them the way vals[28..36] gate the
+        // nine: an admin always sees them, a player when the arena allows it.
+        // A server running neither pack sees no new row at all, which is what
+        // makes this invisible until it is wanted.
+        for (i = 0; i < RA_NUM_PACK_WEAPONS; i++)
+            if (RA_PackWeaponOffered(i) && (!mode || vals[49]))
+                AddMenuItem(m, ra_pack_weapons[i].menulabel,
+                            (vals[2] & weapon_vals[9 + i]) ? "YES" : "NO ", -1, changeyesno);
         if (!mode || vals[27])
             AddMenuItem(m, "Health: ", StringForProtect(vals[17]), -1, changeprotect);
         if (!mode || vals[26])
             AddMenuItem(m, "Armor:  ", StringForProtect(vals[16]), -1, changeprotect);
         if (!mode || vals[37])
             AddMenuItem(m, "Falling Damage:        ", vals[18] ? "YES" : "NO ", -1, changeyesno);
+        // R-RA-8.  Guarded like the rows above rather than left unconditional
+        // the way Competition Mode and Damage Scoring are: an admin (mode 0)
+        // always sees it, and the arena decides through `allowvotingbots`
+        // whether it is also something the people in it may propose.
+        //
+        // Placed HERE, beside the other whole-arena yes/no, rather than after
+        // the last row: menu.c draws a window of MAXMENUITEMS (18) and this
+        // menu is longer than that, so the tail of the list is behind a
+        // "(More)" the reader has to scroll to.  Appended, the new row landed
+        // there; next to Falling Damage it is on the first page for every arena
+        // that does not also allow voting on all nine weapons.
+        if (!mode || vals[43])
+            AddMenuItem(m, "Allow Bots:            ", vals[42] ? "YES" : "NO ", -1, changeyesno);
         if (!mode)
             AddMenuItem(m, "Lock Arena:            ", vals[38] ? "YES" : "NO ", -1, changeyesno);
         AddMenuItem(m, "Competition Mode:      ", vals[39] ? "YES" : "NO ", -1, changeyesno);

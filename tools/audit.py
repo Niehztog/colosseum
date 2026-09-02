@@ -1,11 +1,18 @@
 #!/usr/bin/env python3
-"""Run the four contract audits and fail the build on a finding (R-TOOL-3).
+"""Run the contract audits and fail the build on a finding (R-TOOL-3).
 
 R-TOOL-3: "The four audits of R-TOOL-1 (`auditsave`, `slotkind`, `keycontract`,
 `auditems`) run in the build, not on request.  A new finding fails the build the
 way a warning does (R-BUILD-2)."
 
-The four tools were written as *reports*: they print what they find and exit 0
+It is more than four now.  R-TOOL-1's four were the imported harness's; every
+phase since has added the check its own defect asked for, and each is registered
+below with the requirement it discharges.  `auditsave` is the one that left:
+`dsweep.py` asks its question better.  The count is not fixed here and is not
+worth publishing from memory -- this driver prints it, and a document that wants
+the figure should quote that line.
+
+The tools were written as *reports*: they print what they find and exit 0
 either way, because in the replay harness a human read the output.  A build
 cannot read.  This driver runs each one, scans its output for the markers the
 tool uses to signal a finding, and exits non-zero if any fired.
@@ -37,25 +44,15 @@ TOOLS = os.path.join(REPO, 'tools')
 #
 #   keycontract  prefixes each finding with '!!'
 #   slotkind     prefixes each finding with '!!'
-#   auditsave    prints one bare '  label.field' line per finding, then a
-#                trailer; no marker at all, so the lines are counted
 #   auditems     prints 'TOTAL differing fields across shared items: N'
+#
+# `auditsave.py` is not here and is not run: R-SAVE-3's question is asked by
+# `dsweep.py`, which brace-matches the struct bodies instead of regexing them
+# and carries its own extractor self-test.  See the note at the dsweep call.
 
 
 def _bang(out):
     return [ln for ln in out.splitlines() if '!!' in ln]
-
-
-def _auditsave(out):
-    # every line before the trailer that looks like 'label.field'
-    hits = []
-    for ln in out.splitlines():
-        s = ln.strip()
-        if s.startswith('(') or not s:
-            continue
-        if re.match(r'^[a-z_]+\.[A-Za-z_]\w*$', s):
-            hits.append(ln)
-    return hits
 
 
 # R-VER-15 item 1 asks whether the merge LOST a baseq2 field.  A merged union
@@ -110,7 +107,12 @@ PARSERS = {
     'keycontract.py': _bang,
     'slotkind.py': _bang,
     'dupvalue.py': _bang,
-    'auditsave.py': _auditsave,
+    'itemnames.py': _bang,
+    'classnames.py': _bang,
+    'deadvalue.py': _bang,
+    'fnsweep.py': _bang,
+    'counts.py': _bang,
+    'assets.py': _bang,
     'auditems.py': _auditems,
 }
 
@@ -145,6 +147,8 @@ def main():
     donors = [(l, p) for l, p in donors if os.path.isdir(p)]
 
     results, vacuous = [], []
+    # The same donor list, in the form the comparative single-tool audits take.
+    dflags = [f'--donor={l}={p}' for l, p in donors]
 
     # --- single-tree audits: meaningful from Phase 0 on -------------------
     # keycontract: statusbar slot vs STAT_ macro vs spawn key vs descriptor type
@@ -216,6 +220,63 @@ def main():
     # twice -- grep in a UTF-8 locale returns NOTHING for a file it cannot
     # decode, so a census can silently report zero (R-60).
     results.append(run('encoding.py', ['--tree', tree], 'encoding'))
+    # itemnames: does every literal FindItem()/FindItemByClassname() in the tree
+    # resolve to a row the itemlist actually has (R-183)?  A merged union
+    # itemlist is where a name goes stale -- six donors' items in one list, so a
+    # donor's own spelling can be renamed by the union and a name one donor
+    # invented for another's item never resolved at all -- and the failure is
+    # silent: NULL assigned is a weapon that is never selected, NULL indexed
+    # through ITEM_INDEX is a negative subscript into pers.inventory[].
+    results.append(run('itemnames.py', ['--tree', tree], 'itemnames'))
+    results.append(run('itemnames.py', ['--selftest'], 'itemnames/controls'))
+    # classnames: the SECOND resolver, and it exists because the first one's
+    # question is narrower than it looks (R-188).  itemnames.py resolves
+    # classname-SHAPED literals against the ITEMLIST; a literal compared against
+    # an entity's classname may name a monster, a projectile or something a
+    # runtime assignment invented, and it need not be shaped like an item at
+    # all.  Both narrowings applied to `"telsa"` in m_move.c, Ground Zero's own
+    # typo, which meant a branch of the blocked-by-tesla chain never ran once in
+    # twenty-seven years (R-187).  So this asks whether ANY code path can put
+    # the string in an edict_t.classname -- the spawn table, the itemlist, or a
+    # `->classname =` assignment -- because a literal none of the three produces
+    # is a comparison that cannot succeed.
+    results.append(run('classnames.py', ['--tree', tree], 'classnames'))
+    results.append(run('classnames.py', ['--selftest'], 'classnames/controls'))
+    # counts: the acceptance-criteria surfaces, and the R-COMPAT-6 duplicate
+    # check inside them.  `doc/cvars.md` publishes counts.py's numbers and cites
+    # its `--duplicates` as evidence, and until R-184 NOTHING re-ran it -- a
+    # figure in a document with no build check behind it is R-TOOL-2's
+    # "indicative only" no matter which script first produced it.  --duplicates
+    # exits non-zero on a real collision, which is what makes it an audit.
+    results.append(run('counts.py', ['--tree', tree, '--duplicates'], 'counts'))
+    results.append(run('counts.py', ['--selftest'], 'counts/controls'))
+    # assets: does every literal .md2/.sp2/.wav name a file some donor actually
+    # ships (R-184)?  itemnames.py asks this of the itemlist; this asks it of the
+    # DATA, which is the other half of the same namespace and fails even more
+    # quietly -- gi.soundindex() cannot check, so a weapon with a misspelled
+    # sound is silent and looks like a design choice.  The game data is not in
+    # the repository, so this one SKIPS rather than passes when it is absent.
+    results.append(run('assets.py', ['--tree', tree], 'assets'))
+    results.append(run('assets.py', ['--selftest'], 'assets/controls'))
+    # deadvalue: R-TOOL-6's third space (R-192).  A field compared against a
+    # value nothing in the tree writes is a branch that cannot be taken, and the
+    # merge produces them by keeping a reader and dropping the write -- R-191's
+    # `osp_r240 == 2`, R-155's `pers.showmotd`, R-192's five-page scoreboard
+    # whose fifth page nothing could open.  The in-tree half needs no donor; the
+    # sharper half compares against each one below.
+    results.append(run('deadvalue.py', ['--tree', tree] + dflags, 'deadvalue'))
+    results.append(run('deadvalue.py', ['--selftest'], 'deadvalue/controls'))
+    # fnsweep: the function-level donor diff (R-VER-35).  divergence.py states
+    # the merge load per FILE in diff lines, which cannot say whether a donor's
+    # change to a particular definition survived; this walks each donor's own
+    # feature set definition by definition and asks.  Its finding is narrow on
+    # purpose -- a donor line whose identifiers exist NOWHERE in src/ and that
+    # no recorded decision explains -- because a line missing from its own site
+    # is the normal case under R-MODE-5 and 1,165 of them are elsewhere in the
+    # tree verbatim.  doc/donor-fdiff.md is the read-through; R-195 records the
+    # findings, including the five this check's own space cannot contain.
+    results.append(run('fnsweep.py', ['--check', '--tree', tree], 'fnsweep'))
+    results.append(run('fnsweep.py', ['--selftest'], 'fnsweep/controls'))
     # botabi: the game<->botlib contract against the BRAIN's own header
     # (R-VER-28).  The Trace slot has two spellings and they are the same ABI at
     # 32 bits and different ABIs at 64, so taking the 32-bit one on aarch64
@@ -253,18 +314,28 @@ def main():
                 results.append(r)
             else:
                 vacuous.append(f'auditems/{label}: {var_items} absent')
-        if not donors:
-            vacuous.append('auditems: the reference tree (q2pro/src/game) is not '
-                           'beside this repository, so there is nothing to '
-                           'compare the merged itemlist against')
     else:
-        vacuous += [
-            'auditsave: no donor supplied -- nothing has been added to a saved '
-            'struct yet, so there is no descriptor to be missing (R-SAVE-3 '
-            'bites from Phase 2)',
-            'auditems: no donor supplied -- the itemlist union of R-CORE-2 does '
-            'not exist yet, so there is nothing to diff against baseq2',
-        ]
+        vacuous.append(
+            'auditems: the reference tree (q2pro/src/game) is not beside this '
+            'repository, so the itemlist union of R-CORE-2 has nothing to be '
+            'diffed against')
+
+    # An audit that could not be given its inputs is a SKIP and not a pass, and
+    # the distinction is the whole reason this list exists -- see the header.
+    # assets.py decides at runtime, because whether the donor paks are on this
+    # machine is not something audit.py can know in advance.
+    for r in list(results):
+        if 'assets: SKIP' in r['out']:
+            results.remove(r)
+            vacuous.append(r['out'].strip().replace('assets: SKIP -- ',
+                                                    'assets: '))
+        # fnsweep needs the vendored bundles (R-PROV-1).  They are in the
+        # repository, so this fires only on a partial checkout -- and it says so
+        # rather than passing, for the reason in this file's header.
+        elif 'fnsweep.py: SKIP' in r['out']:
+            results.remove(r)
+            vacuous.append(r['out'].strip().replace('fnsweep.py: SKIP -- ',
+                                                    'fnsweep: '))
 
     # --- report -----------------------------------------------------------
     failed = [r for r in results if r['hits'] or r['broken']]

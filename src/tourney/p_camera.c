@@ -70,16 +70,16 @@ bool CameraCmd(edict_t *ent, bool force)
         return false;
     }
 
-    if (match_paused && m_mode > 1 &&
+    if (match_paused && OSP_IsTeams() &&
         cl->resp.osp_entered != ENTERED_ENTERED) {
         gi.cprintf(ent, PRINT_HIGH,
-                   "Sorry, cannot join osp_teams during a paused match.\n");
+                   "Sorry, cannot join teams during a paused match.\n");
         return false;
     }
 
     if (gi.argc() == 1 || !Q_stricmp(gi.argv(1), "on") || !force) {
         if (ent->client->osp_t040) {
-            if (m_mode == 3 && !OSP_1v1AllowJoin(ent))
+            if (G_Ruleset() == RULESET_DUEL && !OSP_1v1AllowJoin(ent))
                 return false;
 
             if (cl->resp.osp_entered != 16 && !active_clients) {
@@ -87,14 +87,14 @@ bool CameraCmd(edict_t *ent, bool force)
                 return false;
             }
 
-            if (!cl->resp.osp_r030 || m_mode == 3) {
-                if (m_mode > 1 && !OSP_addTeamMember(ent, 2))
+            if (!cl->resp.osp_r030 || G_Ruleset() == RULESET_DUEL) {
+                if (OSP_IsTeams() && !OSP_addTeamMember(ent, 2))
                     return false;
 
                 cl->resp.osp_r030 = 1;
                 cl->resp.enterframe = level.framenum;
             } else {
-                if (m_mode > 1 && !OSP_readdTeamMember(ent))
+                if (OSP_IsTeams() && !OSP_readdTeamMember(ent))
                     return false;
 
                 if (cl->resp.osp_r030)
@@ -111,7 +111,7 @@ bool CameraCmd(edict_t *ent, bool force)
             cl->resp.osp_r09c--;
             active_clients++;
 
-            if (m_mode > 0 && sync_stat < 4) {
+            if (OSP_IsMatch() && sync_stat < 4) {
                 cl->resp.osp_r010 -= 2;
                 OSP_notready_cmd(ent, true);
             }
@@ -174,13 +174,13 @@ bool CameraCmd(edict_t *ent, bool force)
 
         if (cl->resp.osp_r030 && cl->resp.osp_entered == ENTERED_ENTERED) {
             cl->resp.osp_r248 = cl->resp.score;
-            if (m_mode > 1 && cl->resp.team != 2)
+            if (OSP_IsTeams() && cl->resp.team != 2)
                 OSP_removeTeamMember(ent, false);
         }
 
         if (cl->resp.osp_r030 && cl->resp.osp_entered == ENTERED_ENTERED) {
             cl->resp.osp_r248 = cl->resp.score;
-            if (m_mode > 1 && cl->resp.team != 2)
+            if (OSP_IsTeams() && cl->resp.team != 2)
                 OSP_removeTeamMember(ent, false);
         }
 
@@ -192,7 +192,7 @@ bool CameraCmd(edict_t *ent, bool force)
         cl->resp.osp_r0a0--;
         cl->resp.osp_r09c--;
 
-        if (sync_stat > 2 && m_mode < 2)
+        if (sync_stat > 2 && !OSP_IsTeams())
             G_SetStat(ent, SID_OSP_STATUS3, 0);
 
         if (sync_stat < 4 && cl->resp.osp_entered == ENTERED_ENTERED)
@@ -200,7 +200,7 @@ bool CameraCmd(edict_t *ent, bool force)
 
         if (cl->resp.osp_entered == ENTERED_ENTERED) {
             active_clients--;
-            if (m_mode == 3)
+            if (G_Ruleset() == RULESET_DUEL)
                 OSP_1v1Remove(ent, false);
         }
 
@@ -209,9 +209,9 @@ bool CameraCmd(edict_t *ent, bool force)
         cl->osp_menu = NULL;
         G_MenuClose(&g_edicts[(cl - game.clients) + 1]);
 
-        if (m_mode > 1)
+        if (OSP_IsTeams())
             OSP_checkHalt(cl->resp.osp_r2cc);
-        else if (m_mode == 1)
+        else if (G_Ruleset() == RULESET_DMPRO)
             OSP_checkHalt(2);
 
         OSP_DoRankSort();
@@ -600,7 +600,7 @@ void UpdateValues(edict_t *ent)
             const char *tname = (tnum == 0 || tnum == 1) ?
                                 osp_teams[tnum].netname : "no team";
 
-            if (m_mode != 2)
+            if (G_Ruleset() != RULESET_TDM)
                 Q_snprintf(layout, sizeof(layout),
                            "xv 44 yb -59 string \"Tracking `%s'\"",
                            target->client->pers.netname);

@@ -98,6 +98,11 @@ with this program; if not, write to the Free Software Foundation, Inc.,
 // Consequences, both taken: no AMMO_DISRUPTOR in ammo_t, and no `max_rounds` in
 // client_persistant_t.
 
+// R-RA-9.  The port RA2 recognises as the ZBot aim cheat: a client arriving
+// from it is flagged `resp.isbot` at connect, which is the other half of
+// RA_ZBotSample's runtime heuristic.  Both only ever drive RA2's own reporting.
+#define RA_ZBOT_PORT    27902
+
 // edict->spawnflags
 // these are set with checkboxes on each entity in the map editor
 #define SPAWNFLAG_NOT_EASY          BIT(8)
@@ -1159,10 +1164,12 @@ void respawn(edict_t *self);
 void PutClientInServer(edict_t *ent);
 void InitClientPersistant(gclient_t *client, bool full);
 void ClientObituary(edict_t *self, edict_t *inflictor, edict_t *attacker);
-float PlayersRangeFromSpot(edict_t *spot);
-edict_t *SelectRandomDeathmatchSpawnPoint(void);
-edict_t *SelectFarthestDeathmatchSpawnPoint(void);
-// R-DM-1: how many players the MAP seats, for `dm_botfill`.  Unclamped and with
+// `ent` is the client being placed, or NULL where there is none (R-195.5).
+float PlayersRangeFromSpot(edict_t *spot, edict_t *ent);
+edict_t *SelectRandomDeathmatchSpawnPoint(edict_t *ent);
+edict_t *SelectFarthestDeathmatchSpawnPoint(edict_t *ent);
+// R-DM-1: how many players the MAP seats, for `botfill` under `dm` and
+// `dmpro`.  Unclamped and with
 // no cvar test -- BotFillTarget() owns both.  Lives here because it is the spawn
 // selectors' own number; see the comment on the implementation.
 int  DM_BotFillSeats(void);
@@ -1204,9 +1211,14 @@ void BeginIntermission(edict_t *targ);
 void CheckDMRules(void);
 void EndDMLevel(void);
 edict_t *CreateTargetChangeLevel(char *map);
-void SelectSpawnPoint(edict_t *ent, vec3_t origin, vec3_t angles);
+// False REFUSES the placement, which only tourney does (R-OSP-1): see
+// PutClientInServer's frozen arm and OSP_spawnRefused.
+bool SelectSpawnPoint(edict_t *ent, vec3_t origin, vec3_t angles);
 void G_SetStats(edict_t *ent);
 void DeathmatchScoreboard(edict_t *ent);
+// R-193: reached from ClientThink's observer arms, where a menu press consumes
+// the key that would otherwise change camera mode.
+void Cmd_InvUse_f(edict_t *ent);
 
 // R-MENU-2a/3, implemented in p_hud.c beside the other owners of the layout
 // channel.  G_MenuOpen closes the incumbent -- whichever engine owns it -- and
@@ -1405,16 +1417,23 @@ extern cvar_t *g_gamelog;
 // means the entity is not created rather than created and inert.
 //
 extern cvar_t *g_clientlag;         // R-EXTRA-2, CLIENTLAG
-extern cvar_t *g_observer;          // R-EXTRA-6, OBSERVER (dm/sp/ctf only)
+extern cvar_t *g_observer;          // R-EXTRA-6, OBSERVER (ctf and sp only)
 
 // Is the GLADIATOR observer the implementation in force?  R-EXTRA-6 is the
 // second exemption to sec 7 rule 6 -- three implementations, one per ruleset --
 // so this is a ruleset question and not a cvar question, with the cvar folded
 // in as the operator's request the way G_ResolveModifiers does it (R-88).
+//
+// It is an EVERYTHING-EXCEPT test, which is the shape that goes wrong when a
+// ruleset is added: it named RULESET_ARENA and RULESET_TOURNEY, so `dmpro`,
+// `tdm` and `duel` would each have switched Gladiator's observer on underneath
+// OSP's own -- two live observer systems, which is the bug sec 7 rule 6 names.
+// G_IsOspRuleset() is why it does not: the four answer as one.  What is left
+// after the exclusions is `ctf` and `sp`.
 static inline bool G_GladiatorObserver(void)
 {
     return g_observer->value &&
-           G_Ruleset() != RULESET_ARENA && G_Ruleset() != RULESET_TOURNEY;
+           G_Ruleset() != RULESET_ARENA && !G_IsOspRuleset();
 }
 extern cvar_t *g_triggercounting;   // R-EXTRA-3, TRIGGER_COUNTING
 extern cvar_t *g_triggerlog;        // R-EXTRA-3, TRIGGER_LOG
@@ -1462,6 +1481,7 @@ bool Pickup_Health(edict_t *ent, edict_t *other);       // g_items.c
 bool Pickup_Adrenaline(edict_t *ent, edict_t *other);   // g_items.c
 bool Pickup_Armor(edict_t *ent, edict_t *other);        // g_items.c
 bool Pickup_PowerArmor(edict_t *ent, edict_t *other);   // g_items.c
+bool Pickup_Sphere(edict_t *ent, edict_t *other);       // g_items.c
 edict_t *Sphere_Spawn(edict_t *owner, int spawnflags);  // rogue/g_sphere.c
 void check_dodge(edict_t *self, vec3_t start, vec3_t dir, int speed);   // g_weapon.c
 void hurt_touch(edict_t *self, edict_t *other, cplane_t *plane, csurface_t *surf);  // g_trigger.c
@@ -1557,6 +1577,15 @@ typedef struct {
     // first strike would make the player a SPECTATOR.  R-58's class exactly,
     // and the third instance of it, so it gets its own field (sec 7 rule 4).
     int         osp_speedstrikes;
+
+    // The host player of a LISTEN server, latched at connect (R-BOT-28).  It is
+    // a fact about the connection, so it is read exactly once, from the
+    // userinfo the engine hands ClientConnect: q2pro force-sets `ip` in the
+    // connect packet only (`SVC_DirectConnect` -> `parse_userinfo`), and every
+    // later userinfo update is whatever the client sent -- `setu ip loopback`
+    // is a command every client has.  Reading it live would hand the bot menu
+    // to anybody.
+    bool        listenhost;
 
 //=========
 //ROGUE
@@ -1802,6 +1831,10 @@ struct gclient_s {
     // FloodProtect() is the one that runs (sec 7 rule 6); these two are the
     // donor's spam counter and are kept with its code rather than reconciled
     // into a second answer.
+    //
+    // `zbotscore` is the PORT the client connected from, stamped by
+    // ClientConnect and read once by InitClientResp -- the misleading name is
+    // the donor's.  RA_ZBOT_PORT is what the cheat client of the day used.
     int         zbotscore;
     short       oldangles[2][2];
     int         spamcount;
@@ -2184,9 +2217,13 @@ struct edict_s {
     byte            osp_e40c[20];
     int             osp_e420;
     // Tourney's four per-CLIENT strings of the same names as R-OSP-6's spawn
-    // keys.  They are a different thing in a different struct -- `charname`
-    // here is the rename cooldown stamp OSP_userinfoChanged writes -- and the
-    // spawn keys themselves are in spawn_temp_t, where the entity parser looks.
+    // keys.  They are a different thing in a different struct, and the spawn
+    // keys themselves are in spawn_temp_t, where the entity parser looks.
+    //
+    // All four are layout only, like the osp_eNNN placeholders above them.
+    // `charname` USED to carry OSP's rename cooldown as a frame number cast to
+    // and from this pointer; that stamp is `osp_infochange_framenum` now, which
+    // is what R-79 added the field for.
     char            *name;
     char            *skin;
     char            *charfile;
@@ -2225,7 +2262,7 @@ typedef struct dm_game_rs {
     void (*GameInit)(void);
     void (*PostInitSetup)(void);
     void (*ClientBegin)(edict_t *ent);
-    void (*SelectSpawnPoint)(edict_t *ent, vec3_t origin, vec3_t angles);
+    bool (*SelectSpawnPoint)(edict_t *ent, vec3_t origin, vec3_t angles);
     void (*PlayerDeath)(edict_t *targ, edict_t *inflictor, edict_t *attacker);
     void (*Score)(edict_t *attacker, edict_t *victim, int scoreChange);
     void (*PlayerEffects)(edict_t *ent);
@@ -2249,7 +2286,7 @@ int  Tag_ChangeDamage(edict_t *targ, edict_t *attacker, int damage, int mod);
 
 void DBall_GameInit(void);
 void DBall_ClientBegin(edict_t *ent);
-void DBall_SelectSpawnPoint(edict_t *ent, vec3_t origin, vec3_t angles);
+bool DBall_SelectSpawnPoint(edict_t *ent, vec3_t origin, vec3_t angles);
 int  DBall_ChangeKnockback(edict_t *targ, edict_t *attacker, int knockback, int mod);
 int  DBall_ChangeDamage(edict_t *targ, edict_t *attacker, int damage, int mod);
 void DBall_PostInitSetup(void);

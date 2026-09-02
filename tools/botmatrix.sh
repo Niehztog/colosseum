@@ -23,8 +23,8 @@
 #     went away cleanly" is exactly what R-VER-3 measures.
 #
 # Phase 6's exit is "bots load, spawn, navigate, fight and chat in DM"; ctf,
-# arena and tourney are Phase 7's.  All four are run here anyway, because the
-# leak half of R-VER-3 is not ruleset-specific and a slot leaked under tourney
+# arena and the OSP four are Phase 7's.  All are run here anyway, because the
+# leak half of R-VER-3 is not ruleset-specific and a slot leaked under `tdm`
 # is a slot leaked.  A row that cannot spawn a bot at all under a Phase 7
 # ruleset is reported, not failed -- see WANT below.
 #
@@ -83,7 +83,7 @@ done
 # `sv ruleset` between them is Phase 7's half: R-VER-3 as written measures that
 # a bot can exist and be taken away, which is silent about whether the bot is
 # ON A TEAM, IN AN ARENA or COUNTED BY THE MATCH -- and those are what R-CTF-4,
-# R-RA-4 and R-OSP-11 are.  Until Phase 7 the ctf/arena/tourney rows were run
+# R-RA-4 and R-OSP-11 are.  Until Phase 7 the ctf/arena/OSP rows were run
 # with `want=report` and they passed while every bot under those three rulesets
 # sat in the audience doing nothing (doc/reconciliation.md R-103..R-106).
 #
@@ -99,8 +99,8 @@ run_row() {
     } | timeout -s KILL $((FRAMES / 5 + 240)) "$Q2PRO_BUILD/q2proded" \
       +set basedir "$DIR" +set homedir "$DIR" +set game colosseum \
       +set dedicated 1 +set net_port 0 +set g_ruleset "$rs" \
-      +set deathmatch 1 +set maxclients 20 +set bots_minplayers 0 \
-      +set minimumplayers 0 +set skill 1 ${EXTRA:-} \
+      +set deathmatch 1 +set maxclients 20 \
+      +set minimumplayers 0 +set bots_minplayers 0 +set skill 1 ${EXTRA:-} \
       +map "$map" >"$log" 2>&1 ) 2>>"$log"
 
   # `%3d: name  <library path>` for a bot, `%3d: name  human` for a person,
@@ -187,7 +187,7 @@ if [ "$CONTROL" = 1 ]; then
     timeout -s KILL 120 "$Q2PRO_BUILD/q2proded" \
       +set basedir "$DIR" +set homedir "$DIR" +set game colosseum \
       +set dedicated 1 +set net_port 0 +set g_ruleset dm \
-      +set deathmatch 1 +set maxclients 8 +set minimumplayers 0 \
+      +set deathmatch 1 +set maxclients 8 +set minimumplayers 0 +set bots_minplayers 0 \
       +map q2dm1 >"$DIR/probe.log" 2>&1 )
   if grep -q 'past the bot table' "$DIR/probe.log"; then
     printf '%-9s %-5s %-9s %-8s %-9s %s\n' probe - q2dm1 - - \
@@ -207,14 +207,16 @@ fi
 # Every ruleset that accepts bots now REQUIRES a bot, and the three that place
 # them require the placement too.  The wanted strings are per bot count, so the
 # row asserts "all of them", not "at least one".
-for rs in dm ctf arena tourney; do
+for rs in dm dmpro tdm duel ctf arena; do
   case $rs in
     ctf) map=q2ctf1 ;;
     *)   map=q2dm1 ;;
   esac
   for n in 1 16; do
+    # A `case` WITH NO WILDCARD leaves `place` holding the previous iteration's
+    # value, so a ruleset added to the loop above without an arm here asserts
+    # something stale and passes.  The `*)` arm is the check on the check.
     case $rs in
-      dm)      place="" ;;
       # R-CTF-4: every bot is forced onto a team, so noteam is 0 and red+blue
       # is n.  n=1 lands on either side, so only noteam is asserted there.
       ctf)     if [ "$n" = 1 ]; then place="noteam=0"
@@ -223,10 +225,21 @@ for rs in dm ctf arena tourney; do
       # whether a given bot is in the round or waiting its turn is the round
       # machine's business and changes with the queue.
       arena)   place="arena in-arena=$n (arena1=$n) on-team=$n" ;;
-      # R-OSP-11: entered and counted.  match_mode defaults to 0, which has no
-      # ready gate, so `ready` is not asserted here -- the mode-2 row below is
-      # where readying up is the point.
-      tourney) place="entered=$n" ;;
+      # R-OSP-11: entered and counted.  `dm` has no ready gate, so `ready` is
+      # not asserted for it -- the `tdm` row below is where readying up is the
+      # point.  All four OSP rulesets print the same botplace line.
+      #
+      # `tdm` and `duel` CANNOT seat sixteen, and that is the check rather than
+      # a problem with it: they declare a capacity -- `team_maxplayers`, 4 by
+      # default and forced to 1 under `duel` -- and OSP_addTeamMember refuses
+      # past it, so the roster stops at twice that.  `dm` and `dmpro` have no
+      # teams and take everybody.  Asserting `entered=16` here would be
+      # asserting that the capacity is NOT enforced (R-OSP-12, R-DM-1).
+      dm|dmpro) place="entered=$n" ;;
+      tdm)      place="entered=$([ "$n" -gt 8 ] && echo 8 || echo "$n")" ;;
+      duel)     place="entered=$([ "$n" -gt 2 ] && echo 2 || echo "$n")" ;;
+      *)       echo "!! botmatrix.sh: no placement expectation for '$rs'" >&2
+               exit 2 ;;
     esac
     if run_row "$rs" "$n" "$map" spawn "$place"; then
       pass=$((pass+1))
@@ -252,16 +265,15 @@ for t in 1 2; do
   EXTRA=""
 done
 
-# R-OSP-11's ready-up, which only mode 1..3 have.  Two teams of two, all four
-# ready, in a mode whose match cannot start until they are.
-EXTRA="+set match_mode 2"
-if run_row tourney 4 q2dm1 spawn "entered=4 ready=4 team0=2 team1=2" "m2"; then
+# R-OSP-11's ready-up, which `dm` does not have and the other three do.  Two
+# teams of two, all four ready, in a ruleset whose match cannot start until they
+# are.  This was `+set match_mode 2` on the `tourney` ruleset until spec 1.36.
+if run_row tdm 4 q2dm1 spawn "entered=4 ready=4 team0=2 team1=2" "ready"; then
   pass=$((pass+1))
 else
   fail=$((fail+1))
-  cp "$DIR/tourney-4-m2.log" "/tmp/botmatrix-tourney-m2.log" 2>/dev/null
+  cp "$DIR/tdm-4-ready.log" "/tmp/botmatrix-tdm-ready.log" 2>/dev/null
 fi
-EXTRA=""
 
 # ---------------------------------------------------------------- R-VER-6
 #
@@ -296,7 +308,7 @@ index_row() {
         +set basedir "$DIR" +set homedir "$DIR" +set game colosseum \
         +set dedicated 1 +set net_port 0 +set g_ruleset ctf \
         +set g_protocol_extensions "$ext" +set xatrix 1 +set rogue 1 \
-        +set deathmatch 1 +set maxclients 8 +set minimumplayers 0 \
+        +set deathmatch 1 +set maxclients 8 +set minimumplayers 0 +set bots_minplayers 0 \
         +map command >"$log" 2>&1 ) 2>>"$log"
     rc=$?
 
@@ -365,7 +377,7 @@ botperf_row() {
       } | timeout -s KILL 900 "$Q2PRO_BUILD/q2proded" \
         +set basedir "$DIR" +set homedir "$DIR" +set game colosseum \
         +set dedicated 1 +set net_port 0 +set g_ruleset dm \
-        +set deathmatch 1 +set coop 0 +set maxclients 40 +set minimumplayers 0 \
+        +set deathmatch 1 +set coop 0 +set maxclients 40 +set minimumplayers 0 +set bots_minplayers 0 \
         +set bots 1 +map q2dm1 >"$log" 2>&1 ) 2>>"$log"
     rc=$?
 

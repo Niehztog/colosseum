@@ -104,7 +104,7 @@ bool OSP_addTeamMember(edict_t *ent, int requested_team)
     if (requested_team == 2) {
         if (osp_teams[0].osp_m0f4 && osp_teams[1].osp_m0f4) {
             if (!(ent->flags & FL_BOT))
-                gi.cprintf(ent, PRINT_HIGH, "Sorry, both osp_teams are locked!\n");
+                gi.cprintf(ent, PRINT_HIGH, "Sorry, both teams are locked!\n");
             else
                 BotDestroy(ent);
             return false;
@@ -113,13 +113,13 @@ bool OSP_addTeamMember(edict_t *ent, int requested_team)
         if (OSP_teamCount(0) >= (int)team_maxplayers->value &&
             OSP_teamCount(1) >= (int)team_maxplayers->value) {
             if (!(ent->flags & FL_BOT))
-                gi.cprintf(ent, PRINT_HIGH, "Sorry, both osp_teams are full!\n");
+                gi.cprintf(ent, PRINT_HIGH, "Sorry, both teams are full!\n");
             else
                 BotDestroy(ent);
             return false;
         }
 
-        if (m_mode == 3) {
+        if (G_Ruleset() == RULESET_DUEL) {
             if (OSP_1v1Team(ent))
                 return true;
             return false;
@@ -170,12 +170,12 @@ bool OSP_addTeamMember(edict_t *ent, int requested_team)
     Q_snprintf(tmp, sizeof(tmp), "%15s", osp_teams[1 - team].greenname);
     OSP_clientConfigString(ent, OSP_CS(5) + (1 - team) * 2, tmp);
 
-    if (m_mode == 2)
+    if (G_Ruleset() == RULESET_TDM)
         gi.bprintf(PRINT_HIGH, "%s joined team \"%s\"\n",
                    ent->client->pers.greenname, osp_teams[team].netname);
 
     if (!(ent->flags & FL_BOTCLIENT)) {
-        if (m_mode == 2) {
+        if (G_Ruleset() == RULESET_TDM) {
             // First human on the team becomes captain.
             ent->client->resp.osp_r2c4 = 1;
             for (t = 1; t <= game.maxclients; t++) {
@@ -200,10 +200,10 @@ bool OSP_addTeamMember(edict_t *ent, int requested_team)
                               sizeof(osp_teams[team].joincode));
             }
         }
-    } else if (m_mode == 2)
+    } else if (G_Ruleset() == RULESET_TDM)
         ent->client->resp.osp_r2c4 = 0;
 
-    if (m_mode == 2 && !(ent->flags & FL_BOT)) {
+    if (G_Ruleset() == RULESET_TDM && !(ent->flags & FL_BOT)) {
         if (osp_teams[team].joincode[0])
             gi.centerprintf(ent, "Team joincode is \"%s\"\n", osp_teams[team].joincode);
         else
@@ -213,9 +213,9 @@ bool OSP_addTeamMember(edict_t *ent, int requested_team)
 }
 
 // The "I always play for <name>/<skin>" path. `defaultteam` stores a name and
-// a skin on the edict; on connect this matches them against the two osp_teams and,
+// a skin on the edict; on connect this matches them against the two teams and,
 // if the team it picks is still empty, renames/reskins that team to suit --
-// swapping the two osp_teams' names or skins over if the other one is in the way.
+// swapping the two teams' names or skins over if the other one is in the way.
 bool OSP_defaultTeam(edict_t *ent)
 {
     char        msgbuf[64];
@@ -300,7 +300,7 @@ bool OSP_defaultTeam(edict_t *ent)
         ClientUserinfoChanged(ent, userinfo);
     }
 
-    if (m_mode == 2)
+    if (G_Ruleset() == RULESET_TDM)
         gi.bprintf(PRINT_HIGH, "%s joined team \"%s\"\n",
                    ent->client->pers.greenname, osp_teams[team].netname);
 
@@ -332,7 +332,7 @@ bool OSP_defaultTeam(edict_t *ent)
     } else
         ent->client->resp.osp_r2c4 = 0;
 
-    if (m_mode == 2 && !(ent->flags & FL_BOT)) {
+    if (G_Ruleset() == RULESET_TDM && !(ent->flags & FL_BOT)) {
         if (osp_teams[team].joincode[0])
             gi.centerprintf(ent, "Team joincode is \"%s\"\n", osp_teams[team].joincode);
         else
@@ -341,7 +341,7 @@ bool OSP_defaultTeam(edict_t *ent)
     return true;
 }
 
-// 1v1 (m_mode 3): the "osp_teams" are the two duellists, so the only choice is
+// `duel`: the "teams" are the two duellists, so the only choice is
 // which of the two slots is free. The winner keeps their slot between rounds,
 // which is why this renames the team to the player rather than the reverse.
 bool OSP_1v1Team(edict_t *ent)
@@ -434,7 +434,7 @@ bool OSP_1v1AllowJoin(edict_t *ent)
 
 void OSP_1v1Add(edict_t *ent)
 {
-    if (m_mode != 3 || p_order[25] >= 25 || !(int)team_nextuptime->value)
+    if (G_Ruleset() != RULESET_DUEL || p_order[25] >= 25 || !(int)team_nextuptime->value)
         return;
 
     p_order[p_order[25]] = ent - g_edicts - 1;
@@ -520,7 +520,7 @@ void OSP_removeTeamMember(edict_t *ent, bool quiet)
     if (tno == 2 || ent->client->resp.osp_entered != ENTERED_ENTERED)
         return;
 
-    if (m_mode == 2)
+    if (G_Ruleset() == RULESET_TDM)
         gi.bprintf(PRINT_HIGH, "%s removed from team \"%s\"\n",
                    ent->client->pers.greenname, osp_teams[tno].netname);
     else if (!quiet)
@@ -704,7 +704,7 @@ void OSP_observerTeamFrags(edict_t *ent)
     char        msg[32];
     int         n;
 
-    if (sync_stat > 2 && m_mode == 2) {
+    if (sync_stat > 2 && G_Ruleset() == RULESET_TDM) {
         for (n = 0; n < 2; n++) {
             if (!(int)fraglimit->value)
                 Q_snprintf(num, sizeof(num), "%13i", osp_teams[n].osp_m0f8);
@@ -742,7 +742,7 @@ void OSP_updateTeamFrags(void)
                     Q_snprintf(buf, sizeof(buf), "%13s", tmp);
                 }
 
-                if (m_mode == 2) {
+                if (G_Ruleset() == RULESET_TDM) {
                     for (j = 1; j <= game.maxclients; j++) {
                         other = g_edicts + j;
                         if (!other->inuse || !other->client ||
@@ -798,7 +798,7 @@ void OSP_joincode_cmd(edict_t *ent)
     int         teamidx;
 
     teamidx = ent->client->resp.team;
-    if (m_mode != 2 || level.intermission_framenum)
+    if (G_Ruleset() != RULESET_TDM || level.intermission_framenum)
         return;
 
     if (ent->client->resp.osp_entered == ENTERED_ENTERED) {
@@ -879,7 +879,7 @@ void OSP_teamname_cmd(edict_t *ent)
     pname[j] = 0;
 
     if (!Q_stricmp(pname, osp_teams[1 - tnum].netname)) {
-        gi.cprintf(ent, PRINT_HIGH, "Sorry, cannot use same name for both osp_teams.\n");
+        gi.cprintf(ent, PRINT_HIGH, "Sorry, cannot use same name for both teams.\n");
         return;
     }
 
@@ -908,7 +908,7 @@ void OSP_teamname_cmd(edict_t *ent)
         }
     }
 
-    if (m_mode == 2) {
+    if (G_Ruleset() == RULESET_TDM) {
         gi.cvar_set("Score_A", "WARMUP");
         gi.cvar_set("Score_B", "WARMUP");
     }
@@ -950,7 +950,7 @@ void OSP_teamskin_cmd(edict_t *ent)
     }
 
     if (!Q_stricmp(gi.argv(1), osp_teams[1 - teamidx].skin)) {
-        gi.cprintf(ent, PRINT_HIGH, "Sorry, cannot use same skin for both osp_teams.\n");
+        gi.cprintf(ent, PRINT_HIGH, "Sorry, cannot use same skin for both teams.\n");
         return;
     }
 
@@ -995,7 +995,7 @@ void OSP_teamjoin_cmd(edict_t *ent, char *name)
 
     invited = ent->client->resp.osp_r078;
 
-    if (m_mode == 3 && ent->client->resp.osp_entered != ENTERED_ENTERED) {
+    if (G_Ruleset() == RULESET_DUEL && ent->client->resp.osp_entered != ENTERED_ENTERED) {
         if (!OSP_1v1AllowJoin(ent))
             return;
     }
@@ -1022,7 +1022,7 @@ void OSP_teamjoin_cmd(edict_t *ent, char *name)
     for (i = 0; i < 2; i++) {
         if (!Q_stricmp(teamname, osp_teams[i].netname)) {
             if (!((OSP_teamCount(i) >= (int)team_maxplayers->value && !invited &&
-                   (m_mode != 2 ||
+                   (G_Ruleset() != RULESET_TDM ||
                     ((int)match_latejoin->value <= 2 &&
                      (sync_stat <= 2 ||
                       (int)match_latejoin->value != 2 ||
@@ -1099,7 +1099,7 @@ void OSP_switchteam_cmd(edict_t *ent)
 
     if (who_paused == -2) {
         gi.cprintf(ent, PRINT_HIGH,
-                   "Sorry, cannot switch osp_teams during a forced pause.\n");
+                   "Sorry, cannot switch teams during a forced pause.\n");
         return;
     }
 
@@ -1111,7 +1111,7 @@ void OSP_switchteam_cmd(edict_t *ent)
         // same thing there.
         if (sync_stat < 4) {
             gi.cprintf(ent, PRINT_HIGH,
-                       "Use \"team %s\" to change osp_teams during warmup.\n",
+                       "Use \"team %s\" to change teams during warmup.\n",
                        osp_teams[1 - team].netname);
             return;
         }
@@ -1124,7 +1124,7 @@ void OSP_switchteam_cmd(edict_t *ent)
 
         if (!ent->client->resp.osp_r078 && (int)match_latejoin->value < 2) {
             gi.cprintf(ent, PRINT_HIGH,
-                       "You need to be invited to switch osp_teams.\n");
+                       "You need to be invited to switch teams.\n");
             return;
         }
 
@@ -1678,7 +1678,7 @@ void OSP_1v1queue_cmd(edict_t *ent)
     gi.cprintf(ent, PRINT_HIGH, "\n");
 }
 
-// Wipe both osp_teams back to the server's configured names. The green copy is
+// Wipe both teams back to the server's configured names. The green copy is
 // rebuilt from the plain one by the same `+= 0x80` loop OSP_defaultTeam uses.
 void OSP_teamReset(void)
 {
@@ -1713,7 +1713,7 @@ void OSP_teamReset(void)
     OSP_Stats_TeamName(osp_teams[0].netname);
     OSP_Stats_TeamName(osp_teams[1].netname);
 
-    if (m_mode == 2) {
+    if (G_Ruleset() == RULESET_TDM) {
         gi.cvar_set("Score_A", "WARMUP");
         gi.cvar_set("Score_B", "WARMUP");
     }
@@ -1768,7 +1768,7 @@ void OSP_findTeamWinner(void)
                    osp_teams[winner].osp_m0f8, osp_teams[lose].osp_m0f8);
     }
 
-    if (m_mode == 2) {
+    if (G_Ruleset() == RULESET_TDM) {
         gi.bprintf(PRINT_HIGH, "Frt: Fratricides          F  S  E\n");
         gi.bprintf(PRINT_HIGH, "EK : Enemy Kills       E  r  u  f\n");
         gi.bprintf(PRINT_HIGH, " S : Score         S   K  t  i  f\n");
@@ -1887,36 +1887,194 @@ const char *OSP_teamName(int team)
 
 /*
 =================
-OSP_scoreChange
+OSP_obituarySelf / OSP_obituaryFrag / OSP_obituaryDied
 
-One frag scored, lost or refused (R-OSP-1).
+Tourney's ClientObituary, as the three shapes the donor's own has (R-OSP-1):
+a death nobody else caused, a death an attacking client caused, and the
+unnamed-cause fallback.  Each does the printing and the accounting for its
+shape, because in the donor they are the same block and splitting them would
+put half of a rule in a shared file.
 
-The donor writes this three times in ClientObituary, once at each scoring site,
-and each copy is the same three steps: refuse the change during the countdown,
-apply it, then tell the team totals and the rank order about it.  `sync_stat`
-of 2 is the countdown -- the seconds between "match starting" and the match
-being live -- and a frag taken then is a frag taken before the match, which is
-why it is dropped rather than banked.
+WHAT AN EARLIER MERGE LOST, and why it is one function per shape rather than
+one `resp.score += delta` for all three.  A frag under tourney moves NINE
+numbers, not one:
 
-The rank sort is what feeds the frags/place panel and the scoreboard's tie
-breaks, so it has to run on every change rather than on a timer, or the panel
-lags the kill by up to a second.
+    resp.score          the player's own, which is all the merge kept
+    resp.osp_r014       deaths, the Deaths column and the first rank tie-break
+    resp.osp_r2c0       suicides, the second tie-break
+    resp.osp_r028       team kills, a team-scoreboard column
+    resp.osp_r2dc = 2   "the attacker just hit the fraglimit", which pops the
+                        scoreboard at intermission
+    osp_teams[].osp_m0f8   the TEAM score -- what the team fraglimit, the
+                        overtime test and sudden death all compare
+    osp_teams[].osp_m0fc   team deaths, and the divisor of team efficiency
+    osp_teams[].osp_m100   team frags        osp_teams[].osp_m104  team kills
+    osp_teams[].osp_m108   team suicides
+
+With the five team counters only ever zeroed, `tdm` and `duel` could not be
+won: the team fraglimit never fired, every timed match drew 0-0 and went to
+overtime, and sudden death could never resolve because the two totals could
+never differ.
+
+THE THREE GATES ARE THE DONOR'S, and they are not the same gate:
+
+  * `sync_stat != 2` guards the PRINTING.  2 is the ten-second countdown, and a
+    kill during it is not part of the match, so it is not announced.
+  * `sync_stat > 2` guards the ACCOUNTING -- a match that is actually live.
+  * `frag_offset && teams differ` is checked by the CALLER (OSP_obituaryHush),
+    because once sudden death has a winner the match is over and further
+    obituaries would announce a match nobody is playing.
+
+The printing is per client rather than one gi.bprintf, which is the other half
+of what was lost: each of the two parties is sent the OTHER one's name in
+`pers.greenname` -- the high-bit spelling Quake II draws in the alternate
+charset -- and everyone else gets both names plain.  A bot is skipped
+throughout: FL_BOT has no connection to unicast to.
 =================
 */
-void OSP_scoreChange(edict_t *who, int delta)
+
+// True when the obituary should be suppressed entirely: sudden death has
+// already produced a winner and the rules row is about to end the level.
+bool OSP_obituaryHush(void)
 {
-    if (!who || !who->client)
+    return frag_offset && osp_teams[0].osp_m0f8 != osp_teams[1].osp_m0f8;
+}
+
+// The team half of a death charged to `self`.  Shared by the two shapes that
+// have no attacker.
+static void osp_selfDeathTeams(edict_t *self)
+{
+    int team = self->client->resp.team;
+
+    if (!OSP_IsTeams() || team < 0 || team >= (int)q_countof(osp_teams))
         return;
 
-    if (sync_stat == 2)
-        return;
+    osp_teams[team].osp_m108++;
+    osp_teams[team].osp_m0f8--;
 
-    who->client->resp.score += delta;
+    if (G_Ruleset() == RULESET_TDM)
+        OSP_playerTeamFrags(self);
+
+    // Sudden death is "the next frag decides it", so a frag GIVEN BACK has to
+    // move the bar with it or the offset drifts away from the scores.
+    if (frag_offset)
+        frag_offset--;
+}
+
+void OSP_obituarySelf(edict_t *self, const char *message)
+{
+    edict_t *e;
+    int      i;
+
+    if (sync_stat != 2) {
+        if (!(self->flags & FL_BOT))
+            gi.cprintf(self, PRINT_MEDIUM, "%s %s.\n",
+                       self->client->pers.greenname, message);
+
+        for (i = 1; i <= game.maxclients; i++) {
+            e = g_edicts + i;
+            if (!e->inuse || !e->client)
+                continue;
+            if (e != self && !(e->flags & FL_BOT))
+                gi.cprintf(e, PRINT_MEDIUM, "%s %s.\n",
+                           self->client->pers.netname, message);
+        }
+    }
 
     if (sync_stat > 2) {
-        if (m_mode == 2)
-            OSP_playerTeamFrags(who);
+        self->client->resp.score--;
+        self->client->resp.osp_r2c0++;
+        osp_selfDeathTeams(self);
         OSP_DoRankSort();
+    }
+}
+
+void OSP_obituaryFrag(edict_t *self, edict_t *attacker, const char *message,
+                      const char *message2, bool ff)
+{
+    edict_t *e;
+    int      i, steam, ateam;
+
+    if (sync_stat != 2) {
+        const char *tag = ff ? "  ** Teammate Kill **\n" : "\n";
+
+        if (!(self->flags & FL_BOT))
+            gi.cprintf(self, PRINT_MEDIUM, "%s %s %s%s%s",
+                       self->client->pers.netname, message,
+                       attacker->client->pers.greenname, message2, tag);
+        if (!(attacker->flags & FL_BOT))
+            gi.cprintf(attacker, PRINT_MEDIUM, "%s %s %s%s%s",
+                       self->client->pers.greenname, message,
+                       attacker->client->pers.netname, message2, tag);
+
+        for (i = 1; i <= game.maxclients; i++) {
+            e = g_edicts + i;
+            if (!e->inuse || !e->client)
+                continue;
+            if (e != self && e != attacker && !(e->flags & FL_BOT))
+                gi.cprintf(e, PRINT_MEDIUM, "%s %s %s%s%s",
+                           self->client->pers.netname, message,
+                           attacker->client->pers.netname, message2, tag);
+        }
+
+        // Nobody unicasts to the console, so a dedicated server logs it here.
+        if ((int)dedicated->value)
+            gi.dprintf("%s %s %s%s\n", self->client->pers.netname, message,
+                       attacker->client->pers.netname, message2);
+    }
+
+    if (sync_stat <= 2)
+        return;
+
+    steam = self->client->resp.team;
+    ateam = attacker->client->resp.team;
+
+    if (OSP_IsTeams() && steam >= 0 && steam < (int)q_countof(osp_teams) &&
+        ateam >= 0 && ateam < (int)q_countof(osp_teams)) {
+        if (ff) {
+            attacker->client->resp.score--;
+            attacker->client->resp.osp_r028++;
+            osp_teams[steam].osp_m0fc++;
+            osp_teams[ateam].osp_m0f8--;
+            osp_teams[ateam].osp_m104++;
+        } else {
+            attacker->client->resp.score++;
+            self->client->resp.osp_r014++;
+            osp_teams[steam].osp_m0fc++;
+            osp_teams[ateam].osp_m0f8++;
+            osp_teams[ateam].osp_m100++;
+
+            if ((int)fraglimit->value &&
+                attacker->client->resp.score >= fraglimit->value)
+                self->client->resp.osp_r2dc = 2;
+        }
+
+        if (G_Ruleset() == RULESET_TDM)
+            OSP_playerTeamFrags(attacker);
+    } else {
+        attacker->client->resp.score++;
+        self->client->resp.osp_r014++;
+
+        if ((int)fraglimit->value &&
+            attacker->client->resp.score >= fraglimit->value)
+            self->client->resp.osp_r2dc = 2;
+    }
+
+    OSP_DoRankSort();
+}
+
+// The fallback: a death the message tables could not name.  Broadcast rather
+// than unicast per client -- there is no second party to green -- and it does
+// NOT rank-sort, which is the donor's own asymmetry with OSP_obituarySelf.
+void OSP_obituaryDied(edict_t *self)
+{
+    if (sync_stat != 2)
+        gi.bprintf(PRINT_MEDIUM, "%s died.\n", self->client->pers.netname);
+
+    if (sync_stat > 2) {
+        self->client->resp.score--;
+        self->client->resp.osp_r2c0++;
+        osp_selfDeathTeams(self);
     }
 }
 

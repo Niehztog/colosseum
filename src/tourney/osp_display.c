@@ -153,11 +153,11 @@ void OSP_showMOTD(void)
 
 // Build the "match parameters" page shown at the start of a match into
 // match_info.  Three layouts, one per mode: the qualifier lists the number of
-// qualifying spots, team play lists both osp_teams' head counts and skins and both
+// qualifying spots, team play lists both teams' head counts and skins and both
 // friendly-fire switches, and 1v1 lists the two team names either side of a
 // "vs." plus the overtime rule.  Every value is written into tmp, greened by
 // adding 128 to each byte, and then substituted into the layout line.
-// m_mode 0 (plain deathmatch) builds nothing at all.
+// `dm` (plain deathmatch) builds nothing at all.
 void OSP_setShowParams(void)
 {
     // Both grow with cvars and with the map's descriptive name, so they are
@@ -169,7 +169,7 @@ void OSP_setShowParams(void)
 
     host = gi.cvar("hostname", "", 0);
 
-    if (m_mode == 1) {
+    if (G_Ruleset() == RULESET_DMPRO) {
         Q_snprintf(buf, sizeof(buf), "xv 2 yv 0 string \"Match: %s\"", host->string);
         Q_strlcpy(match_info, buf, sizeof(match_info));
 
@@ -237,7 +237,7 @@ void OSP_setShowParams(void)
         OSP_listDisabledItems(buf);
         Q_strlcat(buf, "\"", sizeof(buf));
         Q_strlcat(match_info, buf, sizeof(match_info));
-    } else if (m_mode == 2) {
+    } else if (G_Ruleset() == RULESET_TDM) {
         Q_snprintf(buf, sizeof(buf), "xv 2 yv 0 string \"Match: %s\"", host->string);
         Q_strlcpy(match_info, buf, sizeof(match_info));
 
@@ -354,7 +354,7 @@ void OSP_setShowParams(void)
         OSP_listDisabledItems(buf);
         Q_strlcat(buf, "\"", sizeof(buf));
         Q_strlcat(match_info, buf, sizeof(match_info));
-    } else if (m_mode == 3) {
+    } else if (G_Ruleset() == RULESET_DUEL) {
         Q_snprintf(buf, sizeof(buf), "xv 2 yv 0 string \"Match: %s\"", host->string);
         Q_strlcpy(match_info, buf, sizeof(match_info));
 
@@ -871,7 +871,7 @@ void OSP_showPlayer(edict_t *ent)
     {
         int             index;          // invented name
 
-        for (i = 0; i < 10; i++) {
+        for (i = 0; a_info[i].name[0]; i++) {
             index = a_info[i].index;
             if (p_acc[cid].shots[index]) {
                 Q_snprintf(line, sizeof(line), "yv %d string \"%s %.1f%% (%d/%d hits)\"", y,
@@ -955,11 +955,11 @@ void OSP_ScoreboardMessage(edict_t *ent, edict_t *killer)
         break;
     }
 
-    if (m_mode == 2) {
+    if (G_Ruleset() == RULESET_TDM) {
         OSP_showTeamScores(ent);
         return;
     }
-    if (m_mode == 3) {
+    if (G_Ruleset() == RULESET_DUEL) {
         OSP_show1v1Scores(ent);
         return;
     }

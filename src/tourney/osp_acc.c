@@ -46,12 +46,36 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 // now gated like the other twelve, which is the behaviour the report assumes:
 // `sync_stat > 2` is "a match is running", and accuracy outside a match is not
 // a number the mod ever shows.
+//
+// TWO CONSEQUENCES THAT CHANGE THE NUMBERS, not only where they are written --
+// both improvements, both worth knowing before comparing a report with a 1999
+// one:
+//
+//   * `given`, `taken`, `dgiven` and `dtaken` now carry `take` -- the damage
+//     that survived armour, powerups and the team rules -- where the donor's
+//     inline sites carried `damage`, the amount the weapon set out to do.  A
+//     rail through body armour counted 100 there and counts what it actually
+//     removed here.  T_Damage is the only place the difference is known.
+//   * the donor leaves the RUNNING totals ungated at two sites: fire_lead adds
+//     `dgiven`/`dtaken` outside its own `sync_stat > 2` test, and fire_rail
+//     gates only the hit counter.  Here everything is gated together, so a
+//     warmup shot cannot land in a match's damage total.
 
 #include "g_local.h"
 #include "tourney/osp_types.h"
 
 // -1 for a means of death that is not a weapon: falling, drowning, telefrag,
-// a laser, the hook.  Those have no accuracy column and never had.
+// a laser, the hook, a monster, a powerup.  Those have no accuracy column and
+// never had.
+//
+// THE SECOND HALF OF THE TABLE IS THE CONTENT LAYERS' (R-MODE-3, R-181).  The
+// donor stops at the BFG because osp-tourney's itemlist does; both layers are
+// valid with every ruleset here, so a `tdm` match on a Reckoning or Ground Zero
+// map was fought with weapons this function answered -1 about -- and the layer
+// fire functions called OSP_accShot from nowhere at all, so both halves had to
+// be added.  MOD_NUKE is deliberately absent: the A-M Bomb is `ammo_nuke`,
+// IT_POWERUP, and a powerup that does damage is not a weapon.  MOD_BLASTER2 too
+// -- that is the monsters' green blaster, not a player weapon.
 static int acc_column(int mod)
 {
     switch (mod & ~MOD_FRIENDLY_FIRE) {
@@ -72,6 +96,22 @@ static int acc_column(int mod)
     case MOD_BFG_LASER:
     case MOD_BFG_BLAST:
     case MOD_BFG_EFFECT:    return ACC_BFG;
+
+    // Xatrix
+    case MOD_RIPPER:        return ACC_RIPPER;
+    case MOD_PHALANX:       return ACC_PHALANX;
+    case MOD_TRAP:          return ACC_TRAP;
+
+    // Ground Zero.  The Disruptor's two MODs share one column the way the BFG's
+    // three do: MOD_TRACKER is the beam, MOD_DISINTEGRATOR the finishing blow.
+    case MOD_ETF_RIFLE:     return ACC_ETF_RIFLE;
+    case MOD_PROX:          return ACC_PROX;
+    case MOD_HEATBEAM:      return ACC_HEATBEAM;
+    case MOD_CHAINFIST:     return ACC_CHAINFIST;
+    case MOD_TESLA:         return ACC_TESLA;
+    case MOD_TRACKER:
+    case MOD_DISINTEGRATOR: return ACC_DISRUPTOR;
+
     default:                return -1;
     }
 }

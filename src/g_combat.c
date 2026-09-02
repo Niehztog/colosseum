@@ -112,6 +112,18 @@ static void Killed(edict_t *targ, edict_t *inflictor, edict_t *attacker, int dam
         // clean up self
         targ->monsterinfo.aiflags &= ~AI_MEDIC;
         targ->enemy = attacker;
+    } else if (G_Ruleset() == RULESET_ARENA && targ == attacker) {
+        // R-158.  RA2 writes `if (targ != attacker) targ->enemy = attacker;`
+        // here, and the difference is a whole feature: on a SELF-kill baseq2
+        // overwrites `enemy` with the victim, and RA2's suicide announcer reads
+        // that field to grade the fight the player just took themselves out of
+        // ("ra/outstand.wav" and the two below it, RA_Obituary).  Overwritten,
+        // it points at the corpse, whose `takedamage` is DAMAGE_YES rather than
+        // the DAMAGE_AIM the announcer tests, so the sound could never play.
+        //
+        // Only under arena, and only for the self-kill: `enemy` is what
+        // LookAtKiller aims the death camera with and what the deathmatch
+        // scoreboard highlights, so every other ruleset keeps baseq2's answer.
     } else {
         targ->enemy = attacker;
     }
@@ -178,7 +190,7 @@ static void Killed(edict_t *targ, edict_t *inflictor, edict_t *attacker, int dam
     // R-EXTRA-6: a player who dies stops being a camera subject, and every
     // camera watching them has to be told before the body is turned into a
     // corpse -- afterwards there is nothing left to hand the next subject.
-    if (G_Ruleset() == RULESET_TOURNEY)
+    if (G_IsOspRuleset())
         PlayerDied(targ);
 
     targ->die(targ, inflictor, attacker, damage, point);
@@ -231,7 +243,11 @@ static int CheckPowerArmor(edict_t *ent, const vec3_t point, const vec3_t normal
     int         save;
     int         power_armor_type;
     int         index;
-    int         damagePerCell;
+    // R-185: float, because `power_armor_screen` and `power_armor_shield` are
+    // floats and the merge had left this an int with the two ratios hardcoded.
+    // With the defaults the arithmetic is identical -- 1.0 and 2.0 are what the
+    // int held -- so this widens the type without moving any number.
+    float       damagePerCell;
     int         pa_te_type;
     int         power;
     int         power_used;
@@ -276,14 +292,25 @@ static int CheckPowerArmor(edict_t *ent, const vec3_t point, const vec3_t normal
         if (dot <= 0.3f)
             return 0;
 
-        damagePerCell = 1;
+        // Gated at the CALL, which is what donorgate.py asks of a tourney
+        // surface reached from a spine file -- the accessor answers with the
+        // donor's fixed value anyway, but a reader should not have to open it
+        // to see which ruleset owns the number.
+        damagePerCell = G_IsOspRuleset() ? OSP_powerArmorPerCell(true) : 1.0f;
         pa_te_type = TE_SCREEN_SPARKS;
         damage = damage / 3;
     } else {
         // CTF halves the power shield's efficiency -- "power armor is weaker in
         // CTF", the donor's own comment.  A balance decision that belongs to the
         // ruleset, so it is gated rather than taken globally.
-        damagePerCell = (G_Ruleset() == RULESET_CTF) ? 1 : 2;
+        //
+        // R-185: and tourney's `power_armor_shield` answers under RegularDM,
+        // which is where upstream's `!m_mode` gate puts it.  Three rulesets,
+        // three answers, and one of them is a cvar -- CTF's 1 first, because a
+        // CTF server has no `m_mode` to be 0.
+        damagePerCell = (G_Ruleset() == RULESET_CTF) ? 1.0f
+                        : G_IsOspRuleset() ? OSP_powerArmorPerCell(false)
+                        : 2.0f;
         pa_te_type = TE_SHIELD_SPARKS;
         damage = (2 * damage) / 3;
     }
@@ -534,6 +561,19 @@ bool CheckTeamDamage(edict_t *targ, edict_t *attacker)
             targ != attacker)
             return true;
 
+    // R-171: RA2 replaces this function outright with teamnum equality, and it
+    // had no arena arm at all.  The one caller is the grapple's damage tick, so
+    // what the omission bought was a team-mate on the end of your hook hearing
+    // `grhurt.wav` every frame while healthprotect cancelled the damage one
+    // function later -- the right outcome reached by the wrong road, and only
+    // because healthprotect happened to be on.
+    //
+    // Asked through OnSameTeam(), which is this tree's one answer to "are these
+    // two on a side together" and already carries arena's.
+    if (G_Ruleset() == RULESET_ARENA)
+        return targ->client && attacker->client && targ != attacker &&
+               OnSameTeam(targ, attacker);
+
     //FIXME make the next line real and uncomment this block
     // if ((ability to damage a teammate == OFF) && (targ's team == attacker's team))
     return false;
@@ -603,13 +643,13 @@ void T_Damage(edict_t *targ, edict_t *inflictor, edict_t *attacker, const vec3_t
     // dmflags friendly-fire arm outright, and R-CORE-8 keeps both -- under
     // every other ruleset they are the only rules there are, and under tourney
     // dmflags teamplay is off, so the inherited arm cannot fire.
-    if (G_Ruleset() == RULESET_TOURNEY && targ->client) {
+    if (G_IsOspRuleset() && targ->client) {
         // A client who has not finished entering is not in the match yet, and
         // is where the donor returns rather than damaging.
         if (targ->client->resp.osp_entered != ENTERED_ENTERED)
             return;
 
-        if (m_mode > 1 && targ != attacker && attacker->client &&
+        if (OSP_IsTeams() && targ != attacker && attacker->client &&
             targ->client->resp.team == attacker->client->resp.team) {
             if (!OSP_teamFriendlyFire(targ->client->resp.team) &&
                 !(dflags & DAMAGE_NO_PROTECTION))
@@ -619,7 +659,7 @@ void T_Damage(edict_t *targ, edict_t *inflictor, edict_t *attacker, const vec3_t
         }
 
         if (targ == attacker) {
-            if (m_mode > 1) {
+            if (OSP_IsTeams()) {
                 if (!OSP_teamSelfDamage(targ->client->resp.team))
                     damage = 0;
             } else if (!(int)ffa_hurtself->value) {
@@ -634,7 +674,7 @@ void T_Damage(edict_t *targ, edict_t *inflictor, edict_t *attacker, const vec3_t
     // is why it reads the attacker and runs before any of the target's
     // reductions.  A no-op unless the rune set is on and the attacker has it,
     // in the same shape as CTFApplyStrength below.
-    if (G_Ruleset() == RULESET_TOURNEY && (rune_stat & RUNE_STRENGTH))
+    if (G_IsOspRuleset() && (rune_stat & RUNE_STRENGTH))
         damage = OSP_runesApplyStrength(attacker, damage);
 
 //ROGUE
@@ -713,7 +753,19 @@ void T_Damage(edict_t *targ, edict_t *inflictor, edict_t *attacker, const vec3_t
     }
 
     // check for invincibility
-    if ((client && client->invincible_framenum > level.framenum) && !(dflags & DAMAGE_NO_PROTECTION) && mod != MOD_TRAP) {
+    //
+    // R-OSP-1's `client_protect` is the second disjunct: `resp.osp_r23c` is a
+    // frame number OSP_seedPlayer sets to `client_protect` seconds ahead when a
+    // player spawns into plain deathmatch with the blaster, and it makes them
+    // untouchable until it passes or they pick something up.  Carrying the
+    // shell in p_view.c without this test left a protected player glowing and
+    // taking full damage, which is the one state the feature must not produce.
+    //
+    // MOD_TRAP is Xatrix's exemption from the invulnerability POWERUP and stays
+    // attached to it; spawn protection is not a powerup and is not exempted.
+    if (client && !(dflags & DAMAGE_NO_PROTECTION) &&
+        ((client->invincible_framenum > level.framenum && mod != MOD_TRAP) ||
+         (G_IsOspRuleset() && client->resp.osp_r23c > level.framenum))) {
         if (targ->pain_debounce_framenum < level.framenum) {
             gi.sound(targ, CHAN_ITEM, gi.soundindex("items/protect4.wav"), 1, ATTN_NORM, 0);
             targ->pain_debounce_framenum = level.framenum + 2 * BASE_FRAMERATE;
@@ -780,7 +832,7 @@ void T_Damage(edict_t *targ, edict_t *inflictor, edict_t *attacker, const vec3_t
     // vampire is fed by what resistance let through: the attacker heals from
     // the damage that actually landed, capped at 40 so that a gib does not pay
     // out the overkill.
-    if (G_Ruleset() == RULESET_TOURNEY && (rune_stat & (RUNE_RESIST | RUNE_VAMPIRE))) {
+    if (G_IsOspRuleset() && (rune_stat & (RUNE_RESIST | RUNE_VAMPIRE))) {
         take = OSP_runesApplyResistance(targ, take);
         if (targ != attacker)
             OSP_runesApplyVampire(attacker,
@@ -819,7 +871,7 @@ void T_Damage(edict_t *targ, edict_t *inflictor, edict_t *attacker, const vec3_t
     // what that changes and why.  This is the point every one of those sites
     // was feeding: `take` is the damage that survived armour, powerups and the
     // team rules, which is what the report means by damage given and taken.
-    if (G_Ruleset() == RULESET_TOURNEY)
+    if (G_IsOspRuleset())
         OSP_accDamage(targ, attacker, mod, take);
 
 // do the damage

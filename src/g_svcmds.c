@@ -309,7 +309,7 @@ void    ServerCommand(void)
     // R-OSP-2's five `sv` commands, delegated like its client commands: one
     // gate here, the table in src/tourney/osp_cmds.c.  It is asked LAST so that
     // it cannot shadow a name this file already owns.
-    else if (G_Ruleset() == RULESET_TOURNEY && OSP_ServerCommand(cmd))
+    else if (G_IsOspRuleset() && OSP_ServerCommand(cmd))
         ;
     // R-BOT-24: the SDK's own set, `server` true because this is `sv <cmd>`.
     // Also asked last, and after tourney's, so that the bot layer -- which is

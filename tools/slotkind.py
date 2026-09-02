@@ -101,15 +101,33 @@ INDEXED = re.compile(r'([A-Za-z_][\w.\[\]]*)\s*=\s*gi\.imageindex\b')
 COPY = re.compile(r'\b([A-Za-z_]\w*)\s*=\s*([A-Za-z_][\w.\[\]]*)\s*;')
 
 
-def index_vars(files):
-    """Identifiers proven to hold an image index -> 'pic'."""
+def index_vars(files, extra=None):
+    """Identifiers proven to hold an image index -> 'pic'.
+
+    `extra` is the same [(label, text)] the writer scan takes.  The learner has
+    to see exactly what the writer scan sees or the two disagree about which
+    sources exist -- which they did: a control injected into audit_map() was
+    scanned for writes and not for what taught them, so a kind error laundered
+    through a variable declared IN the control was invisible to it.
+    """
     out = {}
     texts = [re.sub(r'//[^\n]*', '', read(f)) for f in files]
+    texts += [t for _, t in (extra or [])]
     for t in texts:
         for m in INDEXED.finditer(t):
             lval = m.group(1)
-            # last component: level.pic_health -> pic_health, a[i].icon -> icon
-            name = re.split(r'[.\[]', lval)[-1].strip(']')
+            # The identifier being taught, which is the last DOTTED component
+            # with any subscripts removed: level.pic_health -> pic_health,
+            # a[i].icon -> icon, teamskins_precachem[i] -> teamskins_precachem.
+            #
+            # Splitting on '[' as well as '.' and taking the last piece got the
+            # first two right and the third catastrophically wrong (R-172): it
+            # learned the SUBSCRIPT, so an array of image indices in a loop --
+            # `pics[i] = gi.imageindex(...)`, which is how RA2 caches its seven
+            # team-skin icons -- taught the tool that `i` holds an image index.
+            # classify() then matched that bare name against every right-hand
+            # side in the tree and reported six correct `num` writes as `pic`.
+            name = re.sub(r'\[[^\]]*\]', '', lval).split('.')[-1].strip()
             if name:
                 out[name] = 'pic'
     for _ in range(4):          # bounded: four hops is far past any real chain
@@ -286,21 +304,43 @@ def compose_body(fns):
     return top.get('body', '')
 
 
+# Which MAP COLUMN a ruleset's bar is checked against.  A column is a numbering
+# and the four OSP rulesets share one (R-OSP-12), so this is not the identity
+# map it looks like it should be.  A ruleset missing here is a hard error rather
+# than a default, because the old code defaulted to `dm` and `dm` is no longer a
+# column at all -- a silent wrong answer is exactly what this tool exists to
+# prevent.
+RULESET_COLUMN = {
+    'dm': 'osp', 'dmpro': 'osp', 'tdm': 'osp', 'duel': 'osp',
+    'ctf': 'ctf', 'arena': 'arena', 'sp': 'sp',
+}
+
+
 def bars_per_ruleset(fns):
     """ruleset label -> the emitter functions its bar is composed from."""
     top = compose_body(fns)
     always = EMIT_CALL.findall(top.split('switch')[0])
     out, seen_cases = {}, []
     sw = top[top.find('switch'):] if 'switch' in top else ''
-    for case in re.finditer(r'case\s+RULESET_(\w+)\s*:(.*?)break;', sw, re.S):
-        label = case.group(1).lower()
-        seen_cases.append(label)
-        out[label] = ['sb_' + a for a in always] + \
-                     ['sb_' + f for f in EMIT_CALL.findall(case.group(2))]
-    dm = re.search(r'default\s*:(.*?)break;', sw, re.S)
-    if dm:
+    # FALL-THROUGH LABELS SHARE A BODY.  The OSP four are four `case` labels
+    # over one arm, so a match must collect every label that precedes the body
+    # rather than assuming one label per `break;` -- reading them one at a time
+    # attributed the whole arm to `dm` and left the other three unseen, which
+    # would have let `duel`'s bar drift with nothing to say so.
+    for case in re.finditer(r'((?:case\s+RULESET_\w+\s*:\s*)+)(.*?)break;',
+                            sw, re.S):
+        labels = [m.lower() for m in re.findall(r'RULESET_(\w+)', case.group(1))]
+        emitters = ['sb_' + a for a in always] + \
+                   ['sb_' + f for f in EMIT_CALL.findall(case.group(2))]
+        for label in labels:
+            if label == 'count':        # the enum terminator, not a ruleset
+                continue
+            seen_cases.append(label)
+            out[label] = emitters
+    dflt = re.search(r'default\s*:(.*?)break;', sw, re.S)
+    if dflt:
         out['default'] = ['sb_' + a for a in always] + \
-                         ['sb_' + f for f in EMIT_CALL.findall(dm.group(1))]
+                         ['sb_' + f for f in EMIT_CALL.findall(dflt.group(1))]
     return out, seen_cases
 
 
@@ -393,7 +433,12 @@ def audit_map(lbl, files, out, header_text, impl_text, extra=None):
     # The bar's op must match the kind the map declares.  Runtime checks this
     # too (sb_kind_ok) but a build failure beats a dprintf nobody reads.
     for label, roots in sorted(bars.items()):
-        rs = label if label in cols else 'dm'
+        rs = RULESET_COLUMN.get(label)
+        if rs is None:
+            problems.append(f'the statusbar switch has an arm for `{label}`, '
+                            f'which names no map column -- add it to '
+                            f'RULESET_COLUMN (R-OSP-7 clause 3)')
+            continue
         for f in expand(fns, roots):
             for op, sid in fns[f]['drawn']:
                 if sid not in rows:
@@ -497,7 +542,7 @@ def audit_map(lbl, files, out, header_text, impl_text, extra=None):
 
     # And the writers must agree with the map, which is the original kind check
     # re-aimed at G_SetStat.
-    idx = index_vars(files)
+    idx = index_vars(files, extra)
     setstat = re.compile(r'G_SetStat\s*\(\s*[^,]+,\s*(SID_\w+)\s*,\s*(.+?)\)\s*;',
                          re.S)
     for name, t in sources(files) + list(extra or []):
@@ -511,7 +556,12 @@ def audit_map(lbl, files, out, header_text, impl_text, extra=None):
                 problems.append(f'{sid}: map declares {rows[sid][0]}, '
                                 f'{name} writes {got}: {rhs.strip()[:52]}')
 
-    missing = [c for c in cols if c not in bars and 'default' not in bars]
+    # A column is covered when ANY ruleset mapped to it has an arm -- the four
+    # OSP rulesets share the `osp` column, so asking whether a column named
+    # itself as a case reported `osp` missing while all four of its rulesets
+    # had arms.
+    covered = {RULESET_COLUMN[l] for l in bars if l in RULESET_COLUMN}
+    missing = [c for c in cols if c not in covered and 'default' not in bars]
     for m in missing:
         notes.append(f'ruleset `{m}` has no bar of its own; it inherits the '
                      f'default (R-MODE-6)')
@@ -549,8 +599,12 @@ SELFTESTS = [
      (r'E\(SID_CTF_TECH,\s+SK_PIC,\s+-1,\s+26',
       'E(SID_CTF_TECH,              SK_PIC,  -1,  21'),
      'is claimed by both'),
+    # Mutates the OSP column, which is the map's first now that baseq2's own
+    # numbering is gone -- this control was written against `dm`'s 18 and
+    # stopped applying the moment that column was deleted, which is what
+    # "a control can rot separately from the check" means in practice.
     ('universal', 'header',
-     (r'E\(SID_TIMER2_ICON,\s+SK_PIC,\s+18',
+     (r'E\(SID_TIMER2_ICON,\s+SK_PIC,\s+29',
       'E(SID_TIMER2_ICON,           SK_PIC,   5'),
      'universal and unclaimable'),
     # Not a slot below 16 -- that arm is clause 1's and has its own control.
@@ -568,6 +622,16 @@ SELFTESTS = [
     ('writer kind', 'inject',
      (None, 'void ctl(edict_t *ent) { '
             'G_SetStat(ent, SID_TIMER2, gi.imageindex("p_quad")); }'),
+     'writes pic'),
+    # An ARRAY of image indices, filled in a loop, then written to a `num`
+    # slot -- the learner has to reach through the subscript for this, and the
+    # first thing in the tree to fill one that way is what showed it was
+    # reaching for the subscript INSTEAD.  Here so the narrowing that fixed
+    # that cannot silently blind the learner to a laundered kind error.
+    ('indexed array', 'inject',
+     (None, 'static int ctl_pics[2]; '
+            'void ctl(edict_t *ent) { ctl_pics[0] = gi.imageindex("p_quad"); '
+            'G_SetStat(ent, SID_TIMER2, ctl_pics[0]); }'),
      'writes pic'),
     # The real bug, as its own control: a SID inside stats[].  Written as the
     # fourteen sites were actually written rather than as a minimal case, so

@@ -40,7 +40,14 @@ import sys
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 # Cvars that name a ruleset.  Testing one of these at a call site is the defect.
-RULESET_CVARS = ('ctf', 'rocketarena', 'ra', 'ch', 'arena', 'tourney')
+#
+# `ch` and `tourney` left in spec 1.36 with the things they named: Colored
+# Hitman's cvar is no longer read at all (N7, R-MODE-2) and `tourney` is no
+# longer a ruleset -- OSP's four modes of play are `dm`, `dmpro`, `tdm` and
+# `duel` now (R-OSP-12).  Neither is listed defensively, because a name here
+# that nothing can define is a check that cannot fire, and this list is meant
+# to be short enough to read.
+RULESET_CVARS = ('ctf', 'rocketarena', 'ra', 'arena')
 
 # Where the ruleset cvars are legitimately read: resolution, once, at InitGame.
 OWNER = 'g_ruleset.c'

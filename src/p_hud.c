@@ -19,7 +19,13 @@ with this program; if not, write to the Free Software Foundation, Inc.,
 #include "g_local.h"
 #include "bot/p_observer.h"
 #include "arena/arena.h"
+// R-160: BeginIntermission closes every arena's round record, which is
+// ra2stats.c's and not arena.h's.
+#include "arena/ra2stats.h"
 #include "tourney/p_menu.h"
+// R-OSP-9: the intermission arm asks the client census and clears the rune HUD.
+#include "tourney/osp_hooks.h"
+#include "bot/bl_main.h"
 #include "bot/p_botmenu.h"
 
 /*
@@ -144,6 +150,17 @@ bool G_IsObserver(edict_t *ent)
     // watching as fightstate.  Same question, third answer, still one predicate.
     if (G_Ruleset() == RULESET_ARENA)
         return ent->client->resp.fightstate == FIGHT_SPECTATING;
+    // ...and tourney's is a FIFTH spelling, which R-191 declined to add here and
+    // R-193 adds, because by then it was blocking six sites: `resp.spectator` is
+    // dead under the OSP four -- the donor deleted baseq2's spectator system --
+    // and "watching" is `resp.osp_entered != ENTERED_ENTERED`, which is also the
+    // donor's own test at every one of those sites.  Two callers diverge from
+    // the donor once this answers, and both carry an explicit arm rather than
+    // being left to it: ClientBeginDeathmatch announces an ARRIVING observer
+    // (the donor's OSP_playerAnnounce is unconditional there) and p_view.c keeps
+    // G_SetStats for one, because the donor has no G_SetSpectatorStats at all.
+    if (G_IsOspRuleset())
+        return ent->client->resp.osp_entered != ENTERED_ENTERED;
     return ent->client->resp.spectator;
 }
 
@@ -157,6 +174,27 @@ INTERMISSION
 
 void MoveClientToIntermission(edict_t *ent)
 {
+    // R-159.  The donor's first line here is `clear_menus(ent)`, and the merge
+    // dropped it: an RA2 menu IS the client's statusbar (menu.c SendMenu
+    // overwrites CS_STATUSBAR for the one client), so a menu left open is a
+    // menu still on screen over the end-of-level board, with the real bar never
+    // written back.  A menu is open on almost every one of these, because
+    // move_to_arena(..., 1) reopens the observer menu on every placement.
+    //
+    // `close_menus` rather than the donor's `clear_menus`: it does the same two
+    // things -- drop the queue, repaint through the arbiter -- and FREES the
+    // nodes on the way, which `rocketarena2@28a8af7` established is this tree's
+    // one teardown.  clear_menus() could afford to forget because the level was
+    // about to end; there is no reason to.
+    //
+    // It also makes g_spawn.c's clearing loop true again.  That loop says "the
+    // ordinary map change arrives here with nothing to clear, because
+    // MoveClientToIntermission nulled them" -- which stopped being so when this
+    // call went missing, leaving it to carry every map change rather than the
+    // console `map` it was written for.
+    if (G_Ruleset() == RULESET_ARENA)
+        close_menus(ent);
+
     if (deathmatch->value || coop->value) {
         ent->client->showscores = true;
         // RA2 writes `scoremode = 2` here -- the server-wide board, which is
@@ -263,6 +301,19 @@ void BeginIntermission(edict_t *targ)
         }
     }
 
+    // R-OSP-9: NOTHING ELSE CAN END A TOURNEY INTERMISSION.  The only writer of
+    // `exitintermission` for a deathmatch ruleset is ClientThink, on a button
+    // press from a connected client -- so a server that reaches its timelimit
+    // with nobody on it (or with nobody but bots, which press nothing) stops
+    // here and never changes map again, and OSP_exitLevel's "empty server, go
+    // back to the default config" arm becomes unreachable with it.  The donor
+    // closes it in this function, and R-160 recorded the hole as baseq2's while
+    // missing that osp-tourney fixes it too.
+    if (G_IsOspRuleset() && connected_clients - botglobals.numbots <= 0) {
+        level.exitintermission = 1;
+        return;
+    }
+
     level.exitintermission = 0;
 
     // find an intermission spot
@@ -288,11 +339,56 @@ void BeginIntermission(edict_t *targ)
     }
 
     // move all clients to the intermission point
+    n = 0;
     for (i = 0; i < game.maxclients; i++) {
         client = g_edicts + 1 + i;
         if (!client->inuse)
             continue;
+        n++;
         MoveClientToIntermission(client);
+
+        // R-OSP-1/3: a player who was still in the game when the level ended
+        // gets the scoreboard put up 1.25 seconds in (`osp_r2dc` 2, read by
+        // ClientThink's intermission arm -- this comment said OSP_clientThink,
+        // which reads the value 1, and the value 2 had no reader at all until
+        // R-193), the hi-score alternation is restarted, and the runes they were
+        // carrying stop being drawn on the HUD.
+        if (G_IsOspRuleset()) {
+            if (client->health <= 0 &&
+                client->client->resp.osp_entered == ENTERED_ENTERED)
+                client->client->resp.osp_r2dc = 2;
+            client->client->resp.osp_r034 = 0;
+            OSP_zeroRuneStats(client);
+        }
+    }
+
+    if (G_Ruleset() == RULESET_ARENA) {
+        // R-160, first half.  Every arena's round record is closed HERE in the
+        // donor, and the merge left RA2_Stats_End reachable only from
+        // arena_think's round boundaries -- so a round still being fought when
+        // `timelimit` or `fraglimit` ended the level was never written out.
+        // That is the round a report most wants, because it is the one that got
+        // cut short.
+        for (i = 0; i <= num_arenas; i++) {
+            RA2_Stats_End(arenas[i].stats);
+            arenas[i].stats = NULL;
+        }
+
+        // R-160, second half.  NOTHING ELSE CAN END AN INTERMISSION.  The only
+        // other writer of `exitintermission` for a deathmatch ruleset is
+        // ClientThink, on a button press from a connected client -- so a server
+        // that reaches its timelimit with nobody on it stops here and never
+        // changes map again.  The donor closes it by asking whether it moved
+        // anybody.
+        //
+        // Arena only, matching the donor, and the hole is the same under dm and
+        // ctf: it is baseq2's, it is not RA2's to fix from inside a ruleset
+        // gate, and widening it would change what an empty dm server does.
+        // Recorded rather than taken (doc/reconciliation.md R-160).
+        if (!n)
+            level.exitintermission = 1;
+        else
+            gi.dprintf("%d clients on level change\n", n);
     }
 }
 
@@ -316,7 +412,15 @@ void DeathmatchScoreboardMessage(edict_t *ent, edict_t *killer)
     edict_t     *cl_ent;
     char    *tag;
 
-    // sort the clients by score
+    // sort the clients by score.  `G_IsObserver()` rather than baseq2's own
+    // `resp.spectator` (R-193's widening): the Gladiator observer is a flag and
+    // is set under sp too, so the generic predicate is what keeps a watching
+    // client out of the rankings whichever spelling it arrived in.
+    //
+    // WHO REACHES THIS BOARD IS A SHORT LIST: `sp` alone, meaning coop's
+    // intermission and `score`.  Every deathmatch ruleset fills the
+    // ScoreboardMessage row -- CTFScoreboardMessage, RA_ScoreboardMessage,
+    // OSP_ScoreboardMessage -- so none of them inherits this one (R-OSP-14).
     total = 0;
     for (i = 0; i < game.maxclients; i++) {
         cl_ent = g_edicts + 1 + i;
@@ -460,6 +564,41 @@ void Cmd_Score_f(edict_t *ent)
         ent->client->update_chase = true;
         if (!ent->client->scoremode)
             return;
+        DeathmatchScoreboard(ent);
+        return;
+    }
+
+    // R-OSP-1: THE SCOREBOARD CHANNEL SHOWS FIVE DIFFERENT PAGES under tourney,
+    // and `resp.osp_r24c` says which -- 0 the scoreboard, 1 the previous
+    // match's, 2 the MOTD, 4 the match parameters, 8 the player card.  So
+    // `score` only DISMISSES from the first two; from any other page it returns
+    // to the scoreboard, which is what a player pressing it there means.
+    //
+    // The four fields reset on the way are what the other pages left behind:
+    // the hi-score alternation (osp_r034 / osp_r244), the player-card cursor
+    // (osp_r2ac) and the layout slot the MOTD drew into.
+    if (G_IsOspRuleset()) {
+        if ((ent->client->resp.osp_r24c == 0 || ent->client->resp.osp_r24c == 1) &&
+            ent->client->showscores) {
+            ent->client->showscores = false;
+            ent->client->update_chase = true;
+            G_SetStat(ent, SID_OSP_LAYOUT1, 0);
+            ent->client->resp.osp_r2ac = -1;
+            return;
+        }
+
+        if (ent->client->resp.osp_r24c == 4) {
+            // The parameters page is on a timer of its own; rewinding it is
+            // what stops it drawing itself over the board we are opening.
+            ent->client->resp.osp_r0ac = level.framenum - 100;
+            if (ent->client->resp.osp_r0ac < 0)
+                ent->client->resp.osp_r0ac = 0;
+        }
+
+        ent->client->resp.osp_r24c = 0;
+        ent->client->showscores = true;
+        ent->client->resp.osp_r034 = 1;
+        ent->client->resp.osp_r244 = 0;
         DeathmatchScoreboard(ent);
         return;
     }
@@ -729,7 +868,16 @@ void G_SetStats(edict_t *ent)
     //
     // frags
     //
-    ent->client->ps.stats[STAT_FRAGS] = ent->client->resp.score;
+    // A tourney observer's score is -100 -- OSP_clientBegunPost sets it on
+    // arrival and OSP_startObserve on every later exit -- and the donor
+    // therefore draws a 0 rather than the sentinel for a client that has not
+    // entered.  Read off the wire before this: an arriving client's HUD said
+    // -100.
+    if (G_IsOspRuleset() &&
+        ent->client->resp.osp_entered != ENTERED_ENTERED)
+        ent->client->ps.stats[STAT_FRAGS] = 0;
+    else
+        ent->client->ps.stats[STAT_FRAGS] = ent->client->resp.score;
 
     //
     // help icon / current weapon if not shown
@@ -790,6 +938,27 @@ void G_SetSpectatorStats(edict_t *ent)
         cl->ps.stats[STAT_LAYOUTS] |= LAYOUTS_LAYOUT;
     if (cl->showinventory && cl->pers.health > 0)
         cl->ps.stats[STAT_LAYOUTS] |= LAYOUTS_INVENTORY;
+
+    // *** A CTF CHASER'S NAME PLATE IS A LAYOUT, SO THE LAYOUT BIT IS ON. ***
+    //
+    // Threewave has no chase element in its statusbar -- SID_CHASE is unmapped
+    // under ctf for that reason -- and draws "Chasing <name>" as a unicast
+    // layout from UpdateChaseCam() instead.  What makes that visible is the
+    // `stats[STAT_LAYOUTS] = 1` its own chase-stat copy forces, and the merge
+    // replaced that copy with baseq2's G_CheckChaseStats(), which lands here
+    // and recomputes the bit from three conditions a CTF observer meets none
+    // of: pers.health is 100 (InitClientPersistant), the scoreboard is down
+    // (ctf_PMenu_Close cleared showscores on the way into the chase cam) and
+    // there is no intermission.  So the server unicast the line every 32 frames
+    // and no client ever drew it -- measured off the wire, layout present,
+    // STAT_LAYOUTS 0 -- and with it the whole `update_chase` path that exists
+    // to re-send it after `score`, `inven` and `putaway`.
+    //
+    // Tourney draws the same plate and does not need this: p_view.c sets the
+    // bit itself when it copies a tracked player's stats to its watchers.
+    // doc/reconciliation.md R-176.
+    if (G_Ruleset() == RULESET_CTF && cl->chase_target)
+        cl->ps.stats[STAT_LAYOUTS] |= LAYOUTS_LAYOUT;
 
     if (cl->chase_target && cl->chase_target->inuse) {
         G_SetStat(ent, SID_CHASE, game.csr.playerskins +

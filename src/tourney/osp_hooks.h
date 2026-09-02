@@ -18,8 +18,45 @@
 
 // ---- match state the gates read -------------------------------------------
 
-// R-OSP-12's four match modes: 0 free-for-all, 1 qualifier, 2 team, 3 1-vs-1.
-extern  int     m_mode;
+// R-OSP-12's four modes of play are four RULESETS -- `dm`, `dmpro`, `tdm`,
+// `duel` -- and the `m_mode` global that used to select among them is gone.
+// A site that means one of them tests the ruleset by name; the two questions
+// below are the ones that meant a RANGE of modes and would otherwise be spelled
+// as a list at every call site.
+//
+// The old spellings map exactly, which is how the rewrite was checked.  The
+// left column is the DONOR's, and it is quoted rather than rewritten -- the
+// pass that renamed the identifiers had run over this table too, leaving both
+// columns saying the same thing and the document explaining nothing:
+//
+//      m_mode == 0 / !m_mode              ->  G_Ruleset() == RULESET_DM
+//      m_mode == 1                        ->  G_Ruleset() == RULESET_DMPRO
+//      m_mode == 2                        ->  G_Ruleset() == RULESET_TDM
+//      m_mode == 3                        ->  G_Ruleset() == RULESET_DUEL
+//      m_mode (bare, truthy) / m_mode > 0 ->  OSP_IsMatch()
+//      m_mode > 1  / m_mode >= 2          ->  OSP_IsTeams()
+//      m_mode < 2  / m_mode <= 1          ->  !OSP_IsTeams()
+
+// Is there a match system -- a ready gate, a countdown, a referee?  Everything
+// but `dm`, which is OSP's RegularDM and starts with sync_stat already at 8.
+//
+// Both are ordinary functions rather than inlines on purpose: this header is
+// included by twelve shared files and does not itself include `g_ruleset.h`,
+// which cannot be included before `edict_t` exists.  A body here would compile
+// only because of the order `g_local.h` happens to use.
+bool    OSP_IsMatch(void);
+
+// Are the players on two OSP teams?  `tdm` and `duel` -- a duel is two teams of
+// one.  NOT the same question as the brain's `teamplay` libvar, which is
+// RULESET_TDM alone: see R-BOT-29 and the comment on G_TeamplayEnabled().
+bool    OSP_IsTeams(void);
+
+// The declared roster size of one OSP team: `team_maxplayers`, 4 by default and
+// forced to 1 CVAR_NOSET under `duel`.  Reached through a function because the
+// cvar's DEFAULT is ruleset-dependent, so a call site that spelled one would be
+// R-COMPAT-6's collision -- one cvar registered twice with two values.
+int     OSP_TeamMaxPlayers(void);
+
 // The match state machine: <2 warmup, 2 countdown, >2 live, 4 fully underway.
 extern  int     sync_stat;
 // Which of the five runes are in play, as RUNE_* bits.  0 disables them.
@@ -30,6 +67,38 @@ extern  float   pause_time;
 // The hi-score board's mode; 0 means there is none.
 extern  int     hs_mode;
 extern  int     active_clients;
+// Every slot with a connected client, bots included.  Recounted rather than
+// decremented (OSP_clientLeft), which is what makes it survive a client that
+// left without ever entering.
+extern  int     connected_clients;
+// The countdown bitmask: which of the 10/5/1-minute and 5..1-second marks have
+// been announced.  A client caches the value it was last told about in
+// resp.osp_r01c, which is why InitClientResp has to seed it.
+extern  int     start_count;
+// R-193: the two intermission timers ClientThink reads, and `manual_map`, which
+// distinguishes a map an operator typed from one the rotation chose.
+extern  cvar_t  *nextlevel_click;
+extern  cvar_t  *nextlevel_lazy;
+extern  int     manual_map;
+// R-193: what tourney does to each client when the level ends -- the demo it
+// was recording, the music it hears and the accuracy page it is shown.
+extern  cvar_t  *match_endmusic;
+extern  cvar_t  *demo_referee;
+extern  cvar_t  *demo_player;
+extern  char     wav_file[125];
+void     OSP_accuracyInfo(struct edict_s *ent, char *name, int cid);
+void     OSP_closeMenus(void);
+bool     OSP_teamLost(int team);
+
+// R-193: `numgibs` under tourney, 4 everywhere else -- one question so that
+// p_client.c's two gib loops do not each carry a ruleset test.
+int      OSP_GibCount(void);
+// Sudden death: the number the team fraglimit is offset by once a drawn match
+// runs out of overtime.  Non-zero means "the next frag ends it".
+extern  int     frag_offset;
+// Which of the four statusbar variants the server composed; a client's own
+// choice starts here and `hud` toggles it.
+extern  cvar_t  *client_hud;
 
 #define RUNE_RESIST             1
 #define RUNE_STRENGTH           2
@@ -37,12 +106,24 @@ extern  int     active_clients;
 #define RUNE_REGEN              8
 #define RUNE_VAMPIRE            16
 
-// resp.osp_entered's four states.  R-58: this is NOT baseq2's `resp.entered` bool,
-// and the two share a name in the merged struct (SPECS.md 1.19).
-#define ENTERED_NO              0
-#define ENTERED_ENTERED         1
-#define ENTERED_OBSERVER        2
-#define ENTERED_QUEUED          3
+// resp.osp_entered's five states.  R-58: this is NOT baseq2's `resp.entered`
+// bool, and the two share a name in the merged struct (SPECS.md 1.19).
+//
+// They are BITS in the donor's numbering -- 1, 2, 4, 8, 16 -- and every donor
+// site compares them for EQUALITY, so they are five states rather than a mask.
+// `ENTERED_QUEUED 3` stood here and is not one of them: no donor site writes or
+// reads a 3, and the four states this comment claimed were three plus an
+// invention (doc/reconciliation.md R-191).  The literals still appear as
+// literals at most sites, which is the donor's own text; these names are for
+// the sites that were written with them.
+#define ENTERED_NO              0   // the InitClientResp memset value, which
+                                    // the donor never writes by hand
+#define ENTERED_ENTERED         1   // playing
+#define ENTERED_OBSERVER        2   // observing, free-flying
+#define ENTERED_CHASECAM        4   // chasing one player, with free-look and
+                                    // zoom (g_chase.c reads exactly this)
+#define ENTERED_INEYES          8   // chasing in-eyes: no free-look, no zoom
+#define ENTERED_AUTOCAM         16  // the camera picks its own subject
 
 // The three the BOT LAYER reads through its ruleset-neutral accessors
 // (R-BOT-29).  They are tourney's own globals; bl_main.c must never see them
@@ -52,9 +133,19 @@ extern  int     active_clients;
 extern  cvar_t  *hook_enable;
 extern  int      bots_votedin;
 
+// R-193: the chase camera's two settings, read by g_chase.c -- `camera_depth`
+// is the distance a new target is watched from and `camera_pitch` the free-look
+// pitch offset.  Both were registered and clamped and neither value was read
+// until the camera's consumer arrived.
+extern  cvar_t  *camera_depth;
+extern  cvar_t  *camera_pitch;
+
 extern  cvar_t  *runes_model;
 extern  cvar_t  *ffa_hurtself;
 extern  cvar_t  *client_deathweapdrop;
+// Three frames of the weapon raise/lower animation per server frame instead of
+// one (R-OSP-1).  Read by p_weapon.c's Think_Weapon.
+extern  cvar_t  *client_fastweap;
 extern  int      bot_watch;
 
 // The Standard Log's four spine-facing writers (R-OSP-3).  They take the game
@@ -110,8 +201,23 @@ void     OSP_restartStats(struct edict_s *ent);
 bool     OSP_disableItems(struct edict_s *ent);
 bool     OSP_teamHasEnabled(struct edict_s *master);
 float    OSP_respawnDelay(float delay);
+
+// "Is somebody standing on this spawn point?"  True refuses the placement, which
+// PutClientInServer answers with a frozen, bodiless client that R-191's respawn
+// trigger retries.
+bool     OSP_spawnRefused(struct edict_s *ent, struct edict_s *spot);
+// R-185: the two reads the import dropped.  Both answer with the donor's fixed
+// value outside RegularDM, which is what upstream's `!m_mode` gate means.
+int      OSP_forcedRespawnDelay(void);
+float    OSP_powerArmorPerCell(bool screen);
 struct edict_s *OSP_pickRespawnMember(struct edict_s *master);
 void     OSP_packPlayer(struct edict_s *ent);
+// The armour ceiling and the shard's worth, as Pickup_Armor asks them.  0 and 2
+// outside tourney, which is baseq2's own behaviour.
+// A powerup freed in the world: logs it if its own timer ran out (R-OSP-3).
+void     OSP_itemFreed(struct edict_s *ed);
+int      OSP_armorCeiling(struct edict_s *ent);
+int      OSP_armorShard(void);
 
 // The connect/begin/leave path.
 void     OSP_giveClientID(struct edict_s *ent);
@@ -134,6 +240,9 @@ void     OSP_saveClient(struct edict_s *ent);
 bool     OSP_readdTeamMember(struct edict_s *ent);
 void     OSP_startObserve(struct edict_s *ent);
 bool     OSP_clientThink(struct edict_s *ent, usercmd_t *ucmd);
+// The ping / inactivity / framerate rules (R-OSP-4).  True means the client is
+// gone and the caller must not touch it again.
+bool     OSP_clientPolice(struct edict_s *ent, usercmd_t *ucmd);
 void     OSP_warmupItems(struct edict_s *ent);
 void     OSP_setSingleAccuracy(struct edict_s *ent);
 void     OSP_DoRankSort(void);
@@ -145,14 +254,27 @@ void     OSP_clearVotes(void);
 void     OSP_closeMenus(void);
 void     OSP_checkVote(void);
 void     OSP_removeChaseCam(struct edict_s *ent);
+// R-193's observer input, which ClientThink reaches: the autocam (true when it
+// took the client) and the mode line the stats log records.
+bool     CameraCmd(struct edict_s *ent, bool force);
+void     OSP_Stats_PlayerMode(struct edict_s *ent, const char *mode);
 void     OSP_1v1Add(struct edict_s *ent);
 void     OSP_1v1Remove(struct edict_s *ent, int mode);
 void     OSP_initTeamFrags(struct edict_s *ent);
 void     OSP_playerTeamFrags(struct edict_s *ent);
-void     OSP_scoreChange(struct edict_s *who, int delta);
+// The obituary, in the donor's three shapes.  Each owns both the printing and
+// the frag accounting for its shape -- see src/tourney/osp_teams.c for why they
+// cannot be one `score += delta`.
+bool     OSP_obituaryHush(void);
+void     OSP_obituarySelf(struct edict_s *self, const char *message);
+void     OSP_obituaryFrag(struct edict_s *self, struct edict_s *attacker,
+                          const char *message, const char *message2, bool ff);
+void     OSP_obituaryDied(struct edict_s *self);
 void     OSP_removeTeamMember(struct edict_s *ent, bool quiet);
 void     OSP_notready_cmd(struct edict_s *ent, int quiet);
 void     OSP_logAdminLog(char *fmt, ...);
+// Caches ent->osp_e37c, the client's address with the port stripped.
+void     OSP_getPlayerAddr(struct edict_s *ent);
 void     OSP_zeroRuneStats(struct edict_s *ent);
 int      OSP_teamCount(int team);
 bool     OSP_teamFriendlyFire(int team);
@@ -178,7 +300,6 @@ void     OSP_showMOTD(void);
 void     OSP_setMOTD(void);
 void     OSP_initHighScores(void);
 void     OSP_teamReset(void);
-int      OSP_clampMatchMode(void);
 void     OSP_worldspawn(void);
 void     OSP_frameStart(void);
 void     OSP_frameEnd(void);

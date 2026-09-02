@@ -27,7 +27,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 // Thirteen osp_pmenu_t tables (id CTF's p_menu.c engine) and the callbacks behind
 // their entries: an opener per menu, an `OSP_update*Menu` per menu that
 // rebuilds the entry text for one client, and a leaf callback per selectable
-// line.  The `m_mode` global picks team play from plain DM, which is what
+// line.  OSP_IsTeams() picks team play from plain DM, which is what
 // decides whether "back" goes to Team_Menu or RegDM_Menu.
 
 #include "g_local.h"
@@ -269,7 +269,7 @@ osp_pmenu_t Help3_Menu[18] = {
     { "teamname: Change teamname",               osp_PMENU_ALIGN_LEFT,    NULL, NULL },
     { "teamskin: Change teamskin",               osp_PMENU_ALIGN_LEFT,    NULL, NULL },
     { "join: Join specified team",               osp_PMENU_ALIGN_LEFT,    NULL, NULL },
-    { "switchteam: Switch osp_teams",                osp_PMENU_ALIGN_LEFT,    NULL, NULL },
+    { "switchteam: Switch teams",                osp_PMENU_ALIGN_LEFT,    NULL, NULL },
     { "captain: Show/set team capt",             osp_PMENU_ALIGN_LEFT,    NULL, NULL },
     { "lockteam: Lock team",                     osp_PMENU_ALIGN_LEFT,    NULL, NULL },
     { "unlockteam: Unlock team",                 osp_PMENU_ALIGN_LEFT,    NULL, NULL },
@@ -391,6 +391,45 @@ static int  admin_mode_map = 1;
 static int  admin_mode_ban = 2;
 static int  admin_mode_kick = 4;
 
+/*
+================
+OSP_refereeOnly
+
+THE MENU ROUTE INTO THE ADMIN TREE HAD NO CHECK OF ITS OWN.
+
+The text route does: osp_clientcmd.c gates `r_kick`, `r_ban`, `r_map` and the
+rest behind `else if (ent->osp_e39c)`, so a player who types them is refused by
+the dispatcher before the command function is reached -- which is why
+OSP_rban_cmd and friends never needed a check inside them.  The menu route
+reached the SAME functions and was gated by one thing only: whether
+OSP_updateTeamMenu/OSP_updateDMMenu had left a SelectFunc on the "*Admin Menu"
+row.  That is a field in a file-scope table, written from THIS client's
+`osp_e39c` and read by every client, which is the bug p_menu.c departure 2 is
+about; before the per-client copy, a referee opening their menu handed the row
+to anyone else who had one open and then moved the cursor.
+
+So the copy closes the reachable path and this closes the CLASS.  A row's
+SelectFunc is a drawing decision; it is not an authorisation, and nothing below
+it should have been treating it as one.  Six entry points ask here now: the two
+that open an admin menu, the two that move its selection, and the two that act.
+
+Truthy, not `== 1`, because that is what the flag means: 1 is a referee who
+came in through the match's ref_passwd and 2 is one who used `referee` with
+referee_password or rcon (osp_cmds.c).  Both are referees, both are what
+osp_clientcmd.c's dispatcher accepts, and both are what the menu row itself
+tests -- so this predicate adds no new policy, it just applies the existing one
+where it was missing.
+================
+*/
+static bool OSP_refereeOnly(edict_t *ent)
+{
+    if (ent->osp_e39c)
+        return true;
+
+    gi.cprintf(ent, PRINT_HIGH, "You are not a referee.\n");
+    return false;
+}
+
 void OSP_teamMenu(edict_t *ent)
 {
     int     cur;
@@ -419,6 +458,11 @@ void OSP_adminMenu(edict_t *ent)
 {
     int     cur;
 
+    // Before the toggle, not inside it: a non-referee has no admin menu to
+    // close, and `inven` closes whatever is open through the arbiter anyway.
+    if (!OSP_refereeOnly(ent))
+        return;
+
     if (ent->client->menu_owner == MENU_TOURNEY)
         osp_PMenu_Close(ent);
     else {
@@ -429,8 +473,22 @@ void OSP_adminMenu(edict_t *ent)
 
 void OSP_adminSelectMenu(edict_t *ent, osp_pmenu_t *p)
 {
+    int     which;
+
+    if (!OSP_refereeOnly(ent))
+        return;
+
+    // READ THE ARG BEFORE THE CLOSE.  `p` points into this client's private
+    // copy of the rows, and osp_PMenu_Close() frees that copy -- so the
+    // donor's order, close and then dereference, became a read of released
+    // memory the moment the entries stopped being the global table
+    // (p_menu.c departure 2).  It is the only leaf that does this: the other
+    // two `*(int *)p->arg` sites, OSP_joinTeam_menu and OSP_changeItems_menu,
+    // read before they close anything.
+    which = *(int *)p->arg;
+
     osp_PMenu_Close(ent);
-    ent->client->resp.osp_r238 = *(int *)p->arg;
+    ent->client->resp.osp_r238 = which;
     ent->client->resp.osp_r290 = -1;
     OSP_updateAdminSelectMenu(ent);
     osp_PMenu_Open(ent, AdminSelect_Menu, 6, 17);
@@ -443,7 +501,7 @@ void OSP_adminSelectMenu(edict_t *ent, osp_pmenu_t *p)
 // toggles) gets its own wider variant.
 void OSP_voteMenu(edict_t *ent, osp_pmenu_t *p)
 {
-    if (m_mode && active_clients - botglobals.numbots && !ent->osp_e39c &&
+    if (OSP_IsMatch() && active_clients - botglobals.numbots && !ent->osp_e39c &&
         ent->client->resp.osp_entered != ENTERED_ENTERED) {
         gi.cprintf(ent, PRINT_HIGH, "Observers cannot vote with active\n");
         gi.cprintf(ent, PRINT_HIGH, "players in the game.\n");
@@ -522,7 +580,7 @@ void OSP_botMenu(edict_t *ent, osp_pmenu_t *p)
 void OSP_helpMenu(edict_t *ent, osp_pmenu_t *p)
 {
     osp_PMenu_Close(ent);
-    if (m_mode < 2)
+    if (!OSP_IsTeams())
         Help_Menu[16].SelectFunc = OSP_returnMainDM_menu;
     else
         Help_Menu[16].SelectFunc = OSP_returnMainTeam_menu;
@@ -532,7 +590,7 @@ void OSP_helpMenu(edict_t *ent, osp_pmenu_t *p)
 void OSP_help2Menu(edict_t *ent, osp_pmenu_t *p)
 {
     osp_PMenu_Close(ent);
-    if (m_mode < 2)
+    if (!OSP_IsTeams())
         Help2_Menu[16].SelectFunc = OSP_returnMainDM_menu;
     else
         Help2_Menu[16].SelectFunc = OSP_returnMainTeam_menu;
@@ -542,7 +600,7 @@ void OSP_help2Menu(edict_t *ent, osp_pmenu_t *p)
 void OSP_help3Menu(edict_t *ent, osp_pmenu_t *p)
 {
     osp_PMenu_Close(ent);
-    if (m_mode < 2)
+    if (!OSP_IsTeams())
         Help3_Menu[16].SelectFunc = OSP_returnMainDM_menu;
     else
         Help3_Menu[16].SelectFunc = OSP_returnMainTeam_menu;
@@ -576,7 +634,7 @@ int OSP_updateTeamMenu(edict_t *ent)
     Q_snprintf(tm_count0, sizeof(tm_count0), "*(%d players)", OSP_teamCount(0));
     Q_snprintf(tm_count1, sizeof(tm_count1), "*(%d players)", OSP_teamCount(1));
 
-    if (m_mode == 2)
+    if (G_Ruleset() == RULESET_TDM)
         Q_snprintf(tm_title, sizeof(tm_title), "[ Teamplay Mode ]");
     else
         Q_snprintf(tm_title, sizeof(tm_title), "[ 1v1 Mode ]");
@@ -585,21 +643,21 @@ int OSP_updateTeamMenu(edict_t *ent)
         if (!OSP_teamCount(i))
             pick = i;
 
-        if (ent->osp_e3a0[0] && m_mode == 2 &&
+        if (ent->osp_e3a0[0] && G_Ruleset() == RULESET_TDM &&
             !Q_stricmp(osp_teams[i].netname, ent->osp_e3a0)) {
             pick = -1;
             break;
         }
-        if (m_mode == 3 &&
+        if (G_Ruleset() == RULESET_DUEL &&
             !Q_stricmp(osp_teams[i].netname, ent->client->pers.netname)) {
             pick = -1;
             break;
         }
     }
 
-    if (pick >= 0 && m_mode == 2 && ent->osp_e3a0[0])
+    if (pick >= 0 && G_Ruleset() == RULESET_TDM && ent->osp_e3a0[0])
         Q_snprintf(tm_join[pick], sizeof(tm_join[pick]), "*Join %s", ent->osp_e3a0);
-    else if (pick >= 0 && m_mode == 3)
+    else if (pick >= 0 && G_Ruleset() == RULESET_DUEL)
         Q_snprintf(tm_join[pick], sizeof(tm_join[pick]), "*Join %s", ent->client->pers.netname);
 
     Team_Menu[1].text = tm_title;
@@ -670,7 +728,7 @@ int OSP_updateTeamMenu(edict_t *ent)
 
     if (ent->client->resp.osp_entered == ENTERED_ENTERED ||
         (vote_inprogress && !ent->client->resp.osp_r2d8) ||
-        (m_mode == 3 && OSP_teamCount(0) && OSP_teamCount(1)))
+        (G_Ruleset() == RULESET_DUEL && OSP_teamCount(0) && OSP_teamCount(1)))
         return 8;
 
     if (pick >= 0)
@@ -694,12 +752,14 @@ void OSP_returnMainTeam_menu(edict_t *ent, osp_pmenu_t *p)
 void OSP_toggleID_menu(edict_t *ent, osp_pmenu_t *p)
 {
     OSP_id_cmd(ent);
-    if (m_mode > 1)
+    if (OSP_IsTeams()) {
         OSP_updateTeamMenu(ent);
-    else
+        osp_PMenu_Sync(ent, Team_Menu);
+    } else {
         OSP_updateDMMenu(ent);
+        osp_PMenu_Sync(ent, RegDM_Menu);
+    }
     osp_PMenu_Update(ent);
-    gi.unicast(ent, true);
 }
 
 void OSP_changeHUD(edict_t *ent, osp_pmenu_t *p)
@@ -767,7 +827,7 @@ void OSP_joinTeam_menu(edict_t *ent, osp_pmenu_t *p)
         return;
     }
 
-    if (m_mode == 3 && !OSP_1v1AllowJoin(ent)) {
+    if (G_Ruleset() == RULESET_DUEL && !OSP_1v1AllowJoin(ent)) {
         osp_PMenu_Close(ent);
         return;
     }
@@ -775,24 +835,24 @@ void OSP_joinTeam_menu(edict_t *ent, osp_pmenu_t *p)
     for (i = 1, pick = -2; i >= 0; i--) {
         if (!OSP_teamCount(i))
             pick = i;
-        if (ent->osp_e3a0[0] && m_mode == 2 &&
+        if (ent->osp_e3a0[0] && G_Ruleset() == RULESET_TDM &&
             !Q_stricmp(osp_teams[i].netname, ent->osp_e3a0)) {
             pick = -1;
             break;
         }
     }
 
-    if (!ent->client->resp.osp_r030 && m_mode == 2 &&
+    if (!ent->client->resp.osp_r030 && G_Ruleset() == RULESET_TDM &&
         (!osp_teams[tnum].osp_m0f4 || invited) && pick == tnum) {
         if (OSP_defaultTeam(ent))
             goto joined;
     }
 
-    if (m_mode == 3 && OSP_1v1Team(ent))
+    if (G_Ruleset() == RULESET_DUEL && OSP_1v1Team(ent))
         goto joined;
 
     if ((!(OSP_teamCount(tnum) >= (int)team_maxplayers->value && !invited)
-         || (m_mode == 2 && ((int)match_latejoin->value > 2
+         || (G_Ruleset() == RULESET_TDM && ((int)match_latejoin->value > 2
                              || (sync_stat > 2 && (int)match_latejoin->value == 2 &&
                                  OSP_teamCount(tnum) < (int)team_maxplayers->value))))
         && !(osp_teams[tnum].osp_m0f4 && !invited)) {
@@ -860,9 +920,23 @@ int OSP_updateDMMenu(edict_t *ent)
         Q_snprintf(dm_play_line, sizeof(dm_play_line), "*Enter the Game");
     RegDM_Menu[4].text = dm_play_line;
 
+    // THE `else` IS NOT COSMETIC.  These tables are file-scope globals and the
+    // builders restage them per client, so a branch that only ever CLEARS a
+    // SelectFunc is a one-way latch: the donor's version of this test has no
+    // else, and `RegDM_Menu[4]` -- "Enter the Game" -- is assigned nowhere
+    // else in the mod, so its only non-NULL value is the initialiser above.
+    // One referee opening the DM menu, or anyone opening it during a match
+    // with late joining locked, killed that row for EVERY client; and because
+    // the table has static storage duration and nothing re-initialises it, the
+    // row stayed dead across map changes for the life of the loaded library.
+    // Deep-copying the rows per client (R-MENU-3, p_menu.c departure 2) does
+    // not reach this: what is latched is the template every copy is taken
+    // from.
     if (ent->osp_e39c == 1 ||
         (sync_stat == 4 && (int)match_latejoin->value <= 1))
         RegDM_Menu[4].SelectFunc = NULL;
+    else
+        RegDM_Menu[4].SelectFunc = OSP_dmReturn_menu;
 
     if (ent->osp_e39c) {
         Q_snprintf(dm_admin_line, sizeof(dm_admin_line), "*Admin Menu");
@@ -1112,7 +1186,7 @@ void OSP_updateVoteMenu(edict_t *ent)
     Vote_Menu[10].text = vm_runes;
     Vote_Menu[11].text = vm_kick;
 
-    if (m_mode > 1)
+    if (OSP_IsTeams())
         Vote_Menu[14].SelectFunc = OSP_returnMainTeam_menu;
     else
         Vote_Menu[14].SelectFunc = OSP_returnMainDM_menu;
@@ -1169,11 +1243,18 @@ void OSP_updateVoteMenu2(edict_t *ent)
             Q_snprintf(v2_line6, sizeof(v2_line6), "Hurt Self: NO");
     }
 
-    if (m_mode > 1) {
+    // The second one-way latch, and the same reasoning as RegDM_Menu[4] in
+    // OSP_updateDMMenu: the donor blanks "Hurt Team" outside team play and
+    // never puts it back, so a DM map followed by a team map left the row
+    // drawn -- its text IS restaged below -- but dead, for the life of the
+    // loaded library.  The restore has to be explicit because the table is a
+    // global, not because of anything this client did.
+    if (OSP_IsTeams()) {
         if (ent->client->resp.osp_r2a4 & 0x80)
             Q_snprintf(v2_line7, sizeof(v2_line7), "Hurt Team: YES");
         else
             Q_snprintf(v2_line7, sizeof(v2_line7), "Hurt Team: NO");
+        Vote_Menu2[10].SelectFunc = OSP_changeItems_menu;
     } else {
         v2_line7[0] = 0;
         Vote_Menu2[10].SelectFunc = NULL;
@@ -1206,7 +1287,7 @@ void OSP_updateVoteMenu2(edict_t *ent)
     Vote_Menu2[9].text = v2_line6;
     Vote_Menu2[10].text = v2_line7;
 
-    if (m_mode > 1)
+    if (OSP_IsTeams())
         Vote_Menu2[13].SelectFunc = OSP_returnMainTeam_menu;
     else
         Vote_Menu2[13].SelectFunc = OSP_returnMainDM_menu;
@@ -1248,7 +1329,7 @@ void OSP_updateBotMenu(edict_t *ent)
     Bot_Menu[7].text = bot_rem_line;
     Bot_Menu[9].text = bot_total_line;
 
-    if (m_mode > 1)
+    if (OSP_IsTeams())
         Bot_Menu[13].SelectFunc = OSP_returnMainTeam_menu;
     else
         Bot_Menu[13].SelectFunc = OSP_returnMainDM_menu;
@@ -1372,7 +1453,7 @@ void OSP_updateProposalMenu(edict_t *ent)
     Proposal_Menu[7].text = pm_pct;
     Proposal_Menu[8].text = pm_needed;
 
-    if (m_mode > 1)
+    if (OSP_IsTeams())
         Proposal_Menu[12].SelectFunc = OSP_returnMainTeam_menu;
     else
         Proposal_Menu[12].SelectFunc = OSP_returnMainDM_menu;
@@ -1463,7 +1544,7 @@ void OSP_updateProposalMenu2(edict_t *ent)
     else
         Q_strlcat(pm2_line6, "Hurt Self: NO", sizeof(pm2_line6));
 
-    if (m_mode > 1) {
+    if (OSP_IsTeams()) {
         if ((Q_atoi(vote_value) & 0x80) == (item_settings & 0x80))
             Q_strlcpy(pm2_line7, "*", sizeof(pm2_line7));
         if (Q_atoi(vote_value) & 0x80)
@@ -1487,7 +1568,7 @@ void OSP_updateProposalMenu2(edict_t *ent)
     Proposal_Menu2[12].text = pm2_pct;
     Proposal_Menu2[13].text = pm2_needed;
 
-    if (m_mode > 1)
+    if (OSP_IsTeams())
         Proposal_Menu2[17].SelectFunc = OSP_returnMainTeam_menu;
     else
         Proposal_Menu2[17].SelectFunc = OSP_returnMainDM_menu;
@@ -1620,8 +1701,8 @@ void OSP_changeMap_menu(edict_t *ent, osp_pmenu_t *p)
     }
 
     OSP_updateVoteMenu(ent);
+    osp_PMenu_Sync(ent, Vote_Menu);
     osp_PMenu_Update(ent);
-    gi.unicast(ent, true);
 }
 
 void OSP_changeConfig_menu(edict_t *ent, osp_pmenu_t *p)
@@ -1649,8 +1730,8 @@ void OSP_changeConfig_menu(edict_t *ent, osp_pmenu_t *p)
     }
 
     OSP_updateVoteMenu(ent);
+    osp_PMenu_Sync(ent, Vote_Menu);
     osp_PMenu_Update(ent);
-    gi.unicast(ent, true);
 }
 
 void OSP_changeTime_menu(edict_t *ent, osp_pmenu_t *p)
@@ -1676,8 +1757,8 @@ void OSP_changeTime_menu(edict_t *ent, osp_pmenu_t *p)
         ent->client->resp.osp_r254 = 0;
 
     OSP_updateVoteMenu(ent);
+    osp_PMenu_Sync(ent, Vote_Menu);
     osp_PMenu_Update(ent);
-    gi.unicast(ent, true);
 }
 
 void OSP_changeFrag_menu(edict_t *ent, osp_pmenu_t *p)
@@ -1703,8 +1784,8 @@ void OSP_changeFrag_menu(edict_t *ent, osp_pmenu_t *p)
         ent->client->resp.osp_r254 = 0;
 
     OSP_updateVoteMenu(ent);
+    osp_PMenu_Sync(ent, Vote_Menu);
     osp_PMenu_Update(ent);
-    gi.unicast(ent, true);
 }
 
 void OSP_changeHook_menu(edict_t *ent, osp_pmenu_t *p)
@@ -1721,8 +1802,8 @@ void OSP_changeHook_menu(edict_t *ent, osp_pmenu_t *p)
         ent->client->resp.osp_r254 = 0;
 
     OSP_updateVoteMenu(ent);
+    osp_PMenu_Sync(ent, Vote_Menu);
     osp_PMenu_Update(ent);
-    gi.unicast(ent, true);
 }
 
 void OSP_changeRunes_menu(edict_t *ent, osp_pmenu_t *p)
@@ -1745,8 +1826,8 @@ void OSP_changeRunes_menu(edict_t *ent, osp_pmenu_t *p)
         ent->client->resp.osp_r254 = 0;
 
     OSP_updateVoteMenu(ent);
+    osp_PMenu_Sync(ent, Vote_Menu);
     osp_PMenu_Update(ent);
-    gi.unicast(ent, true);
 }
 
 // Step the kick target to the next/previous connected client. resp.osp_r268 is
@@ -1825,8 +1906,8 @@ void OSP_changeKick_menu(edict_t *ent, osp_pmenu_t *p)
         ent->client->resp.osp_r254 = 0;
 
     OSP_updateVoteMenu(ent);
+    osp_PMenu_Sync(ent, Vote_Menu);
     osp_PMenu_Update(ent);
-    gi.unicast(ent, true);
 }
 
 void OSP_changeItems_menu(edict_t *ent, osp_pmenu_t *p)
@@ -1846,8 +1927,8 @@ void OSP_changeItems_menu(edict_t *ent, osp_pmenu_t *p)
         ent->client->resp.osp_r254 = 0;
 
     OSP_updateVoteMenu2(ent);
+    osp_PMenu_Sync(ent, Vote_Menu2);
     osp_PMenu_Update(ent);
-    gi.unicast(ent, true);
 }
 
 // Cycle through the names in the bot config file. Selecting a name clears the
@@ -1890,8 +1971,8 @@ void OSP_addSpecificBot_menu(edict_t *ent, osp_pmenu_t *p)
     }
 
     OSP_updateBotMenu(ent);
+    osp_PMenu_Sync(ent, Bot_Menu);
     osp_PMenu_Update(ent);
-    gi.unicast(ent, true);
 }
 
 void OSP_addBots_menu(edict_t *ent, osp_pmenu_t *p)
@@ -1921,8 +2002,8 @@ void OSP_addBots_menu(edict_t *ent, osp_pmenu_t *p)
         ent->client->resp.osp_r254 = 0x80;
 
     OSP_updateBotMenu(ent);
+    osp_PMenu_Sync(ent, Bot_Menu);
     osp_PMenu_Update(ent);
-    gi.unicast(ent, true);
 }
 
 void OSP_removeBots_menu(edict_t *ent, osp_pmenu_t *p)
@@ -1948,8 +2029,8 @@ void OSP_removeBots_menu(edict_t *ent, osp_pmenu_t *p)
         ent->client->resp.osp_r254 = 0x100;
 
     OSP_updateBotMenu(ent);
+    osp_PMenu_Sync(ent, Bot_Menu);
     osp_PMenu_Update(ent);
-    gi.unicast(ent, true);
 }
 
 void OSP_acceptVote_menu(edict_t *ent, osp_pmenu_t *p)
@@ -2004,10 +2085,10 @@ void OSP_inviteClose_menu(edict_t *ent, osp_pmenu_t *p)
 
 int OSP_updateAdminMenu(edict_t *ent)
 {
-    if (m_mode > 0) {
+    if (OSP_IsMatch()) {
         Q_snprintf(admin_title, sizeof(admin_title), "*Match Control");
         AdminMain_Menu[9].SelectFunc = NULL;
-        if (m_mode > 1)
+        if (OSP_IsTeams())
             AdminMain_Menu[12].SelectFunc = OSP_returnMainTeam_menu;
         else
             AdminMain_Menu[12].SelectFunc = OSP_returnMainDM_menu;
@@ -2022,7 +2103,7 @@ int OSP_updateAdminMenu(edict_t *ent)
     AdminMain_Menu[5].arg = &admin_mode_ban;
     AdminMain_Menu[7].arg = &admin_mode_kick;
 
-    if (m_mode > 0)
+    if (OSP_IsMatch())
         return 9;
     return 4;
 }
@@ -2114,13 +2195,16 @@ int OSP_updateAdminSelectMenu(edict_t *ent)
     AdminSelect_Menu[7].text = as_addr;
     AdminSelect_Menu[11].text = as_action;
 
-    if (m_mode > 0)
+    if (OSP_IsMatch())
         return 9;
     return 4;
 }
 
 void OSP_mapAdminSelect_menu(edict_t *ent, osp_pmenu_t *p)
 {
+    if (!OSP_refereeOnly(ent))
+        return;
+
     if (ent->client->resp.osp_r264)
         ent->client->resp.osp_r290--;
     else
@@ -2134,8 +2218,8 @@ void OSP_mapAdminSelect_menu(edict_t *ent, osp_pmenu_t *p)
     }
 
     OSP_updateAdminSelectMenu(ent);
+    osp_PMenu_Sync(ent, AdminSelect_Menu);
     osp_PMenu_Update(ent);
-    gi.unicast(ent, true);
 }
 
 // Step to the next/previous connected client. resp.osp_r290 holds a client
@@ -2146,6 +2230,9 @@ void OSP_playerAdminSelect_menu(edict_t *ent, osp_pmenu_t *p)
     edict_t     *other;
     int         i;
     int         found;
+
+    if (!OSP_refereeOnly(ent))
+        return;
 
     found = -1;
     if (ent->client->resp.osp_r264) {
@@ -2168,8 +2255,8 @@ void OSP_playerAdminSelect_menu(edict_t *ent, osp_pmenu_t *p)
 
     ent->client->resp.osp_r290 = found;
     OSP_updateAdminSelectMenu(ent);
+    osp_PMenu_Sync(ent, AdminSelect_Menu);
     osp_PMenu_Update(ent);
-    gi.unicast(ent, true);
 }
 
 // A referee picking a map out of the admin menu ends the level immediately --
@@ -2178,6 +2265,10 @@ void OSP_playerAdminSelect_menu(edict_t *ent, osp_pmenu_t *p)
 void OSP_mapAdminChoose(edict_t *ent, osp_pmenu_t *p)
 {
     int         sel;
+
+    // The acting leaf: this one ends the level.
+    if (!OSP_refereeOnly(ent))
+        return;
 
     sel = ent->client->resp.osp_r290;
     osp_PMenu_Close(ent);
@@ -2201,6 +2292,11 @@ void OSP_mapAdminChoose(edict_t *ent, osp_pmenu_t *p)
 void OSP_playerAdminChoose(edict_t *ent, osp_pmenu_t *p)
 {
     edict_t     *target = g_edicts + ent->client->resp.osp_r290 + 1;
+
+    // The acting leaf: this one kicks or bans, and OSP_rban_cmd has no check
+    // of its own because the dispatcher is what gates `r_ban`.
+    if (!OSP_refereeOnly(ent))
+        return;
 
     if (ent->client->resp.osp_r290 > -1 && target->client) {
         if (ent->client->resp.osp_r238 == 2)

@@ -930,6 +930,15 @@ void SpawnEntities(const char *mapname, const char *entities, const char *spawnp
     for (int i = 0; i < game.maxclients; i++) {
         game.clients[i].menu_owner = MENU_NONE;
         game.clients[i].ctf_menu = NULL;
+        // MENU_TOURNEY's handle, which this loop has cleared for CTF since 1.12
+        // and never for OSP.  Clearing the owner is not enough on its own for
+        // either of them: osp_menus.c calls osp_PMenu_Close(ent) UNCONDITIONALLY
+        // in a dozen leaves -- OSP_voteMenu and OSP_helpMenu among them -- and
+        // that close tests the handle, not the owner.  It was already a free of
+        // a freed pointer; since 1.31 the handle owns an entries array and a
+        // string per row, so the same path would also read `num` and the row
+        // pointers back out of released memory and hand those to gi.TagFree.
+        game.clients[i].osp_menu = NULL;
         // The Gladiator tree itself is TAG_GAME and survives; the client's
         // cursor into it does not have to, and a stale `mainmenu` here would be
         // the one pointer in menustate_t that outlives its owner.
@@ -953,6 +962,38 @@ void SpawnEntities(const char *mapname, const char *entities, const char *spawnp
             game.clients[i].menuqueue.prev = NULL;
             game.clients[i].curmenulink = NULL;
             game.clients[i].selected = NULL;
+            // R-KEY-5, and the fifth thing this loop clears is the one that
+            // was a SIGSEGV rather than a leak.  `teams` is TAG_LEVEL and the
+            // free above has just invalidated the ARRAY -- arena_init()
+            // reallocates it empty a few hundred lines later, inside this same
+            // SpawnEntities -- while `resp.teamnum`, which indexes it, is in
+            // client_respawn_t and survives the level change because g_save.c
+            // carries it.  So between the free and each client's ClientBegin,
+            // where InitClientResp resets the field, a non-negative teamnum
+            // names first a dangling array and then an empty slot.
+            //
+            // For a human that window is however long they take to load the
+            // map.  For a BOT it is the whole reachability build, because
+            // BotStarted() holds a bot's ClientBegin back until the brain
+            // reports initialised -- twenty seconds of frames on the first
+            // visit to a map whose .aas came out of bspc with an empty
+            // REACHABILITY lump.  Anything walking the client list in between
+            // meets those clients, and the scoreboard walks the client list:
+            // Serverwide_ScoreboardMessage died on `teams[teamnum].it->name`
+            // with `.it` NULL (doc/reconciliation.md R-186).
+            //
+            // Here rather than at arena_init()'s TagMalloc, which is where the
+            // first fix put it: R-KEY-5 says the clear belongs where the array
+            // is DROPPED, and this is that place -- the same reason the four
+            // menu handles above are cleared here and not at each engine's
+            // next open.  Nothing reads a carried teamnum, so this costs
+            // nothing: RA_BotJoinArena's "already on a team: a level change"
+            // early-out is unreachable from both of its call sites, one
+            // because ClientBeginDeathmatch runs InitClientResp first and the
+            // other because RA_BotFollowPeople calls remove_from_team first.
+            game.clients[i].resp.teamnum = -1;
+            game.clients[i].resp.teammember.next = NULL;
+            game.clients[i].resp.teammember.prev = NULL;
         }
     }
 
@@ -965,7 +1006,46 @@ void SpawnEntities(const char *mapname, const char *entities, const char *spawnp
     ClearIndexes();
 
     memset(&level, 0, sizeof(level));
-    memset(g_edicts, 0, game.maxentities * sizeof(g_edicts[0]));
+
+    // R-OSP-1: FOUR PER-CLIENT EDICT FIELDS OUTLIVE A LEVEL.  They are not
+    // per-life state, they are facts about the connection, and the donor
+    // memsets the client edicts one at a time so it can put them back:
+    //
+    //   osp_e39c  referee status -- lost here, an admin had to re-`referee`
+    //             with the password on every single map change
+    //   osp_e37c  the address with the port stripped, which every ban check,
+    //             every admin-log line and the stats log's "addr" field read
+    //   osp_e3a0  the client's remembered default team name, and
+    //   osp_e3b0  its skin, which is how OSP_defaultTeam puts a returning
+    //             player back on the side they always play for
+    //
+    // The world's edicts have no such state, so they take the wholesale memset
+    // they had before.
+    if (G_IsOspRuleset()) {
+        for (int i = 1; i <= game.maxclients; i++) {
+            edict_t *e = g_edicts + i;
+            int      referee = e->osp_e39c;
+            char     address[sizeof(e->osp_e37c)];
+            char     teamname[sizeof(e->osp_e3a0)];
+            char     teamskin[sizeof(e->osp_e3b0)];
+
+            Q_strlcpy(address, e->osp_e37c, sizeof(address));
+            Q_strlcpy(teamname, e->osp_e3a0, sizeof(teamname));
+            Q_strlcpy(teamskin, e->osp_e3b0, sizeof(teamskin));
+
+            memset(e, 0, sizeof(*e));
+
+            e->osp_e39c = referee;
+            Q_strlcpy(e->osp_e37c, address, sizeof(e->osp_e37c));
+            Q_strlcpy(e->osp_e3a0, teamname, sizeof(e->osp_e3a0));
+            Q_strlcpy(e->osp_e3b0, teamskin, sizeof(e->osp_e3b0));
+        }
+        memset(g_edicts, 0, sizeof(g_edicts[0]));
+        memset(g_edicts + game.maxclients + 1, 0,
+               (game.maxentities - game.maxclients - 1) * sizeof(g_edicts[0]));
+    } else {
+        memset(g_edicts, 0, game.maxentities * sizeof(g_edicts[0]));
+    }
 
     Q_strlcpy(level.mapname, mapname, sizeof(level.mapname));
     Q_strlcpy(game.spawnpoint, spawnpoint, sizeof(game.spawnpoint));
@@ -1078,7 +1158,7 @@ void SpawnEntities(const char *mapname, const char *entities, const char *spawnp
     if (G_Ruleset() == RULESET_ARENA)
         arena_init(g_edicts);
 
-    if (G_Ruleset() == RULESET_TOURNEY) {
+    if (G_IsOspRuleset()) {
         // The rune spawners and the round's stats file (R-OSP-1, R-OSP-3).
         if (runes_enable && runes_enable->value)
             OSP_setupRuneSpawn(0);
@@ -1260,10 +1340,9 @@ void SP_worldspawn(edict_t *ent)
 
     // R-OSP-1: tourney's own level state -- the hi-score table, the MOTD, the
     // team name and banner configstrings, the overtime counters.  Before
-    // G_SetStatusbar() rather than after, because the bar it composes reads
-    // `m_mode`, which this re-reads from `match_mode` so that a referee's
-    // change takes effect on the map that follows it.
-    if (G_Ruleset() == RULESET_TOURNEY)
+    // G_SetStatusbar() rather than after, because the bar it composes reads the
+    // ruleset and this is what sets the state that bar describes.
+    if (G_IsOspRuleset())
         OSP_worldspawn();
 
     // status bar program -- composed, not stored (R-OSP-7a)
@@ -1272,6 +1351,12 @@ void SP_worldspawn(edict_t *ent)
     // CTF's own precache set: the flag models and icons, the tech models, the
     // team pics the statusbar draws.  A no-op in every other ruleset.
     CTFPrecache();
+
+    // R-161: RA2's, and it is the table RA_SkinIcon() matches against as much
+    // as it is a precache.  After G_SetStatusbar() for the same reason CTF's
+    // is: the bar decides which of these slots is drawn at all.
+    if (G_Ruleset() == RULESET_ARENA)
+        RA_Precache();
 
     //---------------
 
@@ -1341,7 +1426,7 @@ void SP_worldspawn(edict_t *ent)
         gi.modelindex("#w_hyperblaster.md2");
         gi.modelindex("#w_railgun.md2");
         gi.modelindex("#w_bfg.md2");
-    gi.modelindex("#w_grapple.md2");    // CTF
+        gi.modelindex("#w_grapple.md2");        // CTF
 
         gi.modelindex("#w_phalanx.md2");
         gi.modelindex("#w_ripper.md2");

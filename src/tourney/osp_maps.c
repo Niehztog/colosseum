@@ -236,9 +236,9 @@ void OSP_loadMaps(void)
                     // Not "ERROR": a server with no maps list is a normal configuration,
                     // not a fault -- OSP_EndLevel falls back to baseq2's rotation
                     // (R-OSP-9).  It printed ERROR, which made R-VER-2's boot
-                    // matrix count a warning on every tourney row for a missing
+                    // matrix count a warning on every OSP row for a missing
                     // optional file.
-                    gi.dprintf("Colosseum: no map list at [%s]; the tourney "
+                    gi.dprintf("Colosseum: no map list at [%s]; the OSP "
                                "rotation falls back to sv_maplist\n", pathptr);
             }
         }

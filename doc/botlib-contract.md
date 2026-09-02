@@ -21,8 +21,8 @@ now that both sides compile from source.
 | version | change | landed |
 |---|---|---|
 | 1 | initial contract, taken from `osp-tourney`'s already-ported `botlib.h` including its `const`-ification of the `PointContents` slot | Phase 6 |
-| **3** | **the `Trace` slot's 64-bit spelling is WITHDRAWN — by value on every target, which is what the published contract always said.** Upstream removed all three branches (`gladiator-bot-restored 57ce85a3`) and the reason is better than version 2's match: the branch was only sound while both sides were the same project's, because `game/botlib.h` — the header a foreign engine builds against — was never branched. By value is also the faithful 1999 spelling and the only form that reproduces `gladi386.so`'s trace thunk. `tools/botabi.py` reported the divergence on the first run after the update, which is what R-VER-28 exists for | Phase 6, spec 1.22 |
 | **2** | *superseded by 3 after eleven hours.* **the `Trace` slot gains its 64-bit spelling.** `bsp_trace_t` is 88 bytes, so the caller always passes a hidden return buffer; on 32-bit that buffer IS the first visible argument and the two spellings are the same ABI, and on x86-64 and aarch64 it is a hidden register (`rax` / `x8`) and they are **different** ABIs. Version 1 carried only the 32-bit form, because `osp-tourney` — the port R-BOT-1 says to take it from — is a 32-bit port. Both sides now select with `#if defined(__x86_64__) \|\| defined(__aarch64__)`, and the condition is identical on both sides *by check*, not by intent | Phase 6, spec 1.22 |
+| **3** | **the `Trace` slot's 64-bit spelling is WITHDRAWN — by value on every target, which is what the published contract always said.** Upstream removed all three branches (`gladiator-bot-restored 57ce85a3`) and the reason is better than version 2's match: the branch was only sound while both sides were the same project's, because `game/botlib.h` — the header a foreign engine builds against — was never branched. By value is also the faithful 1999 spelling and the only form that reproduces `gladi386.so`'s trace thunk. `tools/botabi.py` reported the divergence on the first run after the update, which is what R-VER-28 exists for | Phase 6, spec 1.22 |
 
 ## Entry point
 
@@ -209,38 +209,81 @@ brain reads the libvar and sending zero costs nothing.
 ### Ruleset → libvar mapping
 
 This table is the single authority for it (R-BOT-7). *Filled in Phase 6, spec
-1.22.* Every one of the 32 names is pushed on **every**
-ruleset, so the brain always sees the same set and only the values move — a
-libvar that is set on one ruleset and absent on another is a libvar whose
-default the brain would silently use, which is R-BOT-7's whole concern.
-`BotInitLibrary` in `src/bot/bl_main.c` is the single place this happens.
+1.22; re-derived from the code in the 1.41 sweep, which found four of its five
+rows describing behaviour two amendments old.* Every one of the 32 names is
+pushed on **every** ruleset, so the brain always sees the same set and only the
+values move — a libvar that is set on one ruleset and absent on another is a
+libvar whose default the brain would silently use, which is R-BOT-7's whole
+concern.
 
-| ruleset | libvars that differ from the baseline |
+**Two places, and the split is R-144.** `BotInitLibrary` pushes the names that
+cannot move once the map is running — the resolved ruleset, the content layers,
+the engine limits, the chat and log switches. `BotRulesetLibVars` pushes the five
+that a person can change *while* the map is running, and it runs **every frame**
+beside the `dmflags` push that is its precedent. Both are in `src/bot/bl_main.c`.
+
+Latched, in `BotInitLibrary`:
+
+| libvar | value |
 |---|---|
-| `dm` | `usehook` from the `hook` modifier; everything else 0 |
-| `ctf` | `ctf 1`, `teamplay 1`, `usehook` from `ctf_hook`, `laserhook` from `laserhook`, `techs` from `!(dmflags & DF_CTF_NO_TECH)` |
-| `arena` | `ra 1`; `usehook` from the `hook` modifier |
-| `tourney` | `usehook`/`laserhook` both from `hook_enable`; `teamplay` from `m_mode == MODE_TEAM` **only** — see below; `runes` from `rune_stat` |
-| `sp` | unreachable: `G_BotsAllowed()` is false, so no library is ever loaded (N6) |
+| `ctf` | 1 under `ctf`, else 0 |
+| `ra` | 1 under `arena`, else 0 |
+| `xatrix`, `rogue` | the content layers, which are orthogonal to the ruleset |
+| `ch` | constant `"0"` (N7) |
+| `assimilation`, `teamplay_shell` | constant `"0"` — in R-BOT-6's fixed set, set by no ruleset here, and omitting them would leave the brain on its own defaults for two names the set names |
 
-`ch` is a constant `"0"` (N7). `xatrix` and `rogue` follow the content layers,
-not the ruleset. `assimilation` and `teamplay_shell` are pushed as `"0"`: they
-are in R-BOT-6's fixed set, no ruleset here sets them, and omitting them would
-leave the brain on its own defaults for two names the set names.
+Per frame, in `BotRulesetLibVars`. Every cell is the value the code computes;
+where it is a constant, the constant is the finding that put it there:
 
-`techs` is the interesting row. The brain reads it as `LibVar("runes", "0")` —
-one libvar under two names — and CTF's techs are gated by `DF_CTF_NO_TECH`
-alone, never by the `runes` modifier, so the dmflag is what the brain has to be
-told about. That is the same fact R-88 recorded as a finding and R-96 turned
+| ruleset | `usehook` | `laserhook` | `teamplay` | `runes` | `techs` |
+|---|---|---|---|---|---|
+| `dm`, `dmpro`, `tdm`, `duel` | `BotTourneyHook()` | same as `usehook` | **`tdm` alone** — see below | `BotTourneyRunes()` | 0 |
+| `ctf` | `ctf_hook` | **0** (R-179) | **0** — see below | 0 | `!(dmflags & DF_CTF_NO_TECH)` |
+| `arena` | `allow_grapple`, i.e. `arena.cfg`'s `grapple:` key (R-164) | 0 | **1** (R-ARENA-2) | 0 | 0 |
+| `sp` | unreachable: `G_BotsAllowed()` is false, so no library is ever loaded (N6). The `default:` arm is kept as the safe answer for a ruleset added later, because an unset libvar is whatever the previous map left in the brain | | | | |
+
+**`teamplay` is the row worth reading, because it is 1 under `arena`, 0 under
+`ctf`, and neither is arithmetic on "is this a team game".** The libvar decides
+whether `BotSameTeam()` consults the SKIN, and what the skin means differs:
+
+* Under `arena` the skin is a synthetic team id that
+  `BotLib_BotClientSettings` pushes, so a whole-string compare is exactly right
+  and a lone player's team has one member.
+* Under `ctf` the skin's own second half already *is* the team — `ctf_r` against
+  `ctf_b` — and the `ctf` branch beneath `teamplay` compares that half. Setting
+  `teamplay 1` made the whole string the comparison instead, so a red in
+  `male/ctf_r` and a red in `female/ctf_r` were enemies and two players sharing a
+  model were allies: **the brain had no CTF teams at all.** Threewave's own donor
+  sets no `teamplay` under ctf either, and the omission is load-bearing.
+* Under the OSP four it is `RULESET_TDM` **alone**, and not any of the three
+  predicates that look like it. `G_IsOspRuleset()` is true under `duel`; so is
+  `OSP_IsTeams()`; so is `G_TeamplayEnabled()`, which R-MODE-7 makes
+  ruleset-derived precisely because `duel` *is* team play — to the game. Not to
+  the brain: a duel is two teams of one, there is no ally, and on real skins
+  `teamplay 1` makes team-mates of two duellists who picked the same model.
+
+  This is R-BOT-29's rule surviving its own cvar. It used to read
+  `m_mode == MODE_TEAM`, and this file used to say that comparison was preserved
+  exactly as written. `m_mode` is gone (R-OSP-12) and the set of one mode it
+  selected is the set of one ruleset selected now — the comparison is preserved,
+  the thing compared is not. **Abstract where the value comes from, never the
+  comparison.**
+
+`laserhook` is 0 under `ctf` for a reason the name hides. To the brain it is a
+*movement model* — `be_ai_move.c`'s "0 = CTF hook, 1 = laser hook", meaning does
+the hook grab instantly or fly there. Threewave's hook is a projectile in both of
+its renderings, and this tree's `laserhook` cvar only chooses between
+`TE_GRAPPLE_CABLE` and `TE_MEDIC_CABLE_ATTACK`; pushing the cvar through told the
+brain the hook was instantaneous whenever an operator preferred the beam.
+uGladQ2 agrees by omission — its `#ifdef ZOID` block sets `usehook` and `runes`
+and never `laserhook`, which it sets only under TOURNEY, where the hook really is
+a laser. `doc/reconciliation.md` R-179.
+
+`techs` is the other one that is not what it looks like. The brain reads it as
+`LibVar("runes", "0")` — one libvar under two names — and CTF's techs are gated
+by `DF_CTF_NO_TECH` alone, never by the `runes` modifier, so the dmflag is what
+the brain has to be told about. R-88 recorded it as a finding and R-96 turned it
 into the modifier's definition.
-
-**The `m_mode` comparison is preserved exactly as written** (R-BOT-29).
-`bl_main.c:1035` tests `m_mode == MODE_TEAM` (`0x02`) to drive `teamplay`, and
-that is correct for all four modes: 1v1 (`m_mode 3`) is two teams of one, the
-brain has no ally, and `teamplay 0` is the right answer. An accessor that
-generalised the test to "is this a team mode" would set `teamplay 1` in 1v1 and
-give every duel bot an imaginary teammate. Abstract only where the value comes
-from, never the comparison.
 
 ## Physics libvars the brain expects
 

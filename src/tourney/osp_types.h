@@ -52,15 +52,63 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 // The donor defines this below hs_player_t, which uses it; here the struct and
 // the macro are in one file, so the macro has to come first.
 
+// The per-player accuracy/damage table behind the accuracy report,
+// indexed by client->resp.clientid.  Member names <invented>.  Every update
+// site is gated by `sync_stat > 2`.
+#define ACC_BLASTER         0
+#define ACC_SHOTGUN         1
+#define ACC_SSHOTGUN        2
+#define ACC_MACHINEGUN      3
+#define ACC_CHAINGUN        4
+#define ACC_GRENADELAUNCHER 5
+#define ACC_ROCKET          6
+#define ACC_HYPERBLASTER    7
+#define ACC_RAILGUN         8
+#define ACC_BFG             9
+#define ACC_GRENADE         10
+
+// *** THE CONTENT LAYERS' NINE, APPENDED -- R-MODE-3, R-181. ***
+//
+// The donor's report has eleven columns because osp-tourney's itemlist has
+// eleven weapons.  This tree's has Xatrix's and Ground Zero's too, and
+// R-MODE-3 makes both layers valid with every ruleset -- so a `tdm` match on a
+// Reckoning or Ground Zero map is fought with weapons the report could not see:
+// `acc_column()` returned -1 for every one of their MODs and the layer fire
+// functions called `OSP_accShot` from nowhere at all.  What a player got was
+// total damage given and taken (those are credited before the column lookup)
+// and accuracy for nothing.
+//
+// APPENDED, never interleaved: 0..10 keep the numbers, the names and the order
+// the donor gave them, so an ngLog parser pointed at the stats file reads the
+// same eleven keys and simply gains new ones when a layer weapon is used.
+//
+// The Disruptor gets a column even though `weapon_disintegrator` is
+// IT_NOT_GIVEABLE (R-16, Ground Zero's own KILL_DISRUPTOR): a map may still
+// place one, the report only prints a row that has shots in it, and a column
+// that stays empty costs four ints.  The A-M Bomb does NOT: `ammo_nuke` is
+// IT_POWERUP, and a powerup that happens to do damage is not a weapon -- which
+// is what -1 goes on meaning.
+#define ACC_RIPPER          11      // Ionripper       -- Xatrix
+#define ACC_PHALANX         12      // Phalanx         -- Xatrix
+#define ACC_TRAP            13      // Trap            -- Xatrix
+#define ACC_ETF_RIFLE       14      // ETF Rifle       -- Ground Zero
+#define ACC_PROX            15      // Prox Launcher   -- Ground Zero
+#define ACC_HEATBEAM        16      // Plasma Beam     -- Ground Zero
+#define ACC_CHAINFIST       17      // Chainfist       -- Ground Zero
+#define ACC_TESLA           18      // Tesla           -- Ground Zero
+#define ACC_DISRUPTOR       19      // Disruptor       -- Ground Zero
+
+#define ACC_COUNT           20
+
 typedef struct {
     char    netname[16];        // ClientUserinfoChanged writes[15] = 0
     char    osp_a010[32];       // invented name; copied from ent->osp_e37c
     int     dgiven;
     int     dtaken;
-    int     shots[11];
-    int     hits[11];
-    int     given[11];
-    int     taken[11];
+    int     shots[ACC_COUNT];
+    int     hits[ACC_COUNT];
+    int     given[ACC_COUNT];
+    int     taken[ACC_COUNT];
 } p_acc_t;
 
 // The two teams.  Each carries its name twice: plain, and with 0x80 added to
@@ -124,7 +172,10 @@ typedef struct {
 // They belong on this side of the seam for the same reason the types above do.
 //
 // `osp_teams` keeps the donor prefix of sec 7 rule 4: Rocket Arena already has
-// a `teams`, in src/arena/arena.c, and they are two mods' team tables.
+// a `teams`, in src/arena/arena.c, and they are two mods' team tables.  The
+// PREFIX is on the identifier only -- the rename that introduced it also ran
+// over comments and string literals, and thirteen player-facing messages, a
+// menu row and one stats-log JSON key said `osp_teams` to the player until 1.37.
 //-------------------------------------------------------------
 // Gladiator Bot SDK feature switches.
 //#define BOT_DEBUG                 // debug lines / bounding boxes
@@ -194,20 +245,6 @@ extern  cvar_t  *runes_vampire_max;
 // The cached `runes_enable` bitmask; see the RUNE_* bits above.
 extern  int     rune_stat;
 
-// The per-player accuracy/damage table behind the accuracy report,
-// indexed by client->resp.clientid.  Member names <invented>.  Every update
-// site is gated by `sync_stat > 2`.
-#define ACC_BLASTER         0
-#define ACC_SHOTGUN         1
-#define ACC_SSHOTGUN        2
-#define ACC_MACHINEGUN      3
-#define ACC_CHAINGUN        4
-#define ACC_GRENADELAUNCHER 5
-#define ACC_ROCKET          6
-#define ACC_HYPERBLASTER    7
-#define ACC_RAILGUN         8
-#define ACC_BFG             9
-#define ACC_GRENADE         10
 
 // ---------------------------------------------------------------------------
 // The mod's logging. Two independent local logs, each its own TU:
@@ -224,14 +261,13 @@ extern  cvar_t  *sl_filename;
 extern  cvar_t  *sl_log_flush;
 extern  cvar_t  *sl_log_method;
 
-// The two osp_teams.  Each carries its name twice: plain, and with 0x80 added to
+// The two teams.  Each carries its name twice: plain, and with 0x80 added to
 // every byte, which is how Quake II's charset renders it green.
 
 extern  osp_team_t  osp_teams[2];
 
 extern  int     sync_stat;
 extern  int     active_clients;
-extern  int     start_count;
 extern  p_acc_t p_acc[256];
 
 // osp_acc.c -- the two entry points the spine calls instead of writing p_acc
@@ -248,7 +284,6 @@ void     OSP_accDamage(edict_t *targ, edict_t *attacker, int mod, int take);
 
 // The mod's own cvars, declared as the vanilla-derived files come to need them.
 extern  cvar_t  *camera_depth;
-extern  cvar_t  *client_hud;
 extern  cvar_t  *damage_railgun;
 extern  cvar_t  *match_type;
 extern  cvar_t  *client_protect;
@@ -296,7 +331,6 @@ extern  osp_pmenu_t Help2_Menu[18];
 extern  osp_pmenu_t Help3_Menu[18];
 extern  osp_pmenu_t Invite_Menu[18];
 
-extern  int     m_mode;
 extern  int     vote_inprogress;
 extern  int     match_paused;
 extern  int     who_paused;
@@ -333,7 +367,6 @@ extern  int     client_maxframes;
 extern  int     console_stampcount;
 extern  int     maxconn_clients;
 extern  int     reconn_index;
-extern  int     connected_clients;
 extern  int     bot_watch;
 extern  int     game_init;
 extern  int     sync_startframe;
@@ -349,7 +382,11 @@ extern  char    wav_file[125];
 // The accuracy report's row table: which p_acc_t.shots/hits column each
 // printed row names.  Type and member names <INVENTED>.
 
-extern  a_info_t a_info[10];
+// Unsized on purpose: the table is NULL-terminated and every reader walks it
+// to the sentinel, so a row can be added in one place (R-181).  `a_info[10]`
+// here meant three loops carried their own copy of the count and the BFG row
+// the donor never added would have needed all four edited.
+extern  a_info_t a_info[];
 extern  int     motd_read;
 extern  loc_t   loc_names[23];
 extern  int     num_names;
@@ -412,7 +449,6 @@ extern  cvar_t  *team_b_score;
 extern  cvar_t  *team_a_skin;
 extern  cvar_t  *hook_pullspeed;
 extern  cvar_t  *resp_delay;
-extern  cvar_t  *match_mode;
 extern  char    conf_file[2048];
 extern  int     p_order[28];
 extern  cvar_t  *team_idteam;
@@ -426,7 +462,6 @@ extern  cvar_t  *bots_botfile;
 extern  cvar_t  *bots_minplayers;
 extern  cvar_t  *bots_noclients;
 extern  cvar_t  *client_recover;
-extern  cvar_t  *client_fastweap;
 extern  cvar_t  *client_maxping;
 extern  cvar_t  *vote_enable_bots;
 extern  cvar_t  *vote_enable_toggles;
@@ -435,7 +470,34 @@ extern  cvar_t  *weapon_have;
 extern  cvar_t  *armor_shard;
 extern  cvar_t  *match_endinfo;
 extern  int     level_start;
-extern  int     start_weap[11];
+// ---- the loadout tables' shapes (R-180, R-181) ----
+//
+// OSP_NUM_WEAPS is the length of the `weapon_initial` / `weapon_have` /
+// `start_weap` family: the donor's ELEVEN baseq2 weapons and then the content
+// layers' EIGHT, which R-181 appended because R-MODE-3 makes both layers valid
+// with every ruleset and the donor's bitmask had no bit for any of them.  The
+// order is a CVAR CONTRACT -- bit k-1 of `weapon_have` is rank k -- so
+// osp_main.c's `osp_weapnames[]` may be appended to and must never be reordered.
+//
+// The Disruptor is deliberately absent: `weapon_disintegrator` carries
+// IT_NOT_GIVEABLE and no IT_WEAPON bit (R-16, Ground Zero's own KILL_DISRUPTOR),
+// so a loadout cannot hand it out and a bit for it would be a bit that lies.
+#define OSP_NUM_WEAPS       19
+#define OSP_NUM_AMMO        6       // start_items[0..5], the donor's
+#define OSP_NUM_ARMOR       3       // start_items[8..10], the donor's
+
+// The layers' five ammo types.  They get their OWN three arrays rather than
+// slots appended to `start_items` / `max_items` / `pack_items`, because those
+// three carry the donor's layout -- ammo at 0..5, health at 7, armour at 8..10,
+// 6 dead -- and bolting a second meaning onto the gaps is how R-180 happened.
+#define OSP_LAYER_MAGSLUG       0
+#define OSP_LAYER_FLECHETTES    1
+#define OSP_LAYER_PROX          2
+#define OSP_LAYER_TESLA         3
+#define OSP_LAYER_TRAP          4
+#define OSP_NUM_LAYER_AMMO      5
+
+extern  int     start_weap[OSP_NUM_WEAPS];
 extern  cvar_t  *team_nextuptime;
 extern  cvar_t  *referee_enable;
 extern  char    default_hook[8];
@@ -507,7 +569,6 @@ extern  char    match_motd[1024];
 extern  char    match_info[1024];
 extern  char    voted_botname[32];
 extern  int     overtime_timer;
-extern  int     frag_offset;
 extern  char    pl_bname[200][16];
 extern  char    pl_names[200][16];
 extern  char    pl_pass[200][32];
@@ -566,7 +627,8 @@ extern  gclient_t   saved_clients[128];
 
     // ClientUserinfoChanged's client_infochange lockout.  v2.75 kept it in
     // the Gladiator SDK's `char *charname` and cast the frame number to and
-    // from a pointer, which does not round-trip on a 64-bit build.
+    // from a pointer; this int is what carries it here, and the cast is gone
+    // (the field was added for that and left unwired until then).
 
 // ---------------------------------------------------------------- prototypes
 //
@@ -647,7 +709,6 @@ void PMenu_Select(edict_t *ent);
 bool OSP_botDetect(edict_t *ent, usercmd_t *ucmd);
 void     OnBotDetection(edict_t *ent, char *why);
 void     OSP_speedCheat_cmd(edict_t *ent);
-void     OSP_getPlayerAddr(edict_t *ent);
 void     OSP_logAdminLog(char *fmt, ...);
 void     OSP_speedDetect(edict_t *ent);
 void    OSP_teamMenu(edict_t *ent);
@@ -791,6 +852,19 @@ bool OSP_configFileExists(char *name);
 void     OSP_gameInit(void);
 void     OSP_endClean(void);
 void     OSP_initWeapItem(void);
+// R-183's one table for the allow_* family: the cvar an operator sets, the
+// entity it inhibits, the short tag the scoreboard banner prints and the name
+// the stats log records.  A NULL tag or log name means "inhibited but not
+// named", which two of the donor's own rows are.  NULL-terminated.
+typedef struct {
+    const char  *cvar;
+    const char  *classname;
+    const char  *tag;
+    const char  *logname;
+} osp_allow_t;
+
+extern const osp_allow_t osp_allow_items[];
+
 void     OSP_listDisabledItems(char *buf);
 void     OSP_clientConfigString(edict_t *ent, short index, const char *string);
 void     OSP_clearStats(edict_t *ent);

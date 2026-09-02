@@ -164,7 +164,7 @@ void Tag_Respawn(edict_t *ent)
 {
     edict_t *spot;
 
-    spot = SelectFarthestDeathmatchSpawnPoint();
+    spot = SelectFarthestDeathmatchSpawnPoint(ent);
     if (spot == NULL) {
 //      gi.dprintf("No open spawn point, waiting...\n");
         ent->nextthink = level.framenum + 1 * BASE_FRAMERATE;

@@ -18,9 +18,17 @@ before that number goes up.
 These are checks, not intentions, and every one of them runs on demand today:
 
 * ten build configurations under `-Werror` on gcc and clang, from `make clean`
-* `make check` — 23 audits, every one with controls that make it fail
-* `tools/bootmatrix.sh` 20 rows, `tools/smoke.sh`, `tools/playtest.sh` 187
-  client-side checks, `tools/botmatrix.sh` 14 rows, `tools/extras.sh` 39
+* `make check` — 19 audits, 33 runs, 14 of them carrying a control that makes
+  the check fail. `audit.py` prints the figure; five of the nineteen
+  (`keycontract`, `gates`, `encoding`, `dsweep`, `auditems`) have no control of
+  their own and R-VER-9 has that half still open
+* the six server-driven scripts, each of which prints its own total — measured
+  2026-09-01, and the figure to quote is the run's, not this line's:
+  `bootmatrix.sh` **28 rows**, `smoke.sh` **passed** with the cross-process
+  savegame round trip, `playtest.sh` **234 checks**, `extras.sh` **52**,
+  `osprunes.sh` **33**, `botmatrix.sh` (needs a brain and an `.aas` per map).
+  What was written here before was 20 / 187 / 39 / 33, and only the last of
+  those four was still true
 * R-SEC-1..9 discharged, with `bounded.py`, `noexec.py` and `externs.py`
   keeping three of them from coming back
 * both R-SEC-2 ledgers entered item by item in `doc/regression.md`
@@ -59,7 +67,7 @@ on the same process they are serving from.
 
 Ready to leave stage 0 when, on that server:
 
-- [ ] each of the five rulesets has been played to a natural end at least once
+- [ ] each of the seven rulesets has been played to a natural end at least once
 - [ ] `sv extras`, `sv ruleset`, `sv slots` and `sv botperf` have been read on a
       server that has been up for hours, not seconds
 - [ ] the log the operator actually wants (`g_gamelog`, or `logfile 2` under

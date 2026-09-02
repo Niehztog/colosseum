@@ -45,18 +45,34 @@ import sys
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 # donor subdirectory -> the ruleset whose gate its surface needs.
+#
+# A DONOR IS NOT A RULESET, and since the flattening it is not even one-to-one.
+# `src/tourney/` is reachable from FOUR rulesets -- dm, dmpro, tdm, duel, which
+# are OSP's four modes of play promoted to first-class values (R-OSP-12) -- so
+# the gate its surface needs is the family predicate, not a single equality.
+# The donor identity is the stable half of that and is what this map is keyed
+# on; how many rulesets dispatch into a donor is the half that moved.
 DONORS = {
     'arena': 'RULESET_ARENA',
-    'tourney': 'RULESET_TOURNEY',
+    'tourney': 'RULESET_OSP',
 }
 
-# Tests that are true for exactly one ruleset and therefore gate as well as the
-# explicit one does.  Kept short on purpose.  `menu_owner == MENU_ARENA` is the
-# strongest of them: only arena's engine ever sets that owner, and R-MENU-2a
-# makes the field the single answer to "whose menu is open".
+# Tests that are true for exactly one ruleset -- or, for RULESET_OSP, for
+# exactly one donor's four -- and therefore gate as well as the explicit one
+# does.  Kept short on purpose.  `menu_owner == MENU_ARENA` is the strongest of
+# them: only arena's engine ever sets that owner, and R-MENU-2a makes the field
+# the single answer to "whose menu is open".
+#
+# G_IsOspRuleset() is the whole gate for tourney's surface, not a shortcut for
+# one: there is no `RULESET_OSP` enum value, and a site that named all four by
+# hand would be a list that the next ruleset gets left off.  OSP_IsMatch() and
+# OSP_IsTeams() are strictly narrower -- each is true only under rulesets
+# G_IsOspRuleset() is also true under -- so they gate too.
 PREDICATES = {
     'RULESET_ARENA': ('MENU_ARENA',),
-    'RULESET_TOURNEY': ('MENU_TOURNEY',),
+    'RULESET_OSP': ('MENU_TOURNEY', 'G_IsOspRuleset', 'OSP_IsMatch',
+                    'OSP_IsTeams', 'RULESET_DM', 'RULESET_DMPRO',
+                    'RULESET_TDM', 'RULESET_DUEL'),
 }
 
 # Fields that are the donor's but are declared in g_local.h, so the "declared in
@@ -182,7 +198,10 @@ ELSEARM = re.compile(r'^\s*\}\s*else\b.*\{\s*$')
 
 def gate_lines(lines, groups, ruleset, i):
     """True if line i is inside a gate for `ruleset`."""
-    pats = [r'RULESET_' + ruleset.split('_', 1)[1]]
+    # RULESET_OSP is the family, not an enum value, so it contributes no
+    # literal name of its own -- everything that gates it is in PREDICATES.
+    pats = [] if ruleset == 'RULESET_OSP' else \
+        [r'RULESET_' + ruleset.split('_', 1)[1]]
     for p in PREDICATES.get(ruleset, ()):
         pats.append(re.escape(p))
     rx = re.compile('|'.join(pats))
@@ -310,12 +329,12 @@ SELFTESTS = [
     # `extern int botglobals;` was.
     ('stray extern', 'g_spawn.c',
      ('#include "tourney/osp_hooks.h"',
-      '#include "tourney/osp_hooks.h"\nextern int m_mode;')),
+      '#include "tourney/osp_hooks.h"\nextern int sync_stat;')),
     # An else-arm gate is a gate.  Removing the ruleset test from the `} else
     # if (...) {` that opens the block must be reported -- before this control
     # existed the tool could not see that line at all.
     ('else-arm gate', 'g_items.c',
-     ('} else if (G_Ruleset() == RULESET_TOURNEY) {',
+     ('} else if (G_IsOspRuleset()) {',
       '} else if (master->item) {')),
     # The initialiser exemption must not swallow a real call.  `.pickup =`
     # rows are data; `OSP_Pickup_Rune(ent, other);` in a function body is not,

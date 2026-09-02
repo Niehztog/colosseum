@@ -367,7 +367,10 @@ bool SV_movestep(edict_t *ent, vec3_t move, bool relink)
                 if ((!(ent->enemy)) || (!(ent->enemy->inuse))) {
                     if ((g_showlogic) && (g_showlogic->value))
                         gi.dprintf("I don't have a valid enemy!\n");
-                } else if (!strcmp(ent->enemy->classname, "telsa")) {
+                // R-187, and this file is NOT BUILT (R-MP-5) -- fixed anyway,
+                // because a reference copy that disagrees with the built one is
+                // a trap for whoever reads it next.  See src/m_move.c.
+                } else if (!strcmp(ent->enemy->classname, "tesla")) {
                     if ((g_showlogic) && (g_showlogic->value))
                         gi.dprintf("but we're already mad at a tesla\n");
                 } else if ((ent->enemy) && (ent->enemy->client)) {

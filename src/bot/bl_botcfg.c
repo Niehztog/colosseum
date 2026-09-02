@@ -429,7 +429,7 @@ int AddRandomBot(edict_t *ent)
         // R-BOT-29, block 8 of seventeen: when the walk ran out of laps without
         // settling, tourney re-picks at random instead of taking whatever the
         // cursor landed on.  Only under tourney -- it changes which bot joins.
-        if (G_Ruleset() == RULESET_TOURNEY && numbots <= 0)
+        if (G_IsOspRuleset() && numbots <= 0)
         {
             choice = frand() * nbots;
             for (i = 0; i < choice; i++)

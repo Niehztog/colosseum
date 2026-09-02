@@ -303,7 +303,7 @@ void fire_bullet(edict_t *self, vec3_t start, vec3_t aimdir, int damage, int kic
     // and only the weapon knows it fired.  One line per weapon here, against
     // fifteen inline p_acc[] writes in the donor -- src/tourney/osp_acc.c has
     // the reasoning.  Damage credit is not here: it is one hook in T_Damage.
-    if (G_Ruleset() == RULESET_TOURNEY)
+    if (G_IsOspRuleset())
         OSP_accShot(self, mod, 1);
 
     fire_lead(self, start, aimdir, damage, kick, TE_GUNSHOT, hspread, vspread, mod);
@@ -318,7 +318,7 @@ Shoots shotgun pellets.  Used by shotgun and super shotgun.
 */
 void fire_shotgun(edict_t *self, vec3_t start, vec3_t aimdir, int damage, int kick, int hspread, int vspread, int count, int mod)
 {
-    if (G_Ruleset() == RULESET_TOURNEY)
+    if (G_IsOspRuleset())
         OSP_accShot(self, mod, count);
 
     int     i;
@@ -380,7 +380,7 @@ void blaster_touch(edict_t *self, edict_t *other, cplane_t *plane, csurface_t *s
 
 void fire_blaster(edict_t *self, vec3_t start, vec3_t dir, int damage, int speed, int effect, bool hyper)
 {
-    if (G_Ruleset() == RULESET_TOURNEY)
+    if (G_IsOspRuleset())
         OSP_accShot(self, hyper ? MOD_HYPERBLASTER : MOD_BLASTER, 1);
 
     edict_t *bolt;
@@ -389,7 +389,27 @@ void fire_blaster(edict_t *self, vec3_t start, vec3_t dir, int damage, int speed
     VectorNormalize(dir);
 
     bolt = G_Spawn();
+    // R-195.7.  Q2PRO'S OWN DIVERGENCE BETWEEN TWO OF ITS OWN GAME LIBRARIES:
+    // its `ctf` sets `SVF_PROJECTILE` here ("special net code is used for
+    // projectiles", `port_ctf:g_weapon.c:320`) and its baseq2, xatrix and
+    // rogue all set `SVF_DEADMONSTER`.  Not Threewave's feature, which is why
+    // R-40 counted the line among CTF's 167 stale hunks -- but a rule that
+    // names 167 hunks has not looked at this one, and under `ctf` upstream
+    // really does set it.
+    //
+    // BOTH, AND NOT THE DONOR'S ONE, because the two flags are not
+    // interchangeable in the engine.  q2pro drops an entity from a trace whose
+    // contentmask lacks the matching bit (`sv/world.c:541`), and the
+    // SVF_PROJECTILE arm is inside `if (svs.csr.extended)` while the
+    // SVF_DEADMONSTER arm is not.  Taking the donor's line verbatim would
+    // therefore leave a bolt on a NON-extended server flagged with nothing at
+    // all -- solid to MASK_PLAYERSOLID, so a player could walk into a blaster
+    // bolt.  Adding it keeps the base behaviour where the engine cannot honour
+    // the flag and gains upstream's where it can; SVF_PROJECTILE only ever
+    // removes the bolt from more traces, never adds it to one.
     bolt->svflags = SVF_DEADMONSTER;
+    if (G_Ruleset() == RULESET_CTF)
+        bolt->svflags |= SVF_PROJECTILE;
     // yes, I know it looks weird that projectiles are deadmonsters
     // what this means is that when prediction is used against the object
     // (blaster/hyperblaster shots), the player won't be solid clipped against
@@ -560,7 +580,7 @@ void Grenade_Touch(edict_t *ent, edict_t *other, cplane_t *plane, csurface_t *su
 
 void fire_grenade(edict_t *self, vec3_t start, vec3_t aimdir, int damage, int speed, float timer, float damage_radius)
 {
-    if (G_Ruleset() == RULESET_TOURNEY)
+    if (G_IsOspRuleset())
         OSP_accShot(self, MOD_GRENADE, 1);
 
     edict_t *grenade;
@@ -599,7 +619,7 @@ void fire_grenade(edict_t *self, vec3_t start, vec3_t aimdir, int damage, int sp
 
 void fire_grenade2(edict_t *self, vec3_t start, vec3_t aimdir, int damage, int speed, float timer, float damage_radius, bool held)
 {
-    if (G_Ruleset() == RULESET_TOURNEY)
+    if (G_IsOspRuleset())
         OSP_accShot(self, MOD_HANDGRENADE, 1);
 
     edict_t *grenade;
@@ -701,7 +721,7 @@ void rocket_touch(edict_t *ent, edict_t *other, cplane_t *plane, csurface_t *sur
 
 void fire_rocket(edict_t *self, vec3_t start, vec3_t dir, int damage, int speed, float damage_radius, int radius_damage)
 {
-    if (G_Ruleset() == RULESET_TOURNEY)
+    if (G_IsOspRuleset())
         OSP_accShot(self, MOD_ROCKET, 1);
 
     edict_t *rocket;
@@ -741,7 +761,7 @@ fire_rail
 */
 void fire_rail(edict_t *self, vec3_t start, vec3_t aimdir, int damage, int kick)
 {
-    if (G_Ruleset() == RULESET_TOURNEY)
+    if (G_IsOspRuleset())
         OSP_accShot(self, MOD_RAILGUN, 1);
 
     vec3_t      from;
@@ -979,7 +999,7 @@ void bfg_think(edict_t *self)
 
 void fire_bfg(edict_t *self, vec3_t start, vec3_t dir, int damage, int speed, float damage_radius)
 {
-    if (G_Ruleset() == RULESET_TOURNEY)
+    if (G_IsOspRuleset())
         OSP_accShot(self, MOD_BFG_BLAST, 1);
 
     edict_t *bfg;
@@ -1062,6 +1082,12 @@ void ionripper_touch(edict_t *self, edict_t *other, cplane_t *plane, csurface_t 
 // RAFAEL
 void fire_ionripper(edict_t *self, vec3_t start, vec3_t dir, int damage, int speed, int effect)
 {
+    // R-181: the content layers' weapons reach the accuracy report too --
+    // R-MODE-3 makes both valid with every ruleset, so a match fought with
+    // them is a match the report has to be able to describe.
+    if (G_IsOspRuleset())
+        OSP_accShot(self, MOD_RIPPER, 1);
+
     edict_t *ion;
     trace_t tr;
 
@@ -1250,6 +1276,11 @@ void plasma_touch(edict_t *ent, edict_t *other, cplane_t *plane, csurface_t *sur
 // RAFAEL
 void fire_plasma(edict_t *self, vec3_t start, vec3_t dir, int damage, int speed, float damage_radius, int radius_damage)
 {
+    // The Phalanx.  `fire_plasma` is Xatrix's name for it and MOD_PHALANX is
+    // what it damages with (R-181).
+    if (G_IsOspRuleset())
+        OSP_accShot(self, MOD_PHALANX, 1);
+
     edict_t *plasma;
 
     plasma = G_Spawn();
@@ -1467,6 +1498,11 @@ void Trap_Think(edict_t *ent)
 // RAFAEL
 void fire_trap(edict_t *self, vec3_t start, vec3_t aimdir, int damage, int speed, float timer, float damage_radius, bool held)
 {
+    // A thrown device that damages, counted like the hand grenade the donor
+    // already counts (R-181).
+    if (G_IsOspRuleset())
+        OSP_accShot(self, MOD_TRAP, 1);
+
     edict_t *trap;
     vec3_t  dir;
     vec3_t  forward, right, up;

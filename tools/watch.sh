@@ -17,7 +17,7 @@
 #   tools/watch.sh [scene] [-r ruleset] [-m map] [-b bots] [--headless]
 #
 #   scene      watch-bots (default) | doors | ctf-skin, or a path to a .cfg
-#   -r         dm (default) | ctf | arena | tourney | sp
+#   -r         dm (default) | dmpro | tdm | duel | ctf | arena | sp
 #   -m         the map; defaults per ruleset
 #   -b         how many bots to add, default 4 (0 for none)
 #   --headless run under Xvfb and print the consoles instead of showing it.
@@ -175,7 +175,7 @@ SRVLOG=$TREE/server.log
     +set basedir "$TREE" +set homedir "$TREE/home" +set game colosseum \
     +set dedicated 1 +set net_port "$PORT" +set g_ruleset "$RULESET" \
     +set deathmatch 1 +set coop 0 +set maxclients 16 \
-    +set bots 1 +set minimumplayers 0 \
+    +set bots 1 +set minimumplayers 0 +set bots_minplayers 0 \
     +map "$MAP" +exec watch_boot.cfg >"$SRVLOG" 2>&1 ) &
 SRVPID=$!
 trap 'kill -TERM $SRVPID 2>/dev/null' EXIT INT TERM

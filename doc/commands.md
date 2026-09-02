@@ -23,7 +23,7 @@ tools/counts.py --list commands
 | command | what it does |
 |---|---|
 | `sv slots` | Reports the active ruleset's resolved stat-slot map (slot, kind, logical id), every row the map declares that resolution *dropped* and why, and the composed statusbar with its byte count. R-OSP-7/7a's counterpart to `sv ruleset`: a slot number that exists only inside the library cannot be checked from outside it |
-| `sv ruleset` | Reports the resolved ruleset, content layers, modifiers, every predicate's answer, the legacy `deathmatch`/`coop` values, and an entity census split into live monsters, corpses and gibs. Self-checking: names any live monster present under a ruleset that forbids them. R-VER-18, and R-VER-2's boot matrix depends on it. **1.23 adds two lines**, `bots` and `botplace`: the bot census with its slot list, and where each bot ended up in the running ruleset's own terms — CTF team, arena and roster, or tourney entry and ready state. `FL_BOT` and `FL_BOTCLIENT` are counted separately on purpose (R-CORE-14). Both print under every ruleset that accepts bots, including when there are none. **1.34 adds a third, `botfill`, and 1.35 gives it a row under every ruleset**: the target in force, and where it came from -- an arena's `playersperteam` or spawn count (R-RA-7), ctf's three spawn pools with the map's number printed beside the clamped one (R-CTF-8), dm's pool (R-DM-1), the flat `minimumplayers` / `bots_minplayers` where the switch is off, and under `tourney` the fact that it has no such switch and why. The target is COMPUTED every tick rather than stored, so this is the only place it can be read back from (R-VER-19) |
+| `sv ruleset` | Reports the resolved ruleset, content layers, modifiers, every predicate's answer, the legacy `deathmatch`/`coop` values, and an entity census split into live monsters, corpses and gibs. Self-checking: names any live monster present under a ruleset that forbids them. R-VER-18, and R-VER-2's boot matrix depends on it. **1.23 adds two lines**, `bots` and `botplace`: the bot census with its slot list, and where each bot ended up in the running ruleset's own terms — CTF team, arena and roster, or OSP entry and ready state. `FL_BOT` and `FL_BOTCLIENT` are counted separately on purpose (R-CORE-14). Both print under every ruleset that accepts bots, including when there are none. **1.34 adds a third, `botfill`, and 1.36 makes it ONE line for every ruleset** rather than four shapes in four switch arms: the ruleset, the target in force, and where the number came from -- an arena's `playersperteam` or spawn count (R-RA-7), ctf's three spawn pools (R-CTF-8), the map's pool under `dm` and `dmpro`, `2 * team_maxplayers` under `tdm` and `duel` (R-DM-1), or the flat `minimumplayers` / `bots_minplayers` where the switch is off. Four shapes is how a play test ends up with three regexes and a gap. The target is COMPUTED every tick rather than stored, so this is the only place it can be read back from (R-VER-19) |
 
 ## Phase 3: Threewave CTF client commands
 
@@ -65,9 +65,11 @@ Three baseq2 commands change meaning under `ctf` and keep it elsewhere:
   reversing the 1999 default, because the 1999 path exposed `bl_spawn.c`'s
   32-byte bot-name copies to clients
 * tourney's 137 and RA2's 39 (R-OSP-2, R-RA-2)
-* tourney's mode-gated commands, which R-VER-16 checks accept and reject per
-  `match_mode`: `highscores` only in mode 0, `queue`/`line`/`order` only in
-  mode 3, `captain`/`invite`/`lockteam` only in mode 2
+* the OSP four's ruleset-gated commands, which R-VER-16 checks accept and
+  reject per RULESET since 1.36 -- they were gated on `match_mode` until the
+  four modes became four rulesets (R-OSP-12): `highscores` only under `dm`,
+  `queue`/`line`/`order` only under
+  `duel`, `captain`/`invite`/`lockteam` only under `tdm`
 
 ## Rocket Arena 2 — added in spec 1.17
 
@@ -81,13 +83,22 @@ other ruleset.
 | `playerlist` | **third implementation.** baseq2's reports `resp.spectator`, CTF's adds team and ghost code, RA2's is arena-scoped |
 | `score` | not a new command: under `arena` it *cycles* arena board → server-wide → off, where every other ruleset toggles |
 | `menuhelp` | the menu key legend |
-| `say_world` | reaches everyone even under teamplay, prefixed `W:` |
-| `grap_on`, `grap_off` | the offhand grapple latch. Mapped onto `ctf_hookstate`, because there is one grapple (§7 rule 6) |
+| `say_world` | reaches everyone even under teamplay, prefixed `W:`. Its counterpart is plain `say`, which under `arena` stays inside the speaker's ARENA (R-165) -- so this is not a synonym |
+| `grap_on`, `grap_off` | the offhand grapple latch. Mapped onto `ctf_hookstate`, because there is one grapple (§7 rule 6). The latch is all they are: whether it may fire is `RA_HookThink`'s, gated on `arena.cfg`'s `grapple:` key and on FIGHT_ALIVE (R-164). `grap_off` sets TURNOFF rather than clearing, so a hook fired from the WEAPON slot is not released by the offhand key |
 | `listkeys`, `listmaps`, `nextmap` | the map loop's reporting |
 | `getdebugcode`, `pcount`, `play` | accepted and ignored, as in the donor: clients bind them and expect the server to swallow them |
 
 `invnext`, `invprev`, `inven`, `invuse` and `invdrop` gain arena arms rather than
 new commands — R-MENU-4 gives the menu owner first claim on that input.
+
+Two verbs the arena ruleset takes AWAY, and they are a matched pair rather than
+one rule. `drop` is refused: RA2 empties `Cmd_Drop_f`, an arena hands out a fixed
+loadout and `SpawnItem` frees every pickup on the map, so a dropped weapon is an
+item in a ruleset that has none (R-166). `kill` is **not** refused, although RA2
+dispatches it to nothing — §3's "dead functions are live again" names
+`Cmd_Kill_f` in RA2's retired list, and `ra2observer` asserts a round outlives a
+fighter's suicide. The difference from the donor is deliberate and is recorded
+in the same row.
 
 
 ## The bot layer — added in spec 1.22 (Phase 6)
@@ -98,12 +109,12 @@ are console-only regardless, because they dump tables at the server.
 
 | command | who | notes |
 |---|---|---|
-| `addbot <name> <skin> <charfile> <charname>` | both | queues one bot (R-BOT-18); never creates one inside `SpawnEntities` or a `ClientConnect`. A duplicate name is refused, except under `tourney`, which auto-suffixes (R-BOT-29) |
+| `addbot <name> <skin> <charfile> <charname>` | both | queues one bot (R-BOT-18); never creates one inside `SpawnEntities` or a `ClientConnect`. A duplicate name is refused, except under the four OSP rulesets, which auto-suffix (R-BOT-29) |
 | `addrandom [n]` | both | picks from `bots.cfg`, skipping bots already in the game |
 | `removebot [name\|all]` | both | `all` is new: `BotDestroyAll()`, which `ShutdownGame` needs too |
 | `becomebot` | both | turns a human client into a bot |
 | `botpause` | both | toggles `botglobals.nobotai`. The SDK's own was behind `#ifdef BOT_DEBUG`, which is defined in neither donor tree, so this command **could not work** before 1.22 |
-| `menu [rcon_password]` | client | the Gladiator menu tree (R-BOT-28). Dropped from `osp-tourney`'s `bl_cmd.c` because that mod has its own menus; it comes back with the menu |
+| `menu [rcon_password]` | client | the Gladiator menu tree (R-BOT-28). Dropped from `osp-tourney`'s `bl_cmd.c` because that mod has its own menus; it comes back with the menu. **Reachable from a client under `ctf` and `arena` only** — under the OSP four `OSP_ClientCommand` routes `menu` to tourney's own inventory menu first. The argument is the rcon password and is not needed by **the host of a listen server**, who is exempt (they hold the server's console, which is the authority rcon lends out). A server with no `rcon_password` set refuses every client, including on `menu ""`; a second bare `menu` always CLOSES an open menu, because the gate is on opening |
 | `bbox` | client | R-BOT-27's fourteen-line bounding box, on the entity you are looking at when observing. Behind `cheats`, because it shows through walls |
 | `name`, `skin`, `gender` | client | the three the brain issues on its own behalf |
 | `teamhelp [who]`, `teamaccompany [who]` | client | a `say_team` naming the best item within 500 units |

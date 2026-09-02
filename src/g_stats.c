@@ -12,9 +12,21 @@ typedef struct {
     int8_t      slot[RULESET_COUNT];
 } slotdef_t;
 
-#define STATSLOT_ROW(id, kind, dm, ctf, arena, tourney, sp) \
-    [id] = { kind, { [RULESET_DM] = dm, [RULESET_CTF] = ctf, \
-                     [RULESET_ARENA] = arena, [RULESET_TOURNEY] = tourney, \
+// A column is a NUMBERING, not a ruleset, and the four OSP rulesets share one:
+// they are one code path emitting one bar (R-OSP-12), so a slot that meant
+// something different under `tdm` than under `dm` would be a bar addressing a
+// number its own emitter did not choose.
+//
+// baseq2's own numbering is gone with this: it was read by RULESET_DM alone,
+// and `dm` is OSP's RegularDM now.  Five columns became four.
+//
+// A ruleset MISSING from this expansion does not fail to compile -- it gets 0
+// for every stat, which is a real slot (STAT_HEALTH_ICON) and not the -1
+// sentinel, so every logical stat would silently collide on one universal slot.
+#define STATSLOT_ROW(id, kind, osp, ctf, arena, sp) \
+    [id] = { kind, { [RULESET_DM] = osp, [RULESET_DMPRO] = osp, \
+                     [RULESET_TDM] = osp, [RULESET_DUEL] = osp, \
+                     [RULESET_CTF] = ctf, [RULESET_ARENA] = arena, \
                      [RULESET_SP] = sp } },
 
 static const slotdef_t slotdefs[SID_COUNT] = {
@@ -23,7 +35,7 @@ static const slotdef_t slotdefs[SID_COUNT] = {
 
 #undef STATSLOT_ROW
 
-#define STATSLOT_NAME(id, kind, dm, ctf, arena, tourney, sp)    #id,
+#define STATSLOT_NAME(id, kind, osp, ctf, arena, sp)    #id,
 
 static const char *const slotnames[SID_COUNT] = {
     STATSLOT_MAP(STATSLOT_NAME)
@@ -318,10 +330,18 @@ void sb_ustat_string(statusbar_t *sb, int slot)
 // parameters instead of a second copy of sixty lines.
 typedef struct {
     bool    icon_above;     // RA2 lifts the health icon to its own row at -32
-    int     timer1_x;       // 262 in baseq2 and Threewave, 246 in RA2
+    // 262 in baseq2 ONLY.  Threewave's ctf_statusbar reads `if 9 xv 246 num 2
+    // 10 xv 296 pic 9 endif` -- the same 246 RA2 and tourney use -- and this
+    // comment said 262 for it, which is how ctf came to be handed
+    // sb_shape_baseq2 and draw the powerup countdown sixteen pixels right of
+    // where 1999 put it.  The composed bar is token-identical to the donor's
+    // literal in every other respect, read off a client on q2ctf1, so this one
+    // number was the whole divergence (R-175).
+    int     timer1_x;
 } sb_shape_t;
 
 static const sb_shape_t sb_shape_baseq2  = { false, 262 };
+static const sb_shape_t sb_shape_ctf     = { false, 246 };
 static const sb_shape_t sb_shape_arena   = { true,  246 };
 static const sb_shape_t sb_shape_tourney = { false, 246 };
 
@@ -414,25 +434,16 @@ static void sb_frags(statusbar_t *sb)
     sb_unum(sb, 3, STAT_FRAGS);
 }
 
-// baseq2's dm tail: the spectator banner and the chase-cam name.
-static void sb_dm_tail(statusbar_t *sb)
-{
-    sb_frags(sb);
-
-    sb_if(sb, SID_SPECTATOR);
-    sb_layout(sb, "xv", 0);
-    sb_layout(sb, "yb", -58);
-    sb_raw(sb, "string2 \"SPECTATOR MODE\"");
-    sb_endif(sb);
-
-    sb_if(sb, SID_CHASE);
-    sb_layout(sb, "xv", 0);
-    sb_layout(sb, "yb", -68);
-    sb_raw(sb, "string \"Chasing\"");
-    sb_layout(sb, "xv", 64);
-    sb_stat_string(sb, SID_CHASE);
-    sb_endif(sb);
-}
+// BASEQ2'S DM TAIL IS GONE, and the compiler is what said so.  It drew the
+// spectator banner and the chase-cam name, and it was reached through the
+// composer's `default:` arm, which only RULESET_DM ever took -- `sp` breaks
+// early with no tail at all and the other rulesets have their own.  When `dm`
+// became OSP's RegularDM the arm had no ruleset left, and -Werror=unused-function
+// reported it on the first build after the switch was made exhaustive.
+//
+// Nothing inherits it: SID_SPECTATOR is mapped only under `sp` now (the OSP
+// column claims 17 for SID_OSP_MATCHSTATE, which R-OSP-7 clause 2 permits for a
+// ruleset with its own observer), and every remaining bar draws its own frags.
 
 // Threewave's own block: tech icon, both team panels with their capture counts
 // and "joined" overlays, the carried-flag badge, the id view, the match clock
@@ -575,7 +586,7 @@ static void sb_arena_tail(statusbar_t *sb)
 }
 
 // OSP Tourney's tail.  The donor ships FOUR complete bars and they differ only
-// in where two panels sit: `client_hud` moves the match clock, and `m_mode >= 2`
+// in where two panels sit: `client_hud` moves the match clock, and `OSP_IsTeams()`
 // (team play and 1v1) replaces the frags/rank pair with a team layout.  Four
 // literals in the donor, two booleans here -- which is the case R-OSP-7a was
 // written for and the reason a literal bar cannot express a per-client option
@@ -729,10 +740,16 @@ static void sb_compose(statusbar_t *sb, ruleset_t r)
     if (r == RULESET_ARENA)
         sb_arena_head(sb);
 
-    sb_universal(sb, r == RULESET_ARENA   ? &sb_shape_arena
-                 : r == RULESET_TOURNEY ? &sb_shape_tourney
+    sb_universal(sb, r == RULESET_ARENA ? &sb_shape_arena
+                 : r == RULESET_CTF     ? &sb_shape_ctf
+                 : G_IsOspRuleset()     ? &sb_shape_tourney
                  : &sb_shape_baseq2);
 
+    // EVERY ruleset has an arm.  There was a `default:` here that composed
+    // baseq2's tail, and `dm` was the only ruleset that reached it -- so when
+    // `dm` became OSP's RegularDM the default would have kept handing it
+    // baseq2's bar while its stat map said OSP's, which is a statusbar
+    // addressing slots that no longer mean what it thinks.
     switch (r) {
     case RULESET_CTF:
         sb_ctf_tail(sb);
@@ -740,20 +757,27 @@ static void sb_compose(statusbar_t *sb, ruleset_t r)
     case RULESET_ARENA:
         sb_arena_tail(sb);
         break;
-    case RULESET_TOURNEY:
+    case RULESET_DM:
+    case RULESET_DMPRO:
+    case RULESET_TDM:
+    case RULESET_DUEL:
         // `client_hud` is per-CLIENT in the donor and the bar is one
         // configstring for everyone, so it is read here as a server default --
         // which is what the donor does too, installing one of its four at
         // SpawnEntities and unicasting another only from `hud`.
+        //
+        // The donor's four literal bars differ in two booleans, and both are
+        // still booleans here: the clock position, and whether the frags/rank
+        // pair is replaced by a team layout -- which is `tdm` and `duel` now
+        // rather than `m_mode >= 2`.
         sb_tourney_tail(sb, client_hud && client_hud->value != 0,
-                        m_mode >= 2);
+                        OSP_IsTeams());
         break;
     case RULESET_SP:
         // The campaign has no frag counter, no spectators and no chase cam --
         // baseq2 installs single_statusbar alone here and so does this.
         break;
-    default:
-        sb_dm_tail(sb);
+    case RULESET_COUNT:
         break;
     }
 }
@@ -902,17 +926,16 @@ void G_Svcmd_Extras_f(void)
             lagged++;
     }
 
-    switch (G_Ruleset()) {
-    case RULESET_TOURNEY:
-        observer = "tourney: osp_observe.c + p_camera.c";
-        break;
+    if (G_IsOspRuleset()) {
+        observer = "osp: osp_observe.c + p_camera.c";
+    } else switch (G_Ruleset()) {
     case RULESET_ARENA:
         observer = "arena: OMODE_NORMAL/FREEFLYING/TRACKCAM/EYECAM in arena.c";
         break;
     default:
         observer = g_observer->value
-                   ? "dm/sp/ctf: p_observer.c autocam/chasecam + g_chase.c"
-                   : "dm/sp/ctf: g_chase.c chasecam only (g_observer 0)";
+                   ? "ctf/sp: p_observer.c autocam/chasecam + g_chase.c"
+                   : "ctf/sp: g_chase.c chasecam only (g_observer 0)";
         break;
     }
 

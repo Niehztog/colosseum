@@ -17,6 +17,13 @@ src/** -text
 # from gladiator-bot-restored/assets and is CRLF as it shipped; the parser does
 # not care, but a provenance copy that git rewrites is no longer a copy.
 # `arena.cfg` is Rocket Arena 2's own arena-definition file on the same terms
-# (SPECS 1.27, doc/reconciliation.md R-129) -- 934 lines, CRLF as it shipped.
+# (SPECS 1.27, doc/reconciliation.md R-129) -- 1028 lines, CRLF as it shipped.
+#
+# This rule stops GIT rewriting it; it cannot stop an EDITOR.  `cdb9df2`
+# rewrote the whole file to add the mission-pack weapon names and wrote LF,
+# and the loss went unnoticed for three commits because nothing checks and
+# nothing breaks -- the parser's `fscanf("%s")` takes CR as whitespace.
+# Restored to CRLF, and recorded so that "it is protected" is not read as
+# "it cannot be lost".
 colosseum/botcfg/bots.cfg -text
 colosseum/arena.cfg -text

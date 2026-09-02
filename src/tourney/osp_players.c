@@ -68,7 +68,7 @@ static int OSP_countTeamPlayers(int team)
 // Each team gets a `client 80` banner card, a column header and up to FOUR
 // rows; row 3 is a "...and you" promotion that swaps the viewer in when he is
 // on that team and ranked below the visible four, exactly as OSP_showScores
-// does at row 9.  The two osp_teams' sorted lists live in one pair of 2-D arrays
+// does at row 9.  The two teams' sorted lists live in one pair of 2-D arrays
 // and are built here rather than by OSP_DoRankSort, but with the same three
 // keys: score descending, then deaths and suicides ascending.
 void OSP_showTeamScores(edict_t *ent)

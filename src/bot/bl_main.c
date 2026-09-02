@@ -64,8 +64,8 @@ library-wide.  Here each one asks the active ruleset instead, and the tourney
 state they read is reached through these accessors rather than through the
 `extern int m_mode;` the donor put at the top of the file -- an extern that
 resolves in every ruleset and answers with tourney's globals whether or not
-tourney is running.  See bl_main.h for why BotTourneyMode() is a value and not
-a predicate.
+tourney is running.  The mode accessor is gone with `m_mode` itself -- see
+bl_main.h for the rule it protected, which the ruleset test now carries.
 
 The donor also declared `extern void OSP_serverbotsRemove(void);` here and
 never called it.  That is R-OSP-5's shape -- a donor's name declared outside
@@ -75,24 +75,19 @@ exists in src/tourney/ and osp_teams.c is what calls it.
 ===============================================================================
 */
 
-int BotTourneyMode(void)
-{
-    return G_Ruleset() == RULESET_TOURNEY ? m_mode : -1;
-}
-
 int BotTourneyRunes(void)
 {
-    return G_Ruleset() == RULESET_TOURNEY ? rune_stat : 0;
+    return G_IsOspRuleset() ? rune_stat : 0;
 }
 
 bool BotTourneyHook(void)
 {
-    return G_Ruleset() == RULESET_TOURNEY && hook_enable && hook_enable->value;
+    return G_IsOspRuleset() && hook_enable && hook_enable->value;
 }
 
 int BotTourneyVotedIn(void)
 {
-    return G_Ruleset() == RULESET_TOURNEY ? bots_votedin : 0;
+    return G_IsOspRuleset() ? bots_votedin : 0;
 }
 
 const char *BotMinPlayersCvar(void)
@@ -101,51 +96,32 @@ const char *BotMinPlayersCvar(void)
     // and its `bots_*` family all say bots_minplayers; every other ruleset's
     // 1999 documentation says minimumplayers.  Renaming either would break a
     // config file that has been correct for twenty years.
-    return G_Ruleset() == RULESET_TOURNEY ? "bots_minplayers" : "minimumplayers";
+    return G_IsOspRuleset() ? "bots_minplayers" : "minimumplayers";
 }
 
 const char *BotFileCvar(void)
 {
-    return G_Ruleset() == RULESET_TOURNEY ? "bots_botfile" : "botfile";
+    return G_IsOspRuleset() ? "bots_botfile" : "botfile";
 }
 
-// R-RA-7, R-CTF-8, R-DM-1.  The switch that replaces `minimumplayers` with a
-// target read off the game itself, and its NAME is per ruleset for R-OSP-11's
-// reason: each ruleset's own documentation and configs spell its cvars its own
-// way, and one shared `botfill` would be a name no donor's readme mentions.
+// R-RA-7, R-CTF-8, R-DM-1.  ONE switch that replaces the flat count with a
+// target read off the game itself.
 //
-// NULL is "this ruleset has no such switch", which is two of the five and both
-// for a stated reason:
+// It was three cvars -- `ra_botfill`, `ctf_botfill`, `dm_botfill` -- named per
+// ruleset on R-OSP-11's authority.  That was wrong about which rule applied.
+// R-OSP-11 governs cvars a DONOR named, so that each donor's twenty-year-old
+// readme and configs keep spelling its own; all three of these are Colosseum's
+// own invention from spec 1.34 and 1.35 and appear in no donor's documentation
+// at all.  What governs them is sec 7 rule 6 -- one implementation per concept --
+// and one concept with three names was already only one implementation, since
+// BotFillEnabled() and BotFillTarget() were shared from the first day.
 //
-//   * `sp` has no bots at all (R-MODE-7, N6).
-//   * `tourney` has the concept already and keeps it -- `bots_minplayers`
-//     defaults to 4 and `bots_autoload 4` tops the roster up regardless of the
-//     player count, and mode 3 zeroes the count because a duel has no seat for
-//     a bot.  What it has no equivalent of is a target read off the map, and it
-//     does not NEED one: `team_maxplayers` is a declared capacity that modes 2
-//     and 3 both size themselves to, which is exactly what the other three
-//     rulesets lack and this switch supplies.  R-OSP-11 says tourney's bot
-//     contract is preserved rather than redesigned; adding a fifth `bots_*`
-//     cvar to it would be redesigning it (doc/reconciliation.md R-156).
-const char *BotFillCvar(void)
-{
-    switch (G_Ruleset()) {
-    case RULESET_ARENA:
-        return "ra_botfill";
-    case RULESET_CTF:
-        return "ctf_botfill";
-    case RULESET_DM:
-        return "dm_botfill";
-    default:
-        return NULL;
-    }
-}
-
+// `sp` is the one ruleset where the switch does nothing, and it needs no arm:
+// it has no bots (R-MODE-7, N6), so G_BotsAllowed() has already refused before
+// anything asks.
 bool BotFillEnabled(void)
 {
-    const char *name = BotFillCvar();
-
-    return name && gi.cvar(name, "0", 0)->value != 0;
+    return G_BotsAllowed() && gi.cvar("botfill", "0", 0)->value != 0;
 }
 
 cvar_t *BotMinPlayers(void)
@@ -155,7 +131,7 @@ cvar_t *BotMinPlayers(void)
     // 1999 SDK's `minimumplayers` has always defaulted to and a server that
     // says nothing must not grow bots.
     return gi.cvar(BotMinPlayersCvar(),
-                   G_Ruleset() == RULESET_TOURNEY ? "4" : "0", 0);
+                   G_IsOspRuleset() ? "4" : "0", 0);
 }
 
 cvar_t *BotFile(void)
@@ -186,7 +162,7 @@ bool BotCountsAsPlayer(edict_t *cl_ent)
     if ((cl_ent->flags & FL_OBSERVER) || G_IsObserver(cl_ent))
         return false;
     // Tourney adds a fourth state: connecting, entered, observing or queued.
-    if (G_Ruleset() == RULESET_TOURNEY)
+    if (G_IsOspRuleset())
         return cl_ent->client->resp.osp_entered == ENTERED_ENTERED;
     return true;
 }
@@ -1120,13 +1096,17 @@ static int BotRuneModelindex(edict_t *ent)
     };
     int i, j;
 
-    if (G_Ruleset() != RULESET_TOURNEY || !BotTourneyRunes())
+    if (!G_IsOspRuleset() || !BotTourneyRunes())
         return 0;
     if (!ent->item || !(ent->item->flags & IT_RUNE))
         return 0;
     for (i = 0; i < 5; i++)
     {
         if (ent->item->quantity != rune_slots[i]) continue;
+        //R-184: a rune with no tech has a NULL row, and strcmp(x, NULL) is a
+        //crash rather than a mismatch.  RUNE_VAMPIRE is that row: OSP has five
+        //runes and Threewave four techs.
+        if (!bot_tech_models[i]) break;
         //look the tech model up in the live index rather than assuming 251..255
         for (j = 1; j < bot_max_modelindexes; j++)
         {
@@ -1532,22 +1512,54 @@ static void BotSetPathVars(bot_library_t *lib)
 static void BotRulesetLibVars(bot_library_t *lib)
 {
     //
-    // R-BOT-29's libvar block.  Under tourney these come from hook_enable and
-    // rune_stat; under ctf from Threewave's own ctf_hook/laserhook, which
-    // R-CTF-3 already registers; elsewhere from the MOD_HOOK modifier.
-    switch (G_Ruleset()) {
-    case RULESET_TOURNEY:
+    // R-BOT-29's libvar block.  Under the OSP four these come from hook_enable
+    // and rune_stat; under ctf from Threewave's own `ctf_hook`, which R-CTF-3
+    // registers -- and NOT from `laserhook`, which is a cable rendering here and
+    // a movement model to the brain (see below); under arena from arena.cfg's
+    // `grapple:` key, which is the switch the item and the offhand think both
+    // obey (R-164).
+    if (G_IsOspRuleset()) {
         lib->funcs.BotLibVarSet("usehook", BotTourneyHook() ? "1" : "0");
         lib->funcs.BotLibVarSet("laserhook", BotTourneyHook() ? "1" : "0");
-        // The comparison is preserved EXACTLY: 1v1 (m_mode 3) is two teams of
-        // one, the brain has no ally, and teamplay 0 is the right answer there.
-        lib->funcs.BotLibVarSet("teamplay", BotTourneyMode() == MODE_TEAM ? "1" : "0");
+        // *** RULESET_TDM ALONE, AND NOT ANY OF THE THREE PREDICATES THAT LOOK
+        // *** LIKE IT.
+        //
+        // This was `m_mode == MODE_TEAM` and the set of one mode it selected is
+        // the set of one ruleset selected here.  `duel` is two teams of one, the
+        // brain has no ally, and `teamplay 0` is the right answer there -- the
+        // brain compares whole SKIN STRINGS when this is set, so two duellists
+        // who happen to pick the same model become team-mates and stop shooting
+        // each other.
+        //
+        // G_IsOspRuleset() is true under `duel`.  So is OSP_IsTeams().  So is
+        // G_TeamplayEnabled(), which R-MODE-7 makes ruleset-derived precisely
+        // because `duel` IS team play -- to the game.  Not to the brain.
+        lib->funcs.BotLibVarSet("teamplay",
+                                G_Ruleset() == RULESET_TDM ? "1" : "0");
         lib->funcs.BotLibVarSet("runes", BotTourneyRunes() ? "1" : "0");
         lib->funcs.BotLibVarSet("techs", "0");
-        break;
+        return;
+    }
+
+    switch (G_Ruleset()) {
     case RULESET_CTF:
         lib->funcs.BotLibVarSet("usehook", ctf_hook && ctf_hook->value ? "1" : "0");
-        lib->funcs.BotLibVarSet("laserhook", laserhook && laserhook->value ? "1" : "0");
+        // *** ZERO, BECAUSE `laserhook` IS NOT ABOUT THE CABLE. ***
+        //
+        // botlib.h: `laserhook` is be_ai_move.c's, "0 = CTF hook, 1 = laser
+        // hook" -- a MOVEMENT model, telling the brain whether the hook grabs
+        // instantly or has to fly there.  Threewave's hook is a projectile in
+        // both of its renderings: the `#if 1 //def USE_GRAPPLE_CABLE` this
+        // tree's `laserhook` cvar replaces chooses between TE_GRAPPLE_CABLE and
+        // TE_MEDIC_CABLE_ATTACK and changes nothing else -- same
+        // CTF_GRAPPLE_SPEED, same CTFGrappleTouch, same pull.  Pushing the
+        // cvar through told the brain the hook was instantaneous whenever an
+        // operator preferred the beam, and it would then aim and time for a
+        // grapple this ruleset does not have.  uGladQ2 agrees by omission: its
+        // `#ifdef ZOID` block sets `usehook` and `runes` and never `laserhook`,
+        // which it sets only under TOURNEY, where the hook really is a laser.
+        // doc/reconciliation.md R-179.
+        lib->funcs.BotLibVarSet("laserhook", "0");
         // *** ZERO, AND THAT IS WHAT GIVES CTF BOTS TEAMS. ***
         //
         // The donor sets no `teamplay` under ctf at all -- its `#ifdef ZOID`
@@ -1572,7 +1584,15 @@ static void BotRulesetLibVars(bot_library_t *lib)
             ((int)dmflags->value & DF_CTF_NO_TECH) ? "0" : "1");
         break;
     case RULESET_ARENA:
-        lib->funcs.BotLibVarSet("usehook", G_ModifierEnabled(MOD_HOOK) ? "1" : "0");
+        // R-164's other side of the seam.  NOT `MOD_HOOK`, which is the
+        // Gladiator SDK's own `hook` cvar and knows nothing about this ruleset:
+        // Rocket Arena's grapple switch is arena.cfg's `grapple:` key, which is
+        // what give_ammo() hands the item out on and what RA_HookThink() fires
+        // it on.  Told from the wrong switch the brain was reliably wrong in
+        // both directions -- `hook 0` is the default, so a `grapple: 1` server
+        // had bots that never used one, and setting `hook 1` on the shipped
+        // config told them to use a grapple they are not given.
+        lib->funcs.BotLibVarSet("usehook", allow_grapple ? "1" : "0");
         lib->funcs.BotLibVarSet("laserhook", "0");
         // R-ARENA-2: arena is ALWAYS teamplay to the brain, because RA2 is
         // always played in teams -- a 1v1 arena is two teams of one.  This is
@@ -1580,9 +1600,9 @@ static void BotRulesetLibVars(bot_library_t *lib)
         // synthetic skin BotLib_BotClientSettings pushes is what it consults;
         // without the pair the brain has no teams and shoots its own side.
         //
-        // It is NOT tourney's answer and the difference is the skin.  R-BOT-29
-        // sets tourney's `teamplay` from `m_mode == MODE_TEAM` and says why: on
-        // real skins, teamplay 1 in a duel gives both duellists an imaginary
+        // It is NOT the OSP four's answer and the difference is the skin.
+        // R-BOT-29 sets theirs from RULESET_TDM alone and says why: on real
+        // skins, teamplay 1 in a duel gives both duellists an imaginary
         // team-mate the moment they wear the same one.  Here the skin is the
         // team, so a lone player's team has exactly one member and the
         // comparison cannot go wrong in either direction.
@@ -1591,6 +1611,10 @@ static void BotRulesetLibVars(bot_library_t *lib)
         lib->funcs.BotLibVarSet("techs", "0");
         break;
     default:
+        // Only `sp` reaches this now, and G_BotsAllowed() is false there, so no
+        // library exists to be told anything.  Kept as the safe answer for a
+        // ruleset added later rather than deleted: an unset libvar is whatever
+        // the previous map left in the brain.
         lib->funcs.BotLibVarSet("usehook", G_ModifierEnabled(MOD_HOOK) ? "1" : "0");
         lib->funcs.BotLibVarSet("laserhook", "0");
         lib->funcs.BotLibVarSet("teamplay", G_TeamplayEnabled() ? "1" : "0");

@@ -135,13 +135,38 @@ typedef struct arena_settings_s {
     int     competition;
     int     scorebydamage;
     int     changed;
+    // R-RA-8: APPENDED AFTER `changed`, AND THAT IS THE POINT.  Every index
+    // above is hard-coded in ra2menus.c -- `settings[2]` is the weapon mask,
+    // `vals[23]` guards the players-per-team row, `settings[41]` is the changed
+    // marker -- so a member inserted among them moves every row after it and
+    // the menu starts writing the wrong setting.  Appending cannot displace
+    // anything; `changed` stops being the LAST member without ceasing to be
+    // index 41, which is all any of that code asked of it.
+    int     bots;               // does the bot fill work this arena at all
+    int     allow_voting_bots;  // ...and may the people in it vote on that
+    // R-182: the mission packs' five ammo types, appended for the same reason
+    // R-RA-8's two were -- everything above is addressed by index from
+    // ra2menus.c and appending cannot displace any of it.  The packs' six
+    // WEAPONS need no member: they are six more bits in `weapons` above.
+    int     magslug;            // the Phalanx's
+    int     flechettes;         // the ETF Rifle's
+    int     prox;               // the Prox Launcher's
+    int     tesla;              // its own ammo AND its own weapon, like grenades
+    int     trap;               // likewise
+    // ONE switch for the six rather than six, which is a departure from the
+    // donor's one-per-weapon (indices 28..36) and a deliberate one: those nine
+    // are 1999's own cfg vocabulary and each weapon there has a row a player
+    // might reasonably want to lock.  The six are one feature arriving
+    // together, and six new cfg keys to refuse it once is six things to learn.
+    int     allow_voting_packweapons;
 } arena_settings_t;
 
 // R-SEC-8: `arena_settings_t` is addressed BY INDEX.  `ra2menus.c` reads and
-// writes it as `int settings[42]` -- settings[2] is the weapon mask,
-// settings[17] the armour protection, settings[41] the changed flag -- and
-// `arena_t` carries a second, inline copy of the same 42 members that
-// `arena.c` and `ra2menus.c` memcpy across with `sizeof(arena_settings_t)`.
+// writes it as `int settings[44]` -- settings[2] is the weapon mask,
+// settings[17] the armour protection, settings[41] the changed flag,
+// settings[42] the per-arena bot switch (R-RA-8) -- and `arena_t` carries a
+// second, inline copy of the same 44 members that `arena.c` and `ra2menus.c`
+// memcpy across with `sizeof(arena_settings_t)`.
 // Both are assumptions about layout that no compiler was checking, and the
 // class is the one that bit RA2 after its own port: a qboolean -> bool
 // retype shrank this struct from 168 bytes to 96 while `ra2menus.c` still
@@ -150,14 +175,25 @@ typedef struct arena_settings_s {
 // So the layout is pinned rather than trusted.  A member inserted, removed,
 // reordered or retyped now fails the build on the line that names it,
 // instead of silently moving every index after it.
-_Static_assert(sizeof(arena_settings_t) == 42 * sizeof(int),
-               "arena_settings_t is read as int[42] by ra2menus.c");
+// 49 since R-182 appended five; ra2menus.c reads 0..43 and never more, and
+// `settings` there is a POINTER into the struct rather than a fixed array, so
+// the run may grow at the end and may not move underneath it.
+_Static_assert(sizeof(arena_settings_t) == 50 * sizeof(int),
+               "arena_settings_t is read by index from ra2menus.c");
 _Static_assert(offsetof(arena_settings_t, playersperteam) == 0 * sizeof(int),
                "arena_settings_t.playersperteam is index 0");
 _Static_assert(offsetof(arena_settings_t, rounds) == 1 * sizeof(int),
                "arena_settings_t.rounds is index 1");
 _Static_assert(offsetof(arena_settings_t, weapons) == 2 * sizeof(int),
                "arena_settings_t.weapons is index 2");
+// R-182's five, pinned like the rest: 44..48, after everything ra2menus.c
+// names by number.
+_Static_assert(offsetof(arena_settings_t, magslug) == 44 * sizeof(int),
+               "arena_settings_t.magslug is index 44");
+_Static_assert(offsetof(arena_settings_t, trap) == 48 * sizeof(int),
+               "arena_settings_t.trap is index 48");
+_Static_assert(offsetof(arena_settings_t, allow_voting_packweapons) == 49 * sizeof(int),
+               "arena_settings_t.allow_voting_packweapons is index 49");
 _Static_assert(offsetof(arena_settings_t, armor) == 3 * sizeof(int),
                "arena_settings_t.armor is index 3");
 _Static_assert(offsetof(arena_settings_t, health) == 4 * sizeof(int),
@@ -236,6 +272,10 @@ _Static_assert(offsetof(arena_settings_t, scorebydamage) == 40 * sizeof(int),
                "arena_settings_t.scorebydamage is index 40");
 _Static_assert(offsetof(arena_settings_t, changed) == 41 * sizeof(int),
                "arena_settings_t.changed is index 41");
+_Static_assert(offsetof(arena_settings_t, bots) == 42 * sizeof(int),
+               "arena_settings_t.bots is index 42");
+_Static_assert(offsetof(arena_settings_t, allow_voting_bots) == 43 * sizeof(int),
+               "arena_settings_t.allow_voting_bots is index 43");
 
 typedef struct arena_s {
     int         numteams;
@@ -302,6 +342,13 @@ typedef struct arena_s {
     int     competition;
     int     scorebydamage;
     int     changed;
+    int     bots;               // R-RA-8: mirrors arena_settings_t, index 42
+    int     allow_voting_bots;  // R-RA-8: mirrors arena_settings_t, index 43
+    // R-182: mirrors arena_settings_t, indices 44..48.  The extent assert below
+    // is what makes forgetting one of these a build failure rather than a
+    // memcpy that runs off the end of the run and into `proposetime`.
+    int     magslug, flechettes, prox, tesla, trap;
+    int     allow_voting_packweapons;   // R-182: index 49
     float       proposetime;
 
     arena_settings_t    proposed;
@@ -322,17 +369,20 @@ typedef struct arena_s {
     struct ra2_round_s  *stats;     // NULL when statsfile is off
 } arena_t;
 
-// The second half of the same contract: `arena_t` repeats those 42 members
-// inline, from `playersperteam` to `changed`, and both arena.c and ra2menus.c
-// copy a whole `arena_settings_t` over that run with memcpy.  If the run and
-// the struct ever differ in extent the copy writes past `changed` and into
-// `proposetime` -- so the extent is pinned too, measured from the first member
-// of the run to the field that follows it.
+// The second half of the same contract: `arena_t` repeats those 44 members
+// inline, from `playersperteam` to `allow_voting_bots`, and both arena.c and
+// ra2menus.c copy a whole `arena_settings_t` over that run with memcpy.  If the
+// run and the struct ever differ in extent the copy writes past the end of the
+// run and into `proposetime` -- so the extent is pinned too, measured from the
+// first member of the run to the field that follows it.
 _Static_assert(offsetof(arena_t, proposetime) - offsetof(arena_t, playersperteam)
                == sizeof(arena_settings_t),
                "arena_t's inline settings run must match arena_settings_t");
 _Static_assert(offsetof(arena_t, changed) - offsetof(arena_t, playersperteam)
                == offsetof(arena_settings_t, changed),
+               "arena_t's inline settings run must match arena_settings_t");
+_Static_assert(offsetof(arena_t, bots) - offsetof(arena_t, playersperteam)
+               == offsetof(arena_settings_t, bots),
                "arena_t's inline settings run must match arena_settings_t");
 
 extern  int         votetries_setting;
@@ -351,7 +401,6 @@ extern  cvar_t      *admincode;
 extern  cvar_t      *ra_playercycle;
 extern  cvar_t      *ra_botcycle;
 // R-RA-7: the bot count follows the arena's own size instead of the server's.
-extern  cvar_t      *ra_botfill;
 
 extern  char        *teamskins[MAX_ARENA_SKINS];
 extern  char        *vwepmodels[4];
@@ -364,7 +413,79 @@ extern  char        *omode_descriptions[4];
 
 extern const char   dm_statusbar[];
 
-extern  int         weapon_vals[9];
+// The `weapons:` bitmask, one bit per selectable weapon.
+//
+// 0..8 ARE THE DONOR'S AND MAY NOT BE REORDERED: ra2menus.c indexes this array
+// directly and pairs each index with a fixed menu label -- weapon_vals[0] is
+// "Allow Shotgun", [8] is "Allow BFG10K" -- so a moved entry relabels a row.
+// maploop.c pairs the same nine with the digits a player presses to select the
+// weapon (2..9 and 0), which is why the cfg key takes numbers.
+//
+// 9..14 are R-182's, the mission packs' six giveable weapons.  They have no
+// digit left to be named by -- the keyboard row is used up -- so `arena.cfg`
+// names them in words, and the settings menu offers a row for each only while
+// its content layer is on.  That last part is why the mask rebuild in
+// ra2menus.c consults RA_PackWeaponOffered() rather than clearing all six: a
+// bit whose row is not drawn has to be carried, or an admin who came to change
+// the round count strips every pack weapon from the arena.
+//
+// The Disruptor is not among them: `weapon_disintegrator` is IT_NOT_GIVEABLE
+// (R-16), so a bit for it could never be honoured.
+#define RA_NUM_WEAPON_BITS      15
+#define RA_NUM_PACK_WEAPONS     6
+// Bits 9..14 as one value: the half of the mask that belongs to the packs, as
+// opposed to the donor's 0..8.  The two halves are decided separately now (see
+// RA_LayerWeaponBits below), so the split has a name.
+#define RA_PACK_WEAPON_MASK     0x7e00
+
+extern  int         weapon_vals[RA_NUM_WEAPON_BITS];
+
+// One row per bit 9..14: what `arena.cfg` calls it, what the arena settings
+// menu calls it, and which content layer it belongs to.  ONE table, because the
+// three consumers -- the cfg parser, the menu that draws the row and the menu
+// that reads the row back -- would otherwise each carry their own copy of the
+// same six-way correspondence, and a fourth weapon added later would have to
+// find all three.
+typedef struct {
+    const char      *cfgname;   // the token `weapons:` accepts
+    const char      *menulabel; // padded to 23 chars, like the donor's nine
+    content_layer_t layer;      // the cvar that decides whether it is offered
+} ra_pack_weapon_t;
+
+extern  const ra_pack_weapon_t ra_pack_weapons[RA_NUM_PACK_WEAPONS];
+
+// Is pack weapon `i` offered by the arena settings menu at all?  Its layer's
+// cvar decides: a server running neither pack never sees a row for either
+// pack's weapons, and R-MODE-3 makes that a question about the LAYER rather
+// than about the ruleset.
+bool        RA_PackWeaponOffered(int i);
+// Which pack weapon a settings-menu row names, or -1.  The menu reads its rows
+// back by label, so this is the inverse of `menulabel`.
+int         RA_PackWeaponRow(const char *label);
+// Every pack-weapon bit whose layer is switched on: the DEFAULT pack half of an
+// arena's `weapons` mask, and the mask give_ammo() honours a cfg's pack bits
+// through.
+//
+// R-182 gave the pack half no default at all -- an arena.cfg that named no pack
+// weapon left bits 9..14 clear -- and reasoned that this makes `weapons:` mean
+// what it always did.  It does, and that is the defect: EVERY arena in RA2's
+// shipped arena.cfg names a `weapons:` line, all of them written in 1999 and
+// none of them able to hold an opinion about a weapon that did not exist.  So
+// `xatrix 1` drew two new menu rows, both reading NO, and handed out no
+// Reckoning weapon on any arena of any map -- the layer was observable in the
+// menu and nowhere else.  A line that names none of the six has no opinion
+// about them; only a line that names one (or `nopack`) does.
+int         RA_LayerWeaponBits(void);
+
+// The team a client is on, or NULL when it is on none -- see the comment on the
+// implementation.  Both halves: a negative teamnum, and a teamnum whose slot is
+// empty.
+team_t      *RA_TeamOf(edict_t *e);
+
+// The weapon bits an arena actually hands out -- its stored mask minus every
+// pack weapon whose content layer is off.  See the comment on the
+// implementation; `sv arenadump` prints both numbers side by side.
+int         RA_ArenaGrantsMask(int arenanum);
 
 int         count_queue(qmenu_t *head);
 int         count_players_queue(qmenu_t *head);
@@ -386,8 +507,14 @@ edict_t     *SelectFarthestArenaSpawnPoint(char *classn, int arenanum, edict_t *
 // report; see the block above RA_BotFillArena() in arena.c for why the answer
 // comes from `arena.cfg` for one kind of arena and from the map for the other.
 int         RA_BotFillArena(void);
-int         RA_BotFillTarget(int arenanum);
-void        RA_BotFillNoMore(int achieved);
+// R-RA-9: the `arena` userinfo key a bot the fill is adding should carry, or 0
+// for "follow the people".  bl_spawn.c asks at bot creation; see the block
+// above the definition for why a staging bot must still get 0.
+int         RA_BotFillDestination(void);
+int         RA_BotFillTarget(int arenanum);     // unclamped -- BotFillTarget()
+                                                // owns the ceilings for every
+                                                // ruleset now
+bool        RA_ArenaIsPickup(int arenanum);
 int         RA_ArenaPlayers(int arenanum, int *bots);
 char        *RA_ArenaBotName(int arenanum);
 
@@ -447,6 +574,8 @@ char        *get_next_map(char *current);        // maploop.c
 void        multi_arena_think(void);
 void        RA_CheckRules(void);
 void        RA_EndLevel(void);
+void        RA_HookThink(edict_t *ent);
+void        RA_Precache(void);
 int         RA_SkinIcon(edict_t *ent);
 void        RA_ZBotSample(edict_t *ent, usercmd_t *ucmd);
 void        RA_Obituary(edict_t *self, edict_t *inflictor, edict_t *attacker);

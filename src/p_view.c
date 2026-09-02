@@ -861,7 +861,7 @@ static void G_SetClientEffects(edict_t *ent)
     // The colours are the donor's and are not arbitrary -- they are what a
     // tourney player reads across a room to know which rune the other player
     // is carrying.
-    if (G_Ruleset() == RULESET_TOURNEY)
+    if (G_IsOspRuleset())
         OSP_runesShell(ent);
 
 //PGM
@@ -1079,7 +1079,7 @@ void ClientEndServerFrame(edict_t *ent)
         // and team columns stay on screen over the end-of-level board.  The
         // second half is the hi-score board, which is the ONLY scoreboard that
         // keeps refreshing during intermission (R-OSP-9's `hs_mode`).
-        if (G_Ruleset() == RULESET_TOURNEY) {
+        if (G_IsOspRuleset()) {
             OSP_clearStats(ent);
             if (ent->client->showscores && !(level.framenum & 31) &&
                 hs_mode && !(ent->flags & FL_BOT)) {
@@ -1165,7 +1165,13 @@ void ClientEndServerFrame(edict_t *ent)
     // chase cam stuff.  G_IsObserver() rather than resp.spectator: under ctf an
     // observer is a CTF_NOTEAM player and resp.spectator is never set, so the
     // inherited test would give an observer a live player's HUD (R-CTF-5).
-    if (G_IsObserver(ent))
+    // R-193: NOT for tourney.  The donor deleted baseq2's spectator system, so
+    // it has no G_SetSpectatorStats and writes an observer's HUD through
+    // G_SetStats like anybody else's -- with the `entered` tests inside it doing
+    // the narrowing (STAT_FRAGS 0 for a client that has not entered, R-191).
+    // Routing an OSP observer to the spectator stats would be this port's
+    // invention rather than the donor's behaviour.
+    if (G_IsObserver(ent) && !G_IsOspRuleset())
         G_SetSpectatorStats(ent);
     else
         G_SetStats(ent);
@@ -1180,7 +1186,7 @@ void ClientEndServerFrame(edict_t *ent)
     // observing gets the panels blanked, a client in its first ten frames does
     // not get them at all (the configstrings it would point at are still being
     // built), and a bot never gets a unicast.
-    if (G_Ruleset() == RULESET_TOURNEY) {
+    if (G_IsOspRuleset()) {
         if (ent->client->resp.osp_r2dc)
             OSP_clearStats(ent);
         else if (level.framenum - ent->client->resp.enterframe > 10 &&
@@ -1211,7 +1217,7 @@ void ClientEndServerFrame(edict_t *ent)
                 watcher->client->ps.stats[STAT_LAYOUTS] = LAYOUTS_LAYOUT;
                 watcher->client->ps.stats[STAT_FRAGS] = 0;
                 watcher->client->ps.stats[STAT_HELPICON] = 0;
-                if (watcher->client->osp_t03c && m_mode < 2)
+                if (watcher->client->osp_t03c && !OSP_IsTeams())
                     G_SetStat(watcher, SID_OSP_STATUS3, 0);
             }
             ent->client->resp.osp_r000 = count;
@@ -1219,9 +1225,11 @@ void ClientEndServerFrame(edict_t *ent)
 
         // R-OSP-3: a powerup running out is a logged event, because the report
         // wants to know how long the player actually held it -- `osp_r200` is
-        // the frame they picked it up on and is cleared once BOTH powerups are
-        // gone, so a player holding quad and invulnerability at once does not
-        // lose the second one's start time to the first one's expiry.
+        // the ENTITY it came from (g_items.c:264) and is cleared once BOTH
+        // powerups are gone, so a player holding quad and invulnerability at
+        // once does not lose the second one's source to the first one's expiry.
+        // TossClientWeapon closes the two cases this reader cannot see: a quad
+        // dropped on death, and one held with DF_QUAD_DROP off (R-195.6).
         if (ent->client->resp.osp_r200) {
             if (ent->client->quad_framenum &&
                 ent->client->quad_framenum < level.framenum) {
@@ -1313,8 +1321,25 @@ void ClientEndServerFrame(edict_t *ent)
         // the arena board's 32-frame redraw for as long as the observer menu
         // was up, which is all the time.
         if (G_MenuActive(ent) && ent->client->menu_owner != MENU_ARENA) {
+            // Composing is what makes this a redraw.  MENU_TOURNEY reached
+            // here and composed NOTHING before 1.31, so the unicast below sent
+            // an EMPTY message every 32 frames -- the branch was claiming the
+            // channel off the scoreboard and then not drawing on it.  It now
+            // repaints the same way MENU_CTF does.  MENU_BOT still composes
+            // nothing: p_botmenu.c drives its own repaint off `redrawmenu`.
+            //
+            // This is a REPAINT, not a refresh.  Both engines redraw the
+            // client's private copy of the rows, and only a builder plus
+            // osp_PMenu_Sync() changes what is in that copy, so Team_Menu's
+            // "*(%d players)" is still the count from when the menu was opened
+            // or last acted on.  RA2 is the only one of the three that closes
+            // that gap (RA_RefreshMenuCounts out of MenuThink, R-136), and it
+            // can because a qmenu_t knows how to rebuild itself; a pmenu_t
+            // handle does not record which builder made it.
             if (ent->client->menu_owner == MENU_CTF)
                 ctf_PMenu_Do_Update(ent);
+            else if (ent->client->menu_owner == MENU_TOURNEY)
+                osp_PMenu_Do_Update(ent);
             ent->client->menudirty = false;
             ent->client->menutime = level.time;
         } else {

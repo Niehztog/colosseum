@@ -68,7 +68,11 @@ void        SendMenu(edict_t *ent);
 void        SendStatusBar(edict_t *ent, const char *string, bool transmit);
 void        DisplayMenu(edict_t *ent);
 qmenu_t     *CreateQMenu(edict_t *ent, char *title);
-qmenu_t     *AddMenuItem(qmenu_t *menu, char *text, char *value, int num, menuselect_t select);
+// `text` and `value` are const: both are COPIED into TAG_LEVEL storage and
+// never written through, and R-182 passes a row label out of a
+// `const ra_pack_weapon_t []`.  Every existing caller still compiles --
+// char * converts to const char * on its own.
+qmenu_t     *AddMenuItem(qmenu_t *menu, const char *text, const char *value, int num, menuselect_t select);
 void        FinishMenu(edict_t *ent, qmenu_t *menu, bool show);
 void        MenuNext(edict_t *ent);
 void        MenuPrev(edict_t *ent);

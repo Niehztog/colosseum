@@ -90,6 +90,9 @@ void    OSP_Stats_Vote(const char *result, const char *what, const char *value);
 
 // items
 void    OSP_Stats_ItemPickup(const char *name, int entnum, edict_t *ent);
+// The cheap half, gated by `stats_logallpickups` -- which lives in osp_stats.c,
+// so the shared call sites ask through this instead of carrying the test.
+void    OSP_statsPickupMinor(const char *name, edict_t *ent);
 void    OSP_Stats_ItemUse(const char *name, edict_t *ent);
 void    OSP_Stats_ItemExpire(const char *name, edict_t *ent, int entnum);
 void    OSP_Stats_ItemDrop(const char *name, int entnum, edict_t *ent);
