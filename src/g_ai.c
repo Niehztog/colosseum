@@ -45,15 +45,15 @@ will be null.
 In coop games, sight_client will cycle between the clients.
 =================
 */
-void AI_SetSightClient(void)
+static edict_t *NextSightClient(edict_t *previous, int excluded_flags)
 {
     edict_t *ent;
     int     start, check;
 
-    if (level.sight_client == NULL)
+    if (previous == NULL)
         start = 1;
     else
-        start = level.sight_client - g_edicts;
+        start = previous - g_edicts;
 
     check = start;
     while (1) {
@@ -61,15 +61,23 @@ void AI_SetSightClient(void)
         if (check > game.maxclients)
             check = 1;
         ent = &g_edicts[check];
-            if (ent->inuse && ent->health > 0 && !(ent->flags & (FL_NOTARGET | FL_DISGUISED))) {
-            level.sight_client = ent;
-            return;     // got one
-        }
-        if (check == start) {
-            level.sight_client = NULL;
-            return;     // nobody to see
-        }
+        if (ent->inuse && ent->health > 0 && !(ent->flags & excluded_flags))
+            return ent;
+        if (check == start)
+            return NULL;
     }
+}
+
+void AI_SetSightClient(void)
+{
+    /*
+     * A base/Xatrix monster may notice a disguised client while an effective
+     * Rogue monster may not.  One rotating cache cannot express both answers
+     * when Rogue-only monsters coexist with a server running rogue 0.
+     */
+    level.sight_client = NextSightClient(level.sight_client, FL_NOTARGET);
+    level.rogue_sight_client = NextSightClient(level.rogue_sight_client,
+                                                FL_NOTARGET | FL_DISGUISED);
 }
 
 //============================================================================
@@ -98,8 +106,8 @@ Distance is for slight position adjustments needed by the animations
 void ai_stand(edict_t *self, float dist)
 {
     vec3_t  v;
-    // PMM
     bool retval;
+    bool rogue = M_UsesRogueBehavior(self);
 
     if (dist)
         M_walkmove(self, self->s.angles[YAW], dist);
@@ -112,26 +120,24 @@ void ai_stand(edict_t *self, float dist)
                 self->monsterinfo.aiflags &= ~(AI_STAND_GROUND | AI_TEMP_STAND_GROUND);
                 self->monsterinfo.run(self);
             }
-            if (!(self->monsterinfo.aiflags & AI_MANUAL_STEERING))
+            if (!rogue || !(self->monsterinfo.aiflags & AI_MANUAL_STEERING))
                 M_ChangeYaw(self);
-            // PMM
-            // find out if we're going to be shooting
-            retval = ai_checkattack(self, 0);
-            // record sightings of player
-            if ((self->enemy) && (self->enemy->inuse) && (visible(self, self->enemy))) {
-                self->monsterinfo.aiflags &= ~AI_LOST_SIGHT;
-                VectorCopy(self->enemy->s.origin, self->monsterinfo.last_sighting);
-                VectorCopy(self->enemy->s.origin, self->monsterinfo.blind_fire_target);
-                self->monsterinfo.trail_framenum = level.framenum;
-                self->monsterinfo.blind_fire_delay = 0;
+            if (rogue) {
+                retval = ai_checkattack(self, 0);
+                if ((self->enemy) && (self->enemy->inuse) &&
+                    visible(self, self->enemy)) {
+                    self->monsterinfo.aiflags &= ~AI_LOST_SIGHT;
+                    VectorCopy(self->enemy->s.origin, self->monsterinfo.last_sighting);
+                    VectorCopy(self->enemy->s.origin, self->monsterinfo.blind_fire_target);
+                    self->monsterinfo.trail_framenum = level.framenum;
+                    self->monsterinfo.blind_fire_delay = 0;
+                } else if (!retval) {
+                    FindTarget(self);
+                    return;
+                }
+            } else {
+                ai_checkattack(self, 0);
             }
-            // check retval to make sure we're not blindfiring
-            else if (!retval) {
-                FindTarget(self);
-                return;
-            }
-//          ai_checkattack (self, 0);
-            // pmm
         } else
             FindTarget(self);
         return;
@@ -148,7 +154,12 @@ void ai_stand(edict_t *self, float dist)
     if (!(self->spawnflags & 1) && (self->monsterinfo.idle) && (level.framenum > self->monsterinfo.idle_framenum)) {
         if (self->monsterinfo.idle_framenum) {
             self->monsterinfo.idle(self);
-            self->monsterinfo.idle_framenum = level.framenum + (15 + random() * 15) * BASE_FRAMERATE;
+            if (rogue)
+                self->monsterinfo.idle_framenum = level.framenum +
+                    (15 + random() * 15) * BASE_FRAMERATE;
+            else
+                self->monsterinfo.idle_framenum = level.framenum +
+                    (1 + random()) * 15 * BASE_FRAMERATE;
         } else {
             self->monsterinfo.idle_framenum = level.framenum + random() * 15 * BASE_FRAMERATE;
         }
@@ -164,6 +175,8 @@ The monster is walking it's beat
 */
 void ai_walk(edict_t *self, float dist)
 {
+    bool rogue = M_UsesRogueBehavior(self);
+
     M_MoveToGoal(self, dist);
 
     // check for noticing a player
@@ -173,7 +186,12 @@ void ai_walk(edict_t *self, float dist)
     if ((self->monsterinfo.search) && (level.framenum > self->monsterinfo.idle_framenum)) {
         if (self->monsterinfo.idle_framenum) {
             self->monsterinfo.search(self);
-            self->monsterinfo.idle_framenum = level.framenum + (15 + random() * 15) * BASE_FRAMERATE;
+            if (rogue)
+                self->monsterinfo.idle_framenum = level.framenum +
+                    (15 + random() * 15) * BASE_FRAMERATE;
+            else
+                self->monsterinfo.idle_framenum = level.framenum +
+                    (1 + random()) * 15 * BASE_FRAMERATE;
         } else {
             self->monsterinfo.idle_framenum = level.framenum + random() * 15 * BASE_FRAMERATE;
         }
@@ -191,17 +209,24 @@ Use this call with a distance of 0 to replace ai_face
 void ai_charge(edict_t *self, float dist)
 {
     vec3_t  v;
-    // PMM
     float   ofs;
-    // PMM
+
+    // Tesla targeting is relationship state shared by both behavior arms.
+    if (!self->enemy || !self->enemy->inuse)
+        return;
+
+    if (!M_UsesRogueBehavior(self)) {
+        VectorSubtract(self->enemy->s.origin, self->s.origin, v);
+        self->ideal_yaw = vectoyaw(v);
+        M_ChangeYaw(self);
+
+        if (dist)
+            M_walkmove(self, self->s.angles[YAW], dist);
+        return;
+    }
 
     // PMM - made AI_MANUAL_STEERING affect things differently here .. they turn, but
     // don't set the ideal_yaw
-
-    // This is put in there so monsters won't move towards the origin after killing
-    // a tesla. This could be problematic, so keep an eye on it.
-    if (!self->enemy || !self->enemy->inuse)    //PGM
-        return;                                 //PGM
 
     // PMM - save blindfire target
     if (visible(self, self->enemy))
@@ -262,8 +287,7 @@ void ai_turn(edict_t *self, float dist)
     if (FindTarget(self))
         return;
 
-    if (!(self->monsterinfo.aiflags & AI_MANUAL_STEERING))
-        M_ChangeYaw(self);
+    M_ChangeYaw(self);
 }
 
 /*
@@ -338,7 +362,8 @@ bool visible(edict_t *self, edict_t *other)
     spot2[2] += other->viewheight;
     trace = gi.trace(spot1, vec3_origin, vec3_origin, spot2, self, MASK_OPAQUE);
 
-    if (trace.fraction == 1.0f || trace.ent == other)        // PGM
+    if (trace.fraction == 1.0f ||
+        (M_UsesRogueBehavior(self) && trace.ent == other))
         return true;
     return false;
 }
@@ -388,9 +413,8 @@ void FoundTarget(edict_t *self)
 {
     // let other monsters see this monster for a while
     if (self->enemy->client) {
-        if (self->enemy->flags & FL_DISGUISED) {
-//          level.disguise_violator = self->enemy;
-//          level.disguise_violation_framenum = level.framenum + 5;
+        if (M_UsesRogueBehavior(self) &&
+            (self->enemy->flags & FL_DISGUISED)) {
             self->enemy->flags &= ~FL_DISGUISED;
         }
 
@@ -403,10 +427,10 @@ void FoundTarget(edict_t *self)
 
     VectorCopy(self->enemy->s.origin, self->monsterinfo.last_sighting);
     self->monsterinfo.trail_framenum = level.framenum;
-    // PMM
-    VectorCopy(self->enemy->s.origin, self->monsterinfo.blind_fire_target);
-    self->monsterinfo.blind_fire_delay = 0;
-    // PMM
+    if (M_UsesRogueBehavior(self)) {
+        VectorCopy(self->enemy->s.origin, self->monsterinfo.blind_fire_target);
+        self->monsterinfo.blind_fire_delay = 0;
+    }
 
     if (!self->combattarget) {
         HuntTarget(self);
@@ -454,7 +478,10 @@ bool FindTarget(edict_t *self)
 {
     edict_t     *client;
     bool        heardit;
+    bool        rogue;
     int         r;
+
+    rogue = M_UsesRogueBehavior(self);
 
     if (self->monsterinfo.aiflags & AI_GOOD_GUY) {
         if (self->goalentity && self->goalentity->inuse && self->goalentity->classname)
@@ -481,7 +508,12 @@ bool FindTarget(edict_t *self)
         client = level.sight_entity;
         if (client->enemy == self->enemy)
             return false;
-    } else if (level.disguise_violation_framenum > level.framenum) {
+        if (rogue && client->enemy && client->enemy->client &&
+            (client->enemy->flags & FL_DISGUISED))
+            return false;
+    } else if (rogue &&
+               level.disguise_violation_framenum > level.framenum &&
+               level.disguise_violator) {
         client = level.disguise_violator;
     } else if (level.sound_entity_framenum >= (level.framenum - 1)) {
         client = level.sound_entity;
@@ -490,7 +522,7 @@ bool FindTarget(edict_t *self)
         client = level.sound2_entity;
         heardit = true;
     } else {
-        client = level.sight_client;
+        client = rogue ? level.rogue_sight_client : level.sight_client;
         if (!client)
             return false;   // no clients to get mad at
     }
@@ -502,13 +534,10 @@ bool FindTarget(edict_t *self)
     if (client == self->enemy)
         return true;    // JDC false;
 
-    //PMM - hintpath coop fix
-    if ((self->monsterinfo.aiflags & AI_HINT_PATH) && (coop) && (coop->value)) {
-//      if ((heardit) && (g_showlogic) && (g_showlogic->value))
-//          gi.dprintf ("ignoring coop sound target\n");
+    if (rogue && (self->monsterinfo.aiflags & AI_HINT_PATH) && coop &&
+        coop->value) {
         heardit = false;
     }
-    // pmm
 
     if (client->client) {
         if (client->flags & FL_NOTARGET)
@@ -519,8 +548,12 @@ bool FindTarget(edict_t *self)
         if (client->enemy->flags & FL_NOTARGET)
             return false;
     } else if (heardit) {
-        // pgm - a little more paranoia won't hurt....
-        if ((client->owner) && (client->owner->flags & FL_NOTARGET))
+        // Gladiator's NULL check sits OUTSIDE its ROGUE fence
+        // (gladq2_src/g_ai.c:597), so under R-200 it is the integration
+        // decision for BOTH arms rather than Ground Zero's own addition.
+        // The base donor's bare deref is the arm R-211 rejects: it can only
+        // differ from this one by crashing.
+        if (client->owner && (client->owner->flags & FL_NOTARGET))
             return false;
     } else
         return false;
@@ -583,7 +616,7 @@ bool FindTarget(edict_t *self)
                 return false;
 
         self->ideal_yaw = vectoyaw(temp);
-        if (!(self->monsterinfo.aiflags & AI_MANUAL_STEERING))
+        if (!rogue || !(self->monsterinfo.aiflags & AI_MANUAL_STEERING))
             M_ChangeYaw(self);
 
         // hunt the sound for a bit; hopefully find the real player
@@ -594,17 +627,11 @@ bool FindTarget(edict_t *self)
 //
 // got one
 //
-    // PMM - if we got an enemy, we need to bail out of hint paths, so take over here
-    if (self->monsterinfo.aiflags & AI_HINT_PATH) {
-//      if(g_showlogic && g_showlogic->value)
-//          gi.dprintf("stopped following hint paths in FindTarget\n");
-
-        // this calls foundtarget for us
+    if (rogue && (self->monsterinfo.aiflags & AI_HINT_PATH)) {
         hintpath_stop(self);
     } else {
         FoundTarget(self);
     }
-    // pmm
     if (!(self->monsterinfo.aiflags & AI_SOUND_TARGET) && (self->monsterinfo.sight))
         self->monsterinfo.sight(self, self->enemy);
 
@@ -631,11 +658,82 @@ bool FacingIdeal(edict_t *self)
 
 //=============================================================================
 
+static bool bq2_M_CheckAttack(edict_t *self)
+{
+    vec3_t  spot1, spot2;
+    float   chance;
+    trace_t tr;
+
+    if (self->enemy->health > 0) {
+        VectorCopy(self->s.origin, spot1);
+        spot1[2] += self->viewheight;
+        VectorCopy(self->enemy->s.origin, spot2);
+        spot2[2] += self->enemy->viewheight;
+
+        tr = gi.trace(spot1, NULL, NULL, spot2, self,
+                      CONTENTS_SOLID | CONTENTS_MONSTER | CONTENTS_SLIME |
+                      CONTENTS_LAVA | CONTENTS_WINDOW);
+        if (tr.ent != self->enemy)
+            return false;
+    }
+
+    if (enemy_range == RANGE_MELEE) {
+        if (skill->value == 0 && (Q_rand() & 3))
+            return false;
+        if (self->monsterinfo.melee)
+            self->monsterinfo.attack_state = AS_MELEE;
+        else
+            self->monsterinfo.attack_state = AS_MISSILE;
+        return true;
+    }
+
+    if (!self->monsterinfo.attack)
+        return false;
+    if (level.time < self->monsterinfo.attack_finished)
+        return false;
+    if (enemy_range == RANGE_FAR)
+        return false;
+
+    if (self->monsterinfo.aiflags & AI_STAND_GROUND)
+        chance = 0.4f;
+    else if (enemy_range == RANGE_MELEE)
+        chance = 0.2f;
+    else if (enemy_range == RANGE_NEAR)
+        chance = 0.1f;
+    else if (enemy_range == RANGE_MID)
+        chance = 0.02f;
+    else
+        return false;
+
+    if (skill->value == 0)
+        chance *= 0.5f;
+    else if (skill->value >= 2)
+        chance *= 2;
+
+    if (random() < chance) {
+        self->monsterinfo.attack_state = AS_MISSILE;
+        self->monsterinfo.attack_finished = level.time + 2 * random();
+        return true;
+    }
+
+    if (self->flags & FL_FLY) {
+        if (random() < 0.3f)
+            self->monsterinfo.attack_state = AS_SLIDING;
+        else
+            self->monsterinfo.attack_state = AS_STRAIGHT;
+    }
+
+    return false;
+}
+
 bool M_CheckAttack(edict_t *self)
 {
     vec3_t  spot1, spot2;
     float   chance = 0;
     trace_t tr;
+
+    if (!M_UsesRogueBehavior(self))
+        return bq2_M_CheckAttack(self);
 
     if (self->enemy->health > 0) {
         // see if any entities are in the way of the shot
@@ -777,6 +875,17 @@ Turn and close until within an angle to launch a melee attack
 */
 static void ai_run_melee(edict_t *self)
 {
+    if (!M_UsesRogueBehavior(self)) {
+        self->ideal_yaw = enemy_yaw;
+        M_ChangeYaw(self);
+
+        if (FacingIdeal(self)) {
+            self->monsterinfo.melee(self);
+            self->monsterinfo.attack_state = AS_STRAIGHT;
+        }
+        return;
+    }
+
     self->ideal_yaw = enemy_yaw;
     if (!(self->monsterinfo.aiflags & AI_MANUAL_STEERING))
         M_ChangeYaw(self);
@@ -796,6 +905,17 @@ Turn in place until within an angle to launch a missile attack
 */
 static void ai_run_missile(edict_t *self)
 {
+    if (!M_UsesRogueBehavior(self)) {
+        self->ideal_yaw = enemy_yaw;
+        M_ChangeYaw(self);
+
+        if (FacingIdeal(self)) {
+            self->monsterinfo.attack(self);
+            self->monsterinfo.attack_state = AS_STRAIGHT;
+        }
+        return;
+    }
+
     self->ideal_yaw = enemy_yaw;
     if (!(self->monsterinfo.aiflags & AI_MANUAL_STEERING))
         M_ChangeYaw(self);
@@ -821,6 +941,23 @@ static void ai_run_slide(edict_t *self, float distance)
 {
     float   ofs;
     float   angle;
+
+    if (!M_UsesRogueBehavior(self)) {
+        self->ideal_yaw = enemy_yaw;
+        M_ChangeYaw(self);
+
+        if (self->monsterinfo.lefty)
+            ofs = 90;
+        else
+            ofs = -90;
+
+        if (M_walkmove(self, self->ideal_yaw + ofs, distance))
+            return;
+
+        self->monsterinfo.lefty = 1 - self->monsterinfo.lefty;
+        M_walkmove(self, self->ideal_yaw - ofs, distance);
+        return;
+    }
 
     self->ideal_yaw = enemy_yaw;
 
@@ -916,12 +1053,105 @@ Decides if we're going to attack or do something else
 used by ai_run and ai_stand
 =============
 */
+static bool bq2_ai_checkattack(edict_t *self, float dist)
+{
+    vec3_t  temp;
+    bool    hesDeadJim;
+
+    if (self->goalentity) {
+        if (self->monsterinfo.aiflags & AI_COMBAT_POINT)
+            return false;
+
+        if (self->monsterinfo.aiflags & AI_SOUND_TARGET) {
+            if ((level.framenum - self->enemy->last_sound_framenum) >
+                5.0f * BASE_FRAMERATE) {
+                if (self->goalentity == self->enemy) {
+                    if (self->movetarget)
+                        self->goalentity = self->movetarget;
+                    else
+                        self->goalentity = NULL;
+                }
+                self->monsterinfo.aiflags &= ~AI_SOUND_TARGET;
+                if (self->monsterinfo.aiflags & AI_TEMP_STAND_GROUND)
+                    self->monsterinfo.aiflags &=
+                        ~(AI_STAND_GROUND | AI_TEMP_STAND_GROUND);
+            } else {
+                self->show_hostile = level.framenum + BASE_FRAMERATE;
+                return false;
+            }
+        }
+    }
+
+    enemy_vis = false;
+    hesDeadJim = false;
+    if (!self->enemy || !self->enemy->inuse) {
+        hesDeadJim = true;
+    } else if (self->monsterinfo.aiflags & AI_MEDIC) {
+        if (self->enemy->health > 0) {
+            hesDeadJim = true;
+            self->monsterinfo.aiflags &= ~AI_MEDIC;
+        }
+    } else if (self->monsterinfo.aiflags & AI_BRUTAL) {
+        if (self->enemy->health <= -80)
+            hesDeadJim = true;
+    } else if (self->enemy->health <= 0) {
+        hesDeadJim = true;
+    }
+
+    if (hesDeadJim) {
+        self->enemy = NULL;
+        if (self->oldenemy && self->oldenemy->health > 0) {
+            self->enemy = self->oldenemy;
+            self->oldenemy = NULL;
+            HuntTarget(self);
+        } else {
+            if (self->movetarget) {
+                self->goalentity = self->movetarget;
+                self->monsterinfo.walk(self);
+            } else {
+                self->monsterinfo.pause_framenum = INT_MAX;
+                self->monsterinfo.stand(self);
+            }
+            return true;
+        }
+    }
+
+    self->show_hostile = level.framenum + BASE_FRAMERATE;
+    enemy_vis = visible(self, self->enemy);
+    if (enemy_vis) {
+        self->monsterinfo.search_framenum =
+            level.framenum + 5 * BASE_FRAMERATE;
+        VectorCopy(self->enemy->s.origin, self->monsterinfo.last_sighting);
+    }
+
+    enemy_range = range(self, self->enemy);
+    VectorSubtract(self->enemy->s.origin, self->s.origin, temp);
+    enemy_yaw = vectoyaw(temp);
+
+    if (self->monsterinfo.attack_state == AS_MISSILE) {
+        ai_run_missile(self);
+        return true;
+    }
+    if (self->monsterinfo.attack_state == AS_MELEE) {
+        ai_run_melee(self);
+        return true;
+    }
+
+    if (!enemy_vis)
+        return false;
+
+    return self->monsterinfo.checkattack(self);
+}
+
 static bool ai_checkattack(edict_t *self, float dist)
 {
     vec3_t      temp;
     bool    hesDeadJim;
     // PMM
     bool    retval;
+
+    if (!M_UsesRogueBehavior(self))
+        return bq2_ai_checkattack(self, dist);
 
 // this causes monsters to run blindly to the combat point w/o firing
     if (self->goalentity) {
@@ -1067,6 +1297,174 @@ ai_run
 The monster has an enemy it is trying to kill
 =============
 */
+static void bq2_ai_run(edict_t *self, float dist)
+{
+    vec3_t  v;
+    edict_t *tempgoal;
+    edict_t *save;
+    bool    new;
+    edict_t *marker;
+    float   d1, d2;
+    trace_t tr;
+    vec3_t  v_forward, v_right;
+    float   left, center, right;
+    vec3_t  left_target, right_target;
+
+    if (self->monsterinfo.aiflags & AI_COMBAT_POINT) {
+        M_MoveToGoal(self, dist);
+        return;
+    }
+
+    if (self->monsterinfo.aiflags & AI_SOUND_TARGET) {
+        VectorSubtract(self->s.origin, self->enemy->s.origin, v);
+        if (VectorLength(v) < 64) {
+            self->monsterinfo.aiflags |=
+                AI_STAND_GROUND | AI_TEMP_STAND_GROUND;
+            self->monsterinfo.stand(self);
+            return;
+        }
+
+        M_MoveToGoal(self, dist);
+        if (!FindTarget(self))
+            return;
+    }
+
+    if (ai_checkattack(self, dist))
+        return;
+
+    if (self->monsterinfo.attack_state == AS_SLIDING) {
+        ai_run_slide(self, dist);
+        return;
+    }
+
+    if (enemy_vis) {
+        M_MoveToGoal(self, dist);
+        self->monsterinfo.aiflags &= ~AI_LOST_SIGHT;
+        VectorCopy(self->enemy->s.origin, self->monsterinfo.last_sighting);
+        self->monsterinfo.trail_framenum = level.framenum;
+        return;
+    }
+
+    if (coop->value) {
+        if (FindTarget(self))
+            return;
+    }
+
+    if (self->monsterinfo.search_framenum &&
+        level.framenum > self->monsterinfo.search_framenum +
+                         20 * BASE_FRAMERATE) {
+        M_MoveToGoal(self, dist);
+        self->monsterinfo.search_framenum = 0;
+        return;
+    }
+
+    save = self->goalentity;
+    tempgoal = G_Spawn();
+    self->goalentity = tempgoal;
+    new = false;
+
+    if (!(self->monsterinfo.aiflags & AI_LOST_SIGHT)) {
+        self->monsterinfo.aiflags |= AI_LOST_SIGHT | AI_PURSUIT_LAST_SEEN;
+        self->monsterinfo.aiflags &= ~(AI_PURSUE_NEXT | AI_PURSUE_TEMP);
+        new = true;
+    }
+
+    if (self->monsterinfo.aiflags & AI_PURSUE_NEXT) {
+        self->monsterinfo.aiflags &= ~AI_PURSUE_NEXT;
+        self->monsterinfo.search_framenum =
+            level.framenum + 5 * BASE_FRAMERATE;
+
+        if (self->monsterinfo.aiflags & AI_PURSUE_TEMP) {
+            self->monsterinfo.aiflags &= ~AI_PURSUE_TEMP;
+            marker = NULL;
+            VectorCopy(self->monsterinfo.saved_goal,
+                       self->monsterinfo.last_sighting);
+            new = true;
+        } else if (self->monsterinfo.aiflags & AI_PURSUIT_LAST_SEEN) {
+            self->monsterinfo.aiflags &= ~AI_PURSUIT_LAST_SEEN;
+            marker = PlayerTrail_PickFirst(self);
+        } else {
+            marker = PlayerTrail_PickNext(self);
+        }
+
+        if (marker) {
+            VectorCopy(marker->s.origin, self->monsterinfo.last_sighting);
+            self->monsterinfo.trail_framenum = marker->timestamp;
+            self->s.angles[YAW] = self->ideal_yaw = marker->s.angles[YAW];
+            new = true;
+        }
+    }
+
+    VectorSubtract(self->s.origin, self->monsterinfo.last_sighting, v);
+    d1 = VectorLength(v);
+    if (d1 <= dist) {
+        self->monsterinfo.aiflags |= AI_PURSUE_NEXT;
+        dist = d1;
+    }
+
+    VectorCopy(self->monsterinfo.last_sighting, self->goalentity->s.origin);
+
+    if (new) {
+        tr = gi.trace(self->s.origin, self->mins, self->maxs,
+                      self->monsterinfo.last_sighting, self, MASK_PLAYERSOLID);
+        if (tr.fraction < 1) {
+            VectorSubtract(self->goalentity->s.origin, self->s.origin, v);
+            d1 = VectorLength(v);
+            center = tr.fraction;
+            d2 = d1 * ((center + 1) / 2);
+            self->s.angles[YAW] = self->ideal_yaw = vectoyaw(v);
+            AngleVectors(self->s.angles, v_forward, v_right, NULL);
+
+            VectorSet(v, d2, -16, 0);
+            G_ProjectSource(self->s.origin, v, v_forward, v_right, left_target);
+            tr = gi.trace(self->s.origin, self->mins, self->maxs, left_target,
+                          self, MASK_PLAYERSOLID);
+            left = tr.fraction;
+
+            VectorSet(v, d2, 16, 0);
+            G_ProjectSource(self->s.origin, v, v_forward, v_right, right_target);
+            tr = gi.trace(self->s.origin, self->mins, self->maxs, right_target,
+                          self, MASK_PLAYERSOLID);
+            right = tr.fraction;
+
+            center = (d1 * center) / d2;
+            if (left >= center && left > right) {
+                if (left < 1) {
+                    VectorSet(v, d2 * left * 0.5f, -16, 0);
+                    G_ProjectSource(self->s.origin, v, v_forward, v_right,
+                                    left_target);
+                }
+                VectorCopy(self->monsterinfo.last_sighting,
+                           self->monsterinfo.saved_goal);
+                self->monsterinfo.aiflags |= AI_PURSUE_TEMP;
+                VectorCopy(left_target, self->goalentity->s.origin);
+                VectorCopy(left_target, self->monsterinfo.last_sighting);
+                VectorSubtract(self->goalentity->s.origin, self->s.origin, v);
+                self->s.angles[YAW] = self->ideal_yaw = vectoyaw(v);
+            } else if (right >= center && right > left) {
+                if (right < 1) {
+                    VectorSet(v, d2 * right * 0.5f, 16, 0);
+                    G_ProjectSource(self->s.origin, v, v_forward, v_right,
+                                    right_target);
+                }
+                VectorCopy(self->monsterinfo.last_sighting,
+                           self->monsterinfo.saved_goal);
+                self->monsterinfo.aiflags |= AI_PURSUE_TEMP;
+                VectorCopy(right_target, self->goalentity->s.origin);
+                VectorCopy(right_target, self->monsterinfo.last_sighting);
+                VectorSubtract(self->goalentity->s.origin, self->s.origin, v);
+                self->s.angles[YAW] = self->ideal_yaw = vectoyaw(v);
+            }
+        }
+    }
+
+    M_MoveToGoal(self, dist);
+    G_FreeEdict(tempgoal);
+
+    if (self->inuse)
+        self->goalentity = save;
+}
+
 void ai_run(edict_t *self, float dist)
 {
     vec3_t      v;
@@ -1084,6 +1482,11 @@ void ai_run(edict_t *self, float dist)
     bool    alreadyMoved = false;
     bool    gotcha = false;
     edict_t     *realEnemy;
+
+    if (!M_UsesRogueBehavior(self)) {
+        bq2_ai_run(self, dist);
+        return;
+    }
 
     // if we're going to a combat point, just proceed
     if (self->monsterinfo.aiflags & AI_COMBAT_POINT) {

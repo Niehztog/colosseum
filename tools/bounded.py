@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""No unbounded string copy anywhere in the game library (R-SEC-1, R-VER-30).
+"""No unbounded string copy or raw token scan anywhere in the game library.
 
 WHY.  R-SEC-1 names the reachable paths -- userinfo, a client command, a chat
 string, an address string, a config file -- and asks that every `strcpy`,
@@ -15,6 +15,11 @@ So the rule this tool enforces is the stronger one that is actually decidable:
 `Q_strlcpy`, `Q_strlcat`, `Q_snprintf` or an explicit `memcpy` with a length the
 call itself computed.  That is a ban, and a ban is checkable; "is this one
 reachable?" is not.
+
+The arena.cfg reader used unbounded `fscanf(..., "%s", ...)` for a raw config
+token.  Unlike the copy calls, a bounded replacement must reject a token that
+does not fit rather than silently parse its tail as another token.  This audit
+therefore rejects every unbounded string conversion in fscanf as well.
 
 WHAT IS EXEMPT, AND WHY IT IS A PATH AND NOT A NAME.  `src/shared/` is vendored
 byte-identical from `q2pro/src/shared` (SPECS.md 5.2) and is diffed against it
@@ -57,6 +62,7 @@ BANNED = {
     'strncpy':  'Q_strlcpy -- strncpy does not terminate on truncation',
     'strncat':  'Q_strlcat -- strncat bounds the SOURCE, not the destination',
 }
+FSCANF_ADVICE = 'read and reject an overlong token explicitly'
 
 # Directories under the tree that are vendored verbatim from q2pro and diffed
 # against it elsewhere.  A path, not a file list: a new file in there is a new
@@ -64,6 +70,13 @@ BANNED = {
 EXEMPT_DIRS = ('shared',)
 
 CALL = re.compile(r'(?<![\w.>])(' + '|'.join(sorted(BANNED, key=len, reverse=True)) + r')\s*\(')
+FSCANF = re.compile(r'(?<![\w.>])fscanf\s*\(')
+# A scanset has the same destination-buffer rule as an s conversion.  The
+# optional zeroes reject `%0s`, which does not establish a positive bound.
+# `%4095s` and `%9[abc]` remain permitted.  An even run of percent signs is
+# literal text; an odd run ends in the actual conversion.
+UNBOUNDED_FSCANF_STRING = re.compile(
+    r'(?<!%)(?:%%)*%(?:\*)?0*(?:hh|ll|[hljztL])*(?:s|\[)')
 
 
 def strip_comments(t):
@@ -82,6 +95,39 @@ def strip_comments(t):
     t = re.sub(r'"(?:\\.|[^"\\\n])*"', lambda m: ' ' * len(m.group(0)), t)
     t = re.sub(r"'(?:\\.|[^'\\\n])*'", lambda m: ' ' * len(m.group(0)), t)
     return t
+
+
+def strip_comments_keep_literals(t):
+    """Blank comments while retaining literals at their original offsets."""
+    out = list(t)
+    i = 0
+    while i < len(t):
+        if t.startswith('//', i):
+            end = t.find('\n', i)
+            end = len(t) if end < 0 else end
+            out[i:end] = ' ' * (end - i)
+            i = end
+        elif t.startswith('/*', i):
+            end = t.find('*/', i + 2)
+            end = len(t) - 2 if end < 0 else end
+            for n in range(i, end + 2):
+                if t[n] != '\n':
+                    out[n] = ' '
+            i = end + 2
+        elif t[i] in '"\'':
+            quote = t[i]
+            i += 1
+            while i < len(t):
+                if t[i] == '\\':
+                    i += 2
+                    continue
+                if t[i] == quote:
+                    i += 1
+                    break
+                i += 1
+        else:
+            i += 1
+    return ''.join(out)
 
 
 def sources(tree):
@@ -104,11 +150,20 @@ def scan(tree):
         with open(path, encoding='utf-8') as fh:
             text = fh.read()
         code = strip_comments(text)
+        literals = strip_comments_keep_literals(text)
         raw = text.splitlines()
         for m in CALL.finditer(code):
             line = code.count('\n', 0, m.start()) + 1
             hits.append((os.path.relpath(path, REPO), line, m.group(1),
                          raw[line - 1].strip() if line <= len(raw) else ''))
+        for m in FSCANF.finditer(code):
+            end = literals.find(';', m.start())
+            if end < 0:
+                continue
+            if UNBOUNDED_FSCANF_STRING.search(literals[m.start():end]):
+                line = code.count('\n', 0, m.start()) + 1
+                hits.append((os.path.relpath(path, REPO), line, 'fscanf %s',
+                             raw[line - 1].strip() if line <= len(raw) else ''))
     return hits
 
 
@@ -126,6 +181,15 @@ void f(char *dst, const char *src) {
     'member.c': '''
 void g(void) { gi.dprintf("x"); }
 ''',
+    # A width makes the conversion bounded; the arena parser needs its own
+    # stricter reject-not-split helper, but this must not reject a safe scanf.
+    'arena/maploop.c': '''
+void read_word(FILE *fp, char *word) {
+    fscanf(fp, "%4095s", word);
+    fscanf(fp, "%9[abc]", word);
+    fscanf(fp, "%%s", word);
+}
+''',
 }
 
 SELFTEST_MUTANTS = [
@@ -136,11 +200,15 @@ SELFTEST_MUTANTS = [
      'void h(char *d, char *s) { strncpy(d, s, 8); }'),
     ('a call split across lines', 'bad.c',
      'void h(char *d, char *s)\n{\n    strcpy\n        (d, s);\n}'),
+    ('an unbounded fscanf string token', 'arena/maploop.c',
+     'void h(FILE *fp, char *d) { fscanf(fp, "%s", d); }'),
+    ('a zero-width fscanf string token', 'arena/maploop.c',
+     'void h(FILE *fp, char *d) { fscanf(fp, "%0s", d); }'),
 ]
 
 
 def selftest():
-    """Five mutations that must be caught, and one clean tree that must not be.
+    """Seven mutations that must be caught, and one clean tree that must not be.
 
     The split-across-lines mutant is the one worth having: the first version of
     this tool matched `strcpy\\s*\\(` on a single line and a donor that had been
@@ -150,7 +218,9 @@ def selftest():
     tmp = tempfile.mkdtemp(prefix='bounded-selftest-')
     try:
         for name, body in SELFTEST_TREE.items():
-            with open(os.path.join(tmp, name), 'w') as fh:
+            path = os.path.join(tmp, name)
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            with open(path, 'w') as fh:
                 fh.write(body)
         # also prove the exemption is a directory and covers what it claims
         os.mkdir(os.path.join(tmp, 'shared'))
@@ -192,9 +262,10 @@ def main():
 
     hits = scan(os.path.abspath(a.tree))
     for path, line, name, text in hits:
-        print('!! %s:%d: %s -- use %s' % (path, line, name, BANNED[name]))
+        advice = FSCANF_ADVICE if name == 'fscanf %s' else BANNED[name]
+        print('!! %s:%d: %s -- use %s' % (path, line, name, advice))
     kinds = sorted({h[2] for h in hits})
-    print('bounded: %d unbounded copy site(s)%s' %
+    print('bounded: %d unbounded copy or raw-scan site(s)%s' %
           (len(hits), (' -- ' + ', '.join(kinds)) if kinds else ''))
     return 1 if hits else 0
 

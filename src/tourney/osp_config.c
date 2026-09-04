@@ -63,8 +63,12 @@ void OSP_configLoad(void)
     conf_size = 0;
 
     {
-        G_FsGamePath(path, sizeof(path),
-                     list ? list->string : "serverconfigs.txt");
+        if (!G_FsGamePath(path, sizeof(path),
+                          list ? list->string : "serverconfigs.txt")) {
+            gi.dprintf("Server config list path is too long. No configs loaded.\n\n");
+            gi.cvar_set("vote_enable_config", "0");
+            return;
+        }
 
         f = fopen(path, "r");
         if (f) {
@@ -93,11 +97,15 @@ void OSP_configLoad(void)
                         Q_strlcpy(conf_info[i], p, sizeof(conf_info[i]));
                     }
 
-                    G_FsGamePath(path, sizeof(path), line);
-                    if (OSP_configFileExists(path))
-                        Q_strlcpy(conf_name[i], line, sizeof(conf_name[i]));
-                    else
+                    if (!G_FsGamePath(path, sizeof(path), line)) {
+                        gi.dprintf("Server config path is too long, skipping \"%s\".\n",
+                                   line);
                         i--;
+                    } else if (OSP_configFileExists(path)) {
+                        Q_strlcpy(conf_name[i], line, sizeof(conf_name[i]));
+                    } else {
+                        i--;
+                    }
                 } else
                     i--;
             }
@@ -120,12 +128,15 @@ void OSP_configLoad(void)
 
                 if ((int)cdefault->value && cdefname->string &&
                     strcmp(cdefname->string, "default")) {
-                    G_FsGamePath(path, sizeof(path), cdefname->string);
-
-                    if (OSP_configFileExists(path))
+                    if (!G_FsGamePath(path, sizeof(path), cdefname->string)) {
+                        gi.dprintf("** Default config path is too long!\n");
+                        gi.dprintf("** No default config will be used.\n");
+                        gi.cvar_set("vote_config_default", "0");
+                        gi.cvar_set("vote_config_defaultname", "default");
+                    } else if (OSP_configFileExists(path)) {
                         gi.dprintf("** Default config is: %s\n",
                                    cdefname->string);
-                    else {
+                    } else {
                         gi.dprintf("** Default config \"%s\" not found!\n",
                                    cdefname->string);
                         gi.dprintf("** No default config will be used.\n");

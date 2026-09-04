@@ -686,7 +686,8 @@ void SP_monster_supertank(edict_t *self)
     self->monsterinfo.search = supertank_search;
     self->monsterinfo.melee = NULL;
     self->monsterinfo.sight = NULL;
-    self->monsterinfo.blocked = supertank_blocked;      //PGM
+    if (self->content_flavour & CONTENT_ROGUE)
+        self->monsterinfo.blocked = supertank_blocked;
 
     gi.linkentity(self);
 
@@ -699,7 +700,6 @@ void SP_monster_supertank(edict_t *self)
     }
     walkmonster_start(self);
 
-    //PMM
-    self->monsterinfo.aiflags |= AI_IGNORE_SHOTS;
-    //pmm
+    if (self->content_flavour & CONTENT_ROGUE)
+        self->monsterinfo.aiflags |= AI_IGNORE_SHOTS;
 }

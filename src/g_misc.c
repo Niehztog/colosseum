@@ -1189,10 +1189,11 @@ void SP_misc_explobox(edict_t *self)
 
     self->touch = barrel_touch;
 
-//PGM - change so barrels will think and hence, blow up
-    self->think = barrel_start;
+    if (self->content_flavour & CONTENT_ROGUE)
+        self->think = barrel_start;
+    else
+        self->think = M_droptofloor;
     self->nextthink = level.framenum + 2;
-//PGM
 
     gi.linkentity(self);
 }
@@ -1397,9 +1398,12 @@ void misc_deadsoldier_die(edict_t *self, edict_t *inflictor, edict_t *attacker, 
 {
     int     n;
 
-//  if (self->health > -80)
-    if (self->health > -30)
+    if (self->content_flavour & CONTENT_ROGUE) {
+        if (self->health > -30)
+            return;
+    } else if (self->health > -80) {
         return;
+    }
 
     gi.sound(self, CHAN_BODY, gi.soundindex("misc/udeath.wav"), 1, ATTN_NORM, 0);
     for (n = 0; n < 4; n++)
@@ -2039,6 +2043,11 @@ void teleporter_touch(edict_t *self, edict_t *other, cplane_t *plane, csurface_t
         return;
 
     if (G_Ruleset() == RULESET_ARENA && self->arena > 0) {
+        if (self->arena > num_arenas || self->arena > MAX_ARENAS) {
+            gi.dprintf("Invalid arena teleporter target %d\n", self->arena);
+            return;
+        }
+
         if (other->client->resp.teamnum != -1) {
             AddtoArena(other, self->arena, 1, 0);
             return;

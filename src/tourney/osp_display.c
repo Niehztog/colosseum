@@ -65,54 +65,57 @@ void OSP_setMOTD(void)
         char    path[MAX_OSPATH];
         char    *p = path;
 
-        G_FsGamePath(path, sizeof(path),
-                     motdfile ? motdfile->string : "motd.txt");
-
-        f = fopen(p, "r");
-
-        if (f) {
-            if (!motd_read) {
-                gi.dprintf("MOTD: Reading from \"%s\"\n", motdfile->string);
-                motd_read = 1;
-            }
-            for (lines = 0; lines < 9; lines++) {
-                for (i = 0; i < 33; i++)
-                    motdpage[lines][i] = 0;
-
-                for (i = 0; i < 33; i++) {
-                    c = fgetc(f);
-                    if (c == -1 || c == '\n')
-                        break;
-                    motdpage[lines][i] = c;
+        if (!G_FsGamePath(path, sizeof(path),
+                          motdfile ? motdfile->string : "motd.txt")) {
+            gi.dprintf("MOTD: Path too long for \"%s\"\n",
+                       motdfile ? motdfile->string : "motd.txt");
+            lines = 0;
+        } else {
+            f = fopen(p, "r");
+            if (f) {
+                if (!motd_read) {
+                    gi.dprintf("MOTD: Reading from \"%s\"\n", motdfile->string);
+                    motd_read = 1;
                 }
+                for (lines = 0; lines < 9; lines++) {
+                    for (i = 0; i < 33; i++)
+                        motdpage[lines][i] = 0;
 
-                // Windows' CRT translates CRLF to LF on a text-mode fgetc, so a
-                // motd.txt with Windows line endings never shows the CR to this
-                // loop there; on Unix fopen's "r" does no such translation.
+                    for (i = 0; i < 33; i++) {
+                        c = fgetc(f);
+                        if (c == -1 || c == '\n')
+                            break;
+                        motdpage[lines][i] = c;
+                    }
+
+                    // Windows' CRT translates CRLF to LF on a text-mode fgetc, so a
+                    // motd.txt with Windows line endings never shows the CR to this
+                    // loop there; on Unix fopen's "r" does no such translation.
 #ifndef _WIN32
-                if (i && motdpage[lines][i - 1] == '\r')
-                    motdpage[lines][i - 1] = 0;
+                    if (i && motdpage[lines][i - 1] == '\r')
+                        motdpage[lines][i - 1] = 0;
 #endif
 
-                if (i == 33) {
-                    motdpage[lines][32] = 0;
-                    while (c != '\n' && c != -1)
-                        c = fgetc(f);
+                    if (i == 33) {
+                        motdpage[lines][32] = 0;
+                        while (c != '\n' && c != -1)
+                            c = fgetc(f);
+                    }
+
+                    if (c == -1)
+                        break;
                 }
 
-                if (c == -1)
-                    break;
+                if (i)
+                    lines++;
+                if (lines > 9)
+                    lines = 9;
+
+                fclose(f);
+            } else {
+                gi.dprintf("MOTD: Couldn't open \"%s\"\n", motdfile->string);
+                lines = 0;
             }
-
-            if (i)
-                lines++;
-            if (lines > 9)
-                lines = 9;
-
-            fclose(f);
-        } else {
-            gi.dprintf("MOTD: Couldn't open \"%s\"\n", motdfile->string);
-            lines = 0;
         }
     }
 
@@ -742,9 +745,9 @@ appended:
     }
 
     if (level.intermission_framenum != 0 && sync_stat != 8)
-        ent->client->ps.stats[27] = OSP_CS(10);
+        G_SetStat(ent, SID_OSP_LAYOUT1, OSP_CS(10));
     else
-        ent->client->ps.stats[27] = OSP_CS(9);
+        G_SetStat(ent, SID_OSP_LAYOUT1, OSP_CS(9));
 
     gi.WriteByte(svc_layout);
     gi.WriteString(buf);

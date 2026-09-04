@@ -203,8 +203,12 @@ void OSP_loadMaps(void)
                 char    path[MAX_OSPATH];
                 char    *pathptr = path;
 
-                G_FsGamePath(path, sizeof(path),
-                             mfile ? mfile->string : "maps.txt");
+                if (!G_FsGamePath(path, sizeof(path),
+                                  mfile ? mfile->string : "maps.txt")) {
+                    gi.dprintf("Colosseum: map list path is too long; the OSP "
+                               "rotation falls back to sv_maplist\n");
+                    return;
+                }
 
                 f = fopen(pathptr, "r");
                 if (f) {

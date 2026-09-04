@@ -265,9 +265,10 @@ void gunner_pain(edict_t *self, edict_t *other, float kick, int damage)
     if (self->health < (self->max_health / 2))
         self->s.skinnum = 1;
 
-    monster_done_dodge(self);
+    if (self->content_flavour & CONTENT_ROGUE)
+        monster_done_dodge(self);
 
-    if (!self->groundentity) {
+    if ((self->content_flavour & CONTENT_ROGUE) && !self->groundentity) {
 //      if ((g_showlogic) && (g_showlogic->value))
 //          gi.dprintf ("gunner: pain avoided due to no ground\n");
         return;
@@ -293,11 +294,12 @@ void gunner_pain(edict_t *self, edict_t *other, float kick, int damage)
     else
         self->monsterinfo.currentmove = &gunner_move_pain1;
 
-    self->monsterinfo.aiflags &= ~AI_MANUAL_STEERING;
+    if (self->content_flavour & CONTENT_ROGUE) {
+        self->monsterinfo.aiflags &= ~AI_MANUAL_STEERING;
 
-    // PMM - clear duck flag
-    if (self->monsterinfo.aiflags & AI_DUCKED)
-        monster_duck_up(self);
+        if (self->monsterinfo.aiflags & AI_DUCKED)
+            monster_duck_up(self);
+    }
 }
 
 static void gunner_dead(edict_t *self)
@@ -558,6 +560,32 @@ static void GunnerGrenade(edict_t *self)
     monster_fire_grenade(self, start, aim, 50, 600, flash_number);
 }
 
+// baseq2's, which The Reckoning inherits unchanged -- Ground Zero rewrote
+// GunnerGrenade above to lead the target and to blindfire, so the two ship side
+// by side and `bq2_gunner_frames_attack_grenade` calls this one.
+static void bq2_GunnerGrenade(edict_t *self)
+{
+    vec3_t start;
+    vec3_t forward, right;
+    vec3_t aim;
+    int flash_number;
+
+    if (self->s.frame == FRAME_attak105)
+        flash_number = MZ2_GUNNER_GRENADE_1;
+    else if (self->s.frame == FRAME_attak108)
+        flash_number = MZ2_GUNNER_GRENADE_2;
+    else if (self->s.frame == FRAME_attak111)
+        flash_number = MZ2_GUNNER_GRENADE_3;
+    else
+        flash_number = MZ2_GUNNER_GRENADE_4;
+
+    AngleVectors(self->s.angles, forward, right, NULL);
+    G_ProjectSource(self->s.origin, monster_flash_offset[flash_number], forward, right, start);
+    VectorCopy(forward, aim);
+
+    monster_fire_grenade(self, start, aim, 50, 600, flash_number);
+}
+
 static const mframe_t gunner_frames_attack_chain[] = {
     { ai_charge, 0, gunner_opengun },
     { ai_charge, 0, NULL },
@@ -639,16 +667,16 @@ static const mframe_t bq2_gunner_frames_attack_grenade[] = {
     { ai_charge, 0, NULL },
     { ai_charge, 0, NULL },
     { ai_charge, 0, NULL },
-    { ai_charge, 0, GunnerGrenade },
+    { ai_charge, 0, bq2_GunnerGrenade },
     { ai_charge, 0, NULL },
     { ai_charge, 0, NULL },
-    { ai_charge, 0, GunnerGrenade },
+    { ai_charge, 0, bq2_GunnerGrenade },
     { ai_charge, 0, NULL },
     { ai_charge, 0, NULL },
-    { ai_charge, 0, GunnerGrenade },
+    { ai_charge, 0, bq2_GunnerGrenade },
     { ai_charge, 0, NULL },
     { ai_charge, 0, NULL },
-    { ai_charge, 0, GunnerGrenade },
+    { ai_charge, 0, bq2_GunnerGrenade },
     { ai_charge, 0, NULL },
     { ai_charge, 0, NULL },
     { ai_charge, 0, NULL },
@@ -663,6 +691,16 @@ const mmove_t bq2_gunner_move_attack_grenade = {FRAME_attak101, FRAME_attak121, 
 void gunner_attack(edict_t *self)
 {
     float chance, r;
+
+    if (!(self->content_flavour & CONTENT_ROGUE)) {
+        if (range(self, self->enemy) == RANGE_MELEE)
+            self->monsterinfo.currentmove = &gunner_move_attack_chain;
+        else if (random() <= 0.5f)
+            self->monsterinfo.currentmove = &bq2_gunner_move_attack_grenade;
+        else
+            self->monsterinfo.currentmove = &gunner_move_attack_chain;
+        return;
+    }
 
     monster_done_dodge(self);
 
@@ -1131,15 +1169,16 @@ void SP_monster_gunner(edict_t *self)
     self->monsterinfo.melee = NULL;
     self->monsterinfo.sight = gunner_sight;
     self->monsterinfo.search = gunner_search;
-    self->monsterinfo.blocked = gunner_blocked;     //PGM
+    if (self->content_flavour & CONTENT_ROGUE)
+        self->monsterinfo.blocked = gunner_blocked;
 
     gi.linkentity(self);
 
     self->monsterinfo.currentmove = &gunner_move_stand;
     self->monsterinfo.scale = MODEL_SCALE;
 
-    // PMM
-    self->monsterinfo.blindfire = true;
+    if (self->content_flavour & CONTENT_ROGUE)
+        self->monsterinfo.blindfire = true;
 
     walkmonster_start(self);
 }

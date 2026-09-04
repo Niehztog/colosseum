@@ -592,8 +592,10 @@ void SP_monster_parasite(edict_t *self)
     self->monsterinfo.attack = parasite_attack;
     self->monsterinfo.sight = parasite_sight;
     self->monsterinfo.idle = parasite_idle;
-    self->monsterinfo.blocked = parasite_blocked;       // PGM
-    self->monsterinfo.checkattack = parasite_checkattack;
+    if (self->content_flavour & CONTENT_ROGUE) {
+        self->monsterinfo.blocked = parasite_blocked;
+        self->monsterinfo.checkattack = parasite_checkattack;
+    }
 
     gi.linkentity(self);
 

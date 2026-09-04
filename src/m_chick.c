@@ -256,7 +256,8 @@ void chick_pain(edict_t *self, edict_t *other, float kick, int damage)
 {
     float   r;
 
-    monster_done_dodge(self);
+    if (self->content_flavour & CONTENT_ROGUE)
+        monster_done_dodge(self);
 
     if (self->health < (self->max_health / 2))
         self->s.skinnum = 1;
@@ -274,11 +275,9 @@ void chick_pain(edict_t *self, edict_t *other, float kick, int damage)
     else
         gi.sound(self, CHAN_VOICE, sound_pain3, 1, ATTN_NORM, 0);
 
-    if (skill->value == 3)
+    if (skill->value == 3 &&
+        !(self->content_flavour & CONTENT_XATRIX))
         return;     // no pain anims in nightmare
-
-    // PMM - clear this from blindfire
-    self->monsterinfo.aiflags &= ~AI_MANUAL_STEERING;
 
     if (damage <= 10)
         self->monsterinfo.currentmove = &chick_move_pain1;
@@ -287,9 +286,12 @@ void chick_pain(edict_t *self, edict_t *other, float kick, int damage)
     else
         self->monsterinfo.currentmove = &chick_move_pain3;
 
-    // PMM - clear duck flag
-    if (self->monsterinfo.aiflags & AI_DUCKED)
-        monster_duck_up(self);
+    if (self->content_flavour & CONTENT_ROGUE) {
+        self->monsterinfo.aiflags &= ~AI_MANUAL_STEERING;
+
+        if (self->monsterinfo.aiflags & AI_DUCKED)
+            monster_duck_up(self);
+    }
 }
 
 static void chick_dead(edict_t *self)
@@ -487,6 +489,37 @@ static void ChickSlash(edict_t *self)
     fire_hit(self, aim, (10 + (Q_rand() % 6)), 100);
 }
 
+// *** THE SKIN IS THE SELECTOR, AND THE CONTENT LATCH HAS NO BUSINESS HERE. ***
+//
+// The Reckoning's heat-seeking chick is a SEPARATE ENTITY, not a variant of the
+// shared one: `monster_chick_heat` has its own spawn-table row, and
+// `SP_monster_chick_heat` is `SP_monster_chick` plus `s.skinnum = 3`.  Nothing
+// else on a chick ever writes a skin above 1 -- `chick_pain`'s is `= 1` -- so
+// `skinnum > 1` means "this is that entity" and cannot be true of id's chick.
+// That is the donor's own test, `port_xatrix:m_chick.c:437`, verbatim.
+//
+// It carried `content_flavour & CONTENT_XATRIX` as well, and that was wrong.
+// The latch is set in ED_CallSpawn from `G_LayerEnabled`, so it says whether the
+// SERVER has the layer on -- it is not a property of the entity.  Its job is to
+// choose between two donors' versions of a monster BOTH of them have; a
+// pack-exclusive entity is not that case.  The spawn path refuses nothing when a
+// layer is off, so `monster_gekk`, `monster_widow` and the rest keep working;
+// only the heat chick silently lost its weapon and threw plain rockets, which is
+// the silent-wrong-answer shape ED_CallSpawn's own comment was written against.
+//
+// NOT a defect, and not to be "fixed": The Reckoning left `chick_pain`'s
+// `s.skinnum = 1` alone, so a heat chick hurt below half health drops to skin 1
+// and fires rockets for the rest of its life.  That is the donor's behaviour --
+// the 2023 rerelease is the tree that changed it, to `|= 1` / `&= ~1` -- and
+// R-200 does not take that tree as a behaviour source.
+static void ChickFireProjectile(edict_t *self, vec3_t start, vec3_t dir, int speed)
+{
+    if (self->s.skinnum > 1)
+        xatrix_monster_fire_heat(self, start, dir, 50, speed, MZ2_CHICK_ROCKET_1);
+    else
+        monster_fire_rocket(self, start, dir, 50, speed, MZ2_CHICK_ROCKET_1);
+}
+
 static void ChickRocket(edict_t *self)
 {
     vec3_t  forward, right;
@@ -500,16 +533,27 @@ static void ChickRocket(edict_t *self)
     vec3_t  target;
     bool blindfire = false;
 
-    if (self->monsterinfo.aiflags & AI_MANUAL_STEERING)
-        blindfire = true;
-    else
-        blindfire = false;
-
     if (!self->enemy || !self->enemy->inuse)    //PGM
         return;                                 //PGM
 
     AngleVectors(self->s.angles, forward, right, NULL);
     G_ProjectSource(self->s.origin, monster_flash_offset[MZ2_CHICK_ROCKET_1], forward, right, start);
+
+    // Rogue replaces the direct base/Xatrix shot with blindfire, leading and
+    // trace retries. The projectile type still composes with the Xatrix layer.
+    if (!(self->content_flavour & CONTENT_ROGUE)) {
+        VectorCopy(self->enemy->s.origin, vec);
+        vec[2] += self->enemy->viewheight;
+        VectorSubtract(vec, start, dir);
+        VectorNormalize(dir);
+        ChickFireProjectile(self, start, dir, 500);
+        return;
+    }
+
+    if (self->monsterinfo.aiflags & AI_MANUAL_STEERING)
+        blindfire = true;
+    else
+        blindfire = false;
 
     rocketSpeed = 500 + (100 * skill->value);   // PGM rock & roll.... :)
 
@@ -566,7 +610,7 @@ static void ChickRocket(edict_t *self)
     if (blindfire) {
         // blindfire has different fail criteria for the trace
         if (!(trace.startsolid || trace.allsolid || (trace.fraction < 0.5f)))
-            monster_fire_rocket(self, start, dir, 50, rocketSpeed, MZ2_CHICK_ROCKET_1);
+            ChickFireProjectile(self, start, dir, rocketSpeed);
         else {
             // geez, this is bad.  she's avoiding about 80% of her blindfires due to hitting things.
             // hunt around for a good shot
@@ -577,7 +621,7 @@ static void ChickRocket(edict_t *self)
             VectorNormalize(dir);
             trace = gi.trace(start, vec3_origin, vec3_origin, vec, self, MASK_SHOT);
             if (!(trace.startsolid || trace.allsolid || (trace.fraction < 0.5f)))
-                monster_fire_rocket(self, start, dir, 50, rocketSpeed, MZ2_CHICK_ROCKET_1);
+                ChickFireProjectile(self, start, dir, rocketSpeed);
             else {
                 // ok, that failed.  try to the right
                 VectorCopy(target, vec);
@@ -586,7 +630,7 @@ static void ChickRocket(edict_t *self)
                 VectorNormalize(dir);
                 trace = gi.trace(start, vec3_origin, vec3_origin, vec, self, MASK_SHOT);
                 if (!(trace.startsolid || trace.allsolid || (trace.fraction < 0.5f)))
-                    monster_fire_rocket(self, start, dir, 50, rocketSpeed, MZ2_CHICK_ROCKET_1);
+                    ChickFireProjectile(self, start, dir, rocketSpeed);
 //              else if ((g_showlogic) && (g_showlogic->value))
 //                  // ok, I give up
 //                  gi.dprintf ("chick avoiding blindfire shot\n");
@@ -596,7 +640,7 @@ static void ChickRocket(edict_t *self)
         trace = gi.trace(start, vec3_origin, vec3_origin, vec, self, MASK_SHOT);
         if (trace.ent == self->enemy || trace.ent == world) {
             if (trace.fraction > 0.5f || (trace.ent && trace.ent->client))
-                monster_fire_rocket(self, start, dir, 50, rocketSpeed, MZ2_CHICK_ROCKET_1);
+                ChickFireProjectile(self, start, dir, rocketSpeed);
             //      else
             //          gi.dprintf("didn't make it halfway to target...aborting\n");
         }
@@ -660,15 +704,21 @@ const mmove_t chick_move_end_attack1 = {FRAME_attak128, FRAME_attak132, chick_fr
 
 static void chick_rerocket(edict_t *self)
 {
-    if (self->monsterinfo.aiflags & AI_MANUAL_STEERING) {
+    float repeat_chance = 0.6f;
+
+    if ((self->content_flavour & CONTENT_ROGUE) &&
+        (self->monsterinfo.aiflags & AI_MANUAL_STEERING)) {
         self->monsterinfo.aiflags &= ~AI_MANUAL_STEERING;
         self->monsterinfo.currentmove = &chick_move_end_attack1;
         return;
     }
+    if (self->content_flavour & CONTENT_ROGUE)
+        repeat_chance += 0.05f * skill->value;
+
     if (self->enemy->health > 0) {
         if (range(self, self->enemy) > RANGE_MELEE)
             if (visible(self, self->enemy))
-                if (random() <= (0.6f + (0.05f * ((float)skill->value)))) {
+                if (random() <= repeat_chance) {
                     self->monsterinfo.currentmove = &chick_move_attack1;
                     return;
                 }
@@ -739,10 +789,12 @@ void chick_attack(edict_t *self)
 {
     float r, chance;
 
-    monster_done_dodge(self);
+    if (self->content_flavour & CONTENT_ROGUE)
+        monster_done_dodge(self);
 
     // PMM
-    if (self->monsterinfo.attack_state == AS_BLIND) {
+    if ((self->content_flavour & CONTENT_ROGUE) &&
+        self->monsterinfo.attack_state == AS_BLIND) {
         // setup shot probabilities
         if (self->monsterinfo.blind_fire_delay < 1.0f)
             chance = 1.0f;
@@ -968,6 +1020,8 @@ void SP_monster_chick(edict_t *self)
         self->monsterinfo.duck = chick_duck;
         self->monsterinfo.unduck = monster_duck_up;
         self->monsterinfo.sidestep = chick_sidestep;
+        self->monsterinfo.blocked = chick_blocked;
+        self->monsterinfo.blindfire = true;
     } else {
         self->monsterinfo.dodge = bq2_chick_dodge;
     }
@@ -976,16 +1030,12 @@ void SP_monster_chick(edict_t *self)
     self->monsterinfo.attack = chick_attack;
     self->monsterinfo.melee = chick_melee;
     self->monsterinfo.sight = chick_sight;
-    self->monsterinfo.blocked = chick_blocked;      // PGM
 
     gi.linkentity(self);
 
     self->monsterinfo.currentmove = &chick_move_stand;
     self->monsterinfo.scale = MODEL_SCALE;
 
-    // PMM
-    self->monsterinfo.blindfire = true;
-    // pmm
     walkmonster_start(self);
 }
 

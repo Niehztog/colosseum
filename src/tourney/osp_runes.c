@@ -104,6 +104,9 @@ bool OSP_Pickup_Rune(edict_t *ent, edict_t *other)
     int     i;
     const gitem_t   *item;
 
+    if (!G_IsOspRuleset())
+        return false;
+
     i = 0;
     while (runenames[i]) {
         item = FindItemByClassname(runenames[i]);
@@ -184,6 +187,9 @@ model -- runes_model gives them all the same one.
 void OSP_Drop_Rune(edict_t *ent, const gitem_t *item)
 {
     edict_t *dropped;
+
+    if (!G_IsOspRuleset())
+        return;
 
     dropped = Drop_Item(ent, item);
 

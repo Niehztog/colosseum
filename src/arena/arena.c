@@ -40,7 +40,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 bool    allow_grapple;
 bool    broken = false;
 
-arena_t     arenas[MAX_ARENAS];
+arena_t     arenas[MAX_ARENAS + 1];
 int         num_arenas;
 bool    idmap;
 
@@ -338,7 +338,7 @@ int RA_ArenaGrantsMask(int arenanum)
 {
     int i, mask;
 
-    if (arenanum < 0 || arenanum >= MAX_ARENAS)
+    if (arenanum < 1 || arenanum > num_arenas || arenanum > MAX_ARENAS)
         return 0;
 
     // The bit is CARRIED rather than cleared: an arena.cfg is written once and
@@ -559,7 +559,9 @@ team_t *add_to_team(edict_t *ent, char *teamname)
 
 // A team name that no other team is using, in TAG_LEVEL memory because
 // add_to_team stores the POINTER rather than copying it -- the string has to
-// outlive the call and go away with the level.
+// outlive the call and go away with the level.  add_to_team retains it only
+// when it creates a team; this helper's unique name makes every successful
+// call that case, and a rejected name is freed by its caller.
 //
 // Factored out of menuNewTeam, which is also the only reason its bound is now
 // checked.  The donor uniquifies by appending "!" and restarting the scan, into
@@ -569,14 +571,19 @@ team_t *add_to_team(edict_t *ent, char *teamname)
 // it stops being unreachable.  A counted suffix cannot grow without bound.
 char *RA_NewTeamName(edict_t *ent)
 {
-    char *name = gi.TagMalloc(100, TAG_LEVEL);
+    char *name = gi.TagMalloc(ARENA_TEAMNAME_SIZE, TAG_LEVEL);
     int  suffix, i;
+
+    if (!name)
+        return NULL;
 
     for (suffix = 0; suffix < MAX_TEAMS; suffix++) {
         if (suffix)
-            Q_snprintf(name, 100, "%s's Team %d", ent->client->pers.netname, suffix + 1);
+            Q_snprintf(name, ARENA_TEAMNAME_SIZE, "%s's Team %d",
+                       ent->client->pers.netname, suffix + 1);
         else
-            Q_snprintf(name, 100, "%s's Team", ent->client->pers.netname);
+            Q_snprintf(name, ARENA_TEAMNAME_SIZE, "%s's Team",
+                       ent->client->pers.netname);
 
         for (i = 0; i < MAX_TEAMS; i++)
             if (teams[i].it && !strcmp(TEAM(&teams[i])->name, name))
@@ -585,7 +592,8 @@ char *RA_NewTeamName(edict_t *ent)
             return name;
     }
 
-    return name;
+    gi.TagFree(name);
+    return NULL;
 }
 
 // R-ARENA-2 and R-RA-4's fifteenth row, "new bots initialised into the selected
@@ -857,6 +865,7 @@ static int RA_AutoArena(void)
 void RA_BotJoinArena(edict_t *ent)
 {
     int     arenanum, k;
+    char    *name;
     team_t  *t;
 
     if (!(ent->flags & FL_BOT))
@@ -937,9 +946,15 @@ void RA_BotJoinArena(edict_t *ent)
         return;
     }
 
-    t = add_to_team(ent, RA_NewTeamName(ent));
-    if (!t)
+    name = RA_NewTeamName(ent);
+    if (!name)
         return;
+
+    t = add_to_team(ent, name);
+    if (!t) {
+        gi.TagFree(name);
+        return;
+    }
 
     remove_from_queue(&t->arenalink, NULL);
     SendTeamToArena(&teams[t->teamnum], arenanum, true, true);
@@ -1300,9 +1315,9 @@ static bool ArenaRangeFromSpot(edict_t *spot, int arenanum, edict_t *ignore,
 // spawn picker was the only thing keeping them out of each other, which is what
 // the donor's PlayersRangeFromSpot did by measuring against every live client.
 //
-// Where there ARE fighters nothing changes, so R-139's answer to "spawns by
-// where the fighters are, not the audience" is untouched, and so is R-77's
-// observers-do-not-repel-each-other.  Taken from `rocketarena2@811af42`.
+// The score remains fighter-first: an observer must not make a candidate rank
+// farther from the fight.  Candidate safety is a separate question, answered
+// below without changing this measure.  Taken from `rocketarena2@811af42`.
 static float ArenaFightersRangeFromSpot(edict_t *spot, int arenanum, edict_t *ignore)
 {
     float   range = 0;
@@ -1313,6 +1328,36 @@ static float ArenaFightersRangeFromSpot(edict_t *spot, int arenanum, edict_t *ig
     ArenaRangeFromSpot(spot, arenanum, ignore, false, &range);
 
     return range;
+}
+
+#define ARENA_SPAWN_CLEARANCE 50.0f
+
+// A live, collidable body already standing on this arena's pad is not a safe
+// placement target.  This is deliberately separate from the fighter-only
+// score: observers do not affect which clear pad ranks farthest from a fight,
+// but they do reserve the pad they physically occupy.  An id map has one
+// arena, so its untagged bodies all belong to the requested arena.
+static bool ArenaSpawnSpotClear(edict_t *spot, int arenanum, edict_t *ignore)
+{
+    edict_t *player;
+    vec3_t  v;
+    int     n;
+
+    for (n = 0; n < game.maxclients; n++) {
+        player = &g_edicts[n + 1];
+        if (!ArenaLiveBody(player, ignore))
+            continue;
+        if (player->solid == SOLID_NOT)
+            continue;
+        if (player->client->resp.context != arenanum && idmap == false)
+            continue;
+
+        VectorSubtract(spot->s.origin, player->s.origin, v);
+        if (VectorLength(v) <= ARENA_SPAWN_CLEARANCE)
+            return false;
+    }
+
+    return true;
 }
 
 // The n-th (0-based) spawn point of this arena, or NULL if there is no n-th.
@@ -1373,18 +1418,17 @@ static int ArenaSpawnCount(char *classn, int arenanum)
 // Pickup Red` placed within 60 units of each other, two of them left SOLID_NOT
 // with a spawn_recheck, which only KillBox's push branch sets.
 //
-// The fix is not to collide.  The preference is the donor's own and is written
-// down in SelectFarthestArenaSpawnPoint: 50 units of clearance from the nearest
-// live player is what that function calls a usable spot, and
-// PlayersRangeFromSpot is where R-RA-4's "observers ignored for spawn points"
-// already lives, so an audience standing on a point does not reserve it.  When
-// every point on the side IS taken the first candidate is returned anyway,
-// because that is RA2's stated fallback in the other selector -- "if there is a
-// player just spawned on each and every start spot we have no choice to turn
-// one into a telefrag meltdown".
+// The fix is not to collide.  Fighter distance chooses the preferred clear
+// point, and ArenaSpawnSpotClear reserves a same-arena solid body's actual
+// pad without letting that body influence the ranking.  If no clear point has
+// fighter clearance, the first clear point is still preferable to a collision.
+// Only when every point on the side IS taken is the first candidate returned,
+// because that is RA2's stated fallback -- "if there is a player just spawned
+// on each and every start spot we have no choice to turn one into a telefrag
+// meltdown".
 edict_t *SelectRandomArenaSpawnPoint(char *classn, int arenanum, int side, edict_t *ignore)
 {
-    edict_t     *spot, *first = NULL;
+    edict_t     *spot, *first = NULL, *clear = NULL;
     int         count;
     int         selection, step, i;
 
@@ -1416,11 +1460,15 @@ edict_t *SelectRandomArenaSpawnPoint(char *classn, int arenanum, int side, edict
             continue;
         if (!first)
             first = spot;
-        if (ArenaFightersRangeFromSpot(spot, arenanum, ignore) > 50)
+        if (!ArenaSpawnSpotClear(spot, arenanum, ignore))
+            continue;
+        if (!clear)
+            clear = spot;
+        if (ArenaFightersRangeFromSpot(spot, arenanum, ignore) > ARENA_SPAWN_CLEARANCE)
             return spot;
     }
 
-    return first;
+    return clear ? clear : first;
 }
 
 edict_t *SelectFarthestArenaSpawnPoint(char *classn, int arenanum, edict_t *ignore)
@@ -1431,10 +1479,11 @@ edict_t *SelectFarthestArenaSpawnPoint(char *classn, int arenanum, edict_t *igno
 
     spot = NULL;
     bestspot = NULL;
-    bestdistance = 50;
+    bestdistance = ARENA_SPAWN_CLEARANCE;
     while ((spot = G_Find(spot, FOFS(classname), classn)) != NULL) {
         //gi.bprintf (PRINT_HIGH,"arena %d spot %d\n", arenanum, spot->arena);
         if (spot->arena != arenanum && idmap == false) continue;
+        if (!ArenaSpawnSpotClear(spot, arenanum, ignore)) continue;
         bestplayerdistance = ArenaFightersRangeFromSpot(spot, arenanum, ignore);
 
         if (bestplayerdistance > bestdistance) {
@@ -2315,6 +2364,22 @@ void SendTeamToArena(qmenu_t *team, int arenanum, bool observer, bool announce)
 int AddtoArena(edict_t *ent, int arenanum, int allow_partial, int skip_checks)
 {
     int     membercount;
+    int     teamnum;
+    qmenu_t *teamnode;
+    team_t  *team;
+
+    if (!ent || !ent->client || !teams)
+        return 1;
+
+    teamnum = ent->client->resp.teamnum;
+    if (arenanum < 1 || arenanum > num_arenas || arenanum > MAX_ARENAS ||
+        teamnum < 0 || teamnum >= MAX_TEAMS)
+        return 1;
+
+    teamnode = &teams[teamnum];
+    team = TEAM(teamnode);
+    if (!team || team->teamnum != teamnum)
+        return 1;
 
     if (!skip_checks) {
         if (arenas[arenanum].minping && ent->client->ping < arenas[arenanum].minping) {
@@ -2343,22 +2408,22 @@ int AddtoArena(edict_t *ent, int arenanum, int allow_partial, int skip_checks)
         }
     }
 
-    membercount = count_queue(&teams[ent->client->resp.teamnum]);
+    membercount = count_queue(teamnode);
 
     if (!(membercount != arenas[arenanum].playersperteam
           && (membercount > arenas[arenanum].playersperteam || !allow_partial))) {
-        TEAM(&teams[ent->client->resp.teamnum])->outofline = skip_checks;
+        team->outofline = skip_checks;
 
         if (!skip_checks) {
-            remove_from_queue(&TEAM(&teams[ent->client->resp.teamnum])->arenalink, NULL);
-            SendTeamToArena(&teams[ent->client->resp.teamnum], arenanum, true, true);
+            remove_from_queue(&team->arenalink, NULL);
+            SendTeamToArena(teamnode, arenanum, true, true);
         } else
-            SendTeamToArena(&teams[ent->client->resp.teamnum], arenanum, true, false);
+            SendTeamToArena(teamnode, arenanum, true, false);
 
         return 0;
     }
 
-    if (count_queue(&teams[ent->client->resp.teamnum]) < arenas[arenanum].playersperteam) {
+    if (membercount < arenas[arenanum].playersperteam) {
         show_teamconfirm_menu(ent, arenanum);
         return 1;
     }
@@ -2387,6 +2452,7 @@ void check_teams(int arenanum)
         remove_from_queue(&TEAM(&teams[i])->arenalink, NULL);
         gi.dprintf("Clearing team %d (%s)\n", TEAM(&teams[i])->teamnum,
                    TEAM(&teams[i])->name);
+        gi.TagFree(TEAM(&teams[i])->name);
         gi.TagFree(TEAM(&teams[i]));
         teams[i].it = NULL;
     }
@@ -3312,10 +3378,16 @@ void arena_init(edict_t *wsent)
     // nothing gets, exactly as it always has.
 
     num_arenas = wsent->arena;  //worldspawn arena flag is # of arenas
-    if (!num_arenas) {
+    if (num_arenas < 0 || num_arenas > MAX_ARENAS) {
+        gi.dprintf("Invalid worldspawn arena count %d; using one id arena\n",
+                   num_arenas);
         num_arenas = 1;
         idmap = true;
-    } else idmap = false;
+    } else if (!num_arenas) {
+        num_arenas = 1;
+        idmap = true;
+    } else
+        idmap = false;
 
     load_config(num_arenas + 1);
     set_config(1, num_arenas);
@@ -3345,8 +3417,10 @@ void arena_init(edict_t *wsent)
             t = add_to_team(NULL, name);
             // add_to_team can refuse now (the MAX_TEAMS guard above), and this
             // caller dereferenced it unconditionally.
-            if (!t)
+            if (!t) {
+                gi.TagFree(name);
                 continue;
+            }
             t->side = 0;
             SendTeamToArena(t->arenalink.it, i, true, true);
             arenas[i].pickupteam[0] = t;
@@ -3354,8 +3428,10 @@ void arena_init(edict_t *wsent)
             name = gi.TagMalloc(ARENA_TEAMNAME_SIZE, TAG_LEVEL);
             Q_snprintf(name, ARENA_TEAMNAME_SIZE, "#%d Pickup Blue", i);
             t = add_to_team(NULL, name);
-            if (!t)
+            if (!t) {
+                gi.TagFree(name);
                 continue;
+            }
             t->side = 1;
             SendTeamToArena(t->arenalink.it, i, true, true);
             arenas[i].pickupteam[1] = t;

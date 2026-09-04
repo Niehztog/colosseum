@@ -799,9 +799,8 @@ void SP_monster_makron(edict_t *self)
 
     walkmonster_start(self);
 
-    //PMM
-    self->monsterinfo.aiflags |= AI_IGNORE_SHOTS;
-    //pmm
+    if (self->content_flavour & CONTENT_ROGUE)
+        self->monsterinfo.aiflags |= AI_IGNORE_SHOTS;
 }
 
 /*
@@ -817,8 +816,12 @@ void MakronSpawn(edict_t *self)
 
     SP_monster_makron(self);
 
-    // jump at player
-    player = level.sight_client;
+    // jump at player.  R-203 gave the two arms separate caches, and this
+    // reader chooses on the Makron's own resolved flavor: a Rogue-effective
+    // Makron must not notice a disguised player, which is exactly what the
+    // base cache still reports (R-211).
+    player = M_UsesRogueBehavior(self) ? level.rogue_sight_client
+                                       : level.sight_client;
     if (!player)
         return;
 
@@ -842,6 +845,8 @@ void MakronToss(edict_t *self)
     edict_t *ent;
 
     ent = G_Spawn();
+    // This delayed direct spawn bypasses ED_CallSpawn's content-flavour latch.
+    ent->content_flavour = self->content_flavour;
     ent->nextthink = level.framenum + 0.8f * BASE_FRAMERATE;
     ent->think = MakronSpawn;
     ent->target = self->target;

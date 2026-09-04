@@ -45,6 +45,17 @@ cvar_t  *goallimit;
 void DBall_BallDie(edict_t *self, edict_t *inflictor, edict_t *attacker, int damage, vec3_t point);
 void DBall_BallRespawn(edict_t *self);
 
+// R-211, the same shape as dm_tag.c's Tag_Active().  Deathball is commented
+// out of InitGameRules(), so `gamerules 3` used to be reset to 0 by its
+// `default:` arm before any map could spawn a dball entity.  R-203 stopped
+// calling InitGameRules() outside CTF/Arena, which removed that reset -- so
+// under OSP the six spawn functions below saw a live 3 and let a dball map
+// build a goal, a ball and its start points with no game running them.
+static bool DBall_Active(void)
+{
+    return G_UsesRogueGameRules() && (int)gamerules->value == RDM_DEATHBALL;
+}
+
 // **************************
 // Game rules
 // **************************
@@ -514,7 +525,7 @@ void SP_dm_dball_ball(edict_t *self)
         return;
     }
 
-    if (gamerules && (gamerules->value != RDM_DEATHBALL)) {
+    if (!DBall_Active()) {
         G_FreeEdict(self);
         return;
     }
@@ -549,7 +560,7 @@ void SP_dm_dball_team1_start(edict_t *self)
         G_FreeEdict(self);
         return;
     }
-    if (gamerules && (gamerules->value != RDM_DEATHBALL)) {
+    if (!DBall_Active()) {
         G_FreeEdict(self);
         return;
     }
@@ -564,7 +575,7 @@ void SP_dm_dball_team2_start(edict_t *self)
         G_FreeEdict(self);
         return;
     }
-    if (gamerules && (gamerules->value != RDM_DEATHBALL)) {
+    if (!DBall_Active()) {
         G_FreeEdict(self);
         return;
     }
@@ -579,7 +590,7 @@ void SP_dm_dball_ball_start(edict_t *self)
         G_FreeEdict(self);
         return;
     }
-    if (gamerules && (gamerules->value != RDM_DEATHBALL)) {
+    if (!DBall_Active()) {
         G_FreeEdict(self);
         return;
     }
@@ -598,7 +609,7 @@ void SP_dm_dball_speed_change(edict_t *self)
         G_FreeEdict(self);
         return;
     }
-    if (gamerules && (gamerules->value != RDM_DEATHBALL)) {
+    if (!DBall_Active()) {
         G_FreeEdict(self);
         return;
     }
@@ -637,7 +648,7 @@ void SP_dm_dball_goal(edict_t *self)
         return;
     }
 
-    if (gamerules && (gamerules->value != RDM_DEATHBALL)) {
+    if (!DBall_Active()) {
         G_FreeEdict(self);
         return;
     }

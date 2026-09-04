@@ -268,10 +268,8 @@ static void InfantryMachineGun(edict_t *self)
     //
     // Three donors give the infantry three different fire frames, because each
     // reordered the attack animation: baseq2 FRAME_attak111, The Reckoning
-    // FRAME_attak103, Ground Zero FRAME_attak104.  This file ships TWO of the
-    // three attack tables -- `infantry_frames_attack1` is Ground Zero's and
-    // `bq2_infantry_frames_attack1` is baseq2's, selected by CONTENT_ROGUE --
-    // and it used to test one donor's constant for both.
+    // FRAME_attak103, Ground Zero FRAME_attak104. The content latch chooses
+    // among all three tables.
     //
     // With `rogue 0`, which is plain dm and sp, the baseq2 sequence fires on
     // frame 111, this test failed, and the shot fell into the DEATH-SPRAY
@@ -488,6 +486,33 @@ static void infantry_fire_prep(edict_t *self)
     self->monsterinfo.pause_framenum = level.framenum + n;
 }
 
+static void xatrix_infantry_set_firetime(edict_t *self)
+{
+    int n;
+
+    n = (Q_rand() & 15) + 5;
+    self->monsterinfo.pause_framenum = level.framenum + n;
+}
+
+static const mframe_t xatrix_infantry_frames_attack1[] = {
+    { ai_charge, 10, xatrix_infantry_set_firetime },
+    { ai_charge,  6, NULL },
+    { ai_charge,  0, infantry_fire },
+    { ai_charge,  0, NULL },
+    { ai_charge,  1, NULL },
+    { ai_charge, -7, NULL },
+    { ai_charge, -6, NULL },
+    { ai_charge, -1, NULL },
+    { ai_charge,  0, infantry_cock_gun },
+    { ai_charge,  0, NULL },
+    { ai_charge,  0, NULL },
+    { ai_charge,  0, NULL },
+    { ai_charge,  0, NULL },
+    { ai_charge, -1, NULL },
+    { ai_charge, -1, NULL }
+};
+const mmove_t xatrix_infantry_move_attack1 = {FRAME_attak101, FRAME_attak115, xatrix_infantry_frames_attack1, infantry_run};
+
 // pmm
 // frames reordered, tweaked for new frames
 
@@ -565,10 +590,12 @@ void infantry_attack(edict_t *self)
     if (range(self, self->enemy) == RANGE_MELEE)
         self->monsterinfo.currentmove = &infantry_move_attack2;
     else {
-        // R-CORE-11: both sequences ship; the latch selects (if/else with
+        // R-CORE-11: all three sequences ship; the latch selects (if/else with
         // literal assignments so genptr.py sees both -- R-CORE-11b).
         if (self->content_flavour & CONTENT_ROGUE)
             self->monsterinfo.currentmove = &infantry_move_attack1;
+        else if (self->content_flavour & CONTENT_XATRIX)
+            self->monsterinfo.currentmove = &xatrix_infantry_move_attack1;
         else
             self->monsterinfo.currentmove = &bq2_infantry_move_attack1;
     }
@@ -935,7 +962,8 @@ void SP_monster_infantry(edict_t *self)
     self->monsterinfo.melee = NULL;
     self->monsterinfo.sight = infantry_sight;
     self->monsterinfo.idle = infantry_fidget;
-    self->monsterinfo.blocked = infantry_blocked;
+    if (self->content_flavour & CONTENT_ROGUE)
+        self->monsterinfo.blocked = infantry_blocked;
 
     gi.linkentity(self);
 

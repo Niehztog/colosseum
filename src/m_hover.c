@@ -43,6 +43,17 @@ static int  daed_sound_sight;
 static int  daed_sound_search1;
 static int  daed_sound_search2;
 
+static bool hover_IsDaedalus(const edict_t *self)
+{
+    return !strcmp(self->classname, "monster_daedalus");
+}
+
+// content_flavour describes the server; Daedalus identity describes this Hover.
+static bool hover_UsesRogueBehavior(const edict_t *self)
+{
+    return M_UsesRogueBehavior(self);
+}
+
 void hover_sight(edict_t *self, edict_t *other)
 {
     // PMM - daedalus sounds
@@ -454,6 +465,10 @@ static void hover_reattack(edict_t *self)
     if (self->enemy->health > 0)
         if (visible(self, self->enemy))
             if (random() <= 0.6f) {
+                if (!hover_UsesRogueBehavior(self)) {
+                    self->monsterinfo.currentmove = &hover_move_attack1;
+                    return;
+                }
                 if (self->monsterinfo.attack_state == AS_STRAIGHT) {
                     self->monsterinfo.currentmove = &hover_move_attack1;
                     return;
@@ -523,6 +538,11 @@ void hover_start_attack(edict_t *self)
 
 static void hover_attack(edict_t *self)
 {
+    if (!hover_UsesRogueBehavior(self)) {
+        self->monsterinfo.currentmove = &hover_move_attack1;
+        return;
+    }
+
     float chance = 0;
     // 0% chance of circle in easy
     // 50% chance in normal
@@ -560,6 +580,13 @@ void hover_pain(edict_t *self, edict_t *other, float kick, int damage)
     if (skill->value == 3)
         return;     // no pain anims in nightmare
 
+    // THE SOUND AND THE MOVE ARE PAIRED, and baseq2 pairs them 1/pain3,
+    // 2/pain2, 1/pain1 -- light damage takes the 9- or 12-frame flinch and
+    // heavy damage the 28-frame one.  Ground Zero replaced the heavy arm with
+    // its own two-way roll ("pain sequence is WAY too long") and kept the light
+    // one, so the non-Rogue arms below are id's and must not be swapped: doing
+    // so gives a base Icarus the long stagger for a graze and the short one for
+    // a rocket, which compiles, plays, and looks merely odd.
     if (damage <= 25) {
         if (random() < 0.5f) {
             // PMM - daedalus sounds
@@ -568,6 +595,9 @@ void hover_pain(edict_t *self, edict_t *other, float kick, int damage)
             else
                 gi.sound(self, CHAN_VOICE, daed_sound_pain1, 1, ATTN_NORM, 0);
             self->monsterinfo.currentmove = &hover_move_pain3;
+        } else if (!hover_UsesRogueBehavior(self)) {
+            gi.sound(self, CHAN_VOICE, sound_pain2, 1, ATTN_NORM, 0);
+            self->monsterinfo.currentmove = &hover_move_pain2;
         } else {
             // PMM - daedalus sounds
             if (self->mass < 225)
@@ -576,6 +606,9 @@ void hover_pain(edict_t *self, edict_t *other, float kick, int damage)
                 gi.sound(self, CHAN_VOICE, daed_sound_pain2, 1, ATTN_NORM, 0);
             self->monsterinfo.currentmove = &hover_move_pain2;
         }
+    } else if (!hover_UsesRogueBehavior(self)) {
+        gi.sound(self, CHAN_VOICE, sound_pain1, 1, ATTN_NORM, 0);
+        self->monsterinfo.currentmove = &hover_move_pain1;
     } else {
 //====
 //PGM pain sequence is WAY too long
@@ -730,10 +763,11 @@ void SP_monster_hover(edict_t *self)
     self->monsterinfo.attack = hover_start_attack;
     self->monsterinfo.sight = hover_sight;
     self->monsterinfo.search = hover_search;
-    self->monsterinfo.blocked = hover_blocked;      // PGM
+    if (hover_UsesRogueBehavior(self))
+        self->monsterinfo.blocked = hover_blocked;
 
 //PGM
-    if (strcmp(self->classname, "monster_daedalus") == 0) {
+    if (hover_IsDaedalus(self)) {
         self->health = 450;
         self->mass = 225;
         self->yaw_speed = 25;
@@ -760,7 +794,7 @@ void SP_monster_hover(edict_t *self)
     flymonster_start(self);
 
 //PGM
-    if (strcmp(self->classname, "monster_daedalus") == 0)
+    if (hover_IsDaedalus(self))
         self->s.skinnum = 2;
 //PGM
 

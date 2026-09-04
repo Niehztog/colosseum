@@ -122,6 +122,7 @@ cvar_t  *randomrespawn;
 cvar_t  *sv_features;
 
 static void G_RunFrame(void);
+static void CheckNeedPass(void);
 
 //===================================================================
 
@@ -305,6 +306,7 @@ static void InitGame(void)
     // what the first draft did -- dereferences a NULL cvar_t and segfaults on
     // the first map load.
     G_InitRuleset();
+    CheckNeedPass();
 
     // `game.maxclients` is settled HERE, not beside the allocation below, and
     // that is R-47's ordering again rather than tidiness.  OSP_gameInit clamps
@@ -353,7 +355,7 @@ static void InitGame(void)
 
 //======
 //ROGUE
-    if (gamerules) {
+    if (G_UsesRogueGameRules()) {
         InitGameRules(); // if there are game rules to set up, do so now.
     }
 //ROGUE
@@ -415,6 +417,8 @@ static void InitGame(void)
     // `runes_enable` -- is registered by OSP_gameInit above.  See
     // G_ResolveModifiers() in g_ruleset.c for why it is a second pass.
     G_ResolveModifiers();
+    if (G_IsOspRuleset())
+        OSP_setFeatures();
 
     // R-EXTRA-1's cvar arm, after everything that might want to write to it.
     if (g_gamelog->string[0]) {
@@ -670,21 +674,27 @@ lose it without either side's shape changing.
 */
 static void CheckNeedPass(void)
 {
+    static ruleset_t checked_ruleset = RULESET_COUNT;
+    ruleset_t ruleset = G_Ruleset();
     int need;
 
-    // if password or spectator_password has changed, update needpass
-    // as needed
-    if (password->modified || spectator_password->modified) {
+    // Ruleset changes are latched at InitGame, so the serverinfo cvar must be
+    // refreshed even when neither password cvar changed since the prior map.
+    if (password->modified || spectator_password->modified ||
+        checked_ruleset != ruleset) {
         password->modified = spectator_password->modified = false;
 
         need = 0;
 
         if (*password->string && Q_stricmp(password->string, "none"))
             need |= 1;
-        if (*spectator_password->string && Q_stricmp(spectator_password->string, "none"))
+        if (ruleset != RULESET_CTF &&
+            *spectator_password->string &&
+            Q_stricmp(spectator_password->string, "none"))
             need |= 2;
 
         gi.cvar_set("needpass", va("%d", need));
+        checked_ruleset = ruleset;
     }
 }
 
@@ -707,7 +717,7 @@ void CheckDMRules(void)
 
 //=======
 //ROGUE
-    if (gamerules && gamerules->value && DMGame.CheckDMRules) {
+    if (G_UsesRogueGameRules() && DMGame.CheckDMRules) {
         if (DMGame.CheckDMRules())
             return;
     }

@@ -62,7 +62,7 @@ Phase 3, and R-OSP-11's per-ruleset bot cvars in Phase 6.
 |---|---|---|
 | `g_ruleset` | `CVAR_LATCH \| CVAR_SERVERINFO` | the primary ruleset: `dm` \| `dmpro` \| `tdm` \| `duel` \| `ctf` \| `arena` \| `sp`. Empty means "infer": legacy aliases first, then `coop`, then `dm`. An invalid value warns and falls back to `dm` (R-MODE-1). **Seven since 1.36**: the first four are OSP's four modes of play, which `match_mode` selected inside a `tourney` ruleset until the flattening (R-OSP-12). `tourney` is not an alias and not a special case — it is simply not a ruleset name, and takes the unknown-value path with the same message any other unknown value gets |
 | `xatrix`, `rogue` | `CVAR_LATCH` | independent content layers, valid with every ruleset, both may be on (R-MODE-3) |
-| `teamplay`, `hook`, `runes` | `CVAR_LATCH` | modifiers, refused with a message by a ruleset that does not accept them (R-MODE-4). `teamplay` reaches only `arena` since 1.36: `tdm` and `duel` **are** team play, so the modifier that also reached it is the second selector the flattening removes |
+| `teamplay`, `hook`, `runes` | `CVAR_LATCH` | modifiers, refused with a message by a ruleset that does not accept them (R-MODE-4). `teamplay` reaches only `arena` since 1.36: `tdm` and `duel` **are** team play, so the modifier that also reached it is the second selector the flattening removes. Under OSP only, `hook 1` is a one-way baseline request to `hook_enable`; it is not CTF's or Arena's hook switch (R-207) |
 
 Read but not registered by Colosseum: `ctf` and `rocketarena` as legacy ruleset
 aliases (R-MODE-2), and `ch`, which is accepted and ignored (N7). They are read
@@ -300,7 +300,7 @@ which runes may appear, clamped to `0x1f`.
 
 | cvar | default | what it does |
 |---|---|---|
-| `runes_enable` | `0` | a bitwise SUM: `1` resist, `2` strength, `4` haste, `8` regeneration, `16` vampire, so `31` is all five. Clamped to `0x1f` |
+| `runes_enable` | `0` | a bitwise SUM: `1` resist, `2` strength, `4` haste, `8` regeneration, `16` vampire, so `31` is all five. Clamped to `0x1f`; a queued OSP configuration transition refreshes the cached `rune_stat` from this effective value before it advertises or seeds the new map's runes (R-210) |
 | `runes_min`, `runes_max` | `3`, `12` | how many exist. `max` is forced up to `min` if a config inverts them |
 | `runes_perplayer` | `0.6` | ratio of runes to active players |
 | `runes_model` | `models/items/c_head/tris.md2` | the model every rune uses — which is John Carmack's head, and the donor says so |
@@ -315,9 +315,16 @@ Registered by tourney and **distinct from CTF's grapple** — one concept, two
 implementations, and §7 rule 6 is not violated because they never both run:
 `hook_enable` answers under the OSP rulesets, `ctf_hook` under `ctf`.
 
+The generic latched `hook` modifier has a deliberately narrower role than that
+table can imply: `hook 1` asks the four OSP rulesets to enable their native
+hook after a fresh baseline, while `hook 0` does not disable an explicit OSP
+setting or a live hook vote. CTF continues to read `ctf_hook`; Arena continues
+to read its `arena.cfg` `grapple:` setting. Native OSP, botlib, `sv ruleset`,
+and `match_info` use integer semantics, so `hook_enable 0.5` is off (R-207).
+
 | cvar | default | what it does |
 |---|---|---|
-| `hook_enable` | `0` | off unless voted on |
+| `hook_enable` | `0` | off unless configured, requested by `hook 1`, or voted on. An OSP config's native value forms the fresh baseline; a pending generic request is applied after that config has executed |
 | `hook_speed`, `hook_pullspeed` | `1600`, `1000` | flight and pull |
 | `hook_wait` | `0.5` | seconds between throws |
 | `hook_holdtime` | `7.5` | seconds on a surface before the hook releases itself |
@@ -373,7 +380,7 @@ plain admin log.
 | `stats_logchat` | `0` | chat into the JSON stream |
 | `stats_logallpickups` | `0` | every pickup, not just the ones that matter |
 | `sl_log_method` | `0` | the Standard Log: 0 off, 1 file |
-| `sl_filename` | `stdlog.log` | where, relative to the Quake II base directory |
+| `sl_filename` | `stdlog.log` | where, relative to the Quake II base directory when relative; an explicit absolute path remains absolute. An overlong resolved path disables Standard Log with a diagnostic rather than opening a truncated pathname |
 | `sl_log_flush` | `2` | `0` flush when the system buffer fills, `1` that or a map change, `2` after every entry |
 | `sl_log_logbots` | `1` | whether a bot's kills are logged. **The one cvar `counts.py` could not see** until R-184: it is registered through `import->cvar()` |
 | `server_adminlog` | `0` | the admin log |

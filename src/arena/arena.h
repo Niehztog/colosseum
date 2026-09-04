@@ -389,7 +389,7 @@ extern  int         votetries_setting;
 extern  bool    allow_grapple;
 extern  bool    broken;
 
-extern  arena_t     arenas[MAX_ARENAS];
+extern  arena_t     arenas[MAX_ARENAS + 1];
 extern  int         num_arenas;
 extern  bool    idmap;
 

@@ -405,6 +405,11 @@ static bool Pickup_Pack(edict_t *ent, edict_t *other)
     const gitem_t   *item;
     int     index;
 
+    // R-139 keeps the donor's persistent pack marker out of every other
+    // ruleset's inventory, but OSP's armor ceiling needs its own marker.
+    if (G_IsOspRuleset())
+        other->client->pers.inventory[ITEM_INDEX(ent->item)]++;
+
     // R-OSP-1: under tourney the pack's ceilings are cvars (`pack_items`), so a
     // referee can set what a pack is worth -- including lower than baseq2's,
     // which is why it REPLACES the block above rather than adding to it.
@@ -1611,6 +1616,13 @@ void SpawnItem(edict_t *ent, const gitem_t *item)
     // uGladQ2 addition (R-RA-4) -- so the gate is the ruleset, and baseq2's
     // dmflags filter below is what every other ruleset still needs.
     if (G_Ruleset() == RULESET_ARENA && item->pickup) {
+        G_FreeEdict(ent);
+        return;
+    }
+
+    // Runes are an OSP ruleset feature, not a content layer.  Their callbacks
+    // read OSP-only state, so a custom CTF/SP map must not expose one.
+    if ((item->flags & IT_RUNE) && !G_IsOspRuleset()) {
         G_FreeEdict(ent);
         return;
     }

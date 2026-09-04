@@ -525,7 +525,8 @@ typedef struct {
     vec3_t      intermission_origin;
     vec3_t      intermission_angle;
 
-    edict_t     *sight_client;  // changed once each frame for coop games
+    edict_t     *sight_client;        // base/Xatrix candidate, changed each frame
+    edict_t     *rogue_sight_client;  // Rogue candidate; excludes disguised players
 
     edict_t     *sight_entity;
     int         sight_entity_framenum;
@@ -1091,6 +1092,7 @@ void monster_fire_tracker(edict_t *self, vec3_t start, vec3_t dir, int damage, i
 void rogue_monster_fire_heat(edict_t *self, const vec3_t start, const vec3_t dir, const vec3_t offset, int damage, int kick, int flashtype);
 void stationarymonster_start(edict_t *self);
 void monster_done_dodge(edict_t *self);
+bool M_UsesRogueBehavior(const edict_t *ent);
 //ROGUE
 
 //

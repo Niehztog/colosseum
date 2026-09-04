@@ -69,6 +69,17 @@ static int  commander_sound_hook_heal;
 static int  commander_sound_hook_retract;
 static int  commander_sound_spawn;
 
+static bool medic_IsCommander(const edict_t *self)
+{
+    return !strcmp(self->classname, "monster_medic_commander");
+}
+
+// content_flavour describes the server; Commander identity describes this Medic.
+static bool medic_UsesRogueBehavior(const edict_t *self)
+{
+    return M_UsesRogueBehavior(self);
+}
+
 static const char *const reinforcements[] = {
     "monster_soldier_light",    // 0
     "monster_soldier",          // 1
@@ -112,7 +123,13 @@ static void cleanupHeal(edict_t *self, bool change_frame)
 {
     // clean up target, if we have one and it's legit
     if (self->enemy && self->enemy->inuse) {
+        // The claim is released here whichever field holds it -- see
+        // medic_ClaimPatient.  This is reached for a baseq2 medic too, because
+        // its frame table drives Ground Zero's `medic_cable_attack` and that
+        // aborts on an obstructed spawn point.
         self->enemy->monsterinfo.healer = NULL;
+        if (self->enemy->owner == self)
+            self->enemy->owner = NULL;
         self->enemy->monsterinfo.aiflags &= ~AI_RESURRECTING;
         self->enemy->takedamage = DAMAGE_YES;
         M_SetEffects(self->enemy);
@@ -237,6 +254,78 @@ static edict_t *medic_FindDeadMonster(edict_t *self)
     return best;
 }
 
+// *** THE CLAIM FIELD IS THE THING THE TWO MEDICS DISAGREE ABOUT EVERYWHERE,
+// *** AND IT IS WHY SPLITTING THE SEARCH ALONE WOULD MEAN NOTHING. ***
+//
+// baseq2 marks a corpse it intends to heal by setting `ent->owner`, and skips a
+// corpse that already has one.  Ground Zero moved that to
+// `monsterinfo.healer` -- its own header comment at the top of this file says
+// so, "owner moved to monsterinfo.healer instead" -- so that `owner` could go
+// on meaning what it means everywhere else in the game.
+//
+// Before this split the tree ran Ground Zero's search under both flavours,
+// which was internally CONSISTENT -- the callers wrote `healer` and the search
+// read it -- and simply not id's policy.  So the defect was never a broken
+// claim; it was that a baseq2 medic searched 400 units instead of 1024 while
+// standing its ground, refused a corpse inside 32 units, accepted one whose
+// `nextthink` is the fly timer, and armed a heal deadline its own donor never
+// had.  Restoring id's predicate is what drags the claim field along: that
+// predicate reads `owner`, so the search and the claim have to move together
+// or the search tests a field nobody writes.
+//
+// What is NOT split, and is worth naming rather than leaving to be discovered:
+// the heal itself.  `medic_cable_attack`, `medic_hook_launch` and
+// `medic_hook_retract` are Ground Zero's for every flavour, and baseq2's
+// `bq2_medic_move_attackCable` drives them on id's frame distances.  Splitting
+// those too would be a second medic rather than a latch.
+static edict_t *bq2_medic_FindDeadMonster(edict_t *self)
+{
+    edict_t *ent = NULL;
+    edict_t *best = NULL;
+
+    while ((ent = findradius(ent, self->s.origin, 1024)) != NULL) {
+        if (ent == self)
+            continue;
+        if (!(ent->svflags & SVF_MONSTER))
+            continue;
+        if (ent->monsterinfo.aiflags & AI_GOOD_GUY)
+            continue;
+        if (ent->owner)
+            continue;
+        if (ent->health > 0)
+            continue;
+        if (ent->nextthink)
+            continue;
+        if (!visible(self, ent))
+            continue;
+        if (!best) {
+            best = ent;
+            continue;
+        }
+        if (ent->max_health <= best->max_health)
+            continue;
+        best = ent;
+    }
+
+    return best;
+}
+
+static edict_t *medic_FindPatient(edict_t *self)
+{
+    if (medic_UsesRogueBehavior(self))
+        return medic_FindDeadMonster(self);
+
+    return bq2_medic_FindDeadMonster(self);
+}
+
+static void medic_ClaimPatient(edict_t *self, edict_t *ent)
+{
+    if (medic_UsesRogueBehavior(self))
+        ent->monsterinfo.healer = self;
+    else
+        ent->owner = self;
+}
+
 void medic_idle(edict_t *self)
 {
     edict_t *ent;
@@ -247,12 +336,27 @@ void medic_idle(edict_t *self)
     else
         gi.sound(self, CHAN_VOICE, commander_sound_idle1, 1, ATTN_IDLE, 0);
 
+    // Ground Zero will not go looking while it still owes an old enemy a fight;
+    // baseq2's idle has neither that guard nor the `oldenemy` save, and takes a
+    // patient whenever it finds one.  medic_search below is the donors' own
+    // point of agreement and keeps the guard for both.
+    if (!medic_UsesRogueBehavior(self)) {
+        ent = medic_FindPatient(self);
+        if (ent) {
+            self->enemy = ent;
+            medic_ClaimPatient(self, self->enemy);
+            self->monsterinfo.aiflags |= AI_MEDIC;
+            FoundTarget(self);
+        }
+        return;
+    }
+
     if (!self->oldenemy) {
-        ent = medic_FindDeadMonster(self);
+        ent = medic_FindPatient(self);
         if (ent) {
             self->oldenemy = self->enemy;
             self->enemy = ent;
-            self->enemy->monsterinfo.healer = self;
+            medic_ClaimPatient(self, self->enemy);
             self->monsterinfo.aiflags |= AI_MEDIC;
             FoundTarget(self);
         }
@@ -270,11 +374,11 @@ void medic_search(edict_t *self)
         gi.sound(self, CHAN_VOICE, commander_sound_search, 1, ATTN_IDLE, 0);
 
     if (!self->oldenemy) {
-        ent = medic_FindDeadMonster(self);
+        ent = medic_FindPatient(self);
         if (ent) {
             self->oldenemy = self->enemy;
             self->enemy = ent;
-            self->enemy->monsterinfo.healer = self;
+            medic_ClaimPatient(self, self->enemy);
             self->monsterinfo.aiflags |= AI_MEDIC;
             FoundTarget(self);
         }
@@ -424,15 +528,17 @@ const mmove_t medic_move_run = {FRAME_run1, FRAME_run6, medic_frames_run, NULL};
 
 void medic_run(edict_t *self)
 {
-    monster_done_dodge(self);
+    if (medic_UsesRogueBehavior(self))
+        monster_done_dodge(self);
+
     if (!(self->monsterinfo.aiflags & AI_MEDIC)) {
         edict_t *ent;
 
-        ent = medic_FindDeadMonster(self);
+        ent = medic_FindPatient(self);
         if (ent) {
             self->oldenemy = self->enemy;
             self->enemy = ent;
-            self->enemy->monsterinfo.healer = self;
+            medic_ClaimPatient(self, self->enemy);
             self->monsterinfo.aiflags |= AI_MEDIC;
             FoundTarget(self);
             return;
@@ -615,7 +721,14 @@ void medic_die(edict_t *self, edict_t *inflictor, edict_t *attacker, int damage,
 {
     int     n;
 
-    // if we had a pending patient, he was already freed up in Killed
+    // Ground Zero's comment, and it is true of ITS claim only: the shared
+    // Killed() clears `monsterinfo.healer`.  Nothing clears `owner`, so
+    // baseq2's own release is restored here -- without it a base medic that
+    // dies mid-heal leaves the corpse marked for good and no other medic will
+    // ever take it (id's line, m_medic.c, immediately above the gib check).
+    if (!medic_UsesRogueBehavior(self) &&
+        (self->enemy) && (self->enemy->owner == self))
+        self->enemy->owner = NULL;
 
 // check for gib
     if (self->health <= self->gib_health) {
@@ -863,6 +976,12 @@ static void medic_cable_attack(edict_t *self)
             // turn off flies
             self->enemy->s.effects &= ~EF_FLIES;
             self->enemy->monsterinfo.healer = NULL;
+            // and id's own release, which it does the line after ED_CallSpawn:
+            // without it a monster a baseq2 medic revived carries `owner` for
+            // the rest of the level, and bq2_medic_FindDeadMonster would refuse
+            // to heal it a second time.
+            if (self->enemy->owner == self)
+                self->enemy->owner = NULL;
 
             if ((self->oldenemy) && (self->oldenemy->inuse) && (self->oldenemy->health > 0)) {
 //              if ((g_showlogic) && (g_showlogic->value))
@@ -1351,6 +1470,14 @@ void medic_attack(edict_t *self)
     int     enemy_range;
     float   r;
 
+    if (!medic_UsesRogueBehavior(self)) {
+        if (self->monsterinfo.aiflags & AI_MEDIC)
+            self->monsterinfo.currentmove = &bq2_medic_move_attackCable;
+        else
+            self->monsterinfo.currentmove = &medic_move_attackBlaster;
+        return;
+    }
+
     monster_done_dodge(self);
 
     enemy_range = range(self, self->enemy);
@@ -1366,9 +1493,7 @@ void medic_attack(edict_t *self)
         if ((self->mass > 400) && (r > 0.8f) && (self->monsterinfo.monster_slots > 2))
             self->monsterinfo.currentmove = &medic_move_callReinforcements;
         else {
-            // R-CORE-11: both sequences ship; the latch selects (if/else with
-            // literal assignments so genptr.py sees both -- R-CORE-11b).
-            if (self->content_flavour & CONTENT_ROGUE)
+            if (medic_UsesRogueBehavior(self))
                 self->monsterinfo.currentmove = &medic_move_attackCable;
             else
                 self->monsterinfo.currentmove = &bq2_medic_move_attackCable;
@@ -1389,11 +1514,39 @@ bool medic_checkattack(edict_t *self)
 {
     if (self->monsterinfo.aiflags & AI_MEDIC) {
         // if our target went away
+        //
+        // KEPT FOR EVERY FLAVOUR, because baseq2 has no guard here at all and
+        // `medic_cable_attack` dereferences `self->enemy` on its first line --
+        // id's arm reaches a null deref by the same road the supertank and
+        // Chick guards are kept against.  It is belt-and-braces either way:
+        // `ai_run` sets `hesDeadJim` on a gone or revived enemy BEFORE it calls
+        // `checkattack`, so this is not reachable from that path.  `abortHeal`
+        // is Ground Zero's and stays with it -- baseq2 has no `healer`,
+        // `badMedic` or `medicTries` bookkeeping to unwind, so declining the
+        // attack is the whole of what it has to do.
         if ((!self->enemy) || (!self->enemy->inuse)) {
 //          if (g_showlogic && g_showlogic->value)
 //              gi.dprintf ("aborting heal target due to gib\n");
-            abortHeal(self, true, false, false);
+            if (medic_UsesRogueBehavior(self))
+                abortHeal(self, true, false, false);
             return false;
+        }
+
+        // *** THE DEADLINE AND THE WALK-IN ARE GROUND ZERO'S, AND THEY ARE A
+        // *** DIFFERENT DESIGN FROM ID'S -- NOT AN ADDITION TO IT.
+        //
+        // baseq2 commits to the cable animation and lets `medic_cable_attack`
+        // decline frame by frame on its own `distance > 256` test, so a medic
+        // that cannot reach keeps swinging.  Ground Zero gives the attempt a
+        // MEDIC_TRY_TIME deadline, gibs the target when it expires, and walks
+        // closer with AS_STRAIGHT when the corpse is beyond
+        // MEDIC_MAX_HEAL_DISTANCE.  Neither half exists in id's file:
+        // `timestamp` is Ground Zero's field, and running its deadline under
+        // `rogue 0` made every base medic answer to a clock its own donor never
+        // set.
+        if (!medic_UsesRogueBehavior(self)) {
+            medic_attack(self);
+            return true;
         }
 
         // if we ran out of time, give up
@@ -1414,6 +1567,9 @@ bool medic_checkattack(edict_t *self)
         }
     }
 
+    if (!medic_UsesRogueBehavior(self))
+        return M_CheckAttack(self);
+
     if (self->enemy->client && !visible(self, self->enemy) && (self->monsterinfo.monster_slots > 2)) {
         self->monsterinfo.attack_state = AS_BLIND;
         return true;
@@ -1430,7 +1586,7 @@ bool medic_checkattack(edict_t *self)
     // ROGUE
     // since his idle animation looks kinda bad in combat, if we're not in easy mode, always attack
     // when he's on a combat point
-    if (skill->value > 0)
+    if (medic_UsesRogueBehavior(self) && skill->value > 0)
         if (self->monsterinfo.aiflags & AI_STAND_GROUND) {
             self->monsterinfo.attack_state = AS_MISSILE;
             return true;
@@ -1737,7 +1893,7 @@ void SP_monster_medic(edict_t *self)
     VectorSet(self->maxs, 24, 24, 32);
 
 //PMM
-    if (strcmp(self->classname, "monster_medic_commander") == 0) {
+    if (medic_IsCommander(self)) {
         self->health = 600;         //  fixme
         self->gib_health = -130;
         self->mass = 600;
@@ -1767,7 +1923,7 @@ void SP_monster_medic(edict_t *self)
     // An if/else with literal assignments, deliberately: genptr.py builds
     // save_ptrs[] by scanning the source for `= &name`, so a ternary or a macro
     // would hide one or both tables from the savegame pointer table.
-    if (self->content_flavour & CONTENT_ROGUE) {
+    if (medic_UsesRogueBehavior(self)) {
         self->monsterinfo.dodge = M_MonsterDodge;
         self->monsterinfo.duck = medic_duck;
         self->monsterinfo.unduck = monster_duck_up;
@@ -1783,7 +1939,8 @@ void SP_monster_medic(edict_t *self)
     self->monsterinfo.idle = medic_idle;
     self->monsterinfo.search = medic_search;
     self->monsterinfo.checkattack = medic_checkattack;
-    self->monsterinfo.blocked = medic_blocked;
+    if (medic_UsesRogueBehavior(self))
+        self->monsterinfo.blocked = medic_blocked;
 
     gi.linkentity(self);
 
@@ -1792,10 +1949,10 @@ void SP_monster_medic(edict_t *self)
 
     walkmonster_start(self);
 
-    //PMM
-    self->monsterinfo.aiflags |= AI_IGNORE_SHOTS;
+    if (medic_UsesRogueBehavior(self))
+        self->monsterinfo.aiflags |= AI_IGNORE_SHOTS;
 
-    if (self->mass > 400) {
+    if (medic_UsesRogueBehavior(self) && self->mass > 400) {
         self->s.skinnum = 2;
         if (skill->value == 0)
             self->monsterinfo.monster_slots = 3;

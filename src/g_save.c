@@ -347,6 +347,7 @@ static const save_field_t levelfields[] = {
     V(intermission_angle),
 
     E(sight_client),
+    E(rogue_sight_client),
 
     E(sight_entity),
     I(sight_entity_framenum),
@@ -992,10 +993,11 @@ static void read_fields(gzFile f, const save_field_t *fields, void *base)
 
 #define SAVE_MAGIC1     MakeLittleLong('S','S','V','1')
 #define SAVE_MAGIC2     MakeLittleLong('S','A','V','1')
+// R-203 adds level.rogue_sight_client to the serialized level state.
 #if USE_NEW_GAME_API
-#define SAVE_VERSION    0x100
+#define SAVE_VERSION    0x101
 #else
-#define SAVE_VERSION    8
+#define SAVE_VERSION    9
 #endif
 
 static void check_gzip(int magic)

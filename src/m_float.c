@@ -554,6 +554,11 @@ static void floater_zap(edict_t *self)
 
 void floater_attack(edict_t *self)
 {
+    if (!(self->content_flavour & CONTENT_ROGUE)) {
+        self->monsterinfo.currentmove = &floater_move_attack1;
+        return;
+    }
+
     float chance = 0;
     // 0% chance of circle in easy
     // 50% chance in normal
@@ -685,7 +690,8 @@ void SP_monster_floater(edict_t *self)
     self->monsterinfo.melee = floater_melee;
     self->monsterinfo.sight = floater_sight;
     self->monsterinfo.idle = floater_idle;
-    self->monsterinfo.blocked = floater_blocked;        // PGM
+    if (self->content_flavour & CONTENT_ROGUE)
+        self->monsterinfo.blocked = floater_blocked;
 
     gi.linkentity(self);
 

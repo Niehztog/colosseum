@@ -82,7 +82,8 @@ int BotTourneyRunes(void)
 
 bool BotTourneyHook(void)
 {
-    return G_IsOspRuleset() && hook_enable && hook_enable->value;
+    return G_IsOspRuleset() && hook_enable &&
+           (int)hook_enable->value != 0;
 }
 
 int BotTourneyVotedIn(void)

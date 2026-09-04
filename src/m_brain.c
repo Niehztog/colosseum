@@ -706,7 +706,8 @@ void brain_pain(edict_t *self, edict_t *other, float kick, int damage)
 
     self->pain_debounce_framenum = level.framenum + 3 * BASE_FRAMERATE;
 
-    if (skill->value == 3)
+    if (skill->value == 3 &&
+        !(self->content_flavour & CONTENT_XATRIX))
         return;     // no pain anims in nightmare
 
     r = random();
@@ -720,8 +721,10 @@ void brain_pain(edict_t *self, edict_t *other, float kick, int damage)
         gi.sound(self, CHAN_VOICE, sound_pain1, 1, ATTN_NORM, 0);
         self->monsterinfo.currentmove = &brain_move_pain3;
     }
-    // PMM - clear duck flag
-    if (self->monsterinfo.aiflags & AI_DUCKED)
+    // Ground Zero clears its dodge state before selecting a pain move; Xatrix
+    // completes its base-style duck animation normally.
+    if ((self->content_flavour & CONTENT_ROGUE) &&
+        (self->monsterinfo.aiflags & AI_DUCKED))
         monster_duck_up(self);
 }
 

@@ -161,9 +161,9 @@ void OSP_showTeamScores(edict_t *ent)
     buf[0] = 0;
 
     if (level.intermission_framenum != 0)
-        ent->client->ps.stats[27] = OSP_CS(10);
+        G_SetStat(ent, SID_OSP_LAYOUT1, OSP_CS(10));
     else
-        ent->client->ps.stats[27] = OSP_CS(9);
+        G_SetStat(ent, SID_OSP_LAYOUT1, OSP_CS(9));
 
     size = strlen(buf);
     basey = 0;
@@ -480,9 +480,9 @@ void OSP_showBIGTeamScores(edict_t *ent)
     buf[0] = 0;
 
     if (level.intermission_framenum != 0)
-        ent->client->ps.stats[27] = OSP_CS(10);
+        G_SetStat(ent, SID_OSP_LAYOUT1, OSP_CS(10));
     else
-        ent->client->ps.stats[27] = OSP_CS(9);
+        G_SetStat(ent, SID_OSP_LAYOUT1, OSP_CS(9));
 
     size = strlen(buf);
     basey = 0;
@@ -744,9 +744,9 @@ void OSP_show1v1Scores(edict_t *ent)
     buf[0] = 0;
 
     if (level.intermission_framenum != 0)
-        ent->client->ps.stats[27] = OSP_CS(10);
+        G_SetStat(ent, SID_OSP_LAYOUT1, OSP_CS(10));
     else
-        ent->client->ps.stats[27] = OSP_CS(9);
+        G_SetStat(ent, SID_OSP_LAYOUT1, OSP_CS(9));
 
     size = strlen(buf);
     basey = 0;

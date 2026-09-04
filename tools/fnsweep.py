@@ -27,7 +27,7 @@ compared against the right body.
 
 THE FINDING, and why it is not "a line is missing".  A missing line is the
 NORMAL case here and must not be a finding: R-MODE-5 puts a donor's concept in
-the donor's own file and leaves one call at the site, so 1,165 of the donor
+the donor's own file and leaves one call at the site, so 1,168 of the donor
 lines that are absent from their own site are elsewhere in the tree verbatim.
 So every missing line is asked a second question, against the whole of `src/`:
 
@@ -38,9 +38,9 @@ So every missing line is asked a second question, against the whole of `src/`:
 
 `ABSENT` is the sharp one -- a field nothing reads, a constant nothing names, a
 string no player can ever see -- and it is still not a finding on its own,
-because a recorded decision removes identifiers by the hundred: 475 lines are
-the libc replacements of R-SEC-1, 219 are `m_mode` comparisons that R-OSP-12
-deleted with the cvar, 171 are the ngLog stack `osp_stats.c` replaced.  CLUSTERS
+because a recorded decision removes identifiers by the hundred: 490 lines are
+the libc replacements of R-SEC-1, 222 are `m_mode` comparisons that R-OSP-12
+deleted with the cvar, 167 are the ngLog stack `osp_stats.c` replaced. CLUSTERS
 below attributes each one to the decision that removed it, and **a line no
 cluster claims and no EXEMPT row names is the finding**.
 
@@ -276,8 +276,10 @@ def defs(text, want_macros=True):
             # function into its predecessor.
             decl = ' '.join(m[chunk_start:i].split())
             name = None
-            if FUNC_DECL.search(decl) and '(' in decl and not TYPE_HEAD.match(decl):
+            if FUNC_DECL.search(decl) and '(' in decl:
                 name = _func_name(decl)
+                if name in ('__attribute__', '__declspec'):
+                    name = None
             if name:
                 head = text[chunk_start:i]
                 out.append({'name': name, 'kind': 'func', 'decl': decl,
@@ -335,8 +337,8 @@ def norm_key(text):
 CLUSTERS = [
     ('findings (R-195)',
      r'^(osp_r008|SVF_PROJECTILE|hooked|item_spehre_defender)$'),
-    ('unsafe libc replaced (R-SEC-1, R-VER-30)',
-     r'^(sprintf|strcat|strncpy|strncat|vsprintf|stricmp|strcasecmp)$'),
+    ('unsafe libc/raw scanner replaced (R-SEC-1, R-VER-30)',
+     r'^(sprintf|strcat|strncpy|strncat|vsprintf|fscanf|stricmp|strcasecmp)$'),
     ('match_mode deleted, four values of g_ruleset instead (R-OSP-12)',
      r'^(m_mode|MODE_TEAM)$'),
     ('the ngLog / ngWorldStats stack, replaced by osp_stats.c (R-OSP-1)',
@@ -351,6 +353,8 @@ CLUSTERS = [
      r'GAMEVERSION|BOT_IMPORT|grapple_state_t|jacketarmor_info|spawn_funcs|'
      r'SP_none|gladi386|RA2_NumArenas|BotDebugCmd|OSP_PrecacheCTFRunes|'
      r'Cmd_ServerCommand|q2log_stdlog)'),
+    ('trigger_push bit collision resolved by targetname (R-27)',
+     r'^(targeted)$'),
     ('verified present under another name (doc/donor-fdiff.md sec 4.4)',
      r'^(allow_|supershotgun|rocketlauncher|grenadelauncher|railgun|_default_|'
      r'_is_referee|_init_state|_client_hud|'
@@ -406,7 +410,7 @@ FINDINGS_CLUSTER = CLUSTERS[0][0]
 # missing set is STALE and is reported: an exemption that has stopped applying
 # is how a check rots (deadvalue.py's controls make the same point).
 #
-# TWO ENTRIES LEFT HERE IN 1.49 AND THE CHECK IS WHY.  R-196 ported R-195.7's
+# ONE HISTORICAL ENTRY REMAINS HERE AFTER R-197. R-196 ported R-195.7's
 # first two -- `SVF_PROJECTILE` on CTF's blaster bolts and tourney's
 # `MOD_GRAPPLE` obituary -- and the build went red on the next `make`, naming
 # both exemptions as no longer matching a donor line.  That is the stale-
@@ -436,11 +440,9 @@ EXEMPT = {
 #            "Open, deliberately" two entries before the one that closed it.  An
 #            absence is a finding only once you know what else could be
 #            answering the question, and no line-level rule can know that.
-#   R-195.2  RA2's chat-spam punishment.  `spamcount` and `spamtime` are
-#            declared in g_local.h and persisted in g_save.c and read by
-#            nothing -- a field with no reader AND no writer, which is a fifth
-#            space for R-TOOL-6 and deadvalue.py's to own, not this one's.
-#            THE ONE STILL OPEN.
+#   R-195.2  CLOSED BY R-197. RA2's chat-spam counter now runs after
+#            FloodProtect(), as the donor does. It remains outside this check's
+#            ABSENT-line space because every identifier involved exists here.
 #
 # CLOSED BY R-196, and listed because a reader of this file should be able to
 # tell "this check never saw it" from "this check still cannot see it":
@@ -458,7 +460,7 @@ EXEMPT = {
 # sounds so a tourney match does not start on a chorus of screams.  A gate that
 # is absent is invisible to a rule about lines and to a rule about calls alike
 # (doc/donor-fdiff.md sec 6 item 1), and it was found by playing the game.
-NOT_MECHANISED = ('R-195.1', 'R-195.2')
+NOT_MECHANISED = ('R-195.1',)
 
 # A donor file the tree carries no file of that name for.  A file-level decision
 # (doc/provenance.md, R-114, and g_monsters.c under R-CORE-8), so its
@@ -483,7 +485,8 @@ def ref_spine():
 
 
 def git(*args):
-    r = subprocess.run(['git', '-C', divergence.CACHE] + list(args),
+    # See divergence.git(): this cache is deliberately bare.
+    r = subprocess.run(['git', f'--git-dir={divergence.CACHE}'] + list(args),
                        capture_output=True, text=True, errors='replace')
     return r.stdout if r.returncode == 0 else None
 
@@ -936,7 +939,36 @@ def selftest(tree):
               % names)
         bad += 1
 
-    # 2. the extractor against the real tree: a count that collapses, or a
+    # 2. A struct return type starts with TYPE_HEAD too, but its trailing
+    # declarator makes it a function.  Before the function check ran first,
+    # this swallowed both bodies through the translation-unit tail.
+    tu = ('struct sockaddr_in net_name_to_address(char *name)\n'
+          '{\n    return result;\n}\n\n'
+          'void address_done(void)\n'
+          '{\n    done = 1;\n}\n')
+    names = [d['name'] for d in defs(tu)]
+    if names == ['net_name_to_address', 'address_done']:
+        print('  ok  control "extractor: struct return" fires: %s' % names)
+    else:
+        print('  !! control "extractor: struct return" did NOT fire; got %s'
+              % names)
+        bad += 1
+
+    # 3. An attribute on a struct definition is not a function whose name is
+    # the attribute macro.  The struct-return exception above must stay narrow.
+    tu = ('struct packed_state __attribute__((packed))\n'
+          '{\n    int value;\n};\n\n'
+          'struct sockaddr_in net_name_to_address(char *name)\n'
+          '{\n    return result;\n}\n')
+    names = [d['name'] for d in defs(tu)]
+    if names == ['packed_state', 'net_name_to_address']:
+        print('  ok  control "extractor: struct attribute" fires: %s' % names)
+    else:
+        print('  !! control "extractor: struct attribute" did NOT fire; got %s'
+              % names)
+        bad += 1
+
+    # 4. the extractor against the real tree: a count that collapses, or a
     #    crop of anonymous names, means it has stopped reading the tree.
     by_name, files = load_tree(tree)
     total = sum(len(v) for v in by_name.values())
@@ -950,7 +982,7 @@ def selftest(tree):
               % (total, anon))
         bad += 1
 
-    # 3. every exempt identifier must attribute to the FINDINGS row, or a
+    # 5. every exempt identifier must attribute to the FINDINGS row, or a
     #    later cluster is swallowing a finding.
     for k in sorted(EXEMPT):
         if attribute([k]) != FINDINGS_CLUSTER:
@@ -961,7 +993,7 @@ def selftest(tree):
         print('  ok  control "the exempt identifiers attribute to the findings '
               'row" fires: %d of %d' % (len(EXEMPT), len(EXEMPT)))
 
-    # 4. one sweep, then the corpus mutations.
+    # 6. one sweep, then the corpus mutations.
     records, (lines, idents, buckets) = sweep(tree, fuzzy=False)
     base = check(records)
     if base:
@@ -989,7 +1021,7 @@ def selftest(tree):
                   'asleep' % ident)
             bad += 1
 
-    # 5. a stale exemption is a finding.
+    # 7. a stale exemption is a finding.
     classify(records, lines, idents, buckets, fuzzy=False)
     EXEMPT['no_such_identifier_at_all'] = 'the control'
     try:

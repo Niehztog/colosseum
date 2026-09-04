@@ -17,6 +17,25 @@ with this program; if not, write to the Free Software Foundation, Inc.,
 */
 #include "g_local.h"
 
+bool M_UsesRogueBehavior(const edict_t *ent)
+{
+    if (!ent)
+        return false;
+    if (ent->content_flavour & CONTENT_ROGUE)
+        return true;
+    if (!ent->classname)
+        return false;
+
+    return !strcmp(ent->classname, "monster_stalker") ||
+           !strcmp(ent->classname, "monster_turret") ||
+           !strcmp(ent->classname, "monster_daedalus") ||
+           !strcmp(ent->classname, "monster_carrier") ||
+           !strcmp(ent->classname, "monster_widow") ||
+           !strcmp(ent->classname, "monster_widow2") ||
+           !strcmp(ent->classname, "monster_medic_commander") ||
+           !strcmp(ent->classname, "monster_kamikaze");
+}
+
 //
 // monster weapons
 //
@@ -671,8 +690,9 @@ void monster_use(edict_t *self, edict_t *other, edict_t *activator)
         return;
     if (!(activator->client) && !(activator->monsterinfo.aiflags & AI_GOOD_GUY))
         return;
-    if (activator->flags & FL_DISGUISED)        // PGM
-        return;                                 // PGM
+    if (M_UsesRogueBehavior(self) &&
+        (activator->flags & FL_DISGUISED))
+        return;
 
 // delay reaction so if the monster is teleported, its sound is still heard
     self->enemy = activator;
@@ -702,14 +722,13 @@ void monster_triggered_spawn(edict_t *self)
         }
     }
 
-    if (self->enemy && !(self->spawnflags & 1) && !(self->enemy->flags & FL_NOTARGET))
-        FoundTarget(self);
-    else
     if (self->enemy && !(self->spawnflags & 1) && !(self->enemy->flags & FL_NOTARGET)) {
-        if (!(self->enemy->flags & FL_DISGUISED))       // PGM
+        if (!M_UsesRogueBehavior(self) ||
+            !(self->enemy->flags & FL_DISGUISED)) {
             FoundTarget(self);
-        else // PMM - just in case, make sure to clear the enemy so FindTarget doesn't get confused
+        } else {
             self->enemy = NULL;
+        }
     } else {
         self->enemy = NULL;
     }
@@ -985,10 +1004,12 @@ void stationarymonster_triggered_spawn(edict_t *self)
     stationarymonster_start_go(self);
 
     if (self->enemy && !(self->spawnflags & 1) && !(self->enemy->flags & FL_NOTARGET)) {
-        if (!(self->enemy->flags & FL_DISGUISED))       // PGM
+        if (!M_UsesRogueBehavior(self) ||
+            !(self->enemy->flags & FL_DISGUISED)) {
             FoundTarget(self);
-        else // PMM - just in case, make sure to clear the enemy so FindTarget doesn't get confused
+        } else {
             self->enemy = NULL;
+        }
     } else {
         self->enemy = NULL;
     }

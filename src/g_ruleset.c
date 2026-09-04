@@ -28,6 +28,8 @@
 static ruleset_t    g_active_ruleset = RULESET_DM;
 static bool         g_modifier[MOD_COUNT];
 static bool         g_layer[LAYER_COUNT];
+// OSP configuration changes execute before the next map's SpawnEntities().
+static bool         g_osp_hook_request_queued;
 
 // R-COMPAT-6, and see reconcile above: one pair, two donors.
 cvar_t             *g_statsfile;
@@ -290,6 +292,7 @@ void G_InitRuleset(void)
 
     g_active_ruleset = r;
     g_active_ops = ruleset_ops[r] ? ruleset_ops[r] : ruleset_ops[RULESET_DM];
+    g_osp_hook_request_queued = false;
 
     reconcile_legacy_cvars();
 
@@ -385,12 +388,62 @@ const ruleset_ops_t *G_Ops(void)
 
 bool G_ModifierEnabled(modifier_t m)
 {
-    return (m >= 0 && m < MOD_COUNT) ? g_modifier[m] : false;
+    if (m < 0 || m >= MOD_COUNT)
+        return false;
+
+    // These OSP switches can change through a vote after InitGame, so the
+    // modifier reports the live ruleset authority rather than its old request.
+    if (G_IsOspRuleset()) {
+        if (m == MOD_HOOK)
+            return hook_enable && (int)hook_enable->value != 0;
+        if (m == MOD_RUNES)
+            return rune_stat != 0;
+    }
+
+    return g_modifier[m];
 }
 
 bool G_LayerEnabled(content_layer_t l)
 {
     return (l >= 0 && l < LAYER_COUNT) ? g_layer[l] : false;
+}
+
+bool G_UsesRogueGameRules(void)
+{
+    return gamerules && gamerules->value &&
+           (g_active_ruleset == RULESET_CTF ||
+            g_active_ruleset == RULESET_ARENA);
+}
+
+void G_ApplyOspHookRequest(void)
+{
+    cvar_t *request;
+
+    if (G_IsOspRuleset() && hook_enable) {
+        request = gi.cvar("hook", "0", CVAR_LATCH);
+        if (request->value && !(int)hook_enable->value) {
+            gi.cvar_set("hook_enable", "1");
+            gi.dprintf("Colosseum: 'hook 1' enables hook_enable under OSP\n");
+        }
+
+        g_modifier[MOD_HOOK] = (int)hook_enable->value != 0;
+    }
+}
+
+void G_QueueOspHookRequest(void)
+{
+    if (G_IsOspRuleset())
+        g_osp_hook_request_queued = true;
+}
+
+bool G_ApplyQueuedOspHookRequest(void)
+{
+    if (!g_osp_hook_request_queued)
+        return false;
+
+    g_osp_hook_request_queued = false;
+    G_ApplyOspHookRequest();
+    return true;
 }
 
 // ---------------------------------------------------------------- diagnostic
@@ -856,11 +909,15 @@ void G_ResolveModifiers(void)
     int flags;
 
     if (G_IsOspRuleset()) {
+        // `hook` is a one-way request like `runes`: an explicit OSP
+        // hook_enable setting remains authoritative when the request is off.
+        G_ApplyOspHookRequest();
+
         if (wanted && !rune_stat) {
             // All five bits.  Which runes is runes_enable's business and this
             // only ever fires when it has chosen none.
             gi.cvar_set("runes_enable", "31");
-            rune_stat = 0x1f;
+            OSP_SyncRuneState();
             gi.dprintf("Colosseum: 'runes 1' sets runes_enable to all five "
                        "(R-MODE-4, R-88)\n");
         }

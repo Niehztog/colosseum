@@ -61,6 +61,8 @@ int     OSP_TeamMaxPlayers(void);
 extern  int     sync_stat;
 // Which of the five runes are in play, as RUNE_* bits.  0 disables them.
 extern  int     rune_stat;
+// Refresh the cached bitmask after a configuration has changed runes_enable.
+void    OSP_SyncRuneState(void);
 // 0 running, 1 paused by a rule, 2 frozen, 3 paused by a player.
 extern  int     match_paused;
 extern  float   pause_time;
@@ -130,6 +132,7 @@ extern  cvar_t  *client_hud;
 // except behind BotTourneyHook()/BotTourneyVotedIn(), because an extern here
 // resolves in every ruleset and answers with tourney's state whether or not
 // tourney is running.
+extern  cvar_t  *damage_railgun;
 extern  cvar_t  *hook_enable;
 extern  int      bots_votedin;
 
@@ -182,6 +185,7 @@ bool     OSP_runesHasVampire(struct edict_s *ent);
 bool     OSP_runesHoldHealth(struct edict_s *ent);
 void     OSP_runesApplyRegeneration(struct edict_s *ent);
 bool     OSP_Pickup_Rune(struct edict_s *ent, struct edict_s *other);
+const gitem_t *OSP_What_Rune(struct edict_s *ent);
 void     OSP_Drop_Rune(struct edict_s *ent, const gitem_t *item);
 void     OSP_runeThink(struct edict_s *self);
 void     OSP_deadDropRune(struct edict_s *ent);

@@ -146,8 +146,9 @@ bool G_IsObserver(edict_t *ent)
         return true;
     if (G_Ruleset() == RULESET_CTF)
         return ent->client->resp.ctf_team == CTF_NOTEAM;
-    // RA2 has a third spelling: it deleted baseq2's spectator too, and expresses
-    // watching as fightstate.  Same question, third answer, still one predicate.
+    // RA2's supported observer state is fightstate. Its donor rejects a fresh
+    // generic spectator request despite retaining related inherited plumbing,
+    // so this predicate uses the arena's native state.
     if (G_Ruleset() == RULESET_ARENA)
         return ent->client->resp.fightstate == FIGHT_SPECTATING;
     // ...and tourney's is a FIFTH spelling, which R-191 declined to add here and
@@ -251,7 +252,8 @@ void MoveClientToIntermission(edict_t *ent)
 
     // add the layout
 
-    if (deathmatch->value || coop->value) {
+    if ((deathmatch->value || coop->value) &&
+        !(G_IsOspRuleset() && ent->client->resp.osp_r2dc)) {
         G_ScoreboardMessage(ent, NULL);
         gi.unicast(ent, true);
     }
@@ -273,7 +275,9 @@ void BeginIntermission(edict_t *targ)
         client = g_edicts + 1 + i;
         if (!client->inuse)
             continue;
-        if (client->health <= 0)
+        if (client->health <= 0 &&
+            (!G_IsOspRuleset() ||
+             client->client->resp.osp_entered == ENTERED_ENTERED))
             respawn(client);
     }
 
@@ -345,21 +349,15 @@ void BeginIntermission(edict_t *targ)
         if (!client->inuse)
             continue;
         n++;
-        MoveClientToIntermission(client);
 
-        // R-OSP-1/3: a player who was still in the game when the level ended
-        // gets the scoreboard put up 1.25 seconds in (`osp_r2dc` 2, read by
-        // ClientThink's intermission arm -- this comment said OSP_clientThink,
-        // which reads the value 1, and the value 2 had no reader at all until
-        // R-193), the hi-score alternation is restarted, and the runes they were
-        // carrying stop being drawn on the HUD.
+        // The OSP mover tests this state before choosing whether to send its
+        // immediate board, so it must be established before calling it.
         if (G_IsOspRuleset()) {
-            if (client->health <= 0 &&
-                client->client->resp.osp_entered == ENTERED_ENTERED)
-                client->client->resp.osp_r2dc = 2;
+            client->client->resp.osp_r2dc = 2;
             client->client->resp.osp_r034 = 0;
             OSP_zeroRuneStats(client);
         }
+        MoveClientToIntermission(client);
     }
 
     if (G_Ruleset() == RULESET_ARENA) {
@@ -467,7 +465,7 @@ void DeathmatchScoreboardMessage(edict_t *ent, edict_t *killer)
 //===============
 //ROGUE
         // allow new DM games to override the tag picture
-        if (gamerules && gamerules->value) {
+        if (G_UsesRogueGameRules()) {
             if (DMGame.DogTag)
                 DMGame.DogTag(cl_ent, killer, &tag);
         }
@@ -665,6 +663,16 @@ Display the current help message
 */
 void Cmd_Help_f(edict_t *ent)
 {
+    if (G_IsOspRuleset()) {
+        if (ent->client->resp.osp_r010 <= level.framenum) {
+            ent->client->resp.osp_r010 = level.framenum + 2;
+            Cmd_Score_f(ent);
+        } else if (match_paused) {
+            Cmd_Score_f(ent);
+        }
+        return;
+    }
+
     // this is for backwards compatability
     if (deathmatch->value) {
         Cmd_Score_f(ent);

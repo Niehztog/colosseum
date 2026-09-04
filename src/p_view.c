@@ -792,7 +792,7 @@ static void G_SetClientEffects(edict_t *ent)
     if (ent->flags & FL_DISGUISED)
         ent->s.renderfx |= RF_USE_DISGUISE;
 
-    if (gamerules && gamerules->value) {
+    if (G_UsesRogueGameRules()) {
         if (DMGame.PlayerEffects)
             DMGame.PlayerEffects(ent);
     }
@@ -1165,18 +1165,20 @@ void ClientEndServerFrame(edict_t *ent)
     // chase cam stuff.  G_IsObserver() rather than resp.spectator: under ctf an
     // observer is a CTF_NOTEAM player and resp.spectator is never set, so the
     // inherited test would give an observer a live player's HUD (R-CTF-5).
-    // R-193: NOT for tourney.  The donor deleted baseq2's spectator system, so
-    // it has no G_SetSpectatorStats and writes an observer's HUD through
-    // G_SetStats like anybody else's -- with the `entered` tests inside it doing
-    // the narrowing (STAT_FRAGS 0 for a client that has not entered, R-191).
-    // Routing an OSP observer to the spectator stats would be this port's
-    // invention rather than the donor's behaviour.
-    if (G_IsObserver(ent) && !G_IsOspRuleset())
-        G_SetSpectatorStats(ent);
-    else
-        G_SetStats(ent);
+    // Tourney has no base spectator HUD.  A free observer gets its ordinary
+    // OSP stats, but a chase/autocam client receives its target's full array
+    // below and must not overwrite that copy on its own later slot pass.
+    if (!(G_IsOspRuleset() &&
+          (ent->client->chase_target || ent->client->osp_t03c))) {
+        if (G_IsObserver(ent) && !G_IsOspRuleset())
+            G_SetSpectatorStats(ent);
+        else
+            G_SetStats(ent);
+    }
 
-    G_CheckChaseStats(ent);
+    // OSP's copy loop below replaces this base spectator mechanism.
+    if (!G_IsOspRuleset())
+        G_CheckChaseStats(ent);
 
     // R-OSP-1 and R-OSP-7: tourney owns the upper half of its own stat map --
     // the match clock, the frag/rank columns, the team panels and the id line
@@ -1311,7 +1313,12 @@ void ClientEndServerFrame(edict_t *ent)
     // if the scoreboard is up, update it.  `scoremode` is RA2's replacement for
     // baseq2's `showscores` bool and the merged struct keeps both (sec 7 rule
     // 3), so this asks whichever field the running ruleset writes.
-    if (G_ScoreboardUp(ent) && !(level.framenum & 31)) {
+    if (G_ScoreboardUp(ent) &&
+        (!(level.framenum & 31) ||
+         (G_IsOspRuleset() && match_paused &&
+          !G_MenuActive(ent) &&
+          pause_time - (int)pause_time < FRAMETIME &&
+          !((int)pause_time % 3)))) {
         // The menu shares the layout channel with the scoreboard -- which is
         // exactly why every engine sets showscores when it opens (R-MENU-2a) --
         // so the owner decides which of the two is redrawn.  MENU_ARENA is the

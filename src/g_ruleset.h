@@ -110,12 +110,20 @@ void        G_InitRuleset(void);        // once, from InitGame, before anything 
 // the ruleset's own code reads rather than gating nothing.  See the comment on
 // the implementation.
 void        G_ResolveModifiers(void);
+void        G_ApplyOspHookRequest(void);
+void        G_QueueOspHookRequest(void);
+bool        G_ApplyQueuedOspHookRequest(void);
 ruleset_t   G_Ruleset(void);
 const char *G_RulesetName(ruleset_t r);
 const ruleset_ops_t *G_Ops(void);       // never NULL after G_InitRuleset()
 
 bool        G_ModifierEnabled(modifier_t m);
 bool        G_LayerEnabled(content_layer_t l);
+
+// Ground Zero's DMGame callback table is a protocol between an active
+// deathmatch ruleset and the Rogue game-rule implementation.  It is available
+// under CTF and Arena only; OSP owns its own match protocol.
+bool        G_UsesRogueGameRules(void);
 
 // Is the OSP Tourney DM code path active?  `dm`, `dmpro`, `tdm` and `duel` are
 // one donor's code selected four ways (R-OSP-12), so a gate that means "this is

@@ -33,7 +33,7 @@ emitter (R-OSP-7a).  Both are audited, because the donor trees stay in the
 repository as controls -- `q2pro/src/ctf` must keep failing on the slot-17
 double assignment (doc/regression.md), and a check that cannot fail is not a
 check.  `--selftest` proves the map-shape checks can fail too, by mutating the
-real map and the real emitter five ways and asserting each one is caught.  It
+real map and the real emitter in several ways and asserting each one is caught.  It
 runs in `make check`, so a control cannot rot separately from its check.
 """
 import os, re, sys, glob
@@ -477,6 +477,23 @@ def audit_map(lbl, files, out, header_text, impl_text, extra=None):
                             f'{m.group(1)} rather than its resolved slot -- '
                             f'use G_GetStat/G_SetStat (R-OSP-7 clause 4)')
 
+    # Tourney's statusbar numbering is private to its ruleset column, so a
+    # literal slot bypasses the same map as a logical id used as an index.
+    numeric_index = re.compile(r'\bstats\s*\[\s*(\d+)\s*\]')
+    numeric_sources = []
+    for f in files:
+        if os.path.basename(os.path.dirname(f)) == 'tourney':
+            numeric_sources.append((os.path.basename(f),
+                                    re.sub(r'//[^\n]*', '', read(f))))
+    for name, t in extra or []:
+        if name == 'control.c' or name.startswith('tourney/'):
+            numeric_sources.append((name, t))
+    for name, t in numeric_sources:
+        for m in numeric_index.finditer(t):
+            problems.append(f'{name} indexes stats[] with bare slot '
+                            f'{m.group(1)} rather than a logical id -- '
+                            f'use G_GetStat/G_SetStat (R-OSP-7 clause 4)')
+
     # ...AND THE MIRROR IMAGE: a slot number where an id belongs.  The accessors
     # take a statslot_t, which is an enum and therefore accepts any int, so
     # `G_SetStat(ent, ent->item->quantity, 1)` compiles and resolves whatever
@@ -640,6 +657,10 @@ SELFTESTS = [
      (None, 'bool ctl(edict_t *ent) { '
             'return ent->client->ps.stats[SID_OSP_RUNE_HASTE] != 0; }'),
      'rather than its resolved slot'),
+    ('bare numeric OSP slot', 'inject',
+     (None, 'void ctl(edict_t *ent) { '
+            'ent->client->ps.stats[27] = OSP_CS(9); }'),
+     'indexes stats[] with bare slot 27'),
     # R-132's other half, as the join it actually is: the accessor reads
     # item->quantity as an id, so an IT_RUNE item that sets quantity to a NUMBER
     # is the defect.  The control supplies the item, because the real accessor

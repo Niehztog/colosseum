@@ -1159,8 +1159,17 @@ void SpawnEntities(const char *mapname, const char *entities, const char *spawnp
         arena_init(g_edicts);
 
     if (G_IsOspRuleset()) {
+        if (G_ApplyQueuedOspHookRequest()) {
+            OSP_SyncRuneState();
+            OSP_setFeatures();
+        }
+
         // The rune spawners and the round's stats file (R-OSP-1, R-OSP-3).
-        if (runes_enable && runes_enable->value)
+        // The donor's own test is integer (port_osp:g_spawn.c:761), and it
+        // has to be: rune_stat is derived with the same cast, so a fractional
+        // runes_enable would schedule a spawner with no rune type enabled
+        // (R-211, and R-207's rule for hook_enable).
+        if (runes_enable && (int)runes_enable->value)
             OSP_setupRuneSpawn(0);
         OSP_Stats_GameInit();
         sl_GameStart(&gi, level);
@@ -1191,7 +1200,7 @@ void SpawnEntities(const char *mapname, const char *entities, const char *spawnp
 //ROGUE
 
 // ROGUE    -- allow dm games to do init stuff right before game starts.
-    if (deathmatch->value && gamerules && gamerules->value) {
+    if (G_UsesRogueGameRules()) {
         if (DMGame.PostInitSetup)
             DMGame.PostInitSetup();
     }

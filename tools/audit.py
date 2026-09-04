@@ -94,6 +94,7 @@ def _gates(out):
 
 PARSERS = {
     'gates.py': _gates,
+    'arenaspawn.py': _bang,
     'units.py': _bang,
     'allocpairs.py': _bang,
     'lostref.py': _bang,
@@ -163,6 +164,11 @@ def main():
     # gates: every ruleset decision goes through the dispatch or a predicate,
     # and the monster-suppression idiom has not come back (Phase 1 exit).
     results.append(run('gates.py', ['--tree', tree], 'gates'))
+    # arenaspawn: fighter-only ranking must still reject an occupied,
+    # same-arena solid pad before either arena selector accepts it (R-146).
+    results.append(run('arenaspawn.py', ['--tree', tree], 'arenaspawn'))
+    results.append(run('arenaspawn.py', ['--selftest', '--tree', tree],
+                       'arenaspawn/controls'))
     # dupvalue: two names for one POSITION in a list something outside this tree
     # walks (R-142).  Each donor numbered its own extra weapons from 12 because
     # each ships a precache block with nothing after the BFG; R-CORE-2 unions the
@@ -198,7 +204,9 @@ def main():
     # another donor's ruleset, which is what R-70's six sites did.
     results.append(run('donorgate.py', ['--tree', tree], 'donorgate'))
     results.append(run('donorgate.py', ['--selftest'], 'donorgate/controls'))
-    # bounded: no unbounded string copy anywhere in src/ (R-SEC-1, R-VER-30).
+    # bounded: no unbounded string copy or raw fscanf string scan in src/
+    # (R-SEC-1, R-VER-30). The config parser must reject an overlong token
+    # rather than treat a bounded fscanf tail as the next valid token.
     # A ban rather than a reachability judgement, because reachability is what a
     # reviewer gets wrong: `sprintf(entry, "yv %d ", y)` reads as arithmetic
     # until somebody adds a %s to it, and the netname three lines down was
@@ -272,9 +280,9 @@ def main():
     # feature set definition by definition and asks.  Its finding is narrow on
     # purpose -- a donor line whose identifiers exist NOWHERE in src/ and that
     # no recorded decision explains -- because a line missing from its own site
-    # is the normal case under R-MODE-5 and 1,165 of them are elsewhere in the
-    # tree verbatim.  doc/donor-fdiff.md is the read-through; R-195 records the
-    # findings, including the five this check's own space cannot contain.
+    # is the normal case under R-MODE-5 and 1,168 of them are elsewhere in the
+    # tree verbatim. doc/donor-fdiff.md is the read-through; R-195 records the
+    # historical findings, while R-196/R-197 closed their non-policy paths.
     results.append(run('fnsweep.py', ['--check', '--tree', tree], 'fnsweep'))
     results.append(run('fnsweep.py', ['--selftest'], 'fnsweep/controls'))
     # botabi: the game<->botlib contract against the BRAIN's own header

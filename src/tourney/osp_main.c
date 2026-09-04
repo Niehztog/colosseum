@@ -311,6 +311,13 @@ cvar_t * vote_enable_kick;
 char    match_motd[1024];
 char    match_info[1024];
 
+void OSP_SyncRuneState(void)
+{
+    rune_stat = (int)runes_enable->value;
+    if (rune_stat > 0x1f)
+        rune_stat = 0x1f;
+}
+
 // Register every cvar the mod owns and clamp the ones that have a legal range.
 void OSP_gameInit(void)
 {
@@ -435,9 +442,7 @@ void OSP_gameInit(void)
     runes_vampire_max = gi.cvar("runes_vampire_max", "200", 0);
     runes_model = gi.cvar("runes_model", "models/items/c_head/tris.md2", 0);
 
-    rune_stat = (int)runes_enable->value;
-    if (rune_stat > 0x1f)
-        rune_stat = 0x1f;
+    OSP_SyncRuneState();
     if ((int)runes_min->value > (int)runes_max->value)
         gi.cvar_set("runes_max", runes_min->string);
 
@@ -738,7 +743,6 @@ void OSP_gameInit(void)
         (int)bots_minplayers->value >= 1)
         gi.cvar_set("bots_minplayers", "0");
 
-    OSP_setFeatures();
     level_start = level.framenum;
 
     gi.dprintf("%s\n", "OSP Tourney DM v(2.75)");
@@ -767,8 +771,10 @@ void OSP_endClean(void)
         gi.cvar_set("timelimit", default_timelimit);
         gi.cvar_set("fraglimit", default_fraglimit);
         gi.cvar_set("hook_enable", default_hook);
-        rune_stat = (int)runes_enable->value;
+        G_ApplyOspHookRequest();
+        OSP_SyncRuneState();
     }
+    OSP_setFeatures();
 
     time_update = 0;
     time_blink = 0;
@@ -4189,6 +4195,7 @@ bool OSP_exitLevel(void)
         gi.cvar_set("__current_config", "default");
         gi.dprintf("Changing back to default config: %s\n",
                    vote_config_defaultname->string);
+        G_QueueOspHookRequest();
         gi.AddCommandString(va("exec %s\n", vote_config_defaultname->string));
         gi.AddCommandString(va("map %s\n", level.mapname));
         return true;

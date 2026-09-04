@@ -107,9 +107,28 @@ void SelectNextItem(edict_t *ent, int itflags)
         return;
     }
 
-    if (cl->chase_target) {
+    if (cl->chase_target &&
+        (!G_IsOspRuleset() || !cl->showscores)) {
+        if (G_IsOspRuleset()) {
+            if (cl->resp.osp_r010 > level.framenum)
+                return;
+            cl->resp.osp_r010 = level.framenum + 2;
+        }
         ChaseNext(ent);
         return;
+    }
+
+    if (G_IsOspRuleset()) {
+        if (OSP_IsMatch() && level.intermission_framenum)
+            return;
+
+        if (G_Ruleset() == RULESET_DM && cl->showscores &&
+            cl->resp.osp_r24c != 1 &&
+            cl->resp.osp_r010 <= level.framenum && active_clients) {
+            cl->resp.osp_r010 = level.framenum + 2;
+            cl->resp.osp_r2b0 = (cl->resp.osp_r2b0 + 1) % active_clients;
+            DeathmatchScoreboard(ent);
+        }
     }
 
     // scan  for the next valid one
@@ -154,8 +173,28 @@ void SelectPrevItem(edict_t *ent, int itflags)
     }
 
     if (cl->chase_target) {
+        if (G_IsOspRuleset()) {
+            if (cl->resp.osp_r010 > level.framenum)
+                return;
+            cl->resp.osp_r010 = level.framenum + 2;
+        }
         ChasePrev(ent);
         return;
+    }
+
+    if (G_IsOspRuleset()) {
+        if (OSP_IsMatch() && level.intermission_framenum)
+            return;
+
+        if (G_Ruleset() == RULESET_DM && cl->showscores &&
+            cl->resp.osp_r24c != 1 &&
+            cl->resp.osp_r010 <= level.framenum && active_clients) {
+            cl->resp.osp_r010 = level.framenum + 2;
+            cl->resp.osp_r2b0 = (cl->resp.osp_r2b0 - 1) % active_clients;
+            if (cl->resp.osp_r2b0 < 0)
+                cl->resp.osp_r2b0 = active_clients - 1;
+            DeathmatchScoreboard(ent);
+        }
     }
 
     // scan  for the next valid one
@@ -423,6 +462,10 @@ void Cmd_Use_f(edict_t *ent)
     const gitem_t   *it;
     char        *s;
 
+    if (G_IsOspRuleset() &&
+        ent->client->resp.osp_entered != ENTERED_ENTERED)
+        return;
+
     s = gi.args();
     it = FindItem(s);
     if (!it) {
@@ -474,6 +517,27 @@ void Cmd_Drop_f(edict_t *ent)
     int         index;
     const gitem_t   *it;
     char        *s;
+
+    if (G_IsOspRuleset()) {
+        if (Q_stricmp(gi.args(), "tech") == 0 ||
+            Q_stricmp(gi.args(), "rune") == 0) {
+            it = OSP_What_Rune(ent);
+            if (it)
+                it->drop(ent, it);
+            else
+                gi.cprintf(ent, PRINT_HIGH, "No runes to drop.\n");
+            return;
+        }
+
+        if (sync_stat < 4) {
+            gi.cprintf(ent, PRINT_HIGH, "Cannot drop items during warmup!\n");
+            return;
+        }
+
+        if (ent->client->resp.osp_entered != ENTERED_ENTERED ||
+            ent->health <= 0)
+            return;
+    }
 
     // CTF: `drop tech` drops whichever tech you hold, since the four techs have
     // four classnames and the player has one key bound.
@@ -844,6 +908,17 @@ void Cmd_InvDrop_f(edict_t *ent)
         return;
     }
 
+    if (G_IsOspRuleset()) {
+        if (sync_stat < 4) {
+            gi.cprintf(ent, PRINT_HIGH, "Cannot drop items during warmup!\n");
+            return;
+        }
+
+        if (ent->client->resp.osp_entered != ENTERED_ENTERED ||
+            ent->health <= 0)
+            return;
+    }
+
     ValidateSelectedItem(ent);
 
     if (ent->client->pers.selected_item == -1) {
@@ -967,6 +1042,8 @@ void Cmd_PutAway_f(edict_t *ent)
     ent->client->showhelp = false;
     ent->client->showinventory = false;
     G_MenuClose(ent);
+    if (G_IsOspRuleset())
+        G_SetStat(ent, SID_OSP_LAYOUT1, 0);
     ent->client->update_chase = true;
 }
 
@@ -1150,6 +1227,82 @@ bool FloodProtect(edict_t *ent)
     return false;
 }
 
+static void OSP_Cmd_Say_f(edict_t *ent, bool team, bool arg0)
+{
+    int     i;
+    int     quiet;
+    char    text[2048];
+    edict_t *other;
+
+    if (G_IsOspRuleset()) {
+        ent->client->resp.osp_r0d8 = 0;
+
+        if (!team && !match_paused && FloodProtect(ent))
+            return;
+
+        if (team)
+            Q_snprintf(text, sizeof(text), "(%s): ", ent->client->pers.netname);
+        else
+            Q_snprintf(text, sizeof(text), "%s: ", ent->client->pers.netname);
+
+        if (arg0) {
+            Q_strlcat(text, gi.argv(0), sizeof(text));
+            Q_strlcat(text, " ", sizeof(text));
+            Q_strlcat(text, gi.args(), sizeof(text));
+        } else {
+            Q_strlcat(text, COM_StripQuotes(gi.args()), sizeof(text));
+        }
+
+        // The donor logs the truncated line before appending its wire newline.
+        text[150] = 0;
+        OSP_Stats_Chat(text);
+        Q_strlcat(text, "\n", sizeof(text));
+
+        if (!team) {
+            if (sync_stat > 2 && !match_paused) {
+                if (dedicated->value)
+                    gi.dprintf("%s", text);
+
+                for (i = 1; i <= game.maxclients; i++) {
+                    other = &g_edicts[i];
+                    if (!other->inuse || !other->client)
+                        continue;
+
+                    quiet = other->client->resp.osp_r0b0;
+                    if (other->client->resp.osp_entered != ENTERED_ENTERED ||
+                        !quiet ||
+                        (quiet == 1 &&
+                         ent->client->resp.osp_entered == ENTERED_ENTERED) ||
+                        other == ent)
+                        gi.cprintf(other, PRINT_CHAT, "%s", text);
+                }
+            } else {
+                gi.bprintf(PRINT_CHAT, "%s", text);
+            }
+            return;
+        }
+
+        if (dedicated->value)
+            gi.dprintf("%s", text);
+
+        for (i = 1; i <= game.maxclients; i++) {
+            other = &g_edicts[i];
+            if (!other->inuse || !other->client)
+                continue;
+
+            if (G_Ruleset() == RULESET_TDM) {
+                if (ent->client->resp.team != other->client->resp.team)
+                    continue;
+            } else if ((ent->client->resp.osp_entered == ENTERED_ENTERED) !=
+                       (other->client->resp.osp_entered == ENTERED_ENTERED)) {
+                continue;
+            }
+
+            gi.cprintf(other, PRINT_CHAT, "%s", text);
+        }
+    }
+}
+
 /*
 ==================
 Cmd_Say_f
@@ -1165,8 +1318,32 @@ void Cmd_Say_f(edict_t *ent, bool team, bool arg0, bool bcast)
     if (gi.argc() < 2 && !arg0)
         return;
 
+    if (G_IsOspRuleset()) {
+        OSP_Cmd_Say_f(ent, team, arg0);
+        return;
+    }
+
     if (FloodProtect(ent))
         return;
+
+    if (G_Ruleset() == RULESET_ARENA) {
+        if (ent->client->spamcount == -1)
+            return;
+
+        if (level.time < ent->client->spamtime + 2.0f) {
+            ent->client->spamcount++;
+            if (ent->client->spamcount > 5) {
+                ent->client->spamcount = -1;
+                gi.bprintf(PRINT_CHAT, "%s: Sorry guys, I talk too much\n",
+                           ent->client->pers.netname);
+                stuffcmd(ent, "disconnect\n");
+                return;
+            }
+        } else {
+            ent->client->spamcount = 1;
+        }
+        ent->client->spamtime = level.time;
+    }
 
     // *** R-165: RA2 DELETES THIS TEST, AND LEAVING IT IN LEAKED EVERY TEAM
     // *** CALLOUT TO THE OTHER SIDE.
@@ -1201,23 +1378,6 @@ void Cmd_Say_f(edict_t *ent, bool team, bool arg0, bool bcast)
     // don't let text be too long for malicious reasons
     if (strlen(text) > 150)
         text[150] = 0;
-
-    // R-195.3.  The donor logs chat from HERE, not from `talkto` alone:
-    // `q2log_playerChat(text)` sits at `port_osp:g_cmds.c:934`, after the
-    // truncation and before the newline, so the line reaches the log with its
-    // "name: " or "(name): " prefix and without the trailing "\n".  This tree
-    // had the call only in `OSP_talkto_cmd`, so `stats_logchat 1` recorded
-    // private messages and nothing else while `osp_stats.h` and doc/cvars.md
-    // both describe the cvar as logging chat lines.
-    //
-    // One call, and the donor's coverage is exactly what one call gives: `say`
-    // under all four OSP rulesets, and `say_team` under three of them.  Under
-    // `tdm` say_team is routed to OSP_sayteam_cmd (osp_clientcmd.c:80) before
-    // it can reach here -- and the donor routes it the same way at
-    // `port_osp:g_cmds.c:1031` and does not log there either.  Sec 7 rule 2
-    // hands the donor its own feature; the tdm say_team gap is the donor's.
-    if (G_IsOspRuleset())
-        OSP_Stats_Chat(text);
 
     Q_strlcat(text, "\n", sizeof(text));
 

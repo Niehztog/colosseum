@@ -43,8 +43,19 @@
 #
 #   -s names a scenario under the harness's scenarios/ and defaults to
 #   `colosseum`, the five-ruleset battery.  `-r` is that scenario's own flag and
-#   is only passed when it is the one running.  The others are single-subject
-#   and take the same server/library/brain arguments:
+#   is only passed when it is the one running.  The others are single-subject;
+#   the wrapper supplies only the server/library/asset flags declared by the
+#   selected scenario and passes its remaining arguments through unchanged:
+#
+#   RA2 map scenarios need their archive root supplied after the runner flags,
+#   for example:
+#
+#     tools/playtest.sh -s ra2join -ref ~/q2-dev/yquake2/release_/arena \
+#       -teams '#1 Pickup Red,#1 Pickup Blue'
+#
+#   `ra2join`'s default Medieval arena is pickup-only, so its pre-created team
+#   rows are required; creating a new team correctly leaves the client in the
+#   lobby and is not a spawn-placement failure.
 #
 #     ra2botvote   R-RA-8's per-arena `bots` switch and R-RA-9's fill
 #                  scheduler: 16 checks in six phases, every one in both signs.
@@ -292,6 +303,7 @@ ROGUEDATA=${ROGUEDATA:-$HOME/q2-dev/yquake2/release_/rogue}
 LIB=release/game$(uname -m | sed -e 's/^x86_64$/x86_64/' -e 's/^aarch64$/arm64/').so
 RULESETS=dm,dmpro,tdm,duel,ctf,arena,sp
 SCENARIO=colosseum
+PLAYTEST_DIR=${PLAYTEST_DIR:-${TMPDIR:-/tmp}/q2playtest}
 
 while [ $# -gt 0 ]; do
   case $1 in
@@ -304,32 +316,103 @@ done
 
 die() { echo "playtest.sh: $*" >&2; exit 1; }
 [ -d "$HARNESS" ] || die "no harness at $HARNESS (set HARNESS)"
-[ -x "$Q2PRO_BUILD/q2proded" ] || die "no q2proded in $Q2PRO_BUILD (set Q2PRO_BUILD)"
-[ -f "$LIB" ] || die "no game library at $LIB -- run make native first"
-[ -d "$Q2DATA" ] || die "no baseq2 paks at $Q2DATA (set Q2DATA)"
+[ -d "$HARNESS/scenarios/$SCENARIO" ] || die "no scenario $SCENARIO in $HARNESS/scenarios"
+SCENARIO_MAIN=$HARNESS/scenarios/$SCENARIO/main.go
 
-LIB=$(cd "$(dirname "$LIB")" && pwd)/$(basename "$LIB")
+# Specialist scenarios deliberately declare only the inputs they need. Passing
+# every shared convenience flag makes some fail before their server starts.
+supports_flag()
+{
+  grep -qE "flag\\.[A-Za-z0-9_]+\\(\\\"$1\\\"" "$SCENARIO_MAIN"
+}
+
+has_option()
+{
+  option=$1
+  shift
+
+  for argument
+  do
+    case "$argument" in
+      "-$option"|"--$option"|-"$option"=*|--"$option"=*) return 0 ;;
+    esac
+  done
+
+  return 1
+}
+
+if supports_flag q2proded; then
+  [ -x "$Q2PRO_BUILD/q2proded" ] || die "no q2proded in $Q2PRO_BUILD (set Q2PRO_BUILD)"
+  Q2PRODED=$(cd "$Q2PRO_BUILD" && pwd)/q2proded
+fi
+
+if supports_flag lib; then
+  [ -f "$LIB" ] || die "no game library at $LIB -- run make native first"
+  LIB=$(cd "$(dirname "$LIB")" && pwd)/$(basename "$LIB")
+fi
+
+if supports_flag ref && ! has_option ref "$@"; then
+  [ -d "$Q2DATA" ] || die "no baseq2 paks at $Q2DATA (set Q2DATA)"
+fi
 
 GLAD=""
 if [ -f "$GLADDIR/release/gladiator.so" ]; then
   GLAD=$(cd "$GLADDIR" && pwd)
 fi
+GLADSO=
+[ -n "$GLAD" ] && GLADSO=$GLAD/release/gladiator.so
+GLADPAK=
+GLADBOTCFG=
+if [ -f "$GLAD/assets/pak7.pak" ]; then
+  GLADPAK=$GLAD/assets/pak7.pak
+fi
+if [ -f "$GLAD/assets/bots.cfg" ]; then
+  GLADBOTCFG=$GLAD/assets
+fi
 
-[ -d "$HARNESS/scenarios/$SCENARIO" ] || die "no scenario $SCENARIO in $HARNESS/scenarios"
+if supports_flag q2proded && ! has_option q2proded "$@"; then
+  set -- "$@" -q2proded "$Q2PRODED"
+fi
+if supports_flag lib && ! has_option lib "$@"; then
+  set -- "$@" -lib "$LIB"
+fi
+if supports_flag ref && ! has_option ref "$@"; then
+  set -- "$@" -ref "$Q2DATA"
+fi
+if supports_flag dir && ! has_option dir "$@"; then
+  set -- "$@" -dir "$PLAYTEST_DIR/$SCENARIO"
+fi
+if supports_flag ctf && ! has_option ctf "$@"; then
+  set -- "$@" -ctf "$CTFDATA"
+fi
+if supports_flag gladdir && ! has_option gladdir "$@"; then
+  set -- "$@" -gladdir "$GLAD"
+fi
+if supports_flag glad && ! has_option glad "$@"; then
+  set -- "$@" -glad "$GLADSO"
+fi
+if supports_flag pak7 && ! has_option pak7 "$@"; then
+  [ -n "$GLADPAK" ] || die "no Gladiator pak7.pak under $GLADDIR/assets"
+  set -- "$@" -pak7 "$GLADPAK"
+fi
+if supports_flag botcfg && ! has_option botcfg "$@"; then
+  [ -n "$GLADBOTCFG" ] || die "no Gladiator bots.cfg under $GLADDIR/assets"
+  set -- "$@" -botcfg "$GLADBOTCFG"
+fi
 
-# `-rulesets` belongs to the battery alone; passing it to a single-subject
-# scenario is a flag it has never heard of and an exit 2 that reads like a
-# broken harness.
-RSFLAG=""
-[ "$SCENARIO" = colosseum ] && RSFLAG="-rulesets $RULESETS"
-
-# ...and the same rule for the mission-pack directories: `layeracc` is the only
-# scenario that has heard of them.
-PACKFLAGS=""
-[ "$SCENARIO" = layeracc ] && PACKFLAGS="-xatrix $XATRIXDATA -rogue $ROGUEDATA"
+# These defaults belong to only one scenario. Preserve explicit overrides
+# instead of emitting duplicate flags after the caller's arguments.
+if [ "$SCENARIO" = colosseum ] && ! has_option rulesets "$@"; then
+  set -- "$@" -rulesets "$RULESETS"
+fi
+if [ "$SCENARIO" = layeracc ]; then
+  if ! has_option xatrix "$@"; then
+    set -- "$@" -xatrix "$XATRIXDATA"
+  fi
+  if ! has_option rogue "$@"; then
+    set -- "$@" -rogue "$ROGUEDATA"
+  fi
+fi
 
 cd "$HARNESS"
-exec go run "./scenarios/$SCENARIO" \
-  -q2proded "$(cd "$OLDPWD" && cd "$Q2PRO_BUILD" && pwd)/q2proded" \
-  -lib "$LIB" -ref "$Q2DATA" -ctf "$CTFDATA" -gladdir "$GLAD" \
-  $RSFLAG $PACKFLAGS "$@"
+exec go run "./scenarios/$SCENARIO" "$@"

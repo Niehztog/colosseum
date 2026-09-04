@@ -105,11 +105,13 @@ static void Killed(edict_t *targ, edict_t *inflictor, edict_t *attacker, int dam
         targ->health = -999;
 
     if (targ->monsterinfo.aiflags & AI_MEDIC) {
-        if (targ->enemy) { // god, I hope so
-            cleanupHealTarget(targ->enemy);
+        if (M_UsesRogueBehavior(targ)) {
+            if (targ->enemy)
+                cleanupHealTarget(targ->enemy);
+        } else if (targ->enemy && targ->enemy->owner == targ) {
+            targ->enemy->owner = NULL;
         }
 
-        // clean up self
         targ->monsterinfo.aiflags &= ~AI_MEDIC;
         targ->enemy = attacker;
     } else if (G_Ruleset() == RULESET_ARENA && targ == attacker) {
@@ -169,10 +171,10 @@ static void Killed(edict_t *targ, edict_t *inflictor, edict_t *attacker, int dam
             level.killed_monsters++;
             if (coop->value && attacker->client)
                 attacker->client->resp.score++;
-            // medics won't heal monsters that they kill themselves
-            // PMM - now they will
-//          if (strcmp(attacker->classname, "monster_medic") == 0)
-//              targ->owner = attacker;
+            if (!M_UsesRogueBehavior(targ) && attacker &&
+                !M_UsesRogueBehavior(attacker) && attacker->classname &&
+                !strcmp(attacker->classname, "monster_medic"))
+                targ->owner = attacker;
         }
     }
 
@@ -404,40 +406,25 @@ static int CheckArmor(edict_t *ent, const vec3_t point, const vec3_t normal, int
 
 static void M_ReactToDamage(edict_t *targ, edict_t *attacker, edict_t *inflictor)
 {
-    // pmm
     bool new_tesla;
+    bool rogue_behavior;
 
     if (!(attacker->client) && !(attacker->svflags & SVF_MONSTER))
         return;
 
-//=======
-//ROGUE
-    // logic for tesla - if you are hit by a tesla, and can't see who you should be mad at (attacker)
-    // attack the tesla
-    // also, target the tesla if it's a "new" tesla
+    rogue_behavior = M_UsesRogueBehavior(targ);
+
+    /*
+     * Tesla and the spawned-minion flags below describe a live relationship,
+     * not the map's monster family.  A Carrier minion can exist under rogue 0,
+     * so those state-driven effects intentionally stay available to it.
+     */
     if ((inflictor) && (!strcmp(inflictor->classname, "tesla"))) {
         new_tesla = MarkTeslaArea(targ, inflictor);
         if (new_tesla)
             TargetTesla(targ, inflictor);
         return;
-        // FIXME - just ignore teslas when you're TARGET_ANGER or MEDIC
-        /*      if (!(targ->enemy && (targ->monsterinfo.aiflags & (AI_TARGET_ANGER|AI_MEDIC))))
-                {
-                    // FIXME - coop issues?
-                    if ((!targ->enemy) || (!visible(targ, targ->enemy)))
-                    {
-                        gi.dprintf ("can't see player, switching to tesla\n");
-                        TargetTesla (targ, inflictor);
-                        return;
-                    }
-                    gi.dprintf ("can see player, ignoring tesla\n");
-                }
-                else if ((g_showlogic) && (g_showlogic->value))
-                    gi.dprintf ("no enemy, or I'm doing other, more important things, than worrying about a damned tesla!\n");
-        */
     }
-//ROGUE
-//=======
 
     if (attacker == targ || attacker == targ->enemy)
         return;
@@ -467,21 +454,18 @@ static void M_ReactToDamage(edict_t *targ, edict_t *attacker, edict_t *inflictor
     }
 //PGM
 
-// PMM
-// if we're healing someone, do like above and try to stay with them
     if ((targ->enemy) && (targ->monsterinfo.aiflags & AI_MEDIC)) {
-        float   percentHealth;
+        if (rogue_behavior) {
+            float percentHealth = (float)targ->health / targ->max_health;
 
-        percentHealth = (float)(targ->health) / (float)(targ->max_health);
-        // ignore it some of the time
-        if (targ->enemy->inuse && percentHealth > 0.25f)
-            return;
-
-        // remove the medic flag
+            if (targ->enemy->inuse && percentHealth > 0.25f)
+                return;
+            cleanupHealTarget(targ->enemy);
+        } else if (targ->enemy->owner == targ) {
+            targ->enemy->owner = NULL;
+        }
         targ->monsterinfo.aiflags &= ~AI_MEDIC;
-        cleanupHealTarget(targ->enemy);
     }
-// PMM
 
     // we now know that we are not both good guys
 
@@ -526,7 +510,12 @@ static void M_ReactToDamage(edict_t *targ, edict_t *attacker, edict_t *inflictor
     if (((targ->flags & (FL_FLY | FL_SWIM)) == (attacker->flags & (FL_FLY | FL_SWIM))) &&
         (strcmp(targ->classname, attacker->classname) != 0) &&
         !(attacker->monsterinfo.aiflags & AI_IGNORE_SHOTS) &&
-        !(targ->monsterinfo.aiflags & AI_IGNORE_SHOTS)) {
+        !(targ->monsterinfo.aiflags & AI_IGNORE_SHOTS) &&
+        (rogue_behavior ||
+         (strcmp(attacker->classname, "monster_tank") != 0 &&
+          strcmp(attacker->classname, "monster_supertank") != 0 &&
+          strcmp(attacker->classname, "monster_makron") != 0 &&
+          strcmp(attacker->classname, "monster_jorg") != 0))) {
         if (targ->enemy && targ->enemy->client)
             targ->oldenemy = targ->enemy;
         targ->enemy = attacker;
@@ -624,7 +613,10 @@ void T_Damage(edict_t *targ, edict_t *inflictor, edict_t *attacker, const vec3_t
     // friendly fire avoidance
     // if enabled you can't hurt teammates (but you can hurt yourself)
     // knockback still occurs
-    if ((targ != attacker) && ((deathmatch->value && ((int)(dmflags->value) & (DF_MODELTEAMS | DF_SKINTEAMS))) || (coop->value && targ->client))) {
+    if (!G_IsOspRuleset() && (targ != attacker) &&
+        ((deathmatch->value &&
+          ((int)(dmflags->value) & (DF_MODELTEAMS | DF_SKINTEAMS))) ||
+         (coop->value && targ->client))) {
         if (OnSameTeam(targ, attacker)) {
             // PMM - nukes kill everyone
             if (((int)(dmflags->value) & DF_NO_FRIENDLY_FIRE) && (mod != MOD_NUKE))
@@ -638,11 +630,8 @@ void T_Damage(edict_t *targ, edict_t *inflictor, edict_t *attacker, const vec3_t
 
     // R-OSP-1: tourney decides friendly fire and self damage per TEAM and per
     // match mode rather than from dmflags, because both are things a referee
-    // changes mid-match.  It is an addition to the block above, not a
-    // replacement for it: the donor deleted baseq2's easy-mode halving and its
-    // dmflags friendly-fire arm outright, and R-CORE-8 keeps both -- under
-    // every other ruleset they are the only rules there are, and under tourney
-    // dmflags teamplay is off, so the inherited arm cannot fire.
+    // changes mid-match.  The donor deleted baseq2's dmflags friendly-fire arm,
+    // so it remains available to every other ruleset but not to OSP.
     if (G_IsOspRuleset() && targ->client) {
         // A client who has not finished entering is not in the match yet, and
         // is where the donor returns rather than damaging.
@@ -674,12 +663,16 @@ void T_Damage(edict_t *targ, edict_t *inflictor, edict_t *attacker, const vec3_t
     // is why it reads the attacker and runs before any of the target's
     // reductions.  A no-op unless the rune set is on and the attacker has it,
     // in the same shape as CTFApplyStrength below.
-    if (G_IsOspRuleset() && (rune_stat & RUNE_STRENGTH))
+    if (G_IsOspRuleset() && (rune_stat & RUNE_STRENGTH)) {
+        psave = damage;
         damage = OSP_runesApplyStrength(attacker, damage);
+        if (psave != damage)
+            knockback = OSP_runesApplyStrength(attacker, knockback);
+    }
 
 //ROGUE
     // allow the deathmatch game to change values
-    if (deathmatch->value && gamerules && gamerules->value) {
+    if (G_UsesRogueGameRules()) {
         if (DMGame.ChangeDamage)
             damage = DMGame.ChangeDamage(targ, attacker, damage, mod);
         if (DMGame.ChangeKnockback)

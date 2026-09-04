@@ -303,9 +303,9 @@ static edict_t *BotCreate(char *userinfo, bot_library_t *lib)
         // one line saying so rather than being silently clamped to a real
         // arena the author did not name.
         arena = Q_atoi(Info_ValueForKey(userinfo, "arena"));
-        if (arena < 0 || arena > num_arenas || arena >= MAX_ARENAS)
+        if (arena < 0 || arena > num_arenas || arena > MAX_ARENAS)
         {
-            newgameimport.dprintf("WARNING: bot arena key %d is not 1..%d; "
+            newgameimport.dprintf("WARNING: bot arena key %d is outside 0..%d; "
                                   "the bot waits in the queue instead\n",
                                   arena, num_arenas);
             arena = 0;

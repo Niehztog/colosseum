@@ -262,29 +262,57 @@ show_arena_menu(edict_t *ent)
 int
 menuAddtoTeam(edict_t *ent, qmenu_t *menu, qmenu_t *item, int arg)
 {
-    if (add_to_team(ent, ((menuitem_t *)item->it)->text)) {
-        if (!((team_t *)teams[ent->client->resp.teamnum].it)->arenanum)
-            show_arena_menu(ent);
-        else {
-            ent->client->resp.fightstate = FIGHT_SPECTATING;
-            ent->takedamage = 0;
-            move_to_arena(ent, ((team_t *)teams[ent->client->resp.teamnum].it)->arenanum, 1);
-        }
+    menuitem_t  *menuitem;
+    team_t      *team;
+    char        *name;
+    size_t      len;
 
-        return 0;
+    menuitem = (menuitem_t *)item->it;
+    len = strlen(menuitem->text) + 1;
+    name = gi.TagMalloc(len, TAG_LEVEL);
+    if (!name) {
+        menu_centerprint(ent, "That team is already in an arena\nand full or\nthe arena is locked");
+        return 2;
+    }
+    memcpy(name, menuitem->text, len);
+
+    team = add_to_team(ent, name);
+    if (!team) {
+        gi.TagFree(name);
+        menu_centerprint(ent, "That team is already in an arena\nand full or\nthe arena is locked");
+        return 2;
     }
 
-    menu_centerprint(ent, "That team is already in an arena\nand full or\nthe arena is locked");
+    // add_to_team keeps a name only when this click re-creates the team.
+    if (team->name != name)
+        gi.TagFree(name);
 
-    return 2;
+    if (!team->arenanum)
+        show_arena_menu(ent);
+    else {
+        ent->client->resp.fightstate = FIGHT_SPECTATING;
+        ent->takedamage = 0;
+        move_to_arena(ent, team->arenanum, 1);
+    }
+
+    return 0;
 }
 
 int
 menuNewTeam(edict_t *ent, qmenu_t *menu, qmenu_t *item, int arg)
 {
+    char *name;
+
     // The name and its uniquifier moved to arena.c so the bot join uses the
     // same one; the donor's "!"-appending loop had no bound (see RA_NewTeamName).
-    add_to_team(ent, RA_NewTeamName(ent));
+    name = RA_NewTeamName(ent);
+    if (!name || !add_to_team(ent, name)) {
+        if (name)
+            gi.TagFree(name);
+        menu_centerprint(ent, "That team is already in an arena\nand full or\nthe arena is locked");
+        return 2;
+    }
+
     show_arena_menu(ent);
 
     return 0;

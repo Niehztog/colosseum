@@ -523,7 +523,7 @@ void ClientObituary(edict_t *self, edict_t *inflictor, edict_t *attacker)
 
                 gi.bprintf(PRINT_MEDIUM, "%s %s %s%s\n", self->client->pers.netname, message, attacker->client->pers.netname, message2);
 //ROGUE
-                if (gamerules && gamerules->value) {
+                if (G_UsesRogueGameRules()) {
                     if (DMGame.Score) {
                         if (ff)
                             DMGame.Score(attacker, self, -1);
@@ -574,7 +574,7 @@ void ClientObituary(edict_t *self, edict_t *inflictor, edict_t *attacker)
     if (deathmatch->value && G_Ruleset() != RULESET_ARENA)
 //ROGUE
     {
-        if (gamerules && gamerules->value) {
+        if (G_UsesRogueGameRules()) {
             if (DMGame.Score) {
                 DMGame.Score(self, self, -1);
             }
@@ -843,7 +843,7 @@ void player_die(edict_t *self, edict_t *inflictor, edict_t *attacker, int damage
         }
     }
 
-    if (gamerules && gamerules->value) { // if we're in a dm game, alert the game
+    if (G_UsesRogueGameRules()) {
         if (DMGame.PlayerDeath)
             DMGame.PlayerDeath(self, inflictor, attacker);
     }
@@ -2157,8 +2157,10 @@ void PutClientInServer(edict_t *ent)
     if (G_Ruleset() == RULESET_CTF && CTFStartClient(ent))
         return;
 
-    // spawn a spectator
-    if (client->pers.spectator) {
+    // RA2 applies post-connect spectator updates through its native placement
+    // path, which establishes its fightstate observer representation.
+    if (client->pers.spectator && G_Ruleset() != RULESET_ARENA &&
+        !G_IsOspRuleset()) {
         client->chase_target = NULL;
 
         client->resp.spectator = true;
@@ -2294,7 +2296,7 @@ static void ClientBeginDeathmatch(edict_t *ent)
         InitClientResp(ent->client);
 
     //PGM
-    if (gamerules && gamerules->value && DMGame.ClientBegin) {
+    if (G_UsesRogueGameRules() && DMGame.ClientBegin) {
         DMGame.ClientBegin(ent);
     }
     //PGM
@@ -2511,7 +2513,8 @@ void ClientUserinfoChanged(edict_t *ent, char *userinfo)
     // client -- `spectator 1` in userinfo would noclip a player that
     // G_IsObserver() still reports as playing, because it asks about the team.
     // Threewave deletes the key outright; here it is simply inert.
-    if (deathmatch->value && G_Ruleset() != RULESET_CTF && *s && strcmp(s, "0"))
+    if (deathmatch->value && G_Ruleset() != RULESET_CTF &&
+        !G_IsOspRuleset() && *s && strcmp(s, "0"))
         ent->client->pers.spectator = true;
     else
         ent->client->pers.spectator = false;
@@ -2681,12 +2684,16 @@ qboolean ClientConnect(edict_t *ent, char *userinfo)
 
     // check for a spectator
     value = Info_ValueForKey(userinfo, "spectator");
+    if (G_Ruleset() == RULESET_ARENA && *value && strcmp(value, "0")) {
+        Info_SetValueForKey(userinfo, "rejmsg", "id Spectator Mode not Supported");
+        return false;
+    }
 //  if (deathmatch->value && strcmp(value, "0"))
-    // Same gate as ClientUserinfoChanged's, and for the same reason: under ctf
-    // and arena the spectator password and limit guard a state no client can
-    // enter -- both donors deleted baseq2's spectator and have their own.
+    // CTF does not use baseq2's generic spectator admission. Arena's nonzero
+    // fresh request was rejected above; its post-connect path is native.
     if (deathmatch->value && G_Ruleset() != RULESET_CTF &&
-        G_Ruleset() != RULESET_ARENA && *value && strcmp(value, "0")) {
+        G_Ruleset() != RULESET_ARENA && !G_IsOspRuleset() &&
+        *value && strcmp(value, "0")) {
         int i, numspec;
 
         if (*spectator_password->string &&
@@ -2895,7 +2902,7 @@ void ClientDisconnect(edict_t *ent)
         ent->client->owned_sphere = NULL;
     }
 
-    if (gamerules && gamerules->value) {
+    if (G_UsesRogueGameRules()) {
         if (DMGame.PlayerDisconnect)
             DMGame.PlayerDisconnect(ent);
     }
@@ -2940,8 +2947,10 @@ void ClientDisconnect(edict_t *ent)
     // only reader in RA2 is a "reconnect without disconnect" arm in
     // ClientConnect that this tree does not have, and the field is shared with
     // tourney's four-state enum (R-58), whose owner clears it its own way.
-    if (G_Ruleset() == RULESET_ARENA)
+    if (G_Ruleset() == RULESET_ARENA) {
         remove_from_team(ent);
+        ent->client->resp.fightstate = FIGHT_SPECTATING;
+    }
 
     ent->inuse = false;
     ent->classname = "disconnected";
@@ -3108,6 +3117,9 @@ static void ClientLagThink(edict_t *ent, usercmd_t *ucmd)
             // OSP_clientThink for the autocam), so there is nothing left to do
             // with it here and baseq2's chase toggle must not have it.
             client->latched_buttons = 0;
+        } else if (G_Ruleset() == RULESET_CTF && G_IsObserver(ent)) {
+            // Threewave reserves CTF chase acquisition for its menu action.
+            client->latched_buttons &= ~BUTTON_ATTACK;
         // G_IsObserver, not resp.spectator: under ctf an observer is a
         // CTF_NOTEAM player, so the inherited test would let him shoot
         // (R-CTF-3's "observers cannot fire it", R-CTF-5).
@@ -3147,7 +3159,8 @@ static void ClientLagThink(edict_t *ent, usercmd_t *ucmd)
     // cycles the chase target INSIDE the chase branch there (R-193), before
     // pmove, and running baseq2's cycle as well would step two targets per
     // press.
-    if (G_IsObserver(ent) && G_Ruleset() != RULESET_ARENA && !G_IsOspRuleset()) {
+    if (G_IsObserver(ent) && G_Ruleset() != RULESET_ARENA &&
+        G_Ruleset() != RULESET_CTF && !G_IsOspRuleset()) {
         if (ucmd->upmove >= 10) {
             if (!(client->ps.pmove.pm_flags & PMF_JUMP_HELD)) {
                 client->ps.pmove.pm_flags |= PMF_JUMP_HELD;
@@ -3733,11 +3746,10 @@ void ClientBeginServerFrame(edict_t *ent)
 
     client = ent->client;
 
-    // baseq2's spectator toggle.  Not under an OSP ruleset: `pers.spectator`
-    // is tourney's speed-cheat strike counter there and NOT baseq2's spectator
-    // flag -- the two share a name in the merged struct, and the first strike
-    // would otherwise have turned the player into a spectator (SPECS.md 1.19,
-    // R-58).  Tourney's own observer path is `observe` / OSP_startObserve.
+    // baseq2's spectator toggle. Not under an OSP ruleset: the donor reused
+    // `pers.spectator` as a speed-cheat counter, while this merged tree keeps
+    // the base spectator flag and carries that counter as osp_speedstrikes.
+    // Tourney's own observer path is `observe` / OSP_startObserve.
     if (!G_IsOspRuleset() && deathmatch->value &&
 
         client->pers.spectator != client->resp.spectator &&

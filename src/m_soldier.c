@@ -42,6 +42,8 @@ static int  sound_death;
 static int  sound_death_ss;
 static int  sound_cock;
 
+static void bq2_soldier_duck_down(edict_t *self);
+static void bq2_soldier_duck_up(edict_t *self);
 
 static void soldier_start_charge(edict_t *self)
 {
@@ -357,16 +359,16 @@ void soldier_pain(edict_t *self, edict_t *other, float kick, int damage)
     if (self->health < (self->max_health / 2))
         self->s.skinnum |= 1;
 
-    monster_done_dodge(self);
-    soldier_stop_charge(self);
-
-    // if we're blind firing, this needs to be turned off here
-    self->monsterinfo.aiflags &= ~AI_MANUAL_STEERING;
+    if (self->content_flavour & CONTENT_ROGUE) {
+        monster_done_dodge(self);
+        soldier_stop_charge(self);
+        self->monsterinfo.aiflags &= ~AI_MANUAL_STEERING;
+    }
 
     if (level.framenum < self->pain_debounce_framenum) {
         if ((self->velocity[2] > 100) && ((self->monsterinfo.currentmove == &soldier_move_pain1) || (self->monsterinfo.currentmove == &soldier_move_pain2) || (self->monsterinfo.currentmove == &soldier_move_pain3))) {
-            // PMM - clear duck flag
-            if (self->monsterinfo.aiflags & AI_DUCKED)
+            if ((self->content_flavour & CONTENT_ROGUE) &&
+                (self->monsterinfo.aiflags & AI_DUCKED))
                 monster_duck_up(self);
             self->monsterinfo.currentmove = &soldier_move_pain4;
         }
@@ -384,8 +386,8 @@ void soldier_pain(edict_t *self, edict_t *other, float kick, int damage)
         gi.sound(self, CHAN_VOICE, sound_pain_ss, 1, ATTN_NORM, 0);
 
     if (self->velocity[2] > 100) {
-        // PMM - clear duck flag
-        if (self->monsterinfo.aiflags & AI_DUCKED)
+        if ((self->content_flavour & CONTENT_ROGUE) &&
+            (self->monsterinfo.aiflags & AI_DUCKED))
             monster_duck_up(self);
         self->monsterinfo.currentmove = &soldier_move_pain4;
 //      self->monsterinfo.pause_framenum = 0;
@@ -404,8 +406,8 @@ void soldier_pain(edict_t *self, edict_t *other, float kick, int damage)
     else
         self->monsterinfo.currentmove = &soldier_move_pain3;
 
-    // PMM - clear duck flag
-    if (self->monsterinfo.aiflags & AI_DUCKED)
+    if ((self->content_flavour & CONTENT_ROGUE) &&
+        (self->monsterinfo.aiflags & AI_DUCKED))
         monster_duck_up(self);
 //  self->monsterinfo.pause_framenum = 0;
 
@@ -473,7 +475,7 @@ static void soldier_fire(edict_t *self, int in_flash_number)
         return;
     }
 
-    if (in_flash_number < 0) {
+    if ((self->content_flavour & CONTENT_ROGUE) && in_flash_number < 0) {
         flash_number = -1 * in_flash_number;
     } else
         flash_number = in_flash_number;
@@ -520,7 +522,7 @@ static void soldier_fire(edict_t *self, int in_flash_number)
         vectoangles(aim, dir);
         AngleVectors(dir, forward, right, up);
 
-        if (skill->value < 2) {
+        if (!(self->content_flavour & CONTENT_ROGUE) || skill->value < 2) {
             r = crandom() * 1000;
             u = crandom() * 500;
         } else {
@@ -535,7 +537,8 @@ static void soldier_fire(edict_t *self, int in_flash_number)
         VectorNormalize(aim);
     }
 #ifdef CHECK_TARGET
-    if (!(flash_number == 5 || flash_number == 6)) { // he's dead
+    if ((self->content_flavour & CONTENT_ROGUE) &&
+        !(flash_number == 5 || flash_number == 6)) {
         tr = gi.trace(start, NULL, NULL, aim_good, self, MASK_SHOT);
         if ((tr.ent != self->enemy) && (tr.ent != world)) {
 //          if(g_showlogic && g_showlogic->value)
@@ -549,13 +552,18 @@ static void soldier_fire(edict_t *self, int in_flash_number)
     } else if (self->s.skinnum <= 3) {
         monster_fire_shotgun(self, start, aim, 2, 1, DEFAULT_SHOTGUN_HSPREAD, DEFAULT_SHOTGUN_VSPREAD, DEFAULT_SHOTGUN_COUNT, flash_index);
     } else {
-        // PMM - changed to wait from pause_framenum to not interfere with dodge code
-        if (!(self->monsterinfo.aiflags & AI_HOLD_FRAME))
-            self->wait = level.time + (3 + Q_rand() % 8) * FRAMETIME;
+        if (!(self->monsterinfo.aiflags & AI_HOLD_FRAME)) {
+            if (self->content_flavour & CONTENT_ROGUE)
+                self->wait = level.time + (3 + Q_rand() % 8) * FRAMETIME;
+            else
+                self->monsterinfo.pause_framenum = level.framenum + (3 + Q_rand() % 8);
+        }
 
         monster_fire_bullet(self, start, aim, 2, 4, DEFAULT_BULLET_HSPREAD, DEFAULT_BULLET_VSPREAD, flash_index);
 
-        if (level.time >= self->wait)
+        if ((self->content_flavour & CONTENT_ROGUE) ?
+            level.time >= self->wait :
+            level.framenum >= self->monsterinfo.pause_framenum)
             self->monsterinfo.aiflags &= ~AI_HOLD_FRAME;
         else
             self->monsterinfo.aiflags |= AI_HOLD_FRAME;
@@ -718,14 +726,27 @@ static void soldier_duck_up (edict_t *self)
 */
 static void soldier_fire3(edict_t *self)
 {
-    monster_duck_down(self);
+    if (self->content_flavour & CONTENT_ROGUE)
+        monster_duck_down(self);
+    else
+        bq2_soldier_duck_down(self);
     soldier_fire(self, 2);
 }
 
 static void soldier_attack3_refire(edict_t *self)
 {
-    if ((level.framenum + 0.4f * BASE_FRAMERATE) < self->monsterinfo.duck_wait_framenum)
+    if ((level.framenum + 0.4f * BASE_FRAMERATE) <
+        ((self->content_flavour & CONTENT_ROGUE) ?
+         self->monsterinfo.duck_wait_framenum : self->monsterinfo.pause_framenum))
         self->monsterinfo.nextframe = FRAME_attak303;
+}
+
+static void soldier_attack3_duck_up(edict_t *self)
+{
+    if (self->content_flavour & CONTENT_ROGUE)
+        monster_duck_up(self);
+    else
+        bq2_soldier_duck_up(self);
 }
 
 static const mframe_t soldier_frames_attack3[] = {
@@ -735,7 +756,7 @@ static const mframe_t soldier_frames_attack3[] = {
     { ai_charge, 0, NULL },
     { ai_charge, 0, NULL },
     { ai_charge, 0, soldier_attack3_refire },
-    { ai_charge, 0, monster_duck_up },
+    { ai_charge, 0, soldier_attack3_duck_up },
     { ai_charge, 0, NULL },
     { ai_charge, 0, NULL }
 };
@@ -762,7 +783,7 @@ const mmove_t soldier_move_attack4 = {FRAME_attak401, FRAME_attak406, soldier_fr
 
 static void soldier_fire8(edict_t *self)
 {
-    soldier_fire(self, -7);
+    soldier_fire(self, (self->content_flavour & CONTENT_ROGUE) ? -7 : 7);
 //  self->monsterinfo.aiflags |= AI_HOLD_FRAME;
 //  self->monsterinfo.pause_framenum = level.framenum + 1000000 * BASE_FRAMERATE;
 }
@@ -770,8 +791,10 @@ static void soldier_fire8(edict_t *self)
 static void soldier_attack6_refire(edict_t *self)
 {
     // PMM - make sure dodge & charge bits are cleared
-    monster_done_dodge(self);
-    soldier_stop_charge(self);
+    if (self->content_flavour & CONTENT_ROGUE) {
+        monster_done_dodge(self);
+        soldier_stop_charge(self);
+    }
 
     if (!self->enemy)
         return;
@@ -780,10 +803,13 @@ static void soldier_attack6_refire(edict_t *self)
         return;
 
 //  if (range(self, self->enemy) < RANGE_MID)
-    if (range(self, self->enemy) < RANGE_NEAR)
+    if (range(self, self->enemy) <
+        ((self->content_flavour & CONTENT_ROGUE) ? RANGE_NEAR : RANGE_MID))
         return;
 
-    if ((skill->value == 3) || ((random() < (0.25f * ((float)skill->value)))))
+    if ((self->content_flavour & CONTENT_ROGUE) ?
+        ((skill->value == 3) || (random() < (0.25f * skill->value))) :
+        skill->value == 3)
         self->monsterinfo.nextframe = FRAME_runs03;
 }
 
@@ -832,6 +858,18 @@ const mmove_t bq2_soldier_move_attack6 = {FRAME_runs01, FRAME_runs14, bq2_soldie
 void soldier_attack(edict_t *self)
 {
     float r, chance;
+
+    if (!(self->content_flavour & CONTENT_ROGUE)) {
+        if (self->s.skinnum < 4) {
+            if (random() < 0.5f)
+                self->monsterinfo.currentmove = &soldier_move_attack1;
+            else
+                self->monsterinfo.currentmove = &soldier_move_attack2;
+        } else {
+            self->monsterinfo.currentmove = &soldier_move_attack4;
+        }
+        return;
+    }
 
     monster_done_dodge(self);
 
@@ -907,7 +945,13 @@ void soldier_sight(edict_t *self, edict_t *other)
     else
         gi.sound(self, CHAN_VOICE, sound_sight2, 1, ATTN_NORM, 0);
 
-//  if ((skill->value > 0) && (self->enemy) && (range(self, self->enemy) >= RANGE_MID))
+    if (!(self->content_flavour & CONTENT_ROGUE)) {
+        if (skill->value > 0 && range(self, self->enemy) >= RANGE_MID &&
+            random() > 0.5f)
+            self->monsterinfo.currentmove = &bq2_soldier_move_attack6;
+        return;
+    }
+
     if ((skill->value > 0) && (self->enemy) && (range(self, self->enemy) >= RANGE_NEAR)) {
 //  PMM - don't let machinegunners run & shoot
         if ((random() > 0.75f) && (self->s.skinnum <= 3)) {
@@ -1685,17 +1729,15 @@ static void SP_monster_soldier_x(edict_t *self)
     self->monsterinfo.melee = NULL;
     self->monsterinfo.sight = soldier_sight;
 
-//=====
-//ROGUE
-    self->monsterinfo.blocked = soldier_blocked;
-    self->monsterinfo.duck = soldier_duck;
-    self->monsterinfo.unduck = monster_duck_up;
-    self->monsterinfo.sidestep = soldier_sidestep;
+    if (self->content_flavour & CONTENT_ROGUE) {
+        self->monsterinfo.blocked = soldier_blocked;
+        self->monsterinfo.duck = soldier_duck;
+        self->monsterinfo.unduck = monster_duck_up;
+        self->monsterinfo.sidestep = soldier_sidestep;
 
-    if (self->spawnflags & 8)   // blind
-        self->monsterinfo.stand = soldier_blind;
-//ROGUE
-//=====
+        if (self->spawnflags & 8)
+            self->monsterinfo.stand = soldier_blind;
+    }
 
     gi.linkentity(self);
 
@@ -1736,8 +1778,8 @@ void SP_monster_soldier_light(edict_t *self)
     self->max_health = self->health = 20;
     self->gib_health = -30;
 
-    // PMM - blindfire
-    self->monsterinfo.blindfire = true;
+    if (self->content_flavour & CONTENT_ROGUE)
+        self->monsterinfo.blindfire = true;
 }
 
 static void soldier_precache(void)

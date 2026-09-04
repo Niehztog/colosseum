@@ -292,9 +292,8 @@ void tank_pain(edict_t *self, edict_t *other, float kick, int damage)
     if (skill->value == 3)
         return;     // no pain anims in nightmare
 
-    // PMM - blindfire cleanup
-    self->monsterinfo.aiflags &= ~AI_MANUAL_STEERING;
-    // pmm
+    if (self->content_flavour & CONTENT_ROGUE)
+        self->monsterinfo.aiflags &= ~AI_MANUAL_STEERING;
 
     if (damage <= 30)
         self->monsterinfo.currentmove = &tank_move_pain1;
@@ -356,6 +355,26 @@ static void TankRocket(edict_t *self)
 
     if (!self->enemy || !self->enemy->inuse)    //PGM
         return;                                 //PGM
+
+    if (!(self->content_flavour & CONTENT_ROGUE)) {
+        if (self->s.frame == FRAME_attak324)
+            flash_number = MZ2_TANK_ROCKET_1;
+        else if (self->s.frame == FRAME_attak327)
+            flash_number = MZ2_TANK_ROCKET_2;
+        else
+            flash_number = MZ2_TANK_ROCKET_3;
+
+        AngleVectors(self->s.angles, forward, right, NULL);
+        G_ProjectSource(self->s.origin, monster_flash_offset[flash_number], forward, right, start);
+
+        VectorCopy(self->enemy->s.origin, vec);
+        vec[2] += self->enemy->viewheight;
+        VectorSubtract(vec, start, dir);
+        VectorNormalize(dir);
+
+        monster_fire_rocket(self, start, dir, 50, 550, flash_number);
+        return;
+    }
 
     // pmm - blindfire check
     if (self->monsterinfo.aiflags & AI_MANUAL_STEERING)
@@ -713,7 +732,8 @@ const mmove_t tank_move_attack_chain = {FRAME_attak401, FRAME_attak429, tank_fra
 static void tank_refire_rocket(edict_t *self)
 {
     // PMM - blindfire cleanup
-    if (self->monsterinfo.aiflags & AI_MANUAL_STEERING) {
+    if ((self->content_flavour & CONTENT_ROGUE) &&
+        (self->monsterinfo.aiflags & AI_MANUAL_STEERING)) {
         self->monsterinfo.aiflags &= ~AI_MANUAL_STEERING;
         self->monsterinfo.currentmove = &tank_move_attack_post_rocket;
         return;
@@ -755,7 +775,8 @@ void tank_attack(edict_t *self)
     }
 
     // PMM
-    if (self->monsterinfo.attack_state == AS_BLIND) {
+    if ((self->content_flavour & CONTENT_ROGUE) &&
+        self->monsterinfo.attack_state == AS_BLIND) {
         // setup shot probabilities
         if (self->monsterinfo.blind_fire_delay < 1.0f)
             chance = 1.0f;
@@ -974,7 +995,8 @@ void SP_monster_tank(edict_t *self)
     self->monsterinfo.melee = NULL;
     self->monsterinfo.sight = tank_sight;
     self->monsterinfo.idle = tank_idle;
-    self->monsterinfo.blocked = tank_blocked;       // PGM
+    if (self->content_flavour & CONTENT_ROGUE)
+        self->monsterinfo.blocked = tank_blocked;
 
     gi.linkentity(self);
 
@@ -983,10 +1005,10 @@ void SP_monster_tank(edict_t *self)
 
     walkmonster_start(self);
 
-    // PMM
-    self->monsterinfo.aiflags |= AI_IGNORE_SHOTS;
-    self->monsterinfo.blindfire = true;
-    //pmm
+    if (self->content_flavour & CONTENT_ROGUE) {
+        self->monsterinfo.aiflags |= AI_IGNORE_SHOTS;
+        self->monsterinfo.blindfire = true;
+    }
     if (strcmp(self->classname, "monster_tank_commander") == 0)
         self->s.skinnum = 2;
 }

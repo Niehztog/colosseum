@@ -24,11 +24,13 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 // here, and they survive at the pin.
 #include <sys/types.h>
 #include <sys/stat.h>
+#include <ctype.h>
 
 #include "g_local.h"
 #include "arena/arena.h"
 
 #define MAX_DEFS    256
+#define CONFIG_TOKEN_SIZE 4096
 // The size of one definition's accumulated value text.  It was a bare
 // 0x400 at the allocation and nothing at all at the append, so a long
 // enough arena.cfg walked off the end of a TAG_LEVEL block (R-SEC-1).
@@ -619,7 +621,7 @@ int ra_isalnum(char ch)
 char *next_token(char *str)
 {
     static char *token = NULL;
-    static char foo[1024];
+    static char foo[CONFIG_TOKEN_SIZE];
     char        *out;
     char        c;
 
@@ -664,11 +666,17 @@ char *new_val_block(void)
     return buf;
 }
 
-void add_val(char *dest, char *token)
+static bool add_val(char *dest, const char *token)
 {
-    // dest is always a new_val_block(), so the bound is that block's.
+    if (strlen(dest) + strlen(token) + 1 >= VAL_BLOCK_SIZE) {
+        gi.dprintf("Error reading config file: definition value exceeds %d characters\n",
+                   VAL_BLOCK_SIZE - 1);
+        return false;
+    }
+
     Q_strlcat(dest, " ", VAL_BLOCK_SIZE);
     Q_strlcat(dest, token, VAL_BLOCK_SIZE);
+    return true;
 }
 
 definition_t *new_def_item(definition_t *item)
@@ -681,7 +689,80 @@ definition_t *new_def_item(definition_t *item)
     return item;
 }
 
-int read_block(FILE *fp, definition_t *cursor)
+/*
+ * Read one whitespace-delimited source token without treating an overlong
+ * token as several valid ones.  A field width on fscanf() would keep the
+ * write bounded but leave its tail for the next parse, changing the config.
+ *
+ *  1: token read, 0: clean EOF, -1: read or length failure.
+ */
+static int read_raw_token(FILE *fp, char *out, size_t out_size)
+{
+    int     c;
+    size_t  len;
+
+    do {
+        c = fgetc(fp);
+    } while (c != EOF && isspace((unsigned char)c));
+
+    if (c == EOF)
+        return ferror(fp) ? -1 : 0;
+
+    len = 0;
+    do {
+        if (len + 1 >= out_size) {
+            do {
+                c = fgetc(fp);
+            } while (c != EOF && !isspace((unsigned char)c));
+            gi.dprintf("Error reading config file: token exceeds %d characters\n",
+                       (int)out_size - 1);
+            return -1;
+        }
+        out[len++] = c;
+        c = fgetc(fp);
+    } while (c != EOF && !isspace((unsigned char)c));
+
+    out[len] = 0;
+    if (c != EOF && ungetc(c, fp) == EOF)
+        return -1;
+
+    return ferror(fp) ? -1 : 1;
+}
+
+static bool new_def_item_checked(definition_t **cur, definition_t **cursor,
+                                 int count)
+{
+    if (*cur)
+        return true;
+
+    if (count >= MAX_DEFS) {
+        gi.dprintf("Error reading config file: definition block exceeds %d entries\n",
+                   MAX_DEFS);
+        return false;
+    }
+
+    *cur = new_def_item(*cursor);
+    (*cursor)++;
+    return true;
+}
+
+static bool finish_read_block(int depth, int mode, const definition_t *cur,
+                              int count, int *result)
+{
+    if (depth) {
+        gi.dprintf("Error reading config file: unbalanced {}\n");
+        return false;
+    }
+    if (mode || cur) {
+        gi.dprintf("Error reading config file: unterminated definition\n");
+        return false;
+    }
+
+    *result = count;
+    return true;
+}
+
+static bool read_block(FILE *fp, definition_t *cursor, int *result)
 {
     definition_t    *cur;
     int             depth;
@@ -692,26 +773,33 @@ int read_block(FILE *fp, definition_t *cursor)
 
     depth = 0;
     count = 0;
-
-    cur = new_def_item(cursor++);
+    cur = NULL;
     mode = 0;
 
     while (1) {
-        if (fscanf(fp, "%s", line) < 1) {
-            if (depth) {
-                gi.dprintf("Error reading config file: unbalanced {}\n");
-                return 0;
-            }
+        int status = read_raw_token(fp, line, CONFIG_TOKEN_SIZE);
 
-            return count;
+        if (status < 0) {
+            if (ferror(fp))
+                gi.dprintf("Error reading config file\n");
+            return false;
+        }
+        if (!status) {
+            return finish_read_block(depth, mode, cur, count, result);
         }
 
         for (tok = next_token(line); tok; tok = next_token(NULL)) {
             if (tok[0] == '/' && tok[1] == '/') {
                 do {
                     c = fgetc(fp);
-                    if (c < 1)
-                        return count;
+                    if (c == EOF) {
+                        if (ferror(fp))
+                            gi.dprintf("Error reading config file\n");
+                        else
+                            return finish_read_block(depth, mode, cur, count,
+                                                     result);
+                        return false;
+                    }
                 } while (c != '\n');
 
                 break;
@@ -719,6 +807,14 @@ int read_block(FILE *fp, definition_t *cursor)
 
             if (!mode) {
                 if (*tok == '{') {
+                    if (!new_def_item_checked(&cur, &cursor, count))
+                        return false;
+                    if (depth >= (int)q_countof(stack)) {
+                        gi.dprintf("Error reading config file: nesting exceeds %d levels\n",
+                                   (int)q_countof(stack));
+                        return false;
+                    }
+
                     cur->type = 2;
                     cur->value2 = new_def_block();
 
@@ -728,16 +824,18 @@ int read_block(FILE *fp, definition_t *cursor)
 
                     count = 0;
                     cursor = cur->value2;
-                    cur = new_def_item(cursor++);
+                    cur = NULL;
                     depth++;
                 } else if (*tok == ':') {
+                    if (!new_def_item_checked(&cur, &cursor, count))
+                        return false;
                     cur->type = 1;
                     cur->value2 = new_val_block();
                     mode = 1;
                 } else if (*tok == '}') {
                     if (!depth) {
                         gi.dprintf("Error reading config file: unbalanced {}\n");
-                        return 0;
+                        return false;
                     }
 
                     depth--;
@@ -746,20 +844,24 @@ int read_block(FILE *fp, definition_t *cursor)
                     cursor = stack[depth].cursor;
                     count = stack[depth].count;
 
-                    cur = new_def_item(cursor++);
+                    cur = NULL;
                     mode = 0;
                     count++;
                 } else {
-                    add_val(cur->value, tok);
+                    if (!new_def_item_checked(&cur, &cursor, count))
+                        return false;
+                    if (!add_val(cur->value, tok))
+                        return false;
                     cur->count++;
                 }
             } else if (mode == 1) {
                 if (*tok == ';') {
-                    cur = new_def_item(cursor++);
                     mode = 0;
                     count++;
+                    cur = NULL;
                 } else {
-                    add_val(cur->value2, tok);
+                    if (!add_val(cur->value2, tok))
+                        return false;
                     cur->count2++;
                 }
             }
@@ -767,12 +869,20 @@ int read_block(FILE *fp, definition_t *cursor)
     }
 }
 
-void read_config(FILE *fp)
+bool read_config(FILE *fp)
 {
     definition_blocks = new_def_block();
-    line = gi.TagMalloc(0x1000, TAG_LEVEL);
+    line = gi.TagMalloc(CONFIG_TOKEN_SIZE, TAG_LEVEL);
     num_definition_blocks = 0;
-    num_definition_blocks = read_block(fp, definition_blocks);
+
+    if (!definition_blocks || !line) {
+        gi.dprintf("Error reading config file: allocation failed\n");
+        definition_blocks = NULL;
+        line = NULL;
+        return false;
+    }
+
+    return read_block(fp, definition_blocks, &num_definition_blocks);
 }
 
 definition_t *find_key(char *key, int type, definition_t *items, int count)
@@ -852,6 +962,9 @@ void load_config(int num_arenas)
     arena_blocks = NULL;
     definition_blocks = NULL;
     num_definition_blocks = 0;
+    votetries_setting = 3;
+    allow_grapple = false;
+    line = NULL;
 
     // R-167.  `<homedir-or-basedir>/<gamedir>/<name>`, not the donor's bare
     // `<gamedir>/<name>`: that resolves against the server's WORKING DIRECTORY,
@@ -875,7 +988,14 @@ void load_config(int num_arenas)
         return;
     }
 
-    read_config(fp);
+    if (!read_config(fp)) {
+        fclose(fp);
+        definition_blocks = NULL;
+        num_definition_blocks = 0;
+        line = NULL;
+        gi.dprintf("Error: Couldn't parse %s\n", path);
+        return;
+    }
     fclose(fp);
 
     arena_blocks = gi.TagMalloc(sizeof(definition_t *) * num_arenas, TAG_LEVEL);

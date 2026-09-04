@@ -43,6 +43,18 @@ static int      sl_buffered;        // lines written since the last flush
 // 2 (the default) = flush every line.
 #define SL_BUFFER_LINES 40
 
+static bool sl_IsAbsolutePath(const char *path)
+{
+#ifdef _WIN32
+    return path[0] == '/' || path[0] == '\\' ||
+           (((path[0] >= 'A' && path[0] <= 'Z') ||
+             (path[0] >= 'a' && path[0] <= 'z')) &&
+            path[1] == ':');
+#else
+    return path[0] == '/';
+#endif
+}
+
 void sl_LogMapName(game_import_t *import, char *mapname)
 {
     char    output[1024];
@@ -194,6 +206,9 @@ void sl_LogScore(game_import_t *import, char *player, char *other, char *event,
 
 int sl_OpenLogFile(game_import_t *import)
 {
+    char path[MAX_OSPATH];
+    size_t len;
+
     if (sl_status) {
         sl_status = 2;
         return 2;
@@ -237,17 +252,28 @@ int sl_OpenLogFile(game_import_t *import)
 
     // sl_filename keeps v2.75's meaning: a path relative to the Quake II
     // base directory, not to the game directory.
-    sl_file = fopen(sl_filename->string, "a");
+    if (sl_IsAbsolutePath(sl_filename->string))
+        len = Q_snprintf(path, sizeof(path), "%s", sl_filename->string);
+    else
+        len = Q_snprintf(path, sizeof(path), "%s/%s", G_FsBaseDir(),
+                         sl_filename->string);
+    if (len >= sizeof(path)) {
+        gi.dprintf("Standard Log path is too long, logging disabled.\n");
+        sl_status = 0;
+        return 0;
+    }
+
+    sl_file = fopen(path, "a");
     if (!sl_file) {
         gi.dprintf("Couldn't create Standard Log \"%s\": %d\n",
-                   sl_filename->string, errno);
+                   path, errno);
         sl_status = 0;
         return 0;
     }
 
     sl_buffered = 0;
     sl_status = 1;
-    gi.dprintf("Standard Log logging enabled (%s).\n", sl_filename->string);
+    gi.dprintf("Standard Log logging enabled (%s).\n", path);
 
     return 1;
 }

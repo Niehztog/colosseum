@@ -32,6 +32,13 @@ tables and the dispatch tables: those are data naming a field, not behaviour
 reading one.  Comments and string literals are stripped first, without which
 this reports every prose mention of `teams`.
 
+PACK-EXCLUSIVE ALIASES.  `content_flavour` is deliberately a server-wide
+selection bit, not entity identity.  A pack-exclusive classname that reuses a
+shared monster function must still receive its own donor behavior when that
+layer is off.  R-202 checks the two aliases where that distinction matters:
+Medic Commander and Daedalus.  It also preserves the donor's Kamikaze guard
+ordering, so the base Flyer arm cannot preempt the exclusive entity's move.
+
 USAGE
     tools/donorgate.py [--tree src]
     tools/donorgate.py --selftest
@@ -120,6 +127,637 @@ def strip(t):
 
 def read(p):
     return open(p, encoding='utf-8').read()
+
+
+def span_mask(text):
+    """Blank comments and literals without changing offsets for brace matching."""
+    def blank(m):
+        return re.sub(r'[^\n]', ' ', m.group(0))
+
+    text = re.sub(r'/\*.*?\*/', blank, text, flags=re.S)
+    text = re.sub(r'//[^\n]*', blank, text)
+    text = re.sub(r'"(?:\\.|[^"\\\n])*"', blank, text)
+    return re.sub(r"'(?:\\.|[^'\\\n])*'", blank, text)
+
+
+def function_span(text, name):
+    """Return the byte span of one simple C function definition, or None."""
+    source = span_mask(text)
+    m = re.search(r'^[A-Za-z_][\w \t*]*?\b%s\s*\([^;{}]*\)\s*\{' %
+                  re.escape(name), source, re.M)
+    if not m:
+        return None
+    start, depth = m.end() - 1, 0
+    for end in range(start, len(source)):
+        if source[end] == '{':
+            depth += 1
+        elif source[end] == '}':
+            depth -= 1
+            if depth == 0:
+                return start, end + 1
+    return None
+
+
+def without_span(text, span):
+    """Blank a span without moving its line numbers."""
+    start, end = span
+    return text[:start] + re.sub(r'[^\n]', ' ', text[start:end]) + text[end:]
+
+
+# R-202 / R-203: these shared functions serve one regular baseq2 entity and one
+# pack-exclusive alias. The former follows the layer selection; the latter must
+# retain the only donor behavior it has regardless of that server-wide bit.
+EXCLUSIVE_ALIASES = (
+    ('m_medic.c', 'medic_IsCommander', 'medic_UsesRogueBehavior',
+     'monster_medic_commander'),
+    ('m_hover.c', 'hover_IsDaedalus', 'hover_UsesRogueBehavior',
+     'monster_daedalus'),
+)
+
+ROGUE_FLAVOUR = re.compile(
+    r'\bself\s*->\s*content_flavour\s*&\s*CONTENT_ROGUE\b')
+
+ROGUE_IDENTITIES = (
+    'monster_stalker',
+    'monster_turret',
+    'monster_daedalus',
+    'monster_carrier',
+    'monster_widow',
+    'monster_widow2',
+    'monster_medic_commander',
+    'monster_kamikaze',
+)
+
+
+def exclusive_alias_violations(tree, override=None):
+    """Check the full entity-versus-layer selection boundary of R-202/R-203."""
+    out = []
+    filename = 'g_monster.c'
+    raw = (override or {}).get(filename, read(os.path.join(tree, filename)))
+    behavior_span = function_span(raw, 'M_UsesRogueBehavior')
+    if not behavior_span:
+        out.append('  !! g_monster.c: `M_UsesRogueBehavior` is missing '
+                   '(R-203 effective Rogue behavior)')
+    else:
+        behavior_text = raw[behavior_span[0]:behavior_span[1]]
+        for pattern, explanation in (
+            (r'\bif\s*\(\s*!\s*ent\s*\)', 'reject a NULL entity'),
+            (r'\bent\s*->\s*content_flavour\s*&\s*CONTENT_ROGUE',
+             'select the Rogue layer'),
+            (r'\bif\s*\(\s*!\s*ent\s*->\s*classname\s*\)',
+             'reject a NULL classname'),
+        ):
+            if not re.search(pattern, behavior_text):
+                out.append('  !! g_monster.c:%d: `M_UsesRogueBehavior` must %s '
+                           '(R-203 effective Rogue behavior)' %
+                           (raw[:behavior_span[0]].count('\n') + 1, explanation))
+        for rogue_classname in ROGUE_IDENTITIES:
+            identity_rx = re.compile(
+                r'!\s*strcmp\s*\(\s*ent\s*->\s*classname\s*,\s*"%s"\s*\)'
+                % re.escape(rogue_classname))
+            if not identity_rx.search(behavior_text):
+                out.append('  !! g_monster.c:%d: `M_UsesRogueBehavior` must '
+                           'recognize `%s` (R-203 effective Rogue behavior)' %
+                           (raw[:behavior_span[0]].count('\n') + 1,
+                            rogue_classname))
+        found_identities = set(re.findall(
+            r'!\s*strcmp\s*\(\s*ent\s*->\s*classname\s*,\s*"([^"]+)"\s*\)',
+            behavior_text))
+        for rogue_classname in sorted(found_identities - set(ROGUE_IDENTITIES)):
+            out.append('  !! g_monster.c:%d: `M_UsesRogueBehavior` must not '
+                       'treat `%s` as a Rogue-exclusive identity '
+                       '(R-203 effective Rogue behavior)' %
+                       (raw[:behavior_span[0]].count('\n') + 1,
+                        rogue_classname))
+
+    for filename, identity, behavior, classname in EXCLUSIVE_ALIASES:
+        path = os.path.join(tree, filename)
+        raw = (override or {}).get(filename, read(path))
+
+        identity_span = function_span(raw, identity)
+        if not identity_span:
+            out.append('  !! %s: `%s` is missing (R-202 exclusive identity)' %
+                       (filename, identity))
+            continue
+        identity_text = raw[identity_span[0]:identity_span[1]]
+        identity_rx = re.compile(
+            r'\breturn\s*!\s*strcmp\s*\(\s*self\s*->\s*classname\s*,\s*"%s"\s*\)\s*;'
+            % re.escape(classname))
+        if not identity_rx.search(identity_text):
+            out.append('  !! %s:%d: `%s` does not identify `%s` by classname '
+                       '(R-202 exclusive identity)' %
+                       (filename, raw[:identity_span[0]].count('\n') + 1,
+                        identity, classname))
+
+        behavior_span = function_span(raw, behavior)
+        if not behavior_span:
+            out.append('  !! %s: `%s` is missing (R-202 effective Rogue behavior)' %
+                       (filename, behavior))
+            continue
+        behavior_text = raw[behavior_span[0]:behavior_span[1]]
+        behavior_rx = re.compile(r'\breturn\s+M_UsesRogueBehavior\s*'
+                                 r'\(\s*self\s*\)\s*;')
+        if not behavior_rx.search(behavior_text):
+            out.append('  !! %s:%d: `%s` must delegate to '
+                       '`M_UsesRogueBehavior` (R-203 effective Rogue behavior)' %
+                       (filename, raw[:behavior_span[0]].count('\n') + 1,
+                        behavior))
+
+        # Every relevant branch in this shared family must use the effective
+        # behavior predicate. Leaving one raw test here reproduces the silent
+        # split where a Commander or Daedalus gets only part of its own setup.
+        outside = strip(without_span(raw, behavior_span))
+        for m in ROGUE_FLAVOUR.finditer(outside):
+            out.append('  !! %s:%d: raw CONTENT_ROGUE selector bypasses `%s` '
+                       '(R-202 exclusive identity)' %
+                       (filename, outside[:m.start()].count('\n') + 1,
+                        behavior))
+
+    filename = 'm_flyer.c'
+    raw = (override or {}).get(filename, read(os.path.join(tree, filename)))
+    span = function_span(raw, 'flyer_attack')
+    if not span:
+        out.append('  !! m_flyer.c: `flyer_attack` is missing '
+                   '(R-202 Kamikaze ordering)')
+        return out
+    attack = strip(raw[span[0]:span[1]])
+    mass = re.search(r'\bif\s*\(\s*self\s*->\s*mass\s*>\s*50\s*\)', attack)
+    base = re.search(
+        r'\bif\s*\(\s*!\s*\(\s*self\s*->\s*content_flavour\s*&\s*CONTENT_ROGUE\s*\)\s*\)',
+        attack)
+    line = raw[:span[0]].count('\n') + 1
+    if not mass:
+        out.append('  !! m_flyer.c:%d: Kamikaze mass guard is missing from '
+                   '`flyer_attack` (R-202 Kamikaze ordering)' % line)
+    elif not base:
+        out.append('  !! m_flyer.c:%d: base Flyer layer guard is missing from '
+                   '`flyer_attack` (R-202 Kamikaze ordering)' % line)
+    elif mass.start() > base.start():
+        out.append('  !! m_flyer.c:%d: Kamikaze mass guard follows the base '
+                   'Flyer layer guard (R-202 Kamikaze ordering)' % line)
+    return out
+
+
+AI_REQUIREMENTS = (
+    ('g_ai.c', 'AI_SetSightClient',
+     ('level.sight_client = NextSightClient',
+      'level.rogue_sight_client = NextSightClient',
+      'FL_NOTARGET | FL_DISGUISED')),
+    ('g_ai.c', 'ai_stand',
+     ('M_UsesRogueBehavior(self)', '15 + random() * 15',
+      '(1 + random()) * 15')),
+    ('g_ai.c', 'ai_walk',
+     ('M_UsesRogueBehavior(self)', '15 + random() * 15',
+      '(1 + random()) * 15')),
+    ('g_ai.c', 'ai_charge', ('if (!M_UsesRogueBehavior(self))',)),
+    ('g_ai.c', 'ai_turn', ('M_ChangeYaw(self);',)),
+    ('g_ai.c', 'visible', ('M_UsesRogueBehavior(self)',)),
+    ('g_ai.c', 'FoundTarget', ('M_UsesRogueBehavior(self)',)),
+    ('g_ai.c', 'FindTarget',
+     ('rogue = M_UsesRogueBehavior(self)',
+      'rogue ? level.rogue_sight_client : level.sight_client',
+      'level.disguise_violator',
+      'client->enemy->flags & FL_DISGUISED',
+      # R-211: Gladiator's guard is outside its ROGUE fence, so it belongs to
+      # both arms.  Splitting it bought nothing -- the base donor's bare deref
+      # can only differ from the guarded form by crashing.
+      'client->owner && (client->owner->flags & FL_NOTARGET)')),
+    ('g_ai.c', 'M_CheckAttack', ('return bq2_M_CheckAttack(self);',)),
+    ('g_ai.c', 'ai_checkattack', ('return bq2_ai_checkattack(self, dist);',)),
+    ('g_ai.c', 'ai_run', ('bq2_ai_run(self, dist);',)),
+    ('g_monster.c', 'monster_use', ('M_UsesRogueBehavior(self)',)),
+    ('g_monster.c', 'monster_triggered_spawn',
+     ('M_UsesRogueBehavior(self)', 'FL_DISGUISED')),
+    ('g_monster.c', 'stationarymonster_triggered_spawn',
+     ('M_UsesRogueBehavior(self)', 'FL_DISGUISED')),
+    ('g_combat.c', 'Killed',
+     ('M_UsesRogueBehavior(targ)', 'targ->enemy->owner == targ',
+      'targ->owner = attacker')),
+    ('g_combat.c', 'M_ReactToDamage',
+     ('rogue_behavior = M_UsesRogueBehavior(targ)', 'AI_IGNORE_SHOTS',
+      '"monster_tank"', '"monster_supertank"', '"monster_makron"',
+      '"monster_jorg"')),
+    ('g_misc.c', 'SP_misc_explobox',
+     ('self->think = barrel_start;', 'self->think = M_droptofloor;')),
+    ('g_misc.c', 'misc_deadsoldier_die', ('self->health > -30',
+                                           'self->health > -80')),
+    # R-211.  R-203 split the sight cache in two; this is its only other
+    # reader, and a Rogue-effective Makron must not read the base cache,
+    # which still reports a disguised player.
+    ('m_boss32.c', 'MakronSpawn',
+     ('M_UsesRogueBehavior(self) ? level.rogue_sight_client',
+      ': level.sight_client')),
+)
+
+SAVE_FORMAT_REQUIREMENTS = (
+    ('g_save.c', 'E(rogue_sight_client)'),
+    ('g_save.c', '#define SAVE_VERSION    0x101'),
+    ('g_save.c', '#define SAVE_VERSION    9'),
+)
+
+
+def shared_behavior_violations(tree, override=None):
+    """Require both donor arms where one shared implementation serves both."""
+    out = []
+    for filename, function, requirements in AI_REQUIREMENTS:
+        raw = (override or {}).get(filename, read(os.path.join(tree, filename)))
+        span = function_span(raw, function)
+        if not span:
+            out.append('  !! %s: `%s` is missing (R-203 shared behavior)' %
+                       (filename, function))
+            continue
+        body = raw[span[0]:span[1]]
+        for required in requirements:
+            if required not in body:
+                out.append('  !! %s:%d: `%s` must retain `%s` '
+                           '(R-203 shared behavior)' %
+                           (filename, raw[:span[0]].count('\n') + 1,
+                            function, required))
+        if filename == 'g_ai.c' and function == 'ai_charge':
+            stale_guard = body.find('if (!self->enemy || !self->enemy->inuse)')
+            selector = body.find('if (!M_UsesRogueBehavior(self))')
+            if stale_guard < 0 or stale_guard > selector:
+                out.append('  !! g_ai.c:%d: `ai_charge` must reject a stale '
+                           'Tesla enemy before selecting an actor arm '
+                           '(R-206 shared Tesla state)' %
+                           (raw[:span[0]].count('\n') + 1))
+        if filename == 'g_ai.c' and function == 'FindTarget':
+            # The guarded form above can coexist with a second, bare one --
+            # which is exactly the shape R-211 removed -- so require that
+            # EVERY read of client->owner->flags is a guarded read.
+            reads = len(re.findall(r'client->owner->flags', body))
+            guarded = len(re.findall(
+                r'client->owner\s*&&\s*\(\s*client->owner->flags', body))
+            if reads != guarded:
+                out.append('  !! g_ai.c:%d: `FindTarget` dereferences '
+                           '`client->owner` without Gladiator\'s NULL guard '
+                           '(R-211 shared noise owner)' %
+                           (raw[:span[0]].count('\n') + 1))
+        if filename == 'g_ai.c' and function == 'ai_turn':
+            # Gladiator has no #ifdef ROGUE here, so the yaw is unconditional
+            # and ANY guard on it is the violation -- not just one written
+            # with M_UsesRogueBehavior.  The arm R-204 actually rejects is
+            # port_rogue's own `AI_MANUAL_STEERING` test, which names no
+            # selector token at all; keying on one let that exact line back
+            # in with the audit silent.  So this asks the structural
+            # question: is there a condition between the FindTarget return
+            # and the yaw?
+            tail = body[body.find('if (FindTarget(self))'):]
+            cut = tail.find('return;')
+            yaw = tail.find('M_ChangeYaw(self);')
+            if cut < 0 or yaw < 0 or 'if (' in tail[cut + len('return;'):yaw]:
+                out.append('  !! g_ai.c:%d: `ai_turn` must retain Gladiator\'s '
+                           'unconditional `M_ChangeYaw` (R-204)' %
+                           (raw[:span[0]].count('\n') + 1))
+    for filename, required in SAVE_FORMAT_REQUIREMENTS:
+        raw = (override or {}).get(filename, read(os.path.join(tree, filename)))
+        if required not in raw:
+            out.append('  !! %s: R-203 sight-cache serialization must retain `%s`'
+                       % (filename, required))
+    return out
+
+
+def dynamic_flavour_violations(tree, override=None):
+    """A direct dynamic monster spawn must retain its parent's resolved layer."""
+    out = []
+    filename = 'm_boss32.c'
+    raw = (override or {}).get(filename, read(os.path.join(tree, filename)))
+
+    toss_span = function_span(raw, 'MakronToss')
+    if not toss_span:
+        out.append('  !! m_boss32.c: `MakronToss` is missing '
+                   '(R-208 dynamic monster flavor)')
+        return out
+    toss = raw[toss_span[0]:toss_span[1]]
+    required = ('ent = G_Spawn();',
+                'ent->content_flavour = self->content_flavour;',
+                'ent->think = MakronSpawn;')
+    for text in required:
+        if text not in toss:
+            out.append('  !! m_boss32.c:%d: `MakronToss` must retain `%s` '
+                       '(R-208 dynamic monster flavor)' %
+                       (raw[:toss_span[0]].count('\n') + 1, text))
+    if all(text in toss for text in required):
+        if not (toss.find(required[0]) < toss.find(required[1]) <
+                toss.find(required[2])):
+            out.append('  !! m_boss32.c:%d: `MakronToss` must copy the '
+                       'parent flavor after G_Spawn and before MakronSpawn '
+                       '(R-208 dynamic monster flavor)' %
+                       (raw[:toss_span[0]].count('\n') + 1))
+
+    spawn_span = function_span(raw, 'MakronSpawn')
+    if not spawn_span or 'SP_monster_makron(self);' not in \
+            raw[spawn_span[0]:spawn_span[1]]:
+        out.append('  !! m_boss32.c: delayed Makron spawn must retain its '
+                   'direct `SP_monster_makron` initialization '
+                   '(R-208 dynamic monster flavor)')
+
+    helper = (override or {}).get(
+        'g_spawn.c', read(os.path.join(tree, 'g_spawn.c')))
+    helper_span = function_span(helper, 'CreateMonster')
+    if not helper_span or 'ED_CallSpawn(newEnt);' not in \
+            helper[helper_span[0]:helper_span[1]]:
+        out.append('  !! g_spawn.c: `CreateMonster` must latch dynamic '
+                   'monster flavor through `ED_CallSpawn` '
+                   '(R-208 dynamic monster flavor)')
+    return out
+
+
+DMGAME_CALLBACKS = (
+    ('g_main.c', 'InitGame', 'InitGameRules'),
+    ('g_main.c', 'CheckDMRules', 'DMGame.CheckDMRules'),
+    ('g_spawn.c', 'SpawnEntities', 'DMGame.PostInitSetup'),
+    ('g_combat.c', 'T_Damage', 'DMGame.ChangeDamage'),
+    ('g_combat.c', 'T_Damage', 'DMGame.ChangeKnockback'),
+    ('p_view.c', 'G_SetClientEffects', 'DMGame.PlayerEffects'),
+    ('p_hud.c', 'DeathmatchScoreboardMessage', 'DMGame.DogTag'),
+    ('p_client.c', 'ClientObituary', 'DMGame.Score'),
+    ('p_client.c', 'player_die', 'DMGame.PlayerDeath'),
+    ('p_client.c', 'ClientBeginDeathmatch', 'DMGame.ClientBegin'),
+    ('p_client.c', 'ClientDisconnect', 'DMGame.PlayerDisconnect'),
+    ('rogue/g_newdm.c', 'InitGameRules', 'DMGame.GameInit'),
+)
+
+
+# R-211.  The DMGame TABLE is not the only way into a Rogue DM game: Tag's
+# token and Deathball's goal reach the world through the spawn table and the
+# item list.  Each file gets one predicate that asks R-MODE-3's question, and
+# every world-facing entry point asks it -- otherwise `gamerules 2` under an
+# OSP ruleset spawns a token nothing scores, and `gamerules 3` spawns a
+# dball goal that InitGameRules() no longer resets away.
+ROGUE_DMGAME_ENTITIES = (
+    ('rogue/dm_tag.c', 'Tag_Active', 'RDM_TAG',
+     ('Tag_PickupToken', 'Tag_DropToken', 'SP_dm_tag_token')),
+    ('rogue/dm_ball.c', 'DBall_Active', 'RDM_DEATHBALL',
+     ('SP_dm_dball_ball', 'SP_dm_dball_team1_start',
+      'SP_dm_dball_team2_start', 'SP_dm_dball_ball_start',
+      'SP_dm_dball_speed_change', 'SP_dm_dball_goal')),
+)
+
+
+def rogue_dmgame_entity_violations(tree, override=None):
+    """A Rogue DM game's own entities and items ask R-MODE-3's question too."""
+    out = []
+    for filename, predicate, mode, entries in ROGUE_DMGAME_ENTITIES:
+        raw = (override or {}).get(filename, read(os.path.join(tree, filename)))
+        span = function_span(raw, predicate)
+        if not span:
+            out.append('  !! %s: `%s` is missing (R-211 Rogue DM entity)'
+                       % (filename, predicate))
+            continue
+        body = strip(raw[span[0]:span[1]])
+        for required in ('G_UsesRogueGameRules()', mode):
+            if required not in body:
+                out.append('  !! %s:%d: `%s` must name `%s` '
+                           '(R-211 Rogue DM entity)' %
+                           (filename, raw[:span[0]].count('\n') + 1,
+                            predicate, required))
+        for entry in entries:
+            entry_span = function_span(raw, entry)
+            if not entry_span:
+                out.append('  !! %s: `%s` is missing (R-211 Rogue DM entity)'
+                           % (filename, entry))
+                continue
+            entry_body = strip(raw[entry_span[0]:entry_span[1]])
+            if predicate + '()' not in entry_body:
+                out.append('  !! %s:%d: `%s` reaches the world without `%s` '
+                           '(R-211 Rogue DM entity)' %
+                           (filename, raw[:entry_span[0]].count('\n') + 1,
+                            entry, predicate))
+        # The raw comparison is what the predicate replaced; a second one is a
+        # second authority, which is the defect rather than a duplicate.
+        outside = strip(raw[:span[0]]) + strip(raw[span[1]:])
+        if re.search(r'gamerules\s*->\s*value', outside):
+            out.append('  !! %s: `gamerules->value` is read outside `%s` '
+                       '(R-211 Rogue DM entity)' % (filename, predicate))
+    return out
+
+
+def enclosed_by_rogue_gamerule_gate(body, offset):
+    """Whether the source offset is inside an explicit DMGame mode gate."""
+    source = span_mask(body)
+    stack = []
+
+    for index, char in enumerate(source[:offset]):
+        if char == '{':
+            boundary = max(source.rfind(';', 0, index),
+                           source.rfind('{', 0, index),
+                           source.rfind('}', 0, index)) + 1
+            opener = source[boundary:index]
+            stack.append(bool(re.search(
+                r'\bif\s*\([^{}]*\bG_UsesRogueGameRules\s*\(\s*\)'
+                r'[^{}]*\)\s*$', opener, re.S)))
+        elif char == '}' and stack:
+            stack.pop()
+    return any(stack)
+
+
+def rogue_gamerule_violations(tree, override=None):
+    """DMGame is a global ruleset protocol, never an OSP side channel."""
+    out = []
+    filename = 'g_ruleset.c'
+    raw = (override or {}).get(filename, read(os.path.join(tree, filename)))
+    span = function_span(raw, 'G_UsesRogueGameRules')
+    if not span:
+        out.append('  !! g_ruleset.c: `G_UsesRogueGameRules` is missing '
+                   '(R-MODE-3 DMGame boundary)')
+    else:
+        body = strip(raw[span[0]:span[1]])
+        for required in ('gamerules && gamerules->value', 'RULESET_CTF',
+                         'RULESET_ARENA'):
+            if required not in body:
+                out.append('  !! g_ruleset.c:%d: `G_UsesRogueGameRules` must '
+                           'name `%s` (R-MODE-3 DMGame boundary)' %
+                           (raw[:span[0]].count('\n') + 1, required))
+
+    for filename, function, callback in DMGAME_CALLBACKS:
+        raw = (override or {}).get(filename, read(os.path.join(tree, filename)))
+        span = function_span(raw, function)
+        if not span:
+            out.append('  !! %s: `%s` is missing (R-MODE-3 DMGame boundary)' %
+                       (filename, function))
+            continue
+        body = strip(raw[span[0]:span[1]])
+        if callback not in body:
+            out.append('  !! %s:%d: `%s` no longer owns `%s` '
+                       '(R-MODE-3 DMGame boundary)' %
+                       (filename, raw[:span[0]].count('\n') + 1,
+                        function, callback))
+        elif 'G_UsesRogueGameRules()' not in body:
+            out.append('  !! %s:%d: `%s` reaches `%s` outside '
+                       '`G_UsesRogueGameRules` (R-MODE-3 DMGame boundary)' %
+                       (filename, raw[:span[0]].count('\n') + 1,
+                        function, callback))
+        else:
+            source = span_mask(body)
+            for occurrence in re.finditer(re.escape(callback) + r'\s*\(', source):
+                before = source[:occurrence.start()]
+                if filename == 'rogue/g_newdm.c':
+                    guarded = bool(re.search(
+                        r'\bif\s*\(\s*!\s*G_UsesRogueGameRules\s*\(\s*\)\s*\)'
+                        r'\s*return\s*;', before, re.S))
+                else:
+                    guarded = enclosed_by_rogue_gamerule_gate(
+                        body, occurrence.start())
+                if not guarded:
+                    out.append('  !! %s:%d: `%s` reaches `%s` outside the '
+                               'lexical `G_UsesRogueGameRules` gate '
+                               '(R-MODE-3 DMGame boundary)' %
+                               (filename, raw[:span[0]].count('\n') + 1,
+                                function, callback))
+                    break
+    return out
+
+
+def osp_hook_violations(tree, override=None):
+    """Keep OSP's live hook authority coherent across its config lifecycle."""
+    out = []
+    int_hook_value = re.compile(
+        r'\(\s*int\s*\)\s*hook_enable\s*->\s*value')
+
+    requirements = (
+        ('g_ruleset.c', 'G_ModifierEnabled',
+         ('hook_enable && (int)hook_enable->value != 0',)),
+        ('g_ruleset.c', 'G_ApplyOspHookRequest',
+         ('if (G_IsOspRuleset() && hook_enable)',
+          'if (request->value && !(int)hook_enable->value)',
+          'g_modifier[MOD_HOOK] = (int)hook_enable->value != 0;')),
+        ('g_ruleset.c', 'G_QueueOspHookRequest',
+         ('if (G_IsOspRuleset())', 'g_osp_hook_request_queued = true;',)),
+        ('g_ruleset.c', 'G_ApplyQueuedOspHookRequest',
+         ('g_osp_hook_request_queued = false;',
+          'G_ApplyOspHookRequest();')),
+        ('g_ruleset.c', 'G_InitRuleset',
+         ('g_osp_hook_request_queued = false;',)),
+        ('bot/bl_main.c', 'BotTourneyHook',
+         ('G_IsOspRuleset() && hook_enable',
+          '(int)hook_enable->value != 0',)),
+        ('tourney/osp_cmds.c', 'OSP_config_vote',
+         ('G_QueueOspHookRequest();',)),
+        ('tourney/osp_main.c', 'OSP_endClean',
+         ('G_ApplyOspHookRequest();', 'OSP_setFeatures();')),
+        ('tourney/osp_main.c', 'OSP_exitLevel',
+         ('G_QueueOspHookRequest();',)),
+        ('g_spawn.c', 'SpawnEntities',
+         ('G_ApplyQueuedOspHookRequest()', 'OSP_setFeatures();')),
+    )
+
+    for filename, function, required in requirements:
+        path = os.path.join(tree, filename)
+        raw = (override or {}).get(os.path.basename(filename), read(path))
+        span = function_span(raw, function)
+        if not span:
+            out.append('  !! %s: `%s` is missing (R-207 OSP hook lifecycle)' %
+                       (filename, function))
+            continue
+        body = raw[span[0]:span[1]]
+        for text in required:
+            if text not in body:
+                out.append('  !! %s:%d: `%s` must retain `%s` '
+                           '(R-207 OSP hook lifecycle)' %
+                           (filename, raw[:span[0]].count('\n') + 1,
+                            function, text))
+
+    ordered = (
+        ('g_main.c', 'InitGame', 'G_ResolveModifiers();', 'OSP_setFeatures();'),
+        ('tourney/osp_cmds.c', 'OSP_config_vote', 'G_QueueOspHookRequest();',
+         'gi.AddCommandString(cmd);'),
+        ('tourney/osp_main.c', 'OSP_exitLevel', 'G_QueueOspHookRequest();',
+         'gi.AddCommandString(va("exec %s\\n", vote_config_defaultname->string));'),
+        ('g_spawn.c', 'SpawnEntities', 'G_ApplyQueuedOspHookRequest()',
+         'OSP_setFeatures();'),
+    )
+    for filename, function, first, second in ordered:
+        raw = (override or {}).get(
+            os.path.basename(filename), read(os.path.join(tree, filename)))
+        span = function_span(raw, function)
+        if not span:
+            continue
+        body = raw[span[0]:span[1]]
+        if body.find(first) >= body.find(second):
+            out.append('  !! %s:%d: `%s` must apply `%s` before `%s` '
+                       '(R-207 OSP hook lifecycle)' %
+                       (filename, raw[:span[0]].count('\n') + 1,
+                        function, first, second))
+
+    hook_sources = [os.path.join(tree, 'g_ruleset.c'),
+                    os.path.join(tree, 'bot', 'bl_main.c')]
+    hook_sources.extend(sorted(glob.glob(os.path.join(tree, 'tourney', '*.c'))))
+    for path in hook_sources:
+        filename = os.path.basename(path)
+        raw = (override or {}).get(filename, read(path))
+        for line_number, line in enumerate(strip(raw).splitlines(), 1):
+            if 'hook_enable->value' in line and not int_hook_value.search(line):
+                out.append('  !! %s:%d: `hook_enable` must use OSP integer '
+                           'semantics (R-207 OSP hook lifecycle)' %
+                           (os.path.relpath(path, tree), line_number))
+    return out
+
+
+def osp_config_violations(tree, override=None):
+    """Keep cvar-derived OSP rune state coherent across config execution."""
+    out = []
+    requirements = (
+        ('tourney/osp_main.c', 'OSP_SyncRuneState',
+         ('rune_stat = (int)runes_enable->value;',
+          'if (rune_stat > 0x1f)',
+          'rune_stat = 0x1f;')),
+        ('tourney/osp_main.c', 'OSP_gameInit',
+         ('OSP_SyncRuneState();',)),
+        ('tourney/osp_main.c', 'OSP_endClean',
+         ('OSP_SyncRuneState();',)),
+        ('g_ruleset.c', 'G_ResolveModifiers',
+         ('gi.cvar_set("runes_enable", "31");',
+          'OSP_SyncRuneState();')),
+        ('g_spawn.c', 'SpawnEntities',
+         ('G_ApplyQueuedOspHookRequest()',
+          'OSP_SyncRuneState();',
+          'OSP_setFeatures();',
+          # R-211.  The donor's guard is integer (port_osp:g_spawn.c:761) and
+          # has to match the cast rune_stat is derived with, or a fractional
+          # runes_enable schedules a spawner with no rune type enabled.
+          'if (runes_enable && (int)runes_enable->value)',
+          'OSP_setupRuneSpawn(0);')),
+    )
+
+    for filename, function, required in requirements:
+        path = os.path.join(tree, filename)
+        raw = (override or {}).get(os.path.basename(filename), read(path))
+        span = function_span(raw, function)
+        if not span:
+            out.append('  !! %s: `%s` is missing (R-210 OSP config lifecycle)' %
+                       (filename, function))
+            continue
+        body = raw[span[0]:span[1]]
+        for text in required:
+            if text not in body:
+                out.append('  !! %s:%d: `%s` must retain `%s` '
+                           '(R-210 OSP config lifecycle)' %
+                           (filename, raw[:span[0]].count('\n') + 1,
+                            function, text))
+
+    raw = (override or {}).get('g_spawn.c',
+                                read(os.path.join(tree, 'g_spawn.c')))
+    span = function_span(raw, 'SpawnEntities')
+    if span:
+        body = raw[span[0]:span[1]]
+        queued_sync = re.search(
+            r'if\s*\(\s*G_ApplyQueuedOspHookRequest\s*\(\s*\)\s*\)\s*\{\s*'
+            r'OSP_SyncRuneState\s*\(\s*\)\s*;\s*'
+            r'OSP_setFeatures\s*\(\s*\)\s*;', body, re.S)
+        if not queued_sync:
+            out.append('  !! g_spawn.c:%d: `SpawnEntities` must synchronize '
+                       'rune state only in the queued configuration transition '
+                       '(R-210 OSP config lifecycle)' %
+                       (raw[:span[0]].count('\n') + 1))
+        else:
+            setup = body.find('OSP_setupRuneSpawn(0);')
+            if setup < queued_sync.end():
+                out.append('  !! g_spawn.c:%d: `SpawnEntities` must synchronize '
+                           'rune state and features before scheduling runes '
+                           '(R-210 OSP config lifecycle)' %
+                           (raw[:span[0]].count('\n') + 1))
+    return out
 
 
 def donor_surface(tree, donor):
@@ -303,12 +941,35 @@ def run(tree, override=None):
                                   line.strip()[:60]))
                     redecl += 1
     bad += redecl
+    exclusive = exclusive_alias_violations(tree, override)
+    shared = shared_behavior_violations(tree, override)
+    dynamic_flavour = dynamic_flavour_violations(tree, override)
+    dmgame = rogue_gamerule_violations(tree, override)
+    dmgame += rogue_dmgame_entity_violations(tree, override)
+    osp_hook = osp_hook_violations(tree, override)
+    osp_config = osp_config_violations(tree, override)
+    out.extend(exclusive)
+    out.extend(shared)
+    out.extend(dynamic_flavour)
+    out.extend(dmgame)
+    out.extend(osp_hook)
+    out.extend(osp_config)
+    bad += len(exclusive) + len(shared) + len(dynamic_flavour) + len(dmgame) + \
+           len(osp_hook) + len(osp_config)
 
     out.insert(0, 'donorgate.py: %d donor-surface use(s) in spine files; '
-                  '%d ungated; %d stray extern(s)' % (checked, bad - redecl, redecl))
+                  '%d ungated; %d stray extern(s); %d exclusive-alias; '
+                  '%d shared-behavior; %d dynamic-flavor; %d DMGame-boundary; %d OSP-hook '
+                  'and %d OSP-config violation(s)' %
+                  (checked, bad - redecl - len(exclusive) - len(shared) -
+                   len(dynamic_flavour) - len(dmgame) - len(osp_hook) -
+                   len(osp_config),
+                   redecl, len(exclusive), len(shared), len(dynamic_flavour),
+                   len(dmgame), len(osp_hook), len(osp_config)))
     if not bad:
         out.append('  every donor-private field and function in a shared file '
-                   'is inside its own ruleset\'s gate')
+                   'is inside its own ruleset\'s gate; every pack-exclusive '
+                   'alias selects its own behavior')
     return out
 
 
@@ -349,6 +1010,138 @@ SELFTESTS = [
       '        ent->client->resp.fightstate != FIGHT_ALIVE)')),
 ]
 
+IDENTITY_SELFTESTS = [
+    ('Medic Commander identity', 'g_monster.c',
+     '"monster_medic_commander"', '"monster_missing_commander"'),
+    ('Daedalus identity', 'g_monster.c',
+     '"monster_daedalus"', '"monster_missing_daedalus"'),
+    ('Rogue identity overmatch', 'g_monster.c',
+     '"monster_kamikaze");',
+     '"monster_kamikaze") || !strcmp(ent->classname, "monster_not_rogue");'),
+    ('Medic generic selector', 'm_medic.c',
+     'return M_UsesRogueBehavior(self);', 'return false;'),
+    ('Daedalus generic selector', 'm_hover.c',
+     'return M_UsesRogueBehavior(self);', 'return false;'),
+    ('Kamikaze guard order', 'm_flyer.c',
+     ('void flyer_attack(edict_t *self)\n'
+      '{\n'
+      '    if (self->mass > 50) {'),
+     ('void flyer_attack(edict_t *self)\n'
+      '{\n'
+      '    if (self->mass > 500) {')),
+]
+
+SHARED_BEHAVIOR_SELFTESTS = [
+    ('Rogue sight cache', 'g_ai.c',
+     'level.rogue_sight_client = NextSightClient',
+     'level.rogue_sight_client = NULL; //'),
+    ('Rogue sight cache serialization', 'g_save.c',
+     'E(rogue_sight_client)', 'E(sight_client)'),
+    ('Rogue sight cache save version', 'g_save.c',
+     '#define SAVE_VERSION    0x101', '#define SAVE_VERSION    0x100'),
+    ('base idle interval', 'g_ai.c',
+     '(1 + random()) * 15', '(1 + random() * 15)'),
+    ('base checkattack arm', 'g_ai.c',
+     'return bq2_ai_checkattack(self, dist);', 'return false;'),
+    ('base ai_charge stale Tesla guard', 'g_ai.c',
+     ('    // Tesla targeting is relationship state shared by both behavior arms.\n'
+      '    if (!self->enemy || !self->enemy->inuse)'),
+     ('    // Tesla targeting is relationship state shared by both behavior arms.\n'
+      '    if (false)')),
+    # The mutation is port_rogue's literal line, because that is the arm
+    # R-204 rejects and the one a future edit would reach for.
+    ('base ai_turn yaw', 'g_ai.c',
+     ('    if (FindTarget(self))\n'
+      '        return;\n'
+      '\n'
+      '    M_ChangeYaw(self);\n'
+      '}\n'),
+     ('    if (FindTarget(self))\n'
+      '        return;\n'
+      '\n'
+      '    if (!(self->monsterinfo.aiflags & AI_MANUAL_STEERING))\n'
+      '        M_ChangeYaw(self);\n'
+      '}\n')),
+    # ...and the runtime-selector shape stays covered too.
+    ('base ai_turn yaw selector', 'g_ai.c',
+     ('    if (FindTarget(self))\n'
+      '        return;\n'
+      '\n'
+      '    M_ChangeYaw(self);\n'
+      '}\n'),
+     ('    if (FindTarget(self))\n'
+      '        return;\n'
+      '\n'
+      '    if (M_UsesRogueBehavior(self))\n'
+      '        M_ChangeYaw(self);\n'
+      '}\n')),
+]
+
+SHARED_BEHAVIOR_SELFTESTS += [
+    # R-211.  The mutation is the base donor's literal bare deref -- the arm
+    # the split had restored -- not a deletion of the whole branch.
+    ('base noise owner NULL guard', 'g_ai.c',
+     'if (client->owner && (client->owner->flags & FL_NOTARGET))',
+     'if (client->owner->flags & FL_NOTARGET)'),
+    ('Makron rogue sight cache', 'm_boss32.c',
+     'M_UsesRogueBehavior(self) ? level.rogue_sight_client',
+     'false ? level.rogue_sight_client'),
+]
+
+DYNAMIC_FLAVOUR_SELFTESTS = [
+    ('Jorg Makron flavor inheritance', 'm_boss32.c',
+     'ent->content_flavour = self->content_flavour;',
+     'ent->content_flavour = 0;'),
+]
+
+DMGAME_SELFTESTS = [
+    ('DMGame effects mode gate', 'p_view.c',
+     'if (G_UsesRogueGameRules()) {',
+     'if (gamerules && gamerules->value) {'),
+    # R-211.  Each mutation is the donor's own raw comparison, which is what
+    # the entry points read before the predicate existed.
+    ('Tag token entity gate', 'rogue/dm_tag.c',
+     '    if (!Tag_Active()) {\n        G_FreeEdict(self);',
+     '    if (gamerules && (gamerules->value != 2)) {\n        G_FreeEdict(self);'),
+    ('Tag token pickup gate', 'rogue/dm_tag.c',
+     '    if (!Tag_Active())\n        return false;',
+     '    if (gamerules && (gamerules->value != 2))\n        return false;'),
+    ('Deathball entity gate', 'rogue/dm_ball.c',
+     '    if (!DBall_Active()) {',
+     '    if (gamerules && (gamerules->value != RDM_DEATHBALL)) {'),
+]
+
+OSP_HOOK_SELFTESTS = [
+    ('OSP hook integer predicate', 'bot/bl_main.c',
+     '(int)hook_enable->value != 0', 'hook_enable->value != 0'),
+    ('OSP config reapplication', 'tourney/osp_cmds.c',
+     'G_QueueOspHookRequest();', '/* no queued hook request */'),
+    ('OSP feature resolution order', 'g_main.c',
+     ('G_ResolveModifiers();\n'
+      '    if (G_IsOspRuleset())\n'
+      '        OSP_setFeatures();'),
+     ('if (G_IsOspRuleset())\n'
+      '        OSP_setFeatures();\n'
+      '    G_ResolveModifiers();')),
+]
+
+OSP_CONFIG_SELFTESTS = [
+    ('OSP rune spawn integer guard', 'g_spawn.c',
+     'if (runes_enable && (int)runes_enable->value)',
+     'if (runes_enable && runes_enable->value)'),
+    ('OSP config rune synchronization', 'g_spawn.c',
+     ('        if (G_ApplyQueuedOspHookRequest()) {\n'
+      '            OSP_SyncRuneState();\n'
+      '            OSP_setFeatures();\n'
+      '        }'),
+     ('        if (G_ApplyQueuedOspHookRequest()) {\n'
+      '            OSP_setFeatures();\n'
+      '        }')),
+    ('OSP rune synchronization mask', 'tourney/osp_main.c',
+     'if (rune_stat > 0x1f)',
+     'if (rune_stat > 0x3f)'),
+]
+
 
 def selftest(tree):
     bad = 0
@@ -362,6 +1155,94 @@ def selftest(tree):
         lines = run(tree, {fname: text.replace(orig, rev, 1)})
         if any('!!' in l and fname in l for l in lines):
             print('  ok  control "%s" fires: an ungated use in %s' % (name, fname))
+        else:
+            print('  !! control "%s" did NOT fire; the check is asleep' % name)
+            bad += 1
+    for name, fname, orig, rev in IDENTITY_SELFTESTS:
+        text = read(os.path.join(tree, fname))
+        if orig not in text:
+            print('  !! control "%s": its own mutation no longer applies -- '
+                  'the control has rotted' % name)
+            bad += 1
+            continue
+        lines = run(tree, {fname: text.replace(orig, rev, 1)})
+        if any('R-202' in line or 'R-203' in line for line in lines):
+            print('  ok  control "%s" fires: exclusive alias behavior changes '
+                  'in %s' % (name, fname))
+        else:
+            print('  !! control "%s" did NOT fire; the check is asleep' % name)
+            bad += 1
+    for name, fname, orig, rev in SHARED_BEHAVIOR_SELFTESTS:
+        text = read(os.path.join(tree, fname))
+        if orig not in text:
+            print('  !! control "%s": its own mutation no longer applies -- '
+                  'the control has rotted' % name)
+            bad += 1
+            continue
+        lines = run(tree, {fname: text.replace(orig, rev, 1)})
+        if any('R-203 shared behavior' in line or
+               'R-203 sight-cache serialization' in line or
+               'R-204' in line or 'R-206' in line or
+               'R-211 shared noise owner' in line for line in lines):
+            print('  ok  control "%s" fires: shared donor arm changes in %s' %
+                  (name, fname))
+        else:
+            print('  !! control "%s" did NOT fire; the check is asleep' % name)
+            bad += 1
+    for name, fname, orig, rev in DYNAMIC_FLAVOUR_SELFTESTS:
+        text = read(os.path.join(tree, fname))
+        if orig not in text:
+            print('  !! control "%s": its own mutation no longer applies -- '
+                  'the control has rotted' % name)
+            bad += 1
+            continue
+        lines = run(tree, {fname: text.replace(orig, rev, 1)})
+        if any('R-208 dynamic monster flavor' in line for line in lines):
+            print('  ok  control "%s" fires: dynamic monster flavor changes '
+                  'in %s' % (name, fname))
+        else:
+            print('  !! control "%s" did NOT fire; the check is asleep' % name)
+            bad += 1
+    for name, fname, orig, rev in DMGAME_SELFTESTS:
+        text = read(os.path.join(tree, fname))
+        if orig not in text:
+            print('  !! control "%s": its own mutation no longer applies -- '
+                  'the control has rotted' % name)
+            bad += 1
+            continue
+        lines = run(tree, {fname: text.replace(orig, rev, 1)})
+        if any('R-MODE-3 DMGame boundary' in line or
+               'R-211 Rogue DM entity' in line for line in lines):
+            print('  ok  control "%s" fires: DMGame escapes its mode gate in %s' %
+                  (name, fname))
+        else:
+            print('  !! control "%s" did NOT fire; the check is asleep' % name)
+            bad += 1
+    for name, fname, orig, rev in OSP_HOOK_SELFTESTS:
+        text = read(os.path.join(tree, fname))
+        if orig not in text:
+            print('  !! control "%s": its own mutation no longer applies -- '
+                  'the control has rotted' % name)
+            bad += 1
+            continue
+        lines = run(tree, {os.path.basename(fname): text.replace(orig, rev, 1)})
+        if any('R-207 OSP hook lifecycle' in line for line in lines):
+            print('  ok  control "%s" fires: OSP hook lifecycle changes in %s' %
+                  (name, fname))
+        else:
+            print('  !! control "%s" did NOT fire; the check is asleep' % name)
+            bad += 1
+    for name, fname, orig, rev in OSP_CONFIG_SELFTESTS:
+        text = read(os.path.join(tree, fname))
+        if orig not in text:
+            print('  !! control "%s": its own mutation no longer applies -- '
+                  'the control has rotted' % name)
+            bad += 1
+            continue
+        lines = run(tree, {os.path.basename(fname): text.replace(orig, rev, 1)})
+        if any('R-210 OSP config lifecycle' in line for line in lines):
+            print('  ok  control "%s" fires: OSP config lifecycle changes in %s' %
+                  (name, fname))
         else:
             print('  !! control "%s" did NOT fire; the check is asleep' % name)
             bad += 1

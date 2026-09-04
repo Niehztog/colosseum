@@ -72,6 +72,12 @@ extern const mmove_t boss5_move_pain2;
 extern const mmove_t boss5_move_pain3;
 extern const mmove_t boss5_move_run;
 extern const mmove_t boss5_move_stand;
+extern const mmove_t bq2_boss2_move_attack_mg;
+extern const mmove_t bq2_boss2_move_attack_post_mg;
+extern const mmove_t bq2_boss2_move_attack_pre_mg;
+extern const mmove_t bq2_boss2_move_attack_rocket;
+extern const mmove_t bq2_boss2_move_run;
+extern const mmove_t bq2_boss2_move_walk;
 extern const mmove_t bq2_brain_move_duck;
 extern const mmove_t bq2_chick_move_duck;
 extern const mmove_t bq2_gunner_move_attack_grenade;
@@ -461,6 +467,7 @@ extern const mmove_t widow_move_run_attack;
 extern const mmove_t widow_move_spawn;
 extern const mmove_t widow_move_stand;
 extern const mmove_t widow_move_walk;
+extern const mmove_t xatrix_infantry_move_attack1;
 extern void actor_attack(edict_t *);
 extern void actor_die(edict_t *, edict_t *, edict_t *, int, vec3_t);
 extern void actor_pain(edict_t *, edict_t *, float, int);
@@ -750,6 +757,7 @@ extern void jorg_stand(edict_t *);
 extern void jorg_walk(edict_t *);
 extern void light_use(edict_t *, edict_t *, edict_t *);
 extern void loogie_touch(edict_t *, edict_t *, cplane_t *, csurface_t *);
+extern void M_droptofloor(edict_t *);
 extern void M_FliesOff(edict_t *);
 extern void M_FliesOn(edict_t *);
 extern void M_MonsterDodge(edict_t *, edict_t *, float, trace_t *);
@@ -1096,6 +1104,7 @@ const save_ptr_t save_ptrs[] = {
 { P_think, hover_deadthink },
 { P_think, hunter_think },
 { P_think, ionripper_sparks },
+{ P_think, M_droptofloor },
 { P_think, M_FliesOff },
 { P_think, M_FliesOn },
 { P_think, makron_torso_think },
@@ -1470,6 +1479,12 @@ const save_ptr_t save_ptrs[] = {
 { P_monsterinfo_currentmove, &boss5_move_pain3 },
 { P_monsterinfo_currentmove, &boss5_move_run },
 { P_monsterinfo_currentmove, &boss5_move_stand },
+{ P_monsterinfo_currentmove, &bq2_boss2_move_attack_mg },
+{ P_monsterinfo_currentmove, &bq2_boss2_move_attack_post_mg },
+{ P_monsterinfo_currentmove, &bq2_boss2_move_attack_pre_mg },
+{ P_monsterinfo_currentmove, &bq2_boss2_move_attack_rocket },
+{ P_monsterinfo_currentmove, &bq2_boss2_move_run },
+{ P_monsterinfo_currentmove, &bq2_boss2_move_walk },
 { P_monsterinfo_currentmove, &bq2_brain_move_duck },
 { P_monsterinfo_currentmove, &bq2_chick_move_duck },
 { P_monsterinfo_currentmove, &bq2_gunner_move_attack_grenade },
@@ -1859,6 +1874,7 @@ const save_ptr_t save_ptrs[] = {
 { P_monsterinfo_currentmove, &widow_move_spawn },
 { P_monsterinfo_currentmove, &widow_move_stand },
 { P_monsterinfo_currentmove, &widow_move_walk },
+{ P_monsterinfo_currentmove, &xatrix_infantry_move_attack1 },
 { P_monsterinfo_stand, actor_stand },
 { P_monsterinfo_stand, berserk_stand },
 { P_monsterinfo_stand, boss2_stand },

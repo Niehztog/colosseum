@@ -1004,6 +1004,7 @@ void OSP_config_vote(void)
         gi.cvar_set("__current_config", vote_value);
         gi.dprintf("Changing to config: %s\n", vote_value);
         Q_snprintf(cmd, sizeof(cmd), "exec %s\n", vote_value);
+        G_QueueOspHookRequest();
         gi.AddCommandString(cmd);
         OSP_loadMaps();
         EndDMLevel();

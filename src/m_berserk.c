@@ -527,16 +527,17 @@ void SP_monster_berserk(edict_t *self)
     self->monsterinfo.stand = berserk_stand;
     self->monsterinfo.walk = berserk_walk;
     self->monsterinfo.run = berserk_run;
-    // pmm
-//  self->monsterinfo.dodge = NULL;
-    self->monsterinfo.dodge = M_MonsterDodge;
-    self->monsterinfo.sidestep = berserk_sidestep;
-    // pmm
+    if (self->content_flavour & CONTENT_ROGUE) {
+        self->monsterinfo.dodge = M_MonsterDodge;
+        self->monsterinfo.sidestep = berserk_sidestep;
+        self->monsterinfo.blocked = berserk_blocked;
+    } else {
+        self->monsterinfo.dodge = NULL;
+    }
     self->monsterinfo.attack = NULL;
     self->monsterinfo.melee = berserk_melee;
     self->monsterinfo.sight = berserk_sight;
     self->monsterinfo.search = berserk_search;
-    self->monsterinfo.blocked = berserk_blocked;        //PGM
 
     self->monsterinfo.currentmove = &berserk_move_stand;
     self->monsterinfo.scale = MODEL_SCALE;

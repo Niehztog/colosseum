@@ -59,7 +59,9 @@ EXCLUDE = {'g_ptrs.c'}
 
 
 def git(*args, cwd=CACHE, check=True):
-    r = subprocess.run(['git', '-C', cwd] + list(args),
+    # `-C` enters a bare repository and is rejected when Git is configured with
+    # safe.bareRepository=explicit.  Naming it as the Git directory is portable.
+    r = subprocess.run(['git', f'--git-dir={cwd}'] + list(args),
                        capture_output=True, text=True)
     if check and r.returncode != 0:
         sys.exit(f'divergence.py: git {" ".join(args)} failed:\n{r.stderr.strip()}')

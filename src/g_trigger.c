@@ -454,8 +454,8 @@ START_OFF - toggled trigger_push begins in off setting
 SILENT - doesn't make wind noise
 
 NOTE (Colosseum): Xatrix's variant of this entity added a PUSH_PLUS flag and a
-"wait" key on the same bit Ground Zero uses for START_OFF.  Ground Zero's
-semantics are the ones implemented -- see doc/reconciliation.md R-28.
+"wait" key on the same bit Ground Zero uses for START_OFF. A targeted trigger
+uses Ground Zero's toggle semantics; an untargeted trigger uses Xatrix's pulse.
 */
 
 void trigger_push_active(edict_t *self);
@@ -513,32 +513,23 @@ void SP_trigger_push(edict_t *self)
     windsound = gi.soundindex("misc/windfly.wav");
     self->touch = trigger_push_touch;
 
-    // XATRIX's PUSH_PLUS: pulse on a `wait` interval.  Only when untargeted --
-    // see the flag comment above.
-    if ((self->spawnflags & PUSH_PLUS) && !self->targetname) {
-        if (!self->wait)
-            self->wait = 10;
-
-        self->think = trigger_push_active;
-        self->nextthink = level.framenum + 0.1 * BASE_FRAMERATE;
-        self->delay = self->nextthink + self->wait * BASE_FRAMERATE;
-    }
-
     if (!self->speed)
         self->speed = 1000;
-
 
 //PGM
     if (self->targetname) {     // toggleable
         self->use = trigger_push_use;
         if (self->spawnflags & PUSH_START_OFF)
             self->solid = SOLID_NOT;
-    } else if (self->spawnflags & PUSH_START_OFF) {
-        gi.dprintf("trigger_push is START_OFF but not targeted.\n");
-        self->svflags = 0;
-        self->touch = NULL;
-        self->solid = SOLID_BSP;
-        self->movetype = MOVETYPE_PUSH;
+    } else if (self->spawnflags & PUSH_PLUS) {
+        // XATRIX's bit-2 pulse.  Ground Zero's START_OFF is only meaningful
+        // on a targetable trigger, so the shared bit cannot reach its cleanup.
+        if (!self->wait)
+            self->wait = 10;
+
+        self->think = trigger_push_active;
+        self->nextthink = level.framenum + 0.1 * BASE_FRAMERATE;
+        self->delay = self->nextthink + self->wait * BASE_FRAMERATE;
     }
 //PGM
 

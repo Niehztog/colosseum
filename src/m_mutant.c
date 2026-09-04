@@ -690,7 +690,8 @@ void SP_monster_mutant(edict_t *self)
     self->monsterinfo.search = mutant_search;
     self->monsterinfo.idle = mutant_idle;
     self->monsterinfo.checkattack = mutant_checkattack;
-    self->monsterinfo.blocked = mutant_blocked;         // PGM
+    if (self->content_flavour & CONTENT_ROGUE)
+        self->monsterinfo.blocked = mutant_blocked;
 
     gi.linkentity(self);
 

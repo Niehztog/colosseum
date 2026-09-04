@@ -37,6 +37,9 @@ void InitGameRules(void)
     // clear out the game rule structure before we start
     memset(&DMGame, 0, sizeof(dm_game_rt));
 
+    if (!G_UsesRogueGameRules())
+        return;
+
     if (gamerules && gamerules->value) {
         gameNum = gamerules->value;
         switch (gameNum) {

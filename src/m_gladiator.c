@@ -375,7 +375,8 @@ void SP_monster_gladiator(edict_t *self)
     self->monsterinfo.sight = gladiator_sight;
     self->monsterinfo.idle = gladiator_idle;
     self->monsterinfo.search = gladiator_search;
-    self->monsterinfo.blocked = gladiator_blocked;      // PGM
+    if (self->content_flavour & CONTENT_ROGUE)
+        self->monsterinfo.blocked = gladiator_blocked;
 
     gi.linkentity(self);
     self->monsterinfo.currentmove = &gladiator_move_stand;

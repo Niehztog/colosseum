@@ -1800,7 +1800,10 @@ static void weapon_railgun_fire(edict_t *ent)
     int         damage;
     int         kick;
 
-    if (deathmatch->value) {
+    if (G_IsOspRuleset()) {
+        damage = (int)damage_railgun->value;
+        kick = 200;
+    } else if (deathmatch->value) {
         // normal damage is too extreme in dm
         damage = 100;
         kick = 200;

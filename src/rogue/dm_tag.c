@@ -34,6 +34,18 @@ edict_t     *tag_token;
 edict_t     *tag_owner;
 int         tag_count;
 
+// R-211.  `gamerules` is not the authority on its own.  R-203 gated the
+// DMGame table on G_UsesRogueGameRules(), but Tag's token reaches the world
+// through the SPAWN TABLE and the ITEM LIST, neither of which goes through
+// that table -- so under an OSP ruleset with `gamerules 2` the token still
+// spawned and could still be picked up while every callback that scores it,
+// draws it, and cleans it up on death or disconnect was gone.  These three
+// entry points ask the same question the callbacks do.
+static bool Tag_Active(void)
+{
+    return G_UsesRogueGameRules() && (int)gamerules->value == RDM_TAG;
+}
+
 //=================
 //=================
 void Tag_PlayerDeath(edict_t *targ, edict_t *inflictor, edict_t *attacker)
@@ -139,9 +151,8 @@ void Tag_Score(edict_t *attacker, edict_t *victim, int scoreChange)
 //=================
 bool Tag_PickupToken(edict_t *ent, edict_t *other)
 {
-    if (gamerules && (gamerules->value != 2)) {
+    if (!Tag_Active())
         return false;
-    }
 
 //  gi.dprintf("tag token picked up by %x\n", other);
     // sanity checking is good.
@@ -202,6 +213,12 @@ void Tag_DropToken(edict_t *ent, const gitem_t *item)
     trace_t trace;
     vec3_t  forward, right;
     vec3_t  offset;
+
+    // The item list's drop callback is public the same way the pickup is.
+    // Unreachable once the pickup above refuses, and kept as the backstop
+    // that makes that true by construction rather than by argument (R-211).
+    if (!Tag_Active())
+        return;
 
 //  if(ent->client)
 //      gi.dprintf("%s dropped the tag token\n", ent->client->pers.netname);
@@ -315,7 +332,7 @@ void SP_dm_tag_token(edict_t *self)
         return;
     }
 
-    if (gamerules && (gamerules->value != 2)) {
+    if (!Tag_Active()) {
         G_FreeEdict(self);
         return;
     }

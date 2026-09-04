@@ -548,16 +548,21 @@ static void flyer_loop_melee(edict_t *self)
 
 void flyer_attack(edict_t *self)
 {
+    if (self->mass > 50) {
+        flyer_run(self);
+        return;
+    }
+
+    if (!(self->content_flavour & CONTENT_ROGUE)) {
+        self->monsterinfo.currentmove = &flyer_move_attack2;
+        return;
+    }
+
     float chance = 0;
     // 0% chance of circle in easy
     // 50% chance in normal
     // 75% chance in hard
     // 86.67% chance in nightmare
-
-    if (self->mass > 50) {
-        flyer_run(self);
-        return;
-    }
 
     if (!skill->value)
         chance = 0;
@@ -702,8 +707,10 @@ void SP_monster_flyer(edict_t *self)
 
     self->s.modelindex = gi.modelindex("models/monsters/flyer/tris.md2");
     VectorSet(self->mins, -16, -16, -24);
-    // PMM - shortened to 16 from 32
-    VectorSet(self->maxs, 16, 16, 16);
+    if (self->content_flavour & CONTENT_ROGUE)
+        VectorSet(self->maxs, 16, 16, 16);
+    else
+        VectorSet(self->maxs, 16, 16, 32);
     self->movetype = MOVETYPE_STEP;
     self->solid = SOLID_BBOX;
 
@@ -722,7 +729,8 @@ void SP_monster_flyer(edict_t *self)
     self->monsterinfo.melee = flyer_melee;
     self->monsterinfo.sight = flyer_sight;
     self->monsterinfo.idle = flyer_idle;
-    self->monsterinfo.blocked = flyer_blocked;
+    if (self->content_flavour & CONTENT_ROGUE)
+        self->monsterinfo.blocked = flyer_blocked;
 
     gi.linkentity(self);
 
