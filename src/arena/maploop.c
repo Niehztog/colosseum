@@ -17,11 +17,10 @@ along with this program; if not, write to the Free Software
 Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 */
-// Rocket Arena 2 v2.25, from rocketarena2-public@d20e1ce (doc/provenance.md).
+// Rocket Arena 2 v2.25, from rocketarena2-public@d20e1ce.
 // Donor-only: baseq2 has no counterpart, so it lives in src/arena/ rather than
-// being merged into a spine file (R-CORE-7).  The reconstruction's asm-matching
-// address comments are stripped -- SPECS.md N1 makes those oracles meaningless
-// here, and they survive at the pin.
+// being merged into a spine file.  The reconstruction's asm-matching
+// address comments are stripped.
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <ctype.h>
@@ -33,7 +32,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #define CONFIG_TOKEN_SIZE 4096
 // The size of one definition's accumulated value text.  It was a bare
 // 0x400 at the allocation and nothing at all at the append, so a long
-// enough arena.cfg walked off the end of a TAG_LEVEL block (R-SEC-1).
+// enough arena.cfg walked off the end of a TAG_LEVEL block.
 #define VAL_BLOCK_SIZE  0x400
 
 typedef struct definition_s {
@@ -52,7 +51,7 @@ typedef struct {
 
 definition_t    *find_key(char *key, int type, definition_t *items, int count);
 
-// R-167: the donor's `gamedir` was here and is gone with the two relative paths
+// The donor's `gamedir` was here and is gone with the two relative paths
 // that were the only things reading it -- G_FsGamePath() asks the engine which
 // directory the game is installed in rather than assuming it is the one the
 // server was started from.
@@ -69,12 +68,12 @@ definition_t    *definition_blocks;
 int     weapon_vals[RA_NUM_WEAPON_BITS] = {
     // 0..8, the donor's, paired with the digits 2..9 and 0 below
     1, 2, 4, 8, 16, 32, 64, 128, 256,
-    // 9..14, R-182's, paired with the names in ra_pack_weapnames
+    // 9..14, the pack weapons, paired with the names in ra_pack_weapnames
     512, 1024, 2048, 4096, 8192, 16384,
 };
 
-// R-182.  Names rather than digits because the digit row is used up at nine,
-// and in THIS order because arena.h pins it: row 0 is bit 9.  The menu labels
+// Names rather than digits because the digit row is used up at nine,
+// and in this order because arena.h pins it: row 0 is bit 9.  The menu labels
 // are padded to 23 characters like the donor's nine, because ra2menus.c reads a
 // row back by comparing its whole label.
 const ra_pack_weapon_t ra_pack_weapons[RA_NUM_PACK_WEAPONS] = {
@@ -133,7 +132,7 @@ int     slugs;
 int     grenades;
 int     rockets;
 int     cells;
-// R-182: the mission packs' five.  Tesla and Trap are ammo AND weapon in one
+// The mission packs' five.  Tesla and Trap are ammo and weapon in one
 // item, exactly as `ammo_grenades` is, so like `grenades` above they are a
 // count and not a `weapons:` bit.
 int     magslug;
@@ -173,7 +172,7 @@ int     allow_voting_bots;
 
 static  blockstack_t    stack[32];
 
-// `key` is const because R-182's caller passes a string literal out of a
+// `key` is const because the caller passes a string literal out of a
 // `const char *const []`; the function only ever strcmp's it.
 int has_val(char *str, const char *key)
 {
@@ -236,10 +235,10 @@ void get_settings(definition_t *items, int count)
                 mask |= weapon_vals[i];
         }
 
-        // R-182's six, named rather than numbered -- and THE HALVES ARE
-        // DECIDED SEPARATELY.  The digits above span exactly the nine weapons
+        // The pack six, named rather than numbered -- and the halves are
+        // decided separately.  The digits above span exactly the nine weapons
         // 1999 had, so a `weapons:` line written before the packs existed says
-        // everything there was to say about the baseq2 half and NOTHING about
+        // everything there was to say about the baseq2 half and nothing about
         // the pack half; reading its silence as "none of the six" is what made
         // `xatrix 1` a menu row and no weapon (see RA_LayerWeaponBits).  A line
         // that names a pack weapon -- or `nopack`, which is how an arena says
@@ -319,7 +318,7 @@ void get_settings(definition_t *items, int count)
     if (key)
         cells = atoi(get_val(key->value2, 0));
 
-    // R-182's five, in the shape of the six above them.
+    // The pack five, in the shape of the six above them.
     key = find_key("magslug", 1, items, count);
     if (key)
         magslug = atoi(get_val(key->value2, 0));
@@ -444,7 +443,7 @@ void get_settings(definition_t *items, int count)
     if (key)
         damage_scoring = atoi(get_val(key->value2, 0));
 
-    // R-RA-8.  `bots` is per arena and defaults ON, so a server that has never
+    // `bots` is per arena and defaults ON, so a server that has never
     // heard of this key behaves exactly as it did: `botfill` alone still
     // decides, and every arena remains a place bots may be sent.  Turning it
     // off is how one arena is kept for people while the rest of the map fills.
@@ -461,7 +460,7 @@ void get_settings(definition_t *items, int count)
     if (key)
         allow_voting_bots = atoi(get_val(key->value2, 0));
 
-    // R-182.  ON by default, which is where the donor's nine per-weapon
+    // ON by default, which is where the donor's nine per-weapon
     // switches sit too (`allow_voting_shotgun = 1` and its eight siblings) --
     // so a pack weapon an arena grants is as votable as a baseq2 one.
     key = find_key("allowvotingpackweapons", 1, items, count);
@@ -472,6 +471,21 @@ void get_settings(definition_t *items, int count)
 void set_config(int first, int last)
 {
     int     i;
+    // THE DEPLOYMENT'S OWN SWITCH, and the whole point of it is that it is not
+    // in arena.cfg.  `allowvotingbots` is a per-arena key like the other
+    // twenty, so whether the people on a server may propose playing without
+    // bots is decided by a file that is also the map rotation, the arena
+    // geometry and every weapon table -- a file an operator replaces wholesale
+    // when the rotation changes, and one that ships per-map and per-arena
+    // blocks able to withdraw the key three layers down.  A server that fills
+    // itself with bots wants that answer to survive all of it.
+    //
+    // Registered here rather than in load_config() because set_config() has a
+    // second caller -- arena.c's reset when an arena empties -- that reaches it
+    // without a file read; `gi.cvar` returns the existing cvar when there is
+    // one, so the value an operator set in a config exec'd at startup is what
+    // this reads.  R-RA-13.
+    cvar_t  *votebots = gi.cvar("ra_allowvotingbots", "0", 0);
 
     i = first;
     if (i > last)
@@ -504,7 +518,7 @@ void set_config(int first, int last)
         grenades = 50;
         rockets = 50;
         cells = 150;
-        // R-182: each pack ammo defaults to its own item ceiling, which is the
+        // Each pack ammo defaults to its own item ceiling, which is the
         // shape `shells`/`bullets` above already have.  An arena that grants
         // none of the pack weapons carries them the way a stock arena already
         // carries 150 cells with no cell weapon on it -- the donor's own
@@ -552,6 +566,15 @@ void set_config(int first, int last)
         if (map_block && arena_blocks[i])
             get_settings(arena_blocks[i]->value2, arena_blocks[i]->count2);
 
+        // AFTER all three layers, which is what makes it independent of them.
+        // Applied to the global rather than to `arenas[i]` below so that it is
+        // the value every consumer of this pass sees, and one way only: the
+        // cvar is a floor the deployment puts under the file, not a second
+        // place to turn the vote off.  A server that wants no bot vote says
+        // nothing here and the file decides, exactly as before.  R-RA-13.
+        if (votebots->value != 0)
+            allow_voting_bots = 1;
+
         arenas[i].weapons = weapons;
         arenas[i].armor = armor;
         arenas[i].health = health;
@@ -568,7 +591,7 @@ void set_config(int first, int last)
         arenas[i].grenades = grenades;
         arenas[i].rockets = rockets;
         arenas[i].cells = cells;
-        arenas[i].magslug = magslug;            // R-182
+        arenas[i].magslug = magslug;
         arenas[i].flechettes = flechettes;
         arenas[i].prox = prox;
         arenas[i].tesla = tesla;
@@ -966,8 +989,8 @@ void load_config(int num_arenas)
     allow_grapple = false;
     line = NULL;
 
-    // R-167.  `<homedir-or-basedir>/<gamedir>/<name>`, not the donor's bare
-    // `<gamedir>/<name>`: that resolves against the server's WORKING DIRECTORY,
+    // `<homedir-or-basedir>/<gamedir>/<name>`, not the donor's bare
+    // `<gamedir>/<name>`: that resolves against the server's working directORY,
     // so a server started from anywhere but the installation read no arena.cfg
     // at all -- every per-arena setting silently back to its built-in default,
     // announced by one dprintf nobody is reading at map load.
@@ -1075,7 +1098,7 @@ void load_motd(void)
 
     motd.next = motd.prev = NULL;
 
-    // R-167, the second of the two.  See load_config() above for why the
+    // The second of the two.  See load_config() above for why the
     // donor's relative path cannot be kept.
     if (!G_FsGamePath(path, sizeof(path), "motd.txt")) {
         gi.dprintf("Error: motd path too long\n");

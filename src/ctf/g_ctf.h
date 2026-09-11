@@ -19,7 +19,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 */
 
 // Threewave CTF 1.52.  Included from the bottom of g_local.h, as the donor has
-// it; §5.2 gives it src/ctf/ and R-25 item 3 requires the qualified include.
+// it, from src/ctf/ and through the qualified include.
 
 #ifndef CTF_G_CTF_H
 #define CTF_G_CTF_H
@@ -32,18 +32,18 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #define CTF_STRING_VERSION  CTF_VSTRING(CTF_VERSION)
 
 // Threewave's fourteen stat slots were `#define STAT_CTF_TEAM1_PIC 17` here.
-// They are now rows in g_stats.h's per-ruleset map, as SID_CTF_* (R-OSP-7
-// clause 3), because 17, 18 and 19 are baseq2's STAT_SPECTATOR, STAT_TIMER2_ICON
-// and STAT_TIMER2 and one library has to hold both meanings.  A slot number
-// appears in exactly one place in this tree and it is not here.
+// They are now rows in g_stats.h's per-ruleset map, as SID_CTF_*, because 17,
+// 18 and 19 are baseq2's STAT_SPECTATOR, STAT_TIMER2_ICON and STAT_TIMER2 and
+// one library has to hold both meanings.  A slot number appears in exactly one
+// place in this tree and it is not here.
 
 // The two configstrings CTF steals from the tail of the statusbar span.  They
-// must be taken from the **runtime** remap, not from the compile-time constant:
-// this library is compiled with USE_PROTOCOL_EXTENSIONS, so CS_AIRACCEL is 59,
-// but a server that did not negotiate the extensions runs on cs_remap_old where
-// airaccel is 29 -- and 57/58 then land inside the old model table rather than
-// in the statusbar span.  Same defect and same fix as the game.csr.general
-// sites in p_client.c and g_ctf.c (doc/reconciliation.md R-62); the idiom is
+// must be taken from the **runtime** remap, not from the compile-time
+// constant: this library is compiled with USE_PROTOCOL_EXTENSIONS, so
+// CS_AIRACCEL is 59, but a server that did not negotiate the extensions runs
+// on cs_remap_old where airaccel is 29 -- and 57/58 then land inside the old
+// model table rather than in the statusbar span.  Same defect and same fix as
+// the game.csr.general sites in p_client.c and g_ctf.c; the idiom is
 // g_local.h's PM_TIME_SHIFT.
 #define CONFIG_CTF_MATCH    (game.csr.airaccel - 1)
 #define CONFIG_CTF_TEAMINFO (game.csr.airaccel - 2)
@@ -125,7 +125,7 @@ char *CTFOtherTeamName(int team);
 void CTFAssignSkin(edict_t *ent, char *s);
 void CTFForceAssignTeam(gclient_t *who);
 void CTFAssignTeam(gclient_t *who);
-// R-CTF-8: `botfill`'s two halves under ctf -- how many players the map and its two
+// `botfill`'s two halves under ctf -- how many players the map and its two
 // bases seat, and which bot to remove when a person takes one of the seats.
 // Both unclamped and neither reads the switch; BotFillTarget() owns that.
 int  CTF_BotFillSeats(void);
@@ -191,12 +191,12 @@ void SP_misc_ctf_banner(edict_t *ent);
 void SP_misc_ctf_small_banner(edict_t *ent);
 
 // Threewave's own grapple, chosen as the one implementation of the concept
-// (§7 rule 6); the offhand `ctf_hook` and `laserhook` variants of R-CTF-3.
+// with the offhand `ctf_hook` and `laserhook` variants.
 void CTFHook_f(edict_t *ent);
 void CTFUnhook_f(edict_t *ent);
 void CTFHookThink(edict_t *ent);
 // ...and the one shot the think is made of, which arena's own think needs
-// (R-164): the hook is Threewave's, the CONDITIONS on it are RA2's.
+//The hook is Threewave's, the CONDITIONS on it are RA2's.
 void CTFHook_Fire(edict_t *ent);
 
 #define CTF_HOOK_STATE_ON       1
@@ -206,21 +206,21 @@ void CTFHook_Fire(edict_t *ent);
 extern cvar_t *ctf_hook;
 extern cvar_t *laserhook;
 
-// The ctf row of the ruleset dispatch (R-MODE-6).  Lives with the ruleset it
+// The ctf row of the ruleset dispatch.  Lives with the ruleset it
 // implements rather than in g_ruleset.c, so that adding a ruleset means adding
 // a file and one table entry.
 extern const ruleset_ops_t ops_ctf;
 
 
 
-// `extern char *ctf_statusbar;` -- gone.  R-OSP-7a: the bar is emitted from the
+// `extern char *ctf_statusbar;` -- gone.  The bar is emitted from the
 // slot map by g_stats.c, not stored as a literal.
 
 void CTFObserver(edict_t *ent);
 
 // Threewave's teleporter, prefixed: Ground Zero ships a `trigger_teleport` of
-// its own with different semantics and the same classname, so §7 rule 4 gives
-// each the donor prefix and g_misc.c dispatches (doc/reconciliation.md R-44).
+// its own with different semantics and the same classname, so
+// each the donor prefix and g_misc.c dispatches.
 void ctf_SP_trigger_teleport(edict_t *ent);
 void ctf_SP_info_teleport_destination(edict_t *ent);
 

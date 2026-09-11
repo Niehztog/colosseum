@@ -20,20 +20,18 @@ along with this program; if not, write to the Free Software
 Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 */
-// OSP Tourney DM v2.75, from osp-tourney@1d8427e (doc/provenance.md).
+// OSP Tourney DM v2.75, from osp-tourney@1d8427e.
 // Donor-only: baseq2 has no counterpart, so it lives in src/tourney/ rather
-// than being merged into a spine file (R-CORE-7).  The reconstruction's
-// asm-matching address comments are stripped -- SPECS.md N1 makes those oracles
-// meaningless here, and they survive at the pin.
+// than being merged into a spine file.  The reconstruction's asm-matching
+// address comments are stripped.
 //
-// THIS IS src/ctf/p_menu.h's ENGINE, ONE GENERATION EARLIER.  Threewave wrote
+// This IS src/ctf/p_menu.h's engine, one generation earlier.  Threewave wrote
 // `pmenu_t`; OSP took a copy and CTF kept developing theirs, so the two
-// engines R-MENU-1 ships side by side are forks of one file rather than two
+// engines that ship side by side are forks of one file rather than two
 // designs.  The `arg`-per-entry here against `arg`-on-the-handle there is the
-// visible divergence (R-MENU-2 struck, and this is why), and until 1.31 the
-// invisible ones were that this copy had none of the three departures
-// `src/ctf/p_menu.c` documents.  It has them now; `p_menu.c` says what each
-// one is for.
+// visible divergence, and the invisible ones were that this copy had none of
+// the three departures `src/ctf/p_menu.c` documents.  It has them now;
+// `p_menu.c` says what each one is for.
 enum {
     osp_PMENU_ALIGN_LEFT,
     osp_PMENU_ALIGN_CENTER,
@@ -74,7 +72,7 @@ void osp_PMenu_Update(edict_t *ent);
 void osp_PMenu_Next(edict_t *ent);
 void osp_PMenu_Prev(edict_t *ent);
 void osp_PMenu_Select(edict_t *ent);
-// R-OSP-13.  The menu key, both of them.  `reverse` is `invdrop` rather than
+// The menu key, both of them.  `reverse` is `invdrop` rather than
 // `invuse`, and it is the STEP DIRECTION the settings rows read off
 // `resp.osp_r264`, not a second kind of selection.  Carries the donor's
 // two-frame debounce, which belongs with the key and not with its caller.

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Every literal item name in the tree resolves to a real itemlist row (R-183).
+"""Every literal item name in the tree resolves to a real itemlist row.
 
 WHY.  `FindItem()` matches `gitem_t.pickup_name` and `FindItemByClassname()`
 matches `gitem_t.classname`, both by exact string, and both return **NULL** for a
@@ -16,7 +16,7 @@ NULL.  Two things it does in this tree:
 
 The second is the reason this is a build check rather than a grep somebody runs.
 There are over two hundred literal lookups in the tree and a merged union
-itemlist is exactly where a name goes stale: R-CORE-2 unions six donors' items
+itemlist is exactly where a name goes stale: the merge unions six donors' items
 into one list, so a donor's own spelling can arrive correct and be renamed by the
 union, and a name invented by one donor for another's item never resolved at all.
 
@@ -33,7 +33,7 @@ TWO KINDS OF FINDING, because there are two ways to reach an item by name.
     earns its keep: it is what found `item_spehre_defender` in
     `FindSubstituteItem`, Ground Zero's own typo, still present upstream, which
     means `DF_NO_SPHERES` never recognised the Defender sphere.  A targeted
-    check that looked only at the tables R-183 touched would have missed it.
+    check that looked only at the tables already touched would have missed it.
 
 The second kind needs an EXEMPTION LIST, and an exemption list is how a check
 dies quietly, so the exemptions are checked too: one that no longer appears in
@@ -335,9 +335,9 @@ def main():
         return 1
     for path, line, what, name in hits:
         if what == 'stale exemption':
-            print('!! %s: stale exemption: %s (R-183)' % (path, name))
+            print('!! %s: stale exemption: %s' % (path, name))
         else:
-            print('!! %s:%d: %s("%s") matches no itemlist row (R-183)'
+            print('!! %s:%d: %s("%s") matches no itemlist row'
                   % (path, line, what, name))
     classnames, pickups = itemlist_names(tree)
     print('itemnames: %d unresolved item name(s); the itemlist defines %d '

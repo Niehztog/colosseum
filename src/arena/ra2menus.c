@@ -17,11 +17,10 @@ along with this program; if not, write to the Free Software
 Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 */
-// Rocket Arena 2 v2.25, from rocketarena2-public@d20e1ce (doc/provenance.md).
+// Rocket Arena 2 v2.25, from rocketarena2-public@d20e1ce.
 // Donor-only: baseq2 has no counterpart, so it lives in src/arena/ rather than
-// being merged into a spine file (R-CORE-7).  The reconstruction's asm-matching
-// address comments are stripped -- SPECS.md N1 makes those oracles meaningless
-// here, and they survive at the pin.
+// being merged into a spine file.  The reconstruction's asm-matching
+// address comments are stripped.
 #include "g_local.h"
 #include "arena/arena.h"
 
@@ -341,11 +340,11 @@ menuRefreshTeamList(edict_t *ent, qmenu_t *menu, qmenu_t *item, int arg)
     return 2;
 }
 
-// R-MENU: A MENU BUILT ONCE IS A SNAPSHOT, and both lobby menus put a number
+// A menu built once is a snapshot, and both lobby menus put a number
 // in one.  RA2's answer is the "Refresh List" row, which is a real answer for
 // 1999 and a poor one now: `minimumplayers` fills the pickup teams while the
 // person is still reading the list, and `inven` REOPENS the menu rather than
-// rebuilding it (R-MENU-3: closing is hiding), so a player who joined, watched
+// rebuilding it -- closing is hiding -- so a player who joined, watched
 // four bots arrive on the scoreboard and pressed TAB again saw "Players: 0"
 // against every team and no reason to believe otherwise.
 //
@@ -354,14 +353,14 @@ menuRefreshTeamList(edict_t *ent, qmenu_t *menu, qmenu_t *item, int arg)
 // which is why "Refresh List" leaks a menu per press -- so binding a rebuild to
 // a key that is pressed all match long turns a bounded 1999 leak into an
 // unbounded one.  The numbers are updated in place instead, which costs no
-// allocation and makes them LIVE rather than merely fresh-on-open: MenuThink
+// allocation and makes them live rather than merely fresh-on-open: MenuThink
 // already repaints every ten frames and only needs to be told the composed bar
 // is stale.
 //
 // The two row kinds are matched the two different ways their own callbacks
 // resolve them.  A team row is matched by NAME, which add_to_team makes unique,
 // because teams are created and freed while the list is open and a row's
-// position stops meaning anything.  An arena row is matched by POSITION,
+// position stops meaning anything.  An arena row is matched by position,
 // because that is exactly what menuAddtoArena does with the row it was clicked
 // on, and because arena display names come out of the map and may repeat.
 bool RA_RefreshMenuCounts(edict_t *ent)
@@ -503,7 +502,7 @@ menuChangeMap(edict_t *ent, qmenu_t *menu, qmenu_t *item, int arg)
 {
     // The map name comes out of arena.cfg and the block was sized by the
     // menu's placeholder, so a long entry truncates here rather than running
-    // off the end of a TAG_LEVEL allocation (R-SEC-1).
+    // off the end of a TAG_LEVEL allocation.
     Q_strlcpy(((menuitem_t *)item->it)->value,
               get_next_map(((menuitem_t *)item->it)->value),
               ((menuitem_t *)item->it)->valuesize);
@@ -607,7 +606,7 @@ menuApplyArenaAdmin(edict_t *ent, qmenu_t *menu, qmenu_t *item, int arg)
     int         *settings = NULL;
     int         arenanum = 0;
     int         weapons;
-    int         i;              // R-182's pack-weapon walk
+    int         i;              // the pack-weapon walk
 
     node = (qmenu_t *)menu->it;
 
@@ -658,7 +657,7 @@ menuApplyArenaAdmin(edict_t *ent, qmenu_t *menu, qmenu_t *item, int arg)
             if (!settings[36])
                 weapons |= (settings[2] & weapon_vals[8]) ? weapon_vals[8] : 0;
 
-            // R-182, and the same rule the nine above follow: a bit is CARRIED
+            // The same rule the nine above follow: a bit is carried
             // when the menu has no row to re-set it from, and cleared when it
             // has one.  For the six that is two questions -- is the layer on,
             // and does this arena allow voting on them -- and getting it wrong
@@ -716,9 +715,9 @@ menuApplyArenaAdmin(edict_t *ent, qmenu_t *menu, qmenu_t *item, int arg)
         } else if (!Q_stricmp(it->text, "Damage Scoring:        ")) {
             settings[40] = (it->value[0] == 'Y');
         } else if (!Q_stricmp(it->text, "Allow Bots:            ")) {
-            settings[42] = (it->value[0] == 'Y');     // R-RA-8
+            settings[42] = (it->value[0] == 'Y');
         } else {
-            // R-182's six, read back through the one table that also draws them
+            // The pack six, read back through the one table that also draws them
             // and parses them out of arena.cfg, so a label cannot drift from a
             // bit.  -1 for every row that is not one of them, which is every
             // row the chain above already handled.
@@ -771,7 +770,7 @@ Cmd_arenaadmin_f(edict_t *ent, unsigned mode)
     int             *live;
     int             arenanum = 0;
     int             code;
-    int             i;          // R-182's pack-weapon walk
+    int             i;          // the pack-weapon walk
 
     switch (mode) {
     case 0:
@@ -813,7 +812,7 @@ Cmd_arenaadmin_f(edict_t *ent, unsigned mode)
         changeyesno = NULL;
         changevalue = NULL;
 
-        // R-SEC-8: this was `(int *)&arenas[arenanum].proposetime + 1`, which
+        // This was `(int *)&arenas[arenanum].proposetime + 1`, which
         // takes the address of a float, reads it as int* and steps one int
         // forward hoping to land on `proposed` -- undefined, and correct only
         // while sizeof(float) == sizeof(int) and nothing pads between the two
@@ -856,7 +855,7 @@ Cmd_arenaadmin_f(edict_t *ent, unsigned mode)
             AddMenuItem(m, "Allow Railgun:         ", (vals[2] & weapon_vals[7]) ? "YES" : "NO ", -1, changeyesno);
         if ((vals[2] & weapon_vals[8]) != (live[2] & weapon_vals[8]))
             AddMenuItem(m, "Allow BFG10K:          ", (vals[2] & weapon_vals[8]) ? "YES" : "NO ", -1, changeyesno);
-        // R-182: and the six, on the same rule -- a row per weapon whose
+        // And the six, on the same rule -- a row per weapon whose
         // proposed state differs from the live one, and only for a layer that
         // is switched on.
         for (i = 0; i < RA_NUM_PACK_WEAPONS; i++)
@@ -871,7 +870,7 @@ Cmd_arenaadmin_f(edict_t *ent, unsigned mode)
         if (vals[18] != live[18])
             AddMenuItem(m, "Falling Damage:        ", vals[18] ? "YES" : "NO ", -1, changeyesno);
         // Same order as the propose menu above, so a voter reads the change in
-        // the place they made it (R-RA-8).
+        // the place they made it.
         if (vals[42] != live[42])
             AddMenuItem(m, "Allow Bots:            ", vals[42] ? "YES" : "NO ", -1, changeyesno);
         if (vals[39] != live[39])
@@ -927,7 +926,7 @@ Cmd_arenaadmin_f(edict_t *ent, unsigned mode)
             AddMenuItem(m, "Allow Railgun:         ", (vals[2] & weapon_vals[7]) ? "YES" : "NO ", -1, changeyesno);
         if (!mode || vals[36])
             AddMenuItem(m, "Allow BFG10K:          ", (vals[2] & weapon_vals[8]) ? "YES" : "NO ", -1, changeyesno);
-        // R-182's six, WHENEVER THEIR LAYER IS ON.  Immediately after the
+        // The pack six, whenever their layer is on.  Immediately after the
         // donor's nine because that is where a reader looks for a weapon
         // switch, and `mode`/vals[49] gate them the way vals[28..36] gate the
         // nine: an admin always sees them, a player when the arena allows it.
@@ -943,12 +942,12 @@ Cmd_arenaadmin_f(edict_t *ent, unsigned mode)
             AddMenuItem(m, "Armor:  ", StringForProtect(vals[16]), -1, changeprotect);
         if (!mode || vals[37])
             AddMenuItem(m, "Falling Damage:        ", vals[18] ? "YES" : "NO ", -1, changeyesno);
-        // R-RA-8.  Guarded like the rows above rather than left unconditional
+        // Guarded like the rows above rather than left unconditional
         // the way Competition Mode and Damage Scoring are: an admin (mode 0)
         // always sees it, and the arena decides through `allowvotingbots`
         // whether it is also something the people in it may propose.
         //
-        // Placed HERE, beside the other whole-arena yes/no, rather than after
+        // Placed here, beside the other whole-arena yes/no, rather than after
         // the last row: menu.c draws a window of MAXMENUITEMS (18) and this
         // menu is longer than that, so the tail of the list is behind a
         // "(More)" the reader has to scroll to.  Appended, the new row landed
@@ -969,7 +968,7 @@ Cmd_arenaadmin_f(edict_t *ent, unsigned mode)
     switch (mode) {
     case 0:
         AddMenuItem(m, "Apply", NULL, -1, menuApplyArenaAdmin);
-        // falls through -- an admin gets Apply AND Propose, a player only Propose
+        // falls through -- an admin gets Apply and Propose, a player only Propose
     case 1:
         AddMenuItem(m, "Propose", NULL, -1, menuApplyArenaAdmin);
         break;
@@ -1087,15 +1086,15 @@ menu_centerprint(edict_t *ent, char *message)
     m = CreateQMenu(ent, "Message");
     AddMenuItem(m, "---------Continue----------", NULL, -1, menuNo);
 
-    // R-SEC-1, and R-SEC-2's kept-bug list only names half of it.  The list
-    // says `lastspace` is never reset after a wrap, which is why this buffer is
-    // 2048 bytes and the text is never compacted back to the start.  The other
-    // half is that `dst` was never bounded at all: `message` reaches here from
-    // `va()` and, through G_UseTargets, from an entity's `message` key -- so a
-    // map with a long enough string on a trigger overflowed 2048 bytes of stack
-    // under `arena`.  `bounded.py` cannot see this one: it is a hand-rolled
-    // copy loop and not one of the five names that tool bans, which is worth
-    // knowing about the check as much as about the bug.
+    // The kept-bug list only names half of it: it says `lastspace` is never
+    // reset after a wrap, which is why this buffer is 2048 bytes and the text
+    // is never compacted back to the start.  The other half is that `dst` was
+    // never bounded at all: `message` reaches here from `va()` and, through
+    // G_UseTargets, from an entity's `message` key -- so a map with a long
+    // enough string on a trigger overflowed 2048 bytes of stack under `arena`.
+    // `bounded.py` cannot see this one: it is a hand-rolled copy loop and not
+    // one of the five names that tool bans, which is worth knowing about the
+    // check as much as about the bug.
     while ((c = *src++) != 0) {
         if (dst >= buf + sizeof(buf) - 1)
             break;

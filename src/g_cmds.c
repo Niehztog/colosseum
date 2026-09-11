@@ -52,7 +52,7 @@ bool OnSameTeam(edict_t *ent1, edict_t *ent2)
     char    ent1Team[MAX_INFO_STRING];
     char    ent2Team[MAX_INFO_STRING];
 
-    // R-ARENA-1: under arena a team is an RA2 TEAM, not a model or a skin.
+    // Under arena a team is an RA2 TEAM, not a model or a skin.
     // RA2 replaces this function outright with `resp.teamnum == resp.teamnum`
     // and every arena rule that asks "are these two on a side together" -- the
     // friendly-fire pair in g_combat.c, score-by-damage, the crosshair ID --
@@ -84,7 +84,7 @@ bool OnSameTeam(edict_t *ent1, edict_t *ent2)
     return false;
 }
 
-// Non-static: tourney's delegated dispatcher calls it (R-88).
+// Non-static: tourney's delegated dispatcher calls it.
 void SelectNextItem(edict_t *ent, int itflags)
 {
     gclient_t   *cl;
@@ -93,7 +93,7 @@ void SelectNextItem(edict_t *ent, int itflags)
 
     cl = ent->client;
 
-    // R-MENU-4: menu input is consumed before anything else can interpret the
+    // Menu input is consumed before anything else can interpret the
     // same key.  The menu owner decides which engine sees it.
     if (G_MenuActive(ent)) {
         if (cl->menu_owner == MENU_CTF)
@@ -149,7 +149,7 @@ void SelectNextItem(edict_t *ent, int itflags)
     cl->pers.selected_item = -1;
 }
 
-// Non-static: tourney's delegated dispatcher calls it (R-88).
+// Non-static: tourney's delegated dispatcher calls it.
 void SelectPrevItem(edict_t *ent, int itflags)
 {
     gclient_t   *cl;
@@ -158,7 +158,7 @@ void SelectPrevItem(edict_t *ent, int itflags)
 
     cl = ent->client;
 
-    // R-MENU-4: menu input is consumed before anything else can interpret the
+    // Menu input is consumed before anything else can interpret the
     // same key.  The menu owner decides which engine sees it.
     if (G_MenuActive(ent)) {
         if (cl->menu_owner == MENU_CTF)
@@ -602,8 +602,7 @@ void Cmd_Inven_f(edict_t *ent)
         cl->scoremode = 0;
     cl->showhelp = false;
 
-    // R-MENU-4 again: `inven` closes an open menu rather than opening the
-    // inventory behind it.
+    // `inven` closes an open menu rather than opening the inventory behind it.
     if (G_MenuActive(ent)) {
         G_MenuClose(ent);
         cl->update_chase = true;
@@ -611,7 +610,7 @@ void Cmd_Inven_f(edict_t *ent)
     }
 
     if (G_Ruleset() == RULESET_ARENA) {
-        // R-RA-4's "arena menu on connect and on `inven`".  G_MenuActive above
+        // The arena menu on connect and on `inven`.  G_MenuActive above
         // has already handled the close; this is the reopen.
         if (cl->curmenulink) {
             G_MenuOpen(ent, MENU_ARENA);
@@ -620,7 +619,7 @@ void Cmd_Inven_f(edict_t *ent)
         return;
     }
 
-    // R-OSP-2: THIS FUNCTION IS TOURNEY'S MENU KEY.  The donor rewrites
+    // This function is tourney's menu key.  The donor rewrites
     // Cmd_Inven_f into the opener for its own menus and never shows an
     // inventory at all, and osp_clientcmd.c still routes `menu`, `ctfmenu` and
     // `inven` here for that reason -- so with no arm the whole OSP menu tree
@@ -649,8 +648,8 @@ void Cmd_Inven_f(edict_t *ent)
     }
 
     // ...and under ctf, with no team yet, `inven` is how you reach the join
-    // menu.  R-RA-4 wants the same for the arena menu in Phase 4, which is why
-    // the test is on the ruleset here rather than inside CTFOpenJoinMenu.
+    // menu.  The arena menu wants the same, which is why the test is on the
+    // ruleset here rather than inside CTFOpenJoinMenu.
     if (G_Ruleset() == RULESET_CTF && cl->resp.ctf_team == CTF_NOTEAM) {
         CTFOpenJoinMenu(ent);
         return;
@@ -670,7 +669,7 @@ void Cmd_Inven_f(edict_t *ent)
 Cmd_InvUse_f
 =================
 */
-// Non-static: tourney's menus bind `invuse` AND `invdrop` (R-MENU-4).  They are
+// Non-static: tourney's menus bind `invuse` and `invdrop`.  They are
 // the same key to the menu and differ only in DIRECTION -- see OSP_menuSelect().
 void Cmd_InvUse_f(edict_t *ent)
 {
@@ -689,18 +688,18 @@ void Cmd_InvUse_f(edict_t *ent)
         return;
     }
 
-    // R-OSP-1: THIS KEY IS THE PLAYER CARD, and the merge dropped the only site
+    // This key is the player card, and the merge dropped the only site
     // that opens it.  `OSP_ScoreboardMessage` has a `case 8: OSP_showPlayer()`
     // arm -- one of its five pages -- and nothing in this tree ever wrote 8 to
     // `resp.osp_r24c`, so the page was unreachable: the donor's toggle lives
     // here rather than in `score`, because pressing USE on an open scoreboard is
     // how OSP asks for your own card.  Under RegularDM only (`dm`), which is the
     // donor's `!m_mode`; the other three have a match result on that key.
-    // `osp_r2ac` is the card's own cursor and -1 is "closed" (R-192).
+    // `osp_r2ac` is the card's own cursor and -1 is "closed".
     //
     // The two guards around it are the donor's as well: at intermission a match
     // ruleset consumes the key rather than using an item, and an OBSERVER uses
-    // nothing at all -- the same `entered` gate R-191 restored in Cmd_Kill_f,
+    // nothing at all -- the same `entered` gate as Cmd_Kill_f,
     // and an observer does carry a blaster for `it->use` to fire.
     if (G_IsOspRuleset()) {
         if (OSP_IsMatch() && level.intermission_framenum)
@@ -896,7 +895,7 @@ void Cmd_InvDrop_f(edict_t *ent)
         return;
     }
 
-    // R-OSP-13.  Tourney binds `invdrop` to the menu too, and it is the REVERSE
+    // Tourney binds `invdrop` to the menu too, and it is the REVERSE
     // of `invuse`: OSP_menuSelect's flag is the step direction every settings
     // row reads (`osp_r290--` against `osp_r290++`) and the scan direction of
     // the player list.  Without this arm the flag was never once set, so nine
@@ -950,12 +949,12 @@ void Cmd_Kill_f(edict_t *ent)
     // `resp.entered != ENTERED_ENTERED`, which is the second half of its
     // combined condition in this same function.  Asked here rather than added
     // to the shared predicate, because two of that predicate's other call sites
-    // would then diverge from the donor -- see doc/reconciliation.md R-191.
+    // would then diverge from the donor.
     if (G_IsObserver(ent) ||
         (G_IsOspRuleset() && ent->client->resp.osp_entered != ENTERED_ENTERED))
         return;
 
-    // R-OSP-1 exempts the COUNTDOWN from the five-second guard: OSP_checkSync
+    // Tourney exempts the countdown from the five-second guard: OSP_checkSync
     // kills everybody into a fresh spawn through this function at sync_stat 2,
     // and a player who respawned inside the last five seconds would otherwise
     // be left standing where they were while the rest of the map was reset.
@@ -963,14 +962,14 @@ void Cmd_Kill_f(edict_t *ent)
         !(G_IsOspRuleset() && sync_stat == 2))
         return;
 
-    // R-OSP-1: dying ends `client_protect` spawn protection, so that it cannot
+    // Dying ends `client_protect` spawn protection, so that it cannot
     // be carried through a suicide into the next life.
     if (G_IsOspRuleset())
         ent->client->resp.osp_r23c = 0;
 
-    // *** THE DONOR'S THREE LINES BEFORE THE DEATH, and they are the ones that
-    // make a tourney `kill` LEAVE NO TRACE. ***  Clearing `s.effects` and
-    // `s.renderfx` matters because CopyToBodyQue copies BOTH to the corpse:
+    // The donor's three lines before the death, and they are the ones that
+    // make a tourney `kill` leave no trace.  Clearing `s.effects` and
+    // `s.renderfx` matters because CopyToBodyQue copies both to the corpse:
     // whatever the body was wearing -- a quad shell, a rune glow, the CTF flag
     // effect -- would otherwise go on glowing on the floor after its owner had
     // gone.  And the hook is let go before the die rather than inside it,
@@ -999,17 +998,17 @@ void Cmd_Kill_f(edict_t *ent)
 
     player_die(ent, ent, ent, 100000, ent->s.origin);
 
-    // *** ...AND THE TWO AFTER IT, WHICH THE MERGE DROPPED. ***  The donor's
+    // *** ...and the two after it, which the merge dropped. ***  The donor's
     // Cmd_Kill_f does not wait for the death frames: it stamps DEAD_DEAD and
     // respawns in the same call, so `kill` under tourney is "put me back at a
     // spawn point", not "lie here until I press fire".
     //
-    // WHICH IS LOAD-BEARING AT THE START OF EVERY MATCH, and that is how the
+    // Which is load-bearing at the start of every match, and that is how the
     // gap was found -- played, not read.  OSP_checkSync ends the countdown by
     // killing EVERYBODY into a fresh spawn (sync_stat 2 -> 4) and then, in the
     // same frame, sweeping the map: gibs are freed and every `bodyque` is
     // unlinked, zeroed and hidden.  The sweep can only park the corpses that
-    // ALREADY EXIST when it runs, and a corpse exists because respawn() ->
+    // Already EXIST when it runs, and a corpse exists because respawn() ->
     // CopyToBodyQue made one.  With the respawn missing, the kills made no
     // corpses for the sweep to find; each player then lay dead until they
     // pressed fire, and the body queued THEN -- after the sweep had run --
@@ -1036,7 +1035,7 @@ void Cmd_PutAway_f(edict_t *ent)
 {
     ent->client->showscores = false;
     // RA2's `putaway` clears `scoremode`; `showscores` is not the field its
-    // HUD reads (sec 7 rule 3), so clearing only that left the arena board up.
+    // HUD reads, so clearing only that left the arena board up.
     if (G_Ruleset() == RULESET_ARENA)
         ent->client->scoremode = 0;
     ent->client->showhelp = false;
@@ -1069,7 +1068,7 @@ static int PlayerSort(void const *a, void const *b)
 Cmd_Players_f
 =================
 */
-// Non-static: tourney's delegated dispatcher calls it (R-88).
+// Non-static: tourney's delegated dispatcher calls it.
 void Cmd_Players_f(edict_t *ent)
 {
     int     i;
@@ -1078,7 +1077,7 @@ void Cmd_Players_f(edict_t *ent)
     char    large[1280];
     int     index[MAX_CLIENTS];
 
-    // R-OSP-2: tourney's own listing, because under tourney a player is
+    // Tourney's own listing, because under tourney a player is
     // addressed by NUMBER -- `vote kick 3`, `accuracy 3`, `r_kick` -- and a
     // list of names sorted by frags does not say what those numbers are.  A
     // referee gets the address column as well, which is what `r_ban` needs;
@@ -1106,10 +1105,9 @@ void Cmd_Players_f(edict_t *ent)
                 gi.cprintf(ent, PRINT_HIGH, "%2d:\"%s\"\n",
                            e->client->resp.clientid, e->client->pers.netname);
             } else {
-                OSP_getPlayerAddr(e);
                 gi.cprintf(ent, PRINT_HIGH, "%2d:\"%s\" [%s]\n",
                            e->client->resp.clientid, e->client->pers.netname,
-                           e->osp_e37c);
+                           e->client->pers.address);
             }
         }
         return;
@@ -1193,10 +1191,10 @@ void Cmd_Wave_f(edict_t *ent)
     }
 }
 
-// §7 rule 6 keeps ONE flood check and Q2PRO's is the one; Threewave renamed it
+// One flood check ships, and Q2PRO's is the one; Threewave renamed it
 // CheckFlood and added a second call in Cmd_Say_f, which charges the counter
 // twice for one message.  The name and the single call stay; g_ctf.c's
-// CTFSay_Team calls this one (R-CORE-13: linkage follows what calls what).
+// CTFSay_Team calls this one, so linkage follows what calls what.
 bool FloodProtect(edict_t *ent)
 {
     int i, msgs = flood_msgs->value;
@@ -1308,7 +1306,7 @@ static void OSP_Cmd_Say_f(edict_t *ent, bool team, bool arg0)
 Cmd_Say_f
 ==================
 */
-// Non-static: tourney's delegated dispatcher calls it (R-88).
+// Non-static: tourney's delegated dispatcher calls it.
 void Cmd_Say_f(edict_t *ent, bool team, bool arg0, bool bcast)
 {
     int     j;
@@ -1345,8 +1343,8 @@ void Cmd_Say_f(edict_t *ent, bool team, bool arg0, bool bcast)
         ent->client->spamtime = level.time;
     }
 
-    // *** R-165: RA2 DELETES THIS TEST, AND LEAVING IT IN LEAKED EVERY TEAM
-    // *** CALLOUT TO THE OTHER SIDE.
+    // RA2 deletes this test, and leaving it in leaked every team callout to
+    // the other side.
     //
     // baseq2 has no teams of its own, so it decides whether `say_team` means
     // anything by asking dmflags for model- or skin-teams.  An arena team is
@@ -1384,7 +1382,7 @@ void Cmd_Say_f(edict_t *ent, bool team, bool arg0, bool bcast)
     if (dedicated->value)
         gi.cprintf(NULL, PRINT_CHAT, "%s", text);
 
-    // R-165's other half: RA2 keeps ordinary chat inside the ARENA it was said
+    // The other half: RA2 keeps ordinary chat inside the arena it was said
     // in, and `say_world` -- the `bcast` arm, which marks itself "W:" so the
     // other arenas know why they heard it -- is the server-wide one.  The merge
     // delivered every `say` server-wide, which made `say_world` a synonym for
@@ -1405,7 +1403,7 @@ void Cmd_Say_f(edict_t *ent, bool team, bool arg0, bool bcast)
         if (!other->client)
             continue;
         if (team) {
-            // R-EXTRA-6: observers are their own team for `say_team`.  An
+            // Observers are their own team for `say_team`.  An
             // observer's team chat reaches observers and nobody else, and a
             // player's reaches players -- otherwise the audience reads the
             // callouts, which is the whole reason the donor added this.
@@ -1416,7 +1414,7 @@ void Cmd_Say_f(edict_t *ent, bool team, bool arg0, bool bcast)
                 continue;
             if (!i_watch && !OnSameTeam(ent, other))
                 continue;
-            // R-165.  RA2 adds a second condition of its own and it is the same
+            // RA2 adds a second condition of its own and it is the same
             // thought as the observer split above, one state finer: a team-mate
             // who is not in the same part of the round does not hear it.  Under
             // arena `fightstate` has three values -- spectating, alive, dead --
@@ -1494,11 +1492,10 @@ void ClientCommand(edict_t *ent)
 
     cmd = gi.argv(0);
 
-    // OSP Tourney has 137 client commands (R-OSP-2).  Threewave's twelve are
+    // OSP Tourney has 137 client commands.  Threewave's twelve are
     // arms in the chain below and that reads fine at twelve; 137 would triple
     // this file and put a donor's whole command surface in a spine file.  One
-    // gate, one question: it returns true if it handled the command
-    // (doc/reconciliation.md R-88).
+    // gate, one question: it returns true if it handled the command.
     if (G_IsOspRuleset() && OSP_ClientCommand(ent))
         return;
 
@@ -1507,7 +1504,7 @@ void ClientCommand(edict_t *ent)
         return;
     }
     if (Q_stricmp(cmd, "say") == 0) {
-        // R-165.  A speaker who is in no arena has nobody to be arena-local to,
+        // A speaker who is in no arena has nobody to be arena-local to,
         // so their `say` is the server-wide one; inside an arena it stays in it.
         // The donor's own condition, and it is why `say_world` exists.
         Cmd_Say_f(ent, false, false,
@@ -1536,7 +1533,7 @@ void ClientCommand(edict_t *ent)
     if (level.intermission_framenum)
         return;
 
-    // R-166: `drop` IS A NO-OP UNDER ARENA.  RA2 empties Cmd_Drop_f outright,
+    // `drop` is a no-op under arena.  RA2 empties Cmd_Drop_f outright,
     // and the reason is already written down in this tree against
     // TossClientWeapon (p_client.c), which IS gated: an arena hands out a fixed
     // loadout and SpawnItem() frees every pickup on the map, so a dropped
@@ -1544,11 +1541,9 @@ void ClientCommand(edict_t *ent)
     // whoever the round goes to next.  The death route was closed and the one
     // the player drives was not.
     //
-    // *** `kill` IS THE OTHER HALF AND IS DELIBERATELY NOT TAKEN. ***  RA2
-    // dispatches it to nothing, so this differs from the donor knowingly.
-    // SPECS.md's "dead functions are live again" names `Cmd_Kill_f` in the list
-    // of what RA2 retired and says every one of them is live here -- Colosseum
-    // keeps four rulesets and three campaigns that RA2 dropped, and `kill` is a
+    // `kill` is the other half and is deliberately not taken.  RA2 dispatches
+    // it to nothing, so this differs from the donor knowingly: Colosseum keeps
+    // four rulesets and three campaigns that RA2 dropped, and `kill` is a
     // verb all of them have.  It is also load-bearing under arena rather than
     // merely tolerated: `ra2observer` asserts that a round OUTLIVES a fighter's
     // suicide and that wiping a side still ends it, which is a property of the
@@ -1630,20 +1625,20 @@ void ClientCommand(edict_t *ent)
         CTFBoot(ent);
     else if (G_Ruleset() == RULESET_CTF && Q_stricmp(cmd, "observer") == 0)
         CTFObserver(ent);
-    // R-CTF-3's offhand hook.  Two commands rather than a +hook alias, which is
-    // what uGladQ2 v0.97u did and what every 1999 config binds.
+    // The offhand hook.  Two commands rather than a +hook alias, which is
+    // what 1999 did, and what every 1999 config binds.
     else if (G_Ruleset() == RULESET_CTF && Q_stricmp(cmd, "hookon") == 0)
         CTFHook_f(ent);
     else if (G_Ruleset() == RULESET_CTF && Q_stricmp(cmd, "hookoff") == 0)
         CTFUnhook_f(ent);
-    // R-EXTRA-6's eight, from the 1999 module: observer, autocam, chasecam,
+    // The observer's eight, from the 1999 module: observer, autocam, chasecam,
     // cyclecam, setcam, camfixed, camname, observerhelp.  Asked as one
     // predicate, the shape the donor used, and only where the Gladiator
     // observer is the implementation in force -- under `arena` and `tourney`
     // the ruleset's own observer owns those verbs.
     else if (G_GladiatorObserver() && ClientObserverCmd(cmd, ent))
         ;
-    // R-EXTRA-2's two, from the 1999 module.  Client commands in the donor and
+    // The lag simulation's two, from the 1999 module.  Client commands in the donor and
     // client commands here; `g_clientlag` decides whether they do anything, and
     // both say so when it is off rather than silently accepting a number.
     else if (Q_stricmp(cmd, "lag") == 0)
@@ -1651,8 +1646,8 @@ void ClientCommand(edict_t *ent)
     else if (Q_stricmp(cmd, "lagvariance") == 0)
         Lag_SetClientLagVariance(ent, Q_atoi(gi.argv(1)));
     else if (Q_stricmp(cmd, "playerlist") == 0) {
-        // Threewave DELETES baseq2's Cmd_PlayerList_f and replaces it; R-CORE-8's
-        // rule applies to functions as well as files, so both survive and the
+        // Threewave deletes baseq2's Cmd_PlayerList_f and replaces it; the
+        // union applies to functions as well as files, so both survive and the
         // ruleset picks.  CTF's adds team, ghost code and ready state; baseq2's
         // reports `resp.spectator`, which CTF has no equivalent for.
         if (G_Ruleset() == RULESET_CTF)
@@ -1660,7 +1655,7 @@ void ClientCommand(edict_t *ent)
         else
             Cmd_PlayerList_f(ent);
     }
-    // Rocket Arena's own commands (R-RA-2).  `admin` and `playerlist` collide
+    // Rocket Arena's own commands.  `admin` and `playerlist` collide
     // with names that already mean something else here, so the ruleset picks
     // which meaning is live rather than either being renamed.
     else if (G_Ruleset() == RULESET_ARENA && Q_stricmp(cmd, "say_world") == 0)
@@ -1674,7 +1669,7 @@ void ClientCommand(edict_t *ent)
     // The offhand latch, and only the latch: whether it may fire is
     // RA_HookThink()'s question, asked every frame from ClientThink, because
     // `grapple` can be voted off and a round can end under a player who is
-    // still holding the key (R-164).
+    // still holding the key.
     else if (G_Ruleset() == RULESET_ARENA && Q_stricmp(cmd, "grap_on") == 0)
         ent->client->ctf_hookstate = CTF_HOOK_STATE_ON;
     // TURNOFF rather than 0: it has to say "the offhand hook is finished" and
@@ -1703,14 +1698,14 @@ void ClientCommand(edict_t *ent)
     else if (Q_stricmp(cmd, "disguise") == 0) {     // PGM
         ent->flags |= FL_DISGUISED;
     }
-    // R-BOT-24, from a client rather than the console, so `server` is false --
-    // which is what makes the six dump commands console-only.  R-BOT-25's
+    // From a client rather than the console, so `server` is false --
+    // which is what makes the six dump commands console-only.
     // `serveronlybotcmds` gates the rest and defaults to 1.  Asked LAST, and
     // before the chat fallback, so no bot name can shadow a ruleset's command.
     else if (BotCmd(cmd, ent, false))
         ;
     else  // anything that doesn't match a command will be a chat
-        // R-165: server-wide under arena, which is the donor's own asymmetry --
+        // Server-wide under arena, which is the donor's own asymmetry --
         // a mistyped command is not a callout and RA2 would rather everybody
         // saw it than that it vanished into one arena.
         Cmd_Say_f(ent, false, true, G_Ruleset() == RULESET_ARENA);

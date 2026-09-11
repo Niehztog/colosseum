@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Every literal model and sound path resolves to a file some donor ships (R-184).
+"""Every literal model and sound path resolves to a file some donor ships.
 
 WHY.  `gi.modelindex("...")` and `gi.soundindex("...")` register a configstring
 and return an index.  Neither checks that the file exists, and neither can: the
@@ -7,7 +7,7 @@ server does not read the asset, only names it.  The failure surfaces on the
 CLIENT, once, as a console line nobody is reading, and the effect is a weapon
 with no sound or an effect with no model -- indistinguishable from a gameplay
 choice.  This is `itemnames.py`'s question asked of the other half of the
-namespace: R-183 checked names against the itemlist, and this checks them
+namespace: the itemlist check covers names, and this checks them
 against the data.
 
 WHAT IS A FINDING.  A string literal ending `.md2`, `.sp2` or `.wav` that names
@@ -33,7 +33,7 @@ why.  It is deliberately not a silent pass: audit.py distinguishes the two, and
 "no data supplied" is a different statement from "every asset resolves".
 
 USAGE
-    tools/assets.py [--tree src] [--data ~/q2-dev/yquake2/release_]
+    tools/assets.py [--tree src] [--data DIR[:DIR...]]
     tools/assets.py --selftest
 """
 import argparse
@@ -45,12 +45,36 @@ import sys
 import zipfile
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-DEFAULT_DATA = os.path.expanduser('~/q2-dev/yquake2/release_')
+# The PARENT of the retail gamedirs, not one of them: this check resolves an
+# asset against whichever donor's data should ship it, so it wants the level
+# above `baseq2/`.  $Q2DATA names one gamedir and is accepted for the case where
+# a caller has laid the data out that way.  Several roots may be given, ':'
+# separated, because `arena` and `tourney` are mod gamedirs an operator installs
+# and are rarely beside the four retail ones.
+DEFAULT_DATA = '/usr/share/games/quake2'
 # The donors whose data Colosseum may legitimately name.  `gladiator` and the
 # q3bot test dirs are deliberately NOT here: they are other projects' gamedirs,
 # and resolving against them would let a missing asset pass because some
 # unrelated mod happens to ship one with the same name.
 DONORS = ('baseq2', 'xatrix', 'rogue', 'ctf', 'arena', 'tourney')
+# ...and of those, the ones whose ABSENCE leaves a question unanswered.
+#
+# OSP Tourney DM ships no model and no sound.  Every path its code names is
+# baseq2's -- that is what let its scenarios run in a gamedir holding nothing
+# but the library -- and the two files it did distribute are `.aas` navigation
+# meshes, which this index does not hold and this audit does not read.  So a
+# `tourney/` directory is not something an operator can install, and requiring
+# one made this the audit that could never answer: `make check` reported
+# "44 audit(s) clean, 1 not applicable yet" on every machine there has ever
+# been, for a donor with nothing to supply.
+#
+# Measured rather than reasoned: with the other five present and `tourney/`
+# EMPTY, the tree's 684 literals resolve 684 -- so there is no path here that
+# only tourney could have supplied, which is the thing its absence could
+# otherwise have hidden.  A donor that ever does ship one goes back on this
+# list, and until then its data is indexed if it happens to be there and its
+# absence is not a reason to withhold a verdict.
+ASSETLESS = ('tourney',)
 
 BLOCK_RE = re.compile(r'/\*.*?\*/', re.S)
 LIT_RE = re.compile(r'"([^"\n]*?\.(?:md2|sp2|wav))"', re.I)
@@ -106,28 +130,42 @@ def pak_names(path):
     return out
 
 
-def data_index(root, donors=DONORS):
-    """Every file each donor ships, from its paks and from loose files."""
+def data_index(roots, donors=DONORS):
+    """Every file each donor ships, from its paks and from loose files.
+
+    `roots` is one path or several, ':' separated.  A donor found under more
+    than one root contributes from each -- the index is a set of names, so the
+    union is the right answer and the first root does not mask the second.
+    """
+    if isinstance(roots, str):
+        roots = [r for r in roots.split(os.pathsep) if r]
     names = set()
     found = []
     for d in donors:
-        dd = os.path.join(root, d)
-        if not os.path.isdir(dd):
+        dirs = [os.path.join(r, d) for r in roots]
+        dirs = [x for x in dirs if os.path.isdir(x)]
+        if not dirs:
             continue
         found.append(d)
-        for p in sorted(glob.glob(os.path.join(dd, '*.pak'))):
-            names |= set(pak_names(p))
-        for p in sorted(glob.glob(os.path.join(dd, '*.pk3'))):
-            try:
-                names |= set(n.lower() for n in zipfile.ZipFile(p).namelist())
-            except Exception:
-                pass
-        for r, _, fs in os.walk(dd):
-            for fn in fs:
-                if not fn.lower().endswith(('.pak', '.pk3')):
-                    rel = os.path.relpath(os.path.join(r, fn), dd)
-                    names.add(rel.lower().replace('\\', '/'))
+        for dd in dirs:
+            _index_one(dd, names)
     return names, found
+
+
+def _index_one(dd, names):
+    """Fold one donor directory's paks, pk3s and loose files into `names`."""
+    for p in sorted(glob.glob(os.path.join(dd, '*.pak'))):
+        names |= set(pak_names(p))
+    for p in sorted(glob.glob(os.path.join(dd, '*.pk3'))):
+        try:
+            names |= set(n.lower() for n in zipfile.ZipFile(p).namelist())
+        except Exception:
+            pass
+    for r, _, fs in os.walk(dd):
+        for fn in fs:
+            if not fn.lower().endswith(('.pak', '.pk3')):
+                rel = os.path.relpath(os.path.join(r, fn), dd)
+                names.add(rel.lower().replace('\\', '/'))
 
 
 def is_shape(lit):
@@ -252,9 +290,59 @@ def selftest():
         # and an empty data set must not pass everything
         hits, _, _ = scan(tmp, set(), SELFTEST_ABSENT)
         want(bool(hits), 'no data at all -> the real names do not resolve')
+
+        # the verdict rule: an absent donor is not evidence against the tree
+        want(verdict(['a hit'], [], []) == 1,
+             'complete data + an unresolved name -> FAILS')
+        want(verdict(['a hit'], [], ['arena']) == 0,
+             'a donor absent + the same name -> unproven, does not fail')
+        want(verdict([], ['x'], ['arena']) == 1,
+             'a stale exemption fails even with a donor absent')
+        want(verdict([], [], ['arena']) == 0,
+             'a donor absent and nothing unresolved -> clean')
+
+        # The ASSETLESS exemption, both ways, because it is the difference
+        # between "this audit answers" and the permanent "not applicable yet"
+        # it used to print.  An exemption that quietly grew to cover a donor
+        # that DOES ship data would let a real missing asset pass.
+        miss = lambda found: [d for d in DONORS
+                              if d not in found and d not in ASSETLESS]
+        want(miss(('baseq2', 'xatrix', 'rogue', 'ctf', 'arena')) == [],
+             'the five that ship data, tourney absent -> nothing missing')
+        want(miss(('baseq2', 'xatrix', 'rogue', 'ctf', 'tourney')) == ['arena'],
+             'a donor that DOES ship data is still required (the control)')
+        want('tourney' in DONORS and 'tourney' in ASSETLESS,
+             'tourney is indexed when present and never required')
+
+        # and data_index takes several roots, because `arena` and `tourney` are
+        # rarely beside the four retail gamedirs
+        r1 = os.path.join(tmp, 'r1', 'baseq2')
+        r2 = os.path.join(tmp, 'r2', 'arena')
+        os.makedirs(r1)
+        os.makedirs(r2)
+        open(os.path.join(r1, 'one.wav'), 'w').write('')
+        open(os.path.join(r2, 'two.wav'), 'w').write('')
+        names, found = data_index(os.pathsep.join(
+            [os.path.join(tmp, 'r1'), os.path.join(tmp, 'r2')]))
+        want(found == ['baseq2', 'arena'] and
+             {'one.wav', 'two.wav'} <= names,
+             'two roots -> both donors indexed, neither masking the other: %s'
+             % (found,))
+        names1, found1 = data_index(os.path.join(tmp, 'r1'))
+        want(found1 == ['baseq2'] and 'two.wav' not in names1,
+             'one root -> only its own donor (the control for the above)')
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
     return ok
+
+
+def verdict(hits, stale, missing):
+    """Exit status.  An unresolved name is a FINDING only when every donor's
+    data was present to resolve it against; with a donor absent it is the check
+    declining to answer.  A stale exemption is always
+    a finding: it is a statement about the TREE, and missing data cannot make
+    one true or false."""
+    return 1 if (stale or (hits and not missing)) else 0
 
 
 def main():
@@ -273,16 +361,34 @@ def main():
         return 0
 
     hits, stale, total = scan(os.path.abspath(a.tree), names)
+    missing = [d for d in DONORS if d not in found and d not in ASSETLESS]
+
+    # An absent donor cannot be evidence that its own assets are missing.  The
+    # index is a union with no record of which donor supplied a name, so a
+    # partial data set makes every literal only that donor ships look
+    # unresolved -- `arena` alone accounts for six.  That is the check being
+    # unable to answer, not the tree being wrong, and reporting it as a finding
+    # would fail the build on any machine without all six installed.  So: the
+    # hits are still printed, because they are the list to chase once the data
+    # is there, and the exit status is only a verdict when the data is complete.
+    # `stale` is unaffected -- an exemption for a name absent from the TREE is
+    # about the tree, and no amount of missing data can create one.
     for path, line, lit, n in hits:
-        print('!! %s:%d: "%s" names no file any donor ships%s (R-184)'
-              % (path, line, lit, '' if n == 1 else ' (+%d more site(s))' % (n - 1)))
-    for s in stale:
-        print('!! tools/assets.py: stale exemption: %s (R-184)' % s)
+        print('%s %s:%d: "%s" names no file any donor ships%s'
+              % ('!!' if not missing else '   (unproven)', path, line, lit,
+                 '' if n == 1 else ' (+%d more site(s))' % (n - 1)))
+    for st in stale:
+        print('!! tools/assets.py: stale exemption: %s' % st)
     print('assets: %d unresolved of %d literal model/sound path(s); %d file(s) '
           'across %s; %d inherited absence(s) exempt'
-          % (len(hits) + len(stale), total, len(names), '+'.join(found),
+          % (len(hits) + len(stale), total, len(names), '+'.join(found) or 'nothing',
              len(ABSENT)))
-    return 1 if (hits or stale) else 0
+    if missing:
+        print('assets: PARTIAL -- no data for %s under %s, so the %d unresolved '
+              'name(s) above are not a verdict.  Give every donor root to get '
+              'one: --data DIR:DIR, or $Q2DATA.'
+              % ('+'.join(missing), a.data, len(hits)))
+    return verdict(hits, stale, missing)
 
 
 if __name__ == '__main__':

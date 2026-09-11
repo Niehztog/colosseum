@@ -44,6 +44,8 @@ cvar_t  *dmflags;
 cvar_t  *skill;
 cvar_t  *fraglimit;
 cvar_t  *timelimit;
+cvar_t  *nextlevel_click;
+cvar_t  *nextlevel_lazy;
 cvar_t  *capturelimit;      // CTF
 cvar_t  *instantweap;       // CTF
 cvar_t  *password;
@@ -78,16 +80,16 @@ cvar_t  *bob_roll;
 
 cvar_t  *sv_cheats;
 
-// RA2's two logging cvars (R-RA-1a, R-OSP-10).  `netlog` named the remote host
-// its event log was forwarded to over UDP; the forwarding is gone (R-SEC-7) and
-// the name stays registered so an old config still parses (R-COMPAT-3).
-// `logfile` is the ENGINE's own console-logging cvar, re-obtained: RA2 gates
-// its stdlog on it rather than adding a second switch, which is an idiomatic
-// re-obtain and not R-COMPAT-6's collision case.
+// RA2's two logging cvars.  `netlog` named the remote host its event log was
+// forwarded to over UDP; the forwarding is gone and the name stays registered
+// so an old config still parses.  `logfile` is the ENGINE's own
+// console-logging cvar, re-obtained: RA2 gates its stdlog on it rather than
+// adding a second switch, which is an idiomatic re-obtain and not a name
+// collision.
 cvar_t  *logfile;
 cvar_t  *netlog;
 
-// R-EXTRA's own switches (R-EXTRA-1, R-EXTRA-3, R-EXTRA-4).
+// The Gladiator extras' own switches.
 cvar_t  *g_gamelog;
 cvar_t  *g_clientlag;
 cvar_t  *g_observer;
@@ -95,7 +97,7 @@ cvar_t  *g_triggercounting;
 cvar_t  *g_triggerlog;
 cvar_t  *g_rotatingbutton;
 
-// OSP Tourney's three match-state globals (R-OSP-1).  They live here because
+// OSP Tourney's three match-state globals.  They live here because
 // the donor defines them in its g_main.c and because the match clock is read by
 // the composed statusbar, which is g_stats.c's -- putting them in src/tourney/
 // would make a spine file depend on a donor's translation unit for its own bar.
@@ -135,12 +137,11 @@ static void ShutdownGame(void)
         RA2_Stats_Shutdown();
     }
 
-    // R-EXTRA-1 names this by hand: the game log is closed on ShutdownGame,
-    // and it is closed for every ruleset because `g_gamelog` is not one
-    // ruleset's cvar.
+    // The game log is closed on ShutdownGame, and it is closed for every
+    // ruleset because `g_gamelog` is not one ruleset's cvar.
     Log_ShutDown();
 
-    // R-OSP-3: both tourney logs are closed with a REASON, and the reason is
+    // Both tourney logs are closed with a reason, and the reason is
     // the console command that caused it -- `map`, `gamemap`, a `quit`, or
     // nothing at all when the server is going down on its own.  A stats file
     // that does not say why it ended cannot be told from one that was
@@ -150,8 +151,8 @@ static void ShutdownGame(void)
 
         sl_GameEnd(&gi, level);
 
-        // R-195.6.  The donor's guard is the whole point of the call:
-        // `if (!level.intermission_framenum) q2log_logAccuracy();`
+        // The donor's guard is the whole point of the call: `if
+        // (!level.intermission_framenum) q2log_logAccuracy();`
         // (`port_osp:g_main.c:79`, between sl_GameEnd and the game-end event,
         // which is where this sits).  Every one of the six
         // OSP_Stats_AccuracyAll() callers in osp_main.c is a MATCH-end
@@ -170,7 +171,7 @@ static void ShutdownGame(void)
             OSP_logAdminLog("Shutdown: %s", reason);
     }
 
-    // R-BOT-3: every bot is destroyed and every library unloaded here, and in
+    // Every bot is destroyed and every library unloaded here, and in
     // that order -- the brain gets a shutdown per client while its library is
     // still mapped.  Before the FreeTags below, which would otherwise pull the
     // bot states out from under BotDestroy.
@@ -224,18 +225,18 @@ static void InitGame(void)
     sv_cheats = gi.cvar("cheats", "0", CVAR_SERVERINFO | CVAR_LATCH);
 
     logfile = gi.cvar("logfile", "0", CVAR_SERVERINFO);
-    // R-EXTRA-1: the 1999 module's LOGFILE, as a cvar.  A name opens the log;
+    // The 1999 module's LOGFILE, as a cvar.  A name opens the log;
     // "" leaves it closed, which is every server that does not ask for one.
     g_gamelog = gi.cvar("g_gamelog", "", 0);
-    // R-EXTRA-3 and R-EXTRA-4, off by default as the requirement says.  Latched:
+    // Two of the extras, off by default.  Latched:
     // all three decide what a map spawns, so flipping one mid-level would leave
     // half the entities on either side of the switch.
-    // R-EXTRA-2: off by default, because `lag` is a CLIENT command and a
+    // Off by default, because `lag` is a CLIENT command and a
     // player who can ask the server to hold two seconds of their own input is
     // asking it for memory.  Not latched: it turns a simulation on and off and
     // nothing is spawned from it.
     g_clientlag = gi.cvar("g_clientlag", "0", 0);
-    // R-EXTRA-6: ON by default, which is the one extra that is not off.  It is
+    // ON by default, which is the one extra that is not off.  It is
     // the 1999 module's own observer and the `observer` command is what a 1999
     // config binds; under `arena` and `tourney` the ruleset's own
     // implementation wins regardless of this cvar.
@@ -259,6 +260,13 @@ static void InitGame(void)
     dmflags = gi.cvar("dmflags", "0", CVAR_SERVERINFO);
     fraglimit = gi.cvar("fraglimit", "0", CVAR_SERVERINFO);
     timelimit = gi.cvar("timelimit", "0", CVAR_SERVERINFO);
+    // Registered HERE, not in OSP_gameInit, because `arena` reads them too
+    // since R-RA-10 and only one registration of a name may decide its default
+    // -- the same rule `botfill` is under, and the one `statsfile`/`statsname`
+    // broke in 1.21.  The two defaults are tourney's, unchanged, because
+    // tourney is where the pair was designed and the values are its donor's.
+    nextlevel_click = gi.cvar("nextlevel_click", "15.0", 0);
+    nextlevel_lazy = gi.cvar("nextlevel_default", "45.0", 0);
     password = gi.cvar("password", "", CVAR_USERINFO);
     spectator_password = gi.cvar("spectator_password", "", CVAR_USERINFO);
     needpass = gi.cvar("needpass", "0", CVAR_SERVERINFO);
@@ -296,7 +304,7 @@ static void InitGame(void)
     gi.cvar_forceset("g_features", va("%d", features));
 
     // items
-    // R-MODE-1/2/3/4.  Placed here, and the ordering is load-bearing in both
+    // Placed here, and the ordering is load-bearing in both
     // directions: *after* the cvar block above, because resolution reads the
     // `deathmatch` and `coop` globals that block assigns and they are NULL until
     // it runs; and *before* everything below, because reconcile_legacy_cvars()
@@ -308,10 +316,10 @@ static void InitGame(void)
     G_InitRuleset();
     CheckNeedPass();
 
-    // `game.maxclients` is settled HERE, not beside the allocation below, and
-    // that is R-47's ordering again rather than tidiness.  OSP_gameInit clamps
+    // `game.maxclients` is settled here, not beside the allocation below, and
+    // that is ordering again rather than tidiness.  OSP_gameInit clamps
     // `team_maxplayers` to `game.maxclients / 2` if two full teams would not
-    // fit, and the donor runs it AFTER this assignment (g_main.c:210 then 216).
+    // fit, and the donor runs it after this assignment (g_main.c:210 then 216).
     // The merge put the tourney block above it, so the clamp read 0, set
     // `team_maxplayers` to 0, and OSP_addTeamMember then refused every join
     // with "Sorry, both teams are full!" -- which for a bot is BotDestroy, so
@@ -321,29 +329,30 @@ static void InitGame(void)
     game.maxclients = maxclients->value;
 
     // OSP Tourney's own init: the map list, the match system's globals and the
-    // Standard Log (R-OSP-1, R-OSP-3).  After resolution for the same reason
-    // RA2's is -- both are per-ruleset writers and only one owner may be live.
+    // Standard Log.  After resolution for the same reason RA2's is -- both are
+    // per-ruleset writers and only one owner may be live.
     if (G_IsOspRuleset()) {
         OSP_loadMaps();
         OSP_gameInit();
         sl_Logging(&gi, "Colosseum tourney");
     }
 
-    // RA2's two writers (R-RA-1a, R-OSP-10).  After resolution, because both
-    // are per-ruleset and only one owner may be live at a time; `hostname` and
-    // `port` are the engine's own cvars, re-obtained for the log header.
+    // RA2's two writers.  After resolution, because both are per-ruleset and
+    // only one owner may be live at a time; `hostname` and `port` are the
+    // engine's own cvars, re-obtained for the log header.
     if (G_Ruleset() == RULESET_ARENA) {
         hostname = gi.cvar("hostname", "", CVAR_SERVERINFO);
         hostport = gi.cvar("port", "27910", CVAR_SERVERINFO | CVAR_NOSET);
 
         // RA2 cleared `netlog` on a private server so the event forwarding
-        // stopped; there is no forwarding any more (R-SEC-7), so the cvar is
+        // stopped; there is no forwarding any more, so the cvar is
         // read once to say so and the local log is unaffected.  `public` is
-        // still obtained because R-RA-2 counts it and the engine reads it.
+        // still obtained because RA2's log header counts it and the engine
+        // reads it.
         gi.cvar("public", "1", 0);
         if (netlog->string[0])
             gi.dprintf("netlog is set to \"%s\": the UDP event forwarding it "
-                       "named was removed under R-SEC-7.  `logfile 2` still "
+                       "named has been removed.  `logfile 2` still "
                        "writes the same lines to the local log.\n",
                        netlog->string);
 
@@ -364,10 +373,10 @@ static void InitGame(void)
     game.helpmessage1[0] = 0;
     game.helpmessage2[0] = 0;
 
-    // Threewave's own init.  NO DONOR TREE CALLS THIS -- not port_ctf, not
+    // Threewave's own init.  No donor tree calls this -- not port_ctf, not
     // q2pro/src/ctf -- so every CTF cvar pointer stays null and SpawnEntities'
     // CTFSpawn() dereferences `competition->value` on the first map load, before
-    // a player can connect.  Found by running it (doc/reconciliation.md R-42).
+    // a player can connect.  Found by running it.
     //
     // Called unconditionally rather than under `ctf`, because CTF's flag and
     // tech drop paths are reached from shared code -- player_die and
@@ -378,9 +387,8 @@ static void InitGame(void)
     //
     // `maxclients->value`, not `game.maxclients`.  Both donor branches carry
     // `game.maxclients = game.maxclients;` -- a self-assignment -- and the
-    // mission-pack merge propagated it here in Phase 2, where nothing could
-    // catch it: on a dedicated server with no clients connecting, maxclients 0
-    // is invisible.  See doc/reconciliation.md R-47.
+    // mission-pack merge propagated it here, where nothing could catch it: on
+    // a dedicated server with no clients connecting, maxclients 0 is invisible.
     game.maxentities = Q_clip(maxentities->value, (int)maxclients->value + 1, game.csr.max_edicts);
     g_edicts = gi.TagMalloc(game.maxentities * sizeof(g_edicts[0]), TAG_GAME);
     globals.edicts = g_edicts;
@@ -405,22 +413,21 @@ static void InitGame(void)
 
     // The bot layer, last: BotSetup allocates one bot state per client slot and
     // the index tables from game.csr, so it needs both game.maxclients and the
-    // configstring remap to be settled (R-BOT-11).  The menu tree is built here
+    // configstring remap to be settled.  The menu tree is built here
     // rather than per level because it is TAG_GAME and because the ruleset and
-    // the content layers -- which is what chooses its submenus -- are latched
-    // (R-BOT-28).
+    // the content layers -- which is what chooses its submenus -- are latched.
     BotSetup();
     bot_MenuCreate();
 
-    // R-88's decision, last of all: the `runes` modifier is DERIVED from the
-    // switch the ruleset's own code reads, and that switch -- tourney's
-    // `runes_enable` -- is registered by OSP_gameInit above.  See
-    // G_ResolveModifiers() in g_ruleset.c for why it is a second pass.
+    // Last of all: the `runes` modifier is derived from the switch the
+    // ruleset's own code reads, and that switch -- tourney's `runes_enable` --
+    // is registered by OSP_gameInit above.  See G_ResolveModifiers() in
+    // g_ruleset.c for why it is a second pass.
     G_ResolveModifiers();
     if (G_IsOspRuleset())
         OSP_setFeatures();
 
-    // R-EXTRA-1's cvar arm, after everything that might want to write to it.
+    // The game log's cvar arm, after everything that might want to write to it.
     if (g_gamelog->string[0]) {
         Log_Open(g_gamelog->string);
         Log_WriteTimeStamped("InitGame %s", G_RulesetName(G_Ruleset()));
@@ -439,7 +446,7 @@ q_exported game_export_t *GetGameAPI(game_import_t *import)
 {
     gi = *import;
 
-    // R-BOT-9: IMMEDIATELY after `gi = *import` and before anything else.
+    // IMMEDIATELY after `gi = *import` and before anything else.
     // BotRedirectGameImport keeps a private copy of the engine's table and
     // overwrites twenty slots of `gi` with interceptors, so anything that read
     // `gi` before this line would hold the unredirected function and the bots
@@ -476,12 +483,12 @@ q_exported game_export_t *GetGameAPI(game_import_t *import)
 =================
 GetGameAPIEx
 
-Q2PRO's extended entry point (sec 5.7).  Guaranteed to be called after
+Q2PRO's extended entry point.  Guaranteed to be called after
 GetGameAPI and before Init, and the structure it hands over stays valid for as
 long as the library is loaded, so it is kept by pointer rather than copied.
 
 Colosseum implements no game_export_ex_t entry point yet -- CanSave() is the
-one it will want, because R-ENG-6 forbids saving while a bot exists and the
+one it will want, because saving while a bot exists is refused and the
 engine is the only thing that can be told so before the file is opened.  That
 lands with the savegame work; declaring the table now is what makes the import
 side reachable, and an all-NULL export table is what the header asks for.
@@ -585,18 +592,18 @@ EndDMLevel
 
 The timelimit or fraglimit has been exceeded
 
-*** G_BeginIntermission(), NOT BeginIntermission(). ***  This function is the
+G_BeginIntermission(), not BeginIntermission().  This function is the
 level-end path for every deathmatch ruleset, and it called the base
 implementation directly at all eight sites -- so `ruleset_ops_t.BeginIntermission`
-was reachable from exactly ONE place in the tree, use_target_changelevel(), which
+was reachable from exactly one place in the tree, use_target_changelevel(), which
 a deathmatch map's exit trigger does not fire.  CTF is the only ruleset that
 fills the row, and what it puts there is CTFCalcScores(): Threewave calls it from
 inside BeginIntermission() itself, so it ran on every path.  Here it ran on
 none, leaving ctfgame.total1/total2 at whatever CTFEndMatch last wrote -- zero on
 a public server -- so SetCTFStats' frag tie-breaker read 0 > 0 both ways and
-blanked BOTH team headers, showing a tie at the end of every level whose
+blanked both team headers, showing a tie at the end of every level whose
 captures were level.  The dispatch's NULL row falls back to ops_base, so this is
-the same call it always was for dm, sp, arena and the OSP four (R-174).
+the same call it always was for dm, sp, arena and the OSP four.
 =================
 */
 void EndDMLevel(void)
@@ -702,6 +709,27 @@ static void CheckNeedPass(void)
 =================
 
 CheckDMRules
+
+The two limits end the level through the dispatch, not through `EndDMLevel` by
+name.  The arena ruleset has its own `EndLevel` row so
+that RA2's `maploop:` and baseq2's `sv_maplist` could not both rotate -- and
+then left the only call site that ever trips reaching past the row.  Nothing
+else called `G_EndLevel()` but osp_main.c, whose rulesets do not come through
+here at all (`OSP_CheckRules` reimplements both limits), so `RA_EndLevel` was
+never once called and RA2's rotation was unreachable *even with a timelimit
+set*: measured on `ra2map1` with `timelimit 0.1`, the level ended on schedule
+and `EndDMLevel` fell through every branch to `CreateTargetChangeLevel
+(level.mapname)` -- the same map, forever.
+
+`G_EndLevel()` changes nothing for the other two rulesets that DO come through
+here.  Exactly three rows reach this function -- `ops_base.CheckRules`, which
+is `sp`'s by inheritance, plus `RA_CheckRules` and `ctf_CheckRules` -- and `sp`
+and `ctf` both carry a NULL `EndLevel`, which `GATE()` resolves to
+`ops_base.EndLevel`, which IS `EndDMLevel`.  Provably the same call
+rather than a compatible one.  Every OTHER caller of
+`EndDMLevel` in the tree stays by name deliberately -- ctf's capturelimit and
+`warp`, tourney's map votes, DMGame's ball -- each being a ruleset that has
+already decided, which is the pattern `ops_base`'s header describes.
 =================
 */
 void CheckDMRules(void)
@@ -727,7 +755,7 @@ void CheckDMRules(void)
     if (timelimit->value) {
         if (level.time >= timelimit->value * 60) {
             gi.bprintf(PRINT_HIGH, "Timelimit hit.\n");
-            EndDMLevel();
+            G_EndLevel();
             return;
         }
     }
@@ -740,7 +768,7 @@ void CheckDMRules(void)
 
             if (cl->resp.score >= fraglimit->value) {
                 gi.bprintf(PRINT_HIGH, "Fraglimit hit.\n");
-                EndDMLevel();
+                G_EndLevel();
                 return;
             }
         }
@@ -790,6 +818,112 @@ static void ExitLevel(void)
 }
 
 /*
+=================
+G_IntermissionOnTimer
+
+Does this ruleset use tourney's PRESS delay -- `nextlevel_click` -- in place of
+baseq2's five seconds?
+
+THE OSP FOUR, and nobody else.  They brought the pair of timers with them --
+four and not one, because `dm` is tourney's RegularDM here and
+G_IsOspRuleset() is `g_active_ruleset <= RULESET_DUEL`, so `dm`, `dmpro`, `tdm`
+and `duel` are all inside it.
+
+`arena`, `ctf` and `sp` keep baseq2's five, and for one reason in all three
+cases: THE DEFECT WAS NEVER THE PRESS DELAY.  It was that a press was the only
+thing that could end the intermission at all, and the answer to that is the
+clock below rather than a longer wait before a key is listened to.  Lengthening
+the delay fixes nothing and makes a player wait three times as long to leave a
+board they have finished reading.
+
+`arena` took the press half too until it was measured in play and did not
+survive it (R-RA-10a).  RA2 ends an intermission on five seconds and a
+BUTTON_ANY -- `port_ra2:p_client.c` carries baseq2's rule untouched, its only
+intermission exit -- and fifteen is tourney's number arriving with tourney's
+cvar rather than a decision anybody made for an arena.  What R-RA-10 actually
+found is entirely in the LAZY half, and `arena` keeps that.
+=================
+*/
+bool G_IntermissionOnTimer(void)
+{
+    return G_IsOspRuleset();
+}
+
+/*
+=================
+G_IntermissionLazyExit
+
+...and does a clock end it when no press comes at all?
+
+EVERY DEATHMATCH RULESET, which is the whole of the liveness half.  An
+intermission only a press can end is a server that stops rotating the moment
+nobody on it will press -- and on a bot-filled server that is always, because
+the bot input path sets BUTTON_ATTACK and BUTTON_USE and never BUTTON_ANY.
+There is no ruleset for which "the level never ends again" is the right answer,
+so this is a floor and not a policy, and it is spelled as one test rather than a
+list of rulesets that would need extending every time a ruleset is added.
+
+`sp` is out, and should be: `deathmatch` is 0 there, a campaign intermission is
+a page the player reads and dismisses, and no rotation is waiting behind it.
+`deathmatch` is the same value BeginIntermission itself branches on a few lines
+above, so the two cannot drift.
+=================
+*/
+static bool G_IntermissionLazyExit(void)
+{
+    return deathmatch->value != 0;
+}
+
+/*
+=================
+G_CheckIntermissionExit
+
+The LAZY half of the intermission timers -- the one that needs no press, and
+therefore no client.
+
+It is a frame's work and not a client's, which is the whole of the fix.  Both
+halves used to live in ClientThink, where a timer can only run if somebody is
+being thought for; so an intermission reached with every remaining client a bot
+never ended, because the bot input path sets BUTTON_ATTACK and BUTTON_USE and
+never BUTTON_ANY (bl_main.c), and one reached with nobody at all never ended
+either, because nothing called ClientThink to run the clock.  Neither case is
+exotic: the first is a bot-filled server at its timelimit and the second is the
+last person quitting on the scoreboard.
+
+The other two escapes cannot cover it.  BeginIntermission's immediate exit is
+decided once, at the level end, so a client that leaves afterwards is not in
+it; and OSP_CheckRules's "inactive client timelimit" returns early on
+`level.intermission_framenum`, as every CheckRules row does.
+
+The warmup shortcut is tourney's alone -- `sync_stat` and `manual_map` are its
+state and no other ruleset has a pre-match to shorten the wait for.
+=================
+*/
+static void G_CheckIntermissionExit(void)
+{
+    float   t;
+    bool    warmup;
+
+    if (!level.intermission_framenum || level.exitintermission)
+        return;
+    if (!G_IntermissionLazyExit())
+        return;
+
+    t = (level.framenum - level.intermission_framenum) / (float)BASE_FRAMERATE;
+    warmup = G_IsOspRuleset() && (sync_stat < 4 || manual_map);
+
+    // Zero is that half switched OFF, and deliberately so: `map_halt` sets both
+    // to 0 to hold the server on this map at the end of the level.  An operator
+    // who asks for that gets it under `arena` too.
+    if ((t > nextlevel_lazy->value && (int)nextlevel_lazy->value) ||
+        (warmup && t > 15.0f)) {
+        level.exitintermission = true;
+        if (G_IsOspRuleset())
+            start_count = 0;
+    }
+}
+
+/*
 ================
 G_RunFrame
 
@@ -801,7 +935,7 @@ static void G_RunFrame(void)
     int     i;
     edict_t *ent;
 
-    // R-OSP-1's pause is a frozen WORLD, not a frozen match: no entity thinks,
+    // Tourney's pause is a frozen world, not a frozen match: no entity thinks,
     // no time passes, and the only thing that moves is the countdown.  It has
     // to be here rather than inside the rules row, because everything below --
     // the clock, the entity loop, the rules check -- is what must not happen.
@@ -819,8 +953,8 @@ static void G_RunFrame(void)
     if (G_IsOspRuleset())
         OSP_frameStart();
 
-    // R-BOT-20 steps 1 and 2.  A queued bot is created here rather than inside
-    // SpawnEntities or a ClientConnect (R-BOT-18), and the brain is told the
+    // Steps 1 and 2.  A queued bot is created here rather than inside
+    // SpawnEntities or a ClientConnect, and the brain is told the
     // frame has started before anything in the world moves.
     AddQueuedBots();
     if (botglobals.numbots > 0)
@@ -828,6 +962,10 @@ static void G_RunFrame(void)
 
     // choose a client for monsters to target this frame
     AI_SetSightClient();
+
+    // Ahead of the test below rather than beside the rules row, so a timer that
+    // came due is spent on this frame's level change and not the next one's.
+    G_CheckIntermissionExit();
 
     // exit intermissions
     if (level.exitintermission) {
@@ -850,7 +988,7 @@ static void G_RunFrame(void)
 
         level.current_entity = ent;
 
-        // R-BOT-20 step 3.  A debug line stores its far END in old_origin
+        // Step 3.  A debug line stores its far end in old_origin
         // (bl_debug.c), so overwriting it with the origin every frame collapses
         // every line the brain draws to a point.  RF_BEAM already covers the
         // SDK's own lines; FL_OLDORGNOTSET is the flag it sets alongside, for
@@ -882,7 +1020,7 @@ static void G_RunFrame(void)
         return;
     }
 
-    // R-BOT-20 steps 4, 5 and 6.  After the entity loop, because the brain is
+    // Steps 4, 5 and 6.  After the entity loop, because the brain is
     // entitled to a complete world snapshot, and before the rules check,
     // because a bot added by CheckMinimumPlayers this frame should be counted
     // by the fraglimit test that follows.
@@ -890,11 +1028,11 @@ static void G_RunFrame(void)
     CheckMinimumPlayers();
 
     // see if it is time to end a deathmatch
-    // R-MODE-5: the match-rules gate.  dm checks fraglimit and timelimit, ctf
+    // The match-rules gate.  dm checks fraglimit and timelimit, ctf
     // adds capturelimit, arena runs its round state machine, tourney its match
-    // system, and sp has no match to end.  NULL inherits dm (R-MODE-6).
+    // system, and sp has no match to end.  NULL inherits dm.
     //
-    // Ground Zero calls CheckDMRules() directly here.  Phase 1's seam wins:
+    // Ground Zero calls CheckDMRules() directly here.  The dispatch wins:
     // Rogue's own DM rulesets (dm_ball, dm_tag, driven by `gamerules`) are a
     // dispatch row, not a second direct call.
     G_CheckRules();
@@ -908,7 +1046,7 @@ static void G_RunFrame(void)
     // A pause asked for during this frame takes effect after it: freezing
     // mid-frame would leave half the entities thought and half not.
     if (G_IsOspRuleset()) {
-        // R-OSP-11: `bots_warmuptime` readies bots up.  After the rules check,
+        // `bots_warmuptime` readies bots up.  After the rules check,
         // because readying the last outstanding client starts the match and
         // that must be this frame's last word about the match state.
         OSP_botReady();

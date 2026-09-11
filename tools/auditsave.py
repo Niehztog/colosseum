@@ -1,6 +1,6 @@
 """Report variant-added persistent fields that no savegame descriptor covers."""
 import os, re, sys
-# R-TOOL-1: was tools/replay, a working tree that no longer exists.  The tree
+# Was tools/replay, a working tree that no longer exists.  The tree
 # to audit is now argv[1], defaulting to this repo's src/.
 _REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 R = sys.argv[1] if len(sys.argv) > 1 else os.path.join(_REPO, 'src')

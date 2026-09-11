@@ -26,48 +26,43 @@ with this program; if not, write to the Free Software Foundation, Inc.,
 // because we define the full size ones in this file
 #define GAME_INCLUDE
 #include "shared/game.h"
-// The engine's extended API (sec 5.7).  Vendored with the rest of inc/shared
-// and never edited (R-CORE-9).  It carries FILESYSTEM_API_V1 and
-// DEBUG_DRAW_API_V1, which R-BOT-8 and R-BOT-27 reach through GetGameAPIEx.
+// The engine's extended API.  Vendored with the rest of inc/shared and never
+// edited.  It carries FILESYSTEM_API_V1 and DEBUG_DRAW_API_V1, which the bot
+// layer reaches through GetGameAPIEx.
 #include "shared/gameext.h"
 
-// RA2's menu engine (R-MENU-1, sec 5.2).  Included rather than forward-declared
-// because gclient_t embeds qmenu_t BY VALUE -- Threewave's ctf_pmenuhnd_t is a
-// pointer and could be forward-declared, this one cannot.  The header needs
-// only edict_t, which shared/game.h has just typedef'd.
+// RA2's menu engine.  Included rather than forward-declared because gclient_t
+// embeds qmenu_t by value -- Threewave's ctf_pmenuhnd_t is a pointer and could
+// be forward-declared, this one cannot.  The header needs only edict_t, which
+// shared/game.h has just typedef'd.
 #include "arena/menu.h"
-// OSP's pmenu engine (R-MENU-1).  gclient_t holds a POINTER to its handle,
-// so a forward declaration would do -- but p_menu.h also carries osp_pmenu_t,
-// which osp_menus.c passes by value, and one include is cheaper than two
+// OSP's pmenu engine.  gclient_t holds a pointer to its handle, so a forward
+// declaration would do -- but p_menu.h also carries osp_pmenu_t, which
+// osp_menus.c passes by value, and one include is cheaper than two
 // half-declarations.
 #include "tourney/p_menu.h"
-// The Gladiator menu engine (R-MENU-1, R-BOT-28) and the SDK's debug-line
-// bounding box (R-BOT-27).  Both are embedded BY VALUE -- menustate_t in
-// gclient_t, visiblebbox_t in edict_t -- which is why the types come in here
-// rather than being forward-declared.  Neither header pulls in botlib.h.
+// The Gladiator menu engine and the SDK's debug-line bounding box.  Both are
+// embedded by value -- menustate_t in gclient_t, visiblebbox_t in edict_t --
+// which is why the types come in here rather than being forward-declared.
+// Neither header pulls in botlib.h.
 #include "bot/p_menulib.h"
 #include "bot/bl_debug.h"
 
 // features this game supports
 #define G_FEATURES  (GMF_PROPERINUSE|GMF_WANT_ALL_DISCONNECTS|GMF_ENHANCED_SAVEGAMES)
 
-// the ruleset dispatch (SPECS.md §5.3, R-MODE-1..7).  Included here rather than
-// per-file so that a gate is always reachable by its name and never by a cvar
-// test that happens to be in scope.
+// the ruleset dispatch.  Included here rather than per-file so that a gate is
+// always reachable by its name and never by a cvar test that happens to be in
+// scope.
 #include "g_ruleset.h"
 
-// the per-ruleset stat slot map and the composed statusbar (R-OSP-7,
-// R-OSP-7a).  Same argument as above: a slot is asked for by name, and the
-// number it resolves to is the active ruleset's business, not the call
-// site's.
+// the per-ruleset stat slot map and the composed statusbar.  Same argument as
+// above: a slot is asked for by name, and the number it resolves to is the
+// active ruleset's business, not the call site's.
 #include "g_stats.h"
 
 // the "gameversion" client command will print this plus compile date.
-// R-ENG-8: this feeds the `gamename` serverinfo cvar.  Phase 0 deliberately
-// left it at "baseq2" so src/ stayed byte-identical to the pin and the
-// "unmodified baseq2 library" exit criterion was literally true
-// (doc/reconciliation.md R-3); Phase 1 is the first behavioural change, so it
-// lands here and that row closes.
+// This also feeds the `gamename` serverinfo cvar.
 #define GAMEVERSION "colosseum"
 
 // protocol bytes that can be directly added to messages
@@ -91,17 +86,22 @@ with this program; if not, write to the Free Software Foundation, Inc.,
 #define FALL_TIME       0.3
 
 // ROGUE.  Ground Zero's own `KILL_DISRUPTOR` switch -- id's note that they cut
-// the disruptor -- is resolved statically and removed.  It was #defined 1 in the
-// donor, so every branch it guarded was already decided; R-CORE-3 permits a
-// feature #ifdef only for platform portability and the two Q2PRO build
-// switches, so a live-but-constant one does not survive the merge.
-// Consequences, both taken: no AMMO_DISRUPTOR in ammo_t, and no `max_rounds` in
+// the disruptor -- is resolved statically and removed.  It was #defined 1 in
+// Ground Zero, so every branch it guarded was already decided, and a
+// live-but-constant feature #ifdef does not survive the merge.  Consequences,
+// both taken: no AMMO_DISRUPTOR in ammo_t, and no `max_rounds` in
 // client_persistant_t.
 
-// R-RA-9.  The port RA2 recognises as the ZBot aim cheat: a client arriving
+// The port RA2 recognises as the ZBot aim cheat: a client arriving
 // from it is flagged `resp.isbot` at connect, which is the other half of
 // RA_ZBotSample's runtime heuristic.  Both only ever drive RA2's own reporting.
 #define RA_ZBOT_PORT    27902
+
+// How much room an address needs once the port is off it.  Tourney sized its
+// field 32, which is a dotted quad and change; q2pro's NET_AdrToString writes
+// an IPv6 peer as "[<40 hex and colons>]:<port>", so 32 would store a
+// truncated address and the log would name a host that does not exist.
+#define MAX_CLIENT_ADDRESS  48
 
 // edict->spawnflags
 // these are set with checkboxes on each entity in the map editor
@@ -136,56 +136,49 @@ with this program; if not, write to the Free Software Foundation, Inc.,
 #define FL_NOGIB                BIT(16)     // vaporized by a nuke, drop no gibs
 
 // ---------------------------------------------------------------------------
-// R-CORE-14: entity flag bits are allocated ONCE, here, and this is the table.
+// Entity flag bits are allocated once, here, and this is the table.
 //
-// The requirement exists because the donors alias bits under several names, and
-// it counted four names on two bits.  Measured 2026-08-21 across baseq2, xatrix
-// and rogue, it is SIX names on those two bits, and Ground Zero holds both:
+// The rule exists because the donors alias bits under several names: six names
+// land on two bits across baseq2, xatrix and rogue, and Ground Zero holds both:
 //
 //   BIT(13) 0x2000   FL_MECHANICAL (rogue, above)
-//                    vs FL_BOT and FL_OSP_NOCMD, which R-CORE-14 assigns here
+//                    vs FL_BOT and FL_OSP_NOCMD, assigned here
 //   BIT(16) 0x10000  FL_NOGIB (rogue, above)
 //                    vs FL_OBSERVER, FL_BOTCLIENT and FL_OSP_BOT, likewise
 //
-// Ground Zero arrives in Phase 2 and the bot layer in Phase 6, so Rogue is the
-// incumbent and the later names are the ones that move.  Allocating them now
-// rather than in Phase 6 is the whole point of R-CORE-14: a bot flag colliding
-// with "entity is mechanical" would make every bot bleed sparks, and one
-// colliding with "vaporized by a nuke" would make every bot dropless.  There
-// are 14 free bits, so nothing has to be squeezed.
+// Rogue is the incumbent and the later names are the ones that move.  A bot
+// flag colliding with "entity is mechanical" would make every bot bleed
+// sparks, and one colliding with "vaporized by a nuke" would make every bot
+// dropless.  There are 14 free bits, so nothing has to be squeezed.
 //
-// Reserved here, defined here, used when their phase lands.  A name with no
-// user yet costs nothing; a bit allocated twice costs a debugging session.
-#define FL_OBSERVER             BIT(17)     // Phase 5 -- Gladiator observer mode (R-EXTRA-6)
-#define FL_BOT                  BIT(18)     // Phase 6 -- this client is a bot (R-BOT-14)
-#define FL_BOTINPUT             BIT(19)     // Phase 6 -- inside BotExecuteInput (R-BOT-21)
-#define FL_OLDORGNOTSET         BIT(20)     // Phase 6 -- skip the old_origin copy (R-BOT-20)
-// *Corrected in 1.19, with the tourney donor in front of it.*  R-18 read all
-// four spare names as aliases of FL_BOT and left FL_BOTCLIENT undefined.
+// A name with no user yet costs nothing; a bit allocated twice costs a
+// debugging session.
+#define FL_OBSERVER             BIT(17)     // Gladiator observer mode
+#define FL_BOT                  BIT(18)     // this client is a bot
+#define FL_BOTINPUT             BIT(19)     // inside BotExecuteInput
+#define FL_OLDORGNOTSET         BIT(20)     // skip the old_origin copy
 // Measured in osp-tourney: `FL_OSP_NOCMD` is 0x2000 and `FL_BOT` is BIT(13),
-// the SAME bit -- a true alias.  But `FL_OSP_BOT` is 0x10000 and `FL_BOTCLIENT`
-// is BIT(16), which is a DIFFERENT bit from FL_BOT with a different meaning:
+// the same bit -- a true alias.  But `FL_OSP_BOT` is 0x10000 and `FL_BOTCLIENT`
+// is BIT(16), which is a different bit from FL_BOT with a different meaning:
 // FL_BOT is the SDK's "this entity is a bot" and FL_BOTCLIENT is the mod's
 // "this client is a bot", and osp_cmds.c tests them in different places for
 // different reasons.  Collapsing them would have merged two states.
 //
 // So the aliases go and the two real bits stay: FL_OSP_NOCMD -> FL_BOT,
-// FL_OSP_BOT -> FL_BOTCLIENT.  R-CORE-14's instruction is honoured -- four
-// names become two -- and R-OSP-4's "FL_OSP_BOT/FL_BOT mismatch" cannot recur,
-// because the confusable pair no longer exists.
-#define FL_BOTCLIENT            BIT(21)     // Phase 6 -- this CLIENT is a bot
+// FL_OSP_BOT -> FL_BOTCLIENT.  Four names become two, and the FL_OSP_BOT /
+// FL_BOT mismatch cannot recur because the confusable pair no longer exists.
+#define FL_BOTCLIENT            BIT(21)     // this CLIENT is a bot
 
-// FL_OSP_BOT and FL_OSP_NOCMD are NOT defined: R-CORE-14 says the
-// duplicate aliases are removed rather than kept as synonyms.  FL_BOT is the
-// one name for "is a bot", and osp_* code that said FL_OSP_BOT or FL_OSP_NOCMD
-// uses it.
+// FL_OSP_BOT and FL_OSP_NOCMD are not defined: the duplicate aliases are
+// removed rather than kept as synonyms.  FL_BOT is the one name for "is a
+// bot", and osp_* code that said FL_OSP_BOT or FL_OSP_NOCMD uses it.
 //
 // Free after this: BIT(22)..BIT(30).  BIT(31) is FL_RESPAWN.
 // ---------------------------------------------------------------------------
 
 #define FL_RESPAWN              BIT(31)     // used for item respawning
 
-// R-CORE-11a: the bits carried in edict_t.content_flavour.
+// The bits carried in edict_t.content_flavour.
 #define CONTENT_XATRIX          BIT(0)
 #define CONTENT_ROGUE           BIT(1)
 
@@ -358,33 +351,31 @@ typedef struct {
 #define IT_NOT_GIVEABLE BIT(7)      // item can not be given
 // CTF -- Threewave writes this as a bare `64`, i.e. BIT(6), which Ground Zero
 // already holds for IT_MELEE.  A value collision, not a name collision, so
-// R-CORE-14's treatment applies rather than §7 rule 4's: the bit moves and the
-// allocation is recorded (doc/reconciliation.md R-40).
+// the bit moves and the allocation is recorded in the table above.
 #define IT_TECH         BIT(8)
 // Tourney spells its runes IT_RUNE and gives them id CTF's IT_TECH value; here
-// IT_TECH is Threewave's and already taken, so the runes get a bit of their own
-// (sec 7 rule 3: two donors adding different content both get added).
+// IT_TECH is Threewave's and already taken, so the runes get a bit of their
+// own: two donors adding different content both get added.
 #define IT_RUNE         BIT(9)
 // ROGUE
 
 // gitem_t->weapmodel for weapons indicates model index
 //
-// R-142: THESE ARE POSITIONS IN A LIST, NOT NAMES.  `ChangeWeapon` puts the
+// These are positions in a list, not names.  `ChangeWeapon` puts the
 // value in the high byte of the player's `s.skinnum`, and the client draws
 // `weaponmodel[skinnum >> 8]` -- an array it fills with `weaponModels[0] =
 // "weapon.md2"` and then one entry per `#`-prefixed model in configstring
 // order.  So the number IS the ordinal of that weapon's `#w_*.md2` in
-// SP_worldspawn's precache block, and `g_spawn.c` says so above it: "THIS ORDER
-// MUST MATCH THE DEFINES IN g_local.h".
+// SP_worldspawn's precache block, and `g_spawn.c` says so above it:
+// "this order must match the defines in g_local.h".
 //
 // Each donor numbered its own extra weapons from 12 because each ships a list
 // with nothing after the BFG: CTF's grapple is 12, Xatrix's phalanx is 12,
-// Rogue's disruptor is 12.  R-CORE-2 unions the CONTENT, so the precache block
-// is now one ordered list of nineteen -- and three donors' private 12s made
-// seven weapons draw somebody else's model: a phalanx or a disruptor appeared
-// as a grapple, a ripper and an ETF rifle as a phalanx, and so on down the
-// list.  The Gladiator donor met the same problem when it merged the same two
-// packs and answered it the same way, at 12..18 (`ugladq2/src/g_local.h`).
+// Rogue's disruptor is 12.  The merged content is one ordered list of nineteen
+// -- and three donors' private 12s made seven weapons draw somebody else's
+// model: a phalanx or a disruptor appeared as a grapple, a ripper and an ETF
+// rifle as a phalanx, and so on down the list.  Gladiator met the same problem
+// when it merged the same two packs and answered it the same way, at 12..18.
 //
 // So the numbering is the merged list's.  The only consumer is the one line in
 // `ChangeWeapon`; `tools/dupvalue.py` is what keeps the next merge honest.
@@ -486,22 +477,20 @@ typedef struct {
 // CTF types the client structs below hold pointers to.  Forward-declared rather
 // than included: Threewave puts `#include "p_menu.h"` at the top of g_local.h
 // and `#include "g_ctf.h"` at the bottom, and both of those headers need
-// edict_t, so the include order only works by accident.  §5.2 is explicit that
-// CTF and tourney will both ship a p_menu.h, which is the other half of the
-// reason (R-25 item 3).
+// edict_t, so the include order only works by accident.  CTF and tourney both
+// ship a p_menu.h, which is the other half of the reason.
 typedef struct ctf_pmenuhnd_s   ctf_pmenuhnd_t;
 typedef struct ghost_s          ghost_t;
 
-// R-MENU-1 ships four donor menu engines and R-MENU-3 allows exactly one open
-// per client.  This is the single field R-MENU-2a asks for: the engines are
-// separate translation units with prefixed symbols and no knowledge of each
-// other, so the arbiter has to be outside all of them.
+// Four donor menu engines ship, and exactly one may be open per client.  The
+// engines are separate translation units with prefixed symbols and no
+// knowledge of each other, so the arbiter has to be outside all of them.
 typedef enum {
     MENU_NONE,
     MENU_CTF,           // Threewave pmenu_t     -- src/ctf/p_menu.c
-    MENU_TOURNEY,       // OSP pmenu_t           -- Phase 5
-    MENU_ARENA,         // RA2 qmenu_t           -- Phase 4
-    MENU_BOT,           // Gladiator menu_t tree -- Phase 6
+    MENU_TOURNEY,       // OSP pmenu_t
+    MENU_ARENA,         // RA2 qmenu_t
+    MENU_BOT,           // Gladiator menu_t tree
 } menu_owner_t;
 
 //
@@ -572,29 +561,29 @@ typedef struct {
     int         distance;
     int         height;
     char        *noise;
-    // *** R-KEY-1, caught live. ***
+    // Caught live.
     //
-    // This member is `pausetime`, NOT `pause_framenum`, and the distinction is
-    // the entire content of R-KEY-1.  A .bsp names entity fields as literal
-    // strings matched against the key column of temp_fields[], so the member
-    // name IS the map contract: `func_timer` entities set `"pausetime"`.
+    // This member is `pausetime`, not `pause_framenum`.  A .bsp names entity
+    // fields as literal strings matched against the key column of
+    // temp_fields[], so the member name IS the map contract: `func_timer`
+    // entities set `"pausetime"`.
     //
     // Q2PRO's "Convert monster timers to frame numbers." renamed the unrelated
     // `monsterinfo_t.pausetime` to `pause_framenum`.  Replayed tree-wide it also
-    // renamed THIS member, and every map setting `pausetime` on a func_timer
+    // renamed this member, and every map setting `pausetime` on a func_timer
     // silently lost its initial pause -- ED_ParseEdict reported "pausetime is
     // not a field" and banks of timers that should stagger fired in lockstep.
     //
     // Q2PRO has since fixed it: `q2pro/src/game/g_local.h` carries both
     // `spawn_temp_t.pausetime` (float) and `monsterinfo_t.pause_framenum` (int)
-    // as the two separate things they always were.  **Both donor branches in
-    // the bundles still carry the broken rename**, so the three-way merge
-    // propagated it in, and only `g_func.c`'s surviving `st.pausetime` made the
-    // compiler catch it.  Had g_func.c come from a donor too it would have
-    // compiled clean and broken every func_timer in every map.
+    // as the two separate things they always were.  Both donor branches still
+    // carry the broken rename, so the three-way merge propagated it in, and
+    // only `g_func.c`'s surviving `st.pausetime` made the compiler catch it.
+    // Had g_func.c come from a donor too it would have compiled clean and
+    // broken every func_timer in every map.
     //
-    // §7 rule 1 decides it regardless: a donor renaming a shared member is not
-    // that donor's own feature, so Q2PRO wins.  R-VER-14 is the regression.
+    // A donor renaming a shared member is not that donor's own feature, so
+    // Q2PRO wins.
     float       pausetime;
     char        *item;
     char        *gravity;
@@ -604,10 +593,10 @@ typedef struct {
     float       minpitch;
     float       maxpitch;
 
-    // R-OSP-6's five extra keys, and all five are PARSED now -- including
-    // `botlib`, whose consumer is the bot layer and lands in Phase 6.  A key
-    // that is not in temp_fields[] is rejected outright with "not a field", so
-    // deferring the row would REJECT every tourney map that names a bot library
+    // Tourney's five extra keys, and all five are parsed -- including
+    // `botlib`, whose consumer is the bot layer.  A key that is not in
+    // temp_fields[] is rejected outright with "not a field", so leaving the row
+    // out would reject every tourney map that names a bot library
     // rather than ignoring the setting: storing the string and not yet reading
     // it is the difference between a map that loads and one that does not.
     //
@@ -837,6 +826,17 @@ extern  cvar_t  *dmflags;
 extern  cvar_t  *skill;
 extern  cvar_t  *fraglimit;
 extern  cvar_t  *timelimit;
+// How an intermission ends, and shared because two rulesets ask it (R-RA-10).
+// `nextlevel_click` is how long a press is ignored for, `nextlevel_lazy` --
+// registered under tourney's own spelling `nextlevel_default` -- ends the
+// intermission with no press at all.  Either at 0 is that half switched off,
+// which is what `map_halt` sets both to.
+extern  cvar_t  *nextlevel_click;
+extern  cvar_t  *nextlevel_lazy;
+// ...and which rulesets read them.  A helper and not a sixth ruleset predicate
+// (R-MODE-6 names five): it answers for two named rulesets rather than for a
+// capability a row could carry.
+bool    G_IntermissionOnTimer(void);
 extern  cvar_t  *capturelimit;      // CTF
 extern  cvar_t  *instantweap;       // CTF
 extern  cvar_t  *password;
@@ -864,10 +864,10 @@ extern  cvar_t  *sv_cheats;
 extern  cvar_t  *maxclients;
 extern  cvar_t  *maxspectators;
 
-// RA2's four (R-RA-1a).  `hostname`, `port` and `logfile` are the engine's own,
+// RA2's four.  `hostname`, `port` and `logfile` are the engine's own,
 // re-obtained for the round log's header rather than re-declared with a second
-// meaning; `netlog` no longer opens anything (R-SEC-7) and is kept registered
-// so a legacy config still resolves.
+// meaning; `netlog` no longer opens anything and is kept registered so a legacy
+// config still resolves.
 extern  cvar_t  *hostname;
 extern  cvar_t  *hostport;
 extern  cvar_t  *logfile;
@@ -967,7 +967,7 @@ void    G_ProjectSource(const vec3_t point, const vec3_t distance, const vec3_t 
 edict_t *G_Find(edict_t *from, int fieldofs, char *match);
 // The spawn points of `classname` a random selection may choose among, which is
 // two short of the map's count -- see the comment on the implementation.  Both
-// map-sized bot fills read it (R-DM-1, R-CTF-8).
+// map-sized bot fills read it.
 int     G_SpawnPointPool(char *classname);
 edict_t *findradius(edict_t *from, vec3_t org, float rad);
 edict_t *G_PickTarget(char *targetname);
@@ -982,7 +982,7 @@ void    G_TouchTriggers(edict_t *ent);
 
 char    *G_CopyString(char *in);
 // Threewave and RA2 each shipped a byte-identical copy; it is a generic
-// engine helper and lives in g_utils.c (doc/reconciliation.md R-67).
+// engine helper and lives in g_utils.c.
 void stuffcmd(edict_t *ent, char *s);
 // Six of g_cmds.c's own handlers, reached by tourney's delegated dispatcher.
 void Cmd_Say_f(edict_t *ent, bool team, bool arg0, bool bcast);
@@ -1064,13 +1064,11 @@ void monster_fire_railgun(edict_t *self, vec3_t start, vec3_t aimdir, int damage
 void monster_fire_bfg(edict_t *self, vec3_t start, vec3_t aimdir, int damage, int speed, int kick, float damage_radius, int flashtype);
 // RAFAEL
 void monster_fire_ionripper(edict_t *self, vec3_t start, vec3_t dir, int damage, int speed, int flashtype, int effect);
-// §7 rule 4: two donors claim `fire_heat` and `monster_fire_heat` for different
-// weapons -- Xatrix's Phalanx heat-seeking projectile and Ground Zero's plasma
-// beam -- so both take their donor prefix.  Neither keeps the bare name: rule 4
-// gives it to "the primary ruleset's meaning", and a content layer is not a
-// ruleset, so there is no principled winner and an unprefixed `fire_heat` would
-// be ambiguous to every future reader.  R-CONV-2 had no mission-pack prefix at
-// all; `xatrix_`/`rogue_` are added there in spec 1.7.
+// Two donors claim `fire_heat` and `monster_fire_heat` for different weapons --
+// Xatrix's Phalanx heat-seeking projectile and Ground Zero's plasma beam -- so
+// both take their donor prefix.  Neither keeps the bare name: a content layer
+// is not a ruleset, so there is no principled winner and an unprefixed
+// `fire_heat` would be ambiguous to every future reader.
 void xatrix_monster_fire_heat(edict_t *self, vec3_t start, vec3_t dir, int damage, int speed, int flashtype);
 void monster_dabeam(edict_t *self);
 void monster_fire_blueblaster(edict_t *self, vec3_t start, vec3_t dir, int damage, int speed, int flashtype, int effect);
@@ -1166,14 +1164,13 @@ void respawn(edict_t *self);
 void PutClientInServer(edict_t *ent);
 void InitClientPersistant(gclient_t *client, bool full);
 void ClientObituary(edict_t *self, edict_t *inflictor, edict_t *attacker);
-// `ent` is the client being placed, or NULL where there is none (R-195.5).
+// `ent` is the client being placed, or NULL where there is none.
 float PlayersRangeFromSpot(edict_t *spot, edict_t *ent);
 edict_t *SelectRandomDeathmatchSpawnPoint(edict_t *ent);
 edict_t *SelectFarthestDeathmatchSpawnPoint(edict_t *ent);
-// R-DM-1: how many players the MAP seats, for `botfill` under `dm` and
-// `dmpro`.  Unclamped and with
-// no cvar test -- BotFillTarget() owns both.  Lives here because it is the spawn
-// selectors' own number; see the comment on the implementation.
+// How many players the map seats, for `botfill` under `dm` and `dmpro`.
+// Unclamped and with no cvar test -- BotFillTarget() owns both.  Lives here
+// because it is the spawn selectors' own number; see the implementation.
 int  DM_BotFillSeats(void);
 void InitBodyQue(void);
 void ClientBeginServerFrame(edict_t *ent);
@@ -1183,7 +1180,7 @@ void ClientDisconnect(edict_t *ent);
 void ClientThink(edict_t *ent, usercmd_t *ucmd);
 void ClientUserinfoChanged(edict_t *ent, char *userinfo);
 void SaveClientData(void);
-// arena.c drives its own respawn, so this one stops being static (sec 7 rule 2);
+// arena.c drives its own respawn, so this one stops being static;
 // InitClientPersistant and PlayersRangeFromSpot were already declared above.
 void InitClientResp(gclient_t *client);
 void FetchClientEntData(edict_t *ent);
@@ -1207,23 +1204,23 @@ void ClientEndServerFrame(edict_t *ent);
 void MoveClientToIntermission(edict_t *client);
 void BeginIntermission(edict_t *targ);
 // Non-static because the ruleset dispatch table in g_ruleset.c points at them,
-// which is a call site across a file boundary (R-CORE-13).  Donors add their own
-// call sites later -- tourney needs EndDMLevel and DeathmatchScoreboard, and
-// R-CORE-13 makes the answer the union, not a per-file judgement.
+// which is a call site across a file boundary.  Donors add their own call sites
+// too -- tourney needs EndDMLevel and DeathmatchScoreboard -- so the answer is
+// the union, not a per-file judgement.
 void CheckDMRules(void);
 void EndDMLevel(void);
 edict_t *CreateTargetChangeLevel(char *map);
-// False REFUSES the placement, which only tourney does (R-OSP-1): see
+// False refuses the placement, which only tourney does: see
 // PutClientInServer's frozen arm and OSP_spawnRefused.
 bool SelectSpawnPoint(edict_t *ent, vec3_t origin, vec3_t angles);
 void G_SetStats(edict_t *ent);
 void DeathmatchScoreboard(edict_t *ent);
-// R-193: reached from ClientThink's observer arms, where a menu press consumes
+// Reached from ClientThink's observer arms, where a menu press consumes
 // the key that would otherwise change camera mode.
 void Cmd_InvUse_f(edict_t *ent);
 
-// R-MENU-2a/3, implemented in p_hud.c beside the other owners of the layout
-// channel.  G_MenuOpen closes the incumbent -- whichever engine owns it -- and
+// Implemented in p_hud.c beside the other owners of the layout channel.
+// G_MenuOpen closes the incumbent -- whichever engine owns it -- and
 // records the new owner; nothing else may write gclient_t.menu_owner.
 void G_MenuOpen(edict_t *ent, menu_owner_t who);
 void G_MenuClose(edict_t *ent);
@@ -1235,23 +1232,23 @@ bool G_ScoreboardUp(edict_t *ent);
 // Takes a layout back off a client.  Four engines and the SDK's loading image
 // all write into the layout channel and every one of them needs the same
 // undo; the donors each open-coded it against their own idea of which
-// statusbar to repaint, which is doc/reconciliation.md R-87's defect in the
-// small.  One function, and it asks G_Statusbar() which bar the ACTIVE ruleset
-// composed rather than choosing between dm_statusbar and single_statusbar.
+// statusbar to repaint.  One function, and it asks G_Statusbar() which bar the
+// active ruleset composed rather than choosing between dm_statusbar and
+// single_statusbar.
 void G_LayoutClear(edict_t *ent);
 
-// ---- the engine's extended API (sec 5.7) ----------------------------------
+// ---- the engine's extended API -------------------------------------------
 //
-// GetGameAPIEx is guaranteed to be called after GetGameAPI and before Init, and
-// the structure it hands over stays valid for the life of the library.  It is
-// how R-BOT-8 resolves basedir/gamedir/cddir where the cvars cannot, how
-// R-BOT-26 enumerates bots/*.cfg inside a pak, and how R-BOT-27 reaches
-// DEBUG_DRAW_API_V1.  Every one of these answers something sensible when the
-// engine offers no extension at all -- q2pro only exposes the debug-draw
-// extension in a non-dedicated debug build, so the fallback is the normal case.
-// The engine's extended import table, captured by GetGameAPIEx in g_main.c and
-// read by src/g_fs.c.  NULL until the engine calls it, and NULL forever on an
-// engine that does not.
+// GetGameAPIEx is guaranteed to be called after GetGameAPI and before Init,
+// and the structure it hands over stays valid for the life of the library.  It
+// is how basedir/gamedir/cddir are resolved where the cvars cannot, how
+// bots/*.cfg is enumerated inside a pak, and how DEBUG_DRAW_API_V1 is reached.
+// Every one of these answers something sensible when the engine offers no
+// extension at all -- q2pro only exposes the debug-draw extension in a
+// non-dedicated debug build, so the fallback is the normal case.  The engine's
+// extended import table, captured by GetGameAPIEx in g_main.c and read by
+// src/g_fs.c.  NULL until the engine calls it, and NULL forever on an engine
+// that does not.
 extern const game_import_ex_t *gex;
 
 const char *G_FsBaseDir(void);
@@ -1263,11 +1260,11 @@ char      **G_FsListFiles(const char *path, const char *ext, int *count);
 void        G_FsFreeFileList(char **list);
 const debug_draw_api_v1_t *G_DebugDraw(void);
 
-// R-CTF-5, and the one predicate that replaces thirteen `resp.spectator` tests.
-// "Is this client watching rather than playing?" has two answers in one library:
-// baseq2's `resp.spectator` under dm and sp, and Threewave's
-// `resp.ctf_team == CTF_NOTEAM` under ctf, which has no baseq2 spectator flag
-// at all.  Asking the question by name means no call site has to know which.
+// The one predicate that replaces thirteen `resp.spectator` tests.  "Is this
+// client watching rather than playing?" has two answers in one library:
+// baseq2's `resp.spectator` under dm and sp, and Threewave's `resp.ctf_team ==
+// CTF_NOTEAM` under ctf, which has no baseq2 spectator flag at all.  Asking
+// the question by name means no call site has to know which.
 bool G_IsObserver(edict_t *ent);
 void G_SetSpectatorStats(edict_t *ent);
 void G_CheckChaseStats(edict_t *ent);
@@ -1279,7 +1276,7 @@ void DeathmatchScoreboardMessage(edict_t *client, edict_t *killer);
 //
 void PlayerNoise(edict_t *who, vec3_t where, int type);
 void P_ProjectSource(gclient_t *client, vec3_t point, vec3_t distance, vec3_t forward, vec3_t right, vec3_t result);
-// R-COMPAT-6: the one registration of the statistics-log pair, in g_ruleset.c,
+// The one registration of the statistics-log pair, in g_ruleset.c,
 // shared by RA2's ra2stats.c and tourney's osp_stats.c.
 extern cvar_t *g_statsfile;
 extern cvar_t *g_statsname;
@@ -1399,7 +1396,7 @@ void Widowlegs_Spawn(vec3_t startpos, vec3_t angles);
 void RemoveAttackingPainDaemons(edict_t *self);
 
 //
-// g_log.c -- the Gladiator game log (R-EXTRA-1)
+// g_log.c -- the Gladiator game log
 //
 void Log_Open(const char *filename);
 void Log_Close(void);
@@ -1413,38 +1410,38 @@ int Log_Writes(void);
 extern cvar_t *g_gamelog;
 
 //
-// The rest of R-EXTRA's `#define`s, as cvars.  R-EXTRA's rule is that each is
-// kept, each becomes a cvar and none is compiled out; these three are the ones
-// the requirement also says are OFF by default, which for a spawn function
-// means the entity is not created rather than created and inert.
+// The rest of Gladiator's compile-time `#define`s, as cvars: each is kept, each
+// becomes a cvar and none is compiled out.  These three are off by default,
+// which for a spawn function means the entity is not created rather than
+// created and inert.
 //
-extern cvar_t *g_clientlag;         // R-EXTRA-2, CLIENTLAG
-extern cvar_t *g_observer;          // R-EXTRA-6, OBSERVER (ctf and sp only)
+extern cvar_t *g_clientlag;         // CLIENTLAG
+extern cvar_t *g_observer;          // OBSERVER (ctf and sp only)
 
-// Is the GLADIATOR observer the implementation in force?  R-EXTRA-6 is the
-// second exemption to sec 7 rule 6 -- three implementations, one per ruleset --
-// so this is a ruleset question and not a cvar question, with the cvar folded
-// in as the operator's request the way G_ResolveModifiers does it (R-88).
+// Is the Gladiator observer the implementation in force?  Three observer
+// implementations ship, one per ruleset, so this is a ruleset question and not
+// a cvar question, with the cvar folded in as the operator's request the way
+// G_ResolveModifiers does it.
 //
-// It is an EVERYTHING-EXCEPT test, which is the shape that goes wrong when a
+// It is an everything-except test, which is the shape that goes wrong when a
 // ruleset is added: it named RULESET_ARENA and RULESET_TOURNEY, so `dmpro`,
 // `tdm` and `duel` would each have switched Gladiator's observer on underneath
-// OSP's own -- two live observer systems, which is the bug sec 7 rule 6 names.
-// G_IsOspRuleset() is why it does not: the four answer as one.  What is left
-// after the exclusions is `ctf` and `sp`.
+// OSP's own -- two live observer systems at once.  G_IsOspRuleset() is why it
+// does not: the four answer as one.  What is left after the exclusions is `ctf`
+// and `sp`.
 static inline bool G_GladiatorObserver(void)
 {
     return g_observer->value &&
            G_Ruleset() != RULESET_ARENA && !G_IsOspRuleset();
 }
-extern cvar_t *g_triggercounting;   // R-EXTRA-3, TRIGGER_COUNTING
-extern cvar_t *g_triggerlog;        // R-EXTRA-3, TRIGGER_LOG
-extern cvar_t *g_rotatingbutton;    // R-EXTRA-4, FUNC_BUTTON_ROTATING
+extern cvar_t *g_triggercounting;   // TRIGGER_COUNTING
+extern cvar_t *g_triggerlog;        // TRIGGER_LOG
+extern cvar_t *g_rotatingbutton;    // FUNC_BUTTON_ROTATING
 
 //
-// p_lag.c -- the Gladiator client-lag simulation (R-EXTRA-2)
+// p_lag.c -- the Gladiator client-lag simulation
 //
-// The ceiling on both `lag` and `lagvariance`, in milliseconds.  The donor
+// The ceiling on both `lag` and `lagvariance`, in milliseconds.  Gladiator
 // spelled 2000 in four places and clamped the ping from the unclamped value in
 // a fifth.
 #define LAG_MAX_DELAY   2000
@@ -1465,7 +1462,7 @@ void SP_func_button_rotating(edict_t *ent);
 bool G_SpawnFuncExists(const char *classname);
 
 //
-// Cross-file declarations that used to be local `extern`s in a .c (R-SEC-8).
+// Cross-file declarations that used to be local `extern`s in a .c.
 //
 // Each of these names something another translation unit defines.  Declared in
 // a .c, the two sides never meet and nothing checks them -- which is how RA2
@@ -1571,16 +1568,15 @@ typedef struct {
     // OSP: the "green name" a referee or admin is drawn with.
     char        greenname[16];
 
-    // OSP's speed-cheat strike counter.  The donor OVERLOADS baseq2's
-    // `spectator` for this -- its g_local.h says so in as many words,
-    // `int spectator; // client is a spectator, and a strike counter` -- and in
-    // this tree that member is baseq2's `bool`.  Merged as-is, `++` saturates
-    // at 1 so `>= 3` never fires and OSP_speedDetect kicks nobody; worse, the
-    // first strike would make the player a SPECTATOR.  R-58's class exactly,
-    // and the third instance of it, so it gets its own field (sec 7 rule 4).
+    // OSP's speed-cheat strike counter.  OSP overloads baseq2's `spectator`
+    // for this -- its g_local.h says so in as many words, `int spectator; //
+    // client is a spectator, and a strike counter` -- and in this tree that
+    // member is baseq2's `bool`.  Merged as-is, `++` saturates at 1 so `>= 3`
+    // never fires and OSP_speedDetect kicks nobody; worse, the first strike
+    // would make the player a spectator.  So it gets its own field.
     int         osp_speedstrikes;
 
-    // The host player of a LISTEN server, latched at connect (R-BOT-28).  It is
+    // The host player of a listen server, latched at connect.  It is
     // a fact about the connection, so it is read exactly once, from the
     // userinfo the engine hands ClientConnect: q2pro force-sets `ip` in the
     // connect packet only (`SVC_DirectConnect` -> `parse_userinfo`), and every
@@ -1588,6 +1584,22 @@ typedef struct {
     // is a command every client has.  Reading it live would hand the bot menu
     // to anybody.
     bool        listenhost;
+
+    // Where the client connected FROM, latched at connect beside
+    // `listenhost` and for the same reason: the engine force-sets userinfo
+    // `ip` in the connect packet and nowhere else, so this is the one moment
+    // the value is the engine's rather than the client's.  The port is
+    // stripped and a bot -- which has no `ip` at all -- reads "SERVER_BOT".
+    //
+    // One field for the whole tree.  It was tourney's `edict_t.osp_e37c`,
+    // which every ban check, every admin-log line, the stats log's "addr" and
+    // the accuracy row read; the connect and disconnect records of R-LOG-1
+    // need the same string under the other three rulesets, and section 7
+    // rule 6 keeps one implementation of a concept.  Living in `pers` also
+    // deletes the copy-out/copy-back that carried it across a level change in
+    // `SpawnEntities`: `game.clients` is allocated once and survives a level
+    // on its own.
+    char        address[MAX_CLIENT_ADDRESS];
 
 //=========
 //ROGUE
@@ -1599,11 +1611,11 @@ typedef struct {
 //=========
 } client_persistant_t;
 
-// The Gladiator observer's camera (R-EXTRA-6), for `dm`, `sp` and `ctf`.  One
+// The Gladiator observer's camera, for `dm`, `sp` and `ctf`.  One
 // per client because the eye and chase cameras are per viewer -- two observers
 // watching the same player have different smoothing state and different
 // offsets.  `ent`, `lastent` and `goalent` are edict pointers and therefore
-// need savegame descriptors, which g_save.c has (R-SAVE-3).
+// need savegame descriptors, which g_save.c has.
 typedef struct camera_s {
     edict_t *ent;                   //observed client
     vec3_t  angles;                 //camera angles
@@ -1630,10 +1642,9 @@ typedef struct camera_s {
     vec3_t  clientorigin;           //origin of the client using this camera
 } camera_t;
 
-// RA2's observer modes (R-EXTRA-6, the second exemption to sec 7 rule 6).  The
-// eye and chase cameras of `dm`/`ctf`/`sp` are g_chase.c's; these four are
-// arena.c's own and are not reconciled away, because RA2's observers are the
-// voting electorate and the queue audience that R-RA-4 depends on.
+// RA2's observer modes.  The eye and chase cameras of `dm`/`ctf`/`sp` are
+// g_chase.c's; these four are arena.c's own and are not reconciled away,
+// because RA2's observers are the voting electorate and the queue audience.
 typedef enum {
     OMODE_NORMAL,
     OMODE_FREEFLYING,
@@ -1650,67 +1661,66 @@ typedef struct {
 
     bool        spectator;          // client is a spectator
 
-    // CTF.  Threewave DELETED pers.spectator and resp.spectator and expressed
-    // "watching rather than playing" as ctf_team == CTF_NOTEAM instead
-    // (R-CTF-5).  The merged struct keeps both, because dm and sp still need
-    // baseq2's flag and R-CORE-8 keeps the campaign in scope; G_IsObserver()
-    // is the one place that knows which is authoritative.
+    // CTF.  Threewave deleted pers.spectator and resp.spectator and expressed
+    // "watching rather than playing" as ctf_team == CTF_NOTEAM instead.  The
+    // merged struct keeps both, because dm and sp still need baseq2's flag and
+    // the campaign stays in scope; G_IsObserver() is the one place that knows
+    // which is authoritative.
     int         ctf_team;
     int         ctf_state;
     float       ctf_lasthurtcarrier;
     float       ctf_lastreturnedflag;
     float       ctf_flagsince;
     float       ctf_lastfraggedcarrier;
-    bool        id_state;           // player-id display, on by default (R-CTF-6)
+    bool        id_state;           // player-id display, on by default
     float       lastidtime;
     bool        voted;              // for elections
     bool        ready;
     bool        admin;
     ghost_t     *ghost;             // ghost code, for reconnecting mid-match
 
-    // Rocket Arena 2 (R-RA-1..6, R-ARENA-1..4).  `context` is the arena whose
-    // menu the client is looking at, which is not always the arena it is in.
-    // The reconstruction's byte-layout padding members (`_unidentified*`) are
-    // NOT carried: N1 says nothing here is address- or byte-matched, so a hole
-    // that exists to reproduce a 1999 struct offset is a hole with no reason.
+    // Rocket Arena 2.  `context` is the arena whose menu the client is looking
+    // at, which is not always the arena it is in.  The reconstruction's
+    // byte-layout padding members (`_unidentified*`) are not carried: nothing
+    // here is address- or byte-matched, so a hole that exists to reproduce a
+    // 1999 struct offset is a hole with no reason.
     int         teamnum;            // -1 when on no team
     int         fightstate;         // FIGHT_SPECTATING / _ALIVE / _DEAD
     int         context;            // arena the menus are operating on
     qmenu_t     teammember;         // this client's node in its team's list
     int         spawn_recheck;      // framenum: retry the telefrag push
-    observer_mode_t omode;          // R-EXTRA-6's four modes
+    observer_mode_t omode;          // the four observer modes
     observer_mode_t lastomode;
     int         omode_buttons;
     edict_t     *track_target;      // TRACKCAM/EYECAM subject
     bool        entered;            // has been in the game at least once
     // `ra_voted` keeps the donor prefix: CTF's election flag above is also
-    // `voted`, the two vote systems are different (sec 7 rule 6 lists them) and
-    // one struct cannot hold two members of one name.
+    // `voted`, the two vote systems are different, and one struct cannot hold
+    // two members of one name.
     bool        ra_voted;
     int         ra_votes;
     int         damagedealt;        // for scorebydamage
 
     // OSP's `entered` is a STATE, not a flag: 1 entered, 2 observing, 16
     // autocam (its ENTERED_* values).  RA2's above is a bool meaning "has been
-    // in the game at least once".  Same name, two donors, two types -- R-58's
+    // in the game at least once".  Same name, two donors, two types -- its own
     // class, and the second instance of it in this import, so it gets its own
-    // field rather than a silent truncation to 0 or 1 (sec 7 rule 4).
+    // field, rather than a silent truncation to 0 or 1.
     int         osp_entered;
 
-    // RA2's ZBot aim-cheat detector.  Kept as the donor has it; R-SEC's sweep
-    // in Phase 8 decides whether it stays enabled by default.
+    // RA2's ZBot aim-cheat detector, kept as RA2 has it.
     int         zbotcount;
     float       zbotlastcheck;
     int         isbot;
 
-    // ---- OSP Tourney DM (R-OSP-1..13) -------------------------------------
+    // ---- OSP Tourney DM ---------------------------------------------------
     //
     // 736 bytes of the mod's own per-match state.  `osp_rNNN` is the field's
     // byte offset inside that block in the shipped 1999 binary and nothing
     // more: the reconstruction names a field only when something in the code
     // names it, and 62 of these are still unnamed.
     //
-    // They are carried VERBATIM, which is the opposite of what R-67 did with
+    // They are carried verbatim, which is the opposite of what was done with
     // RA2's `_unidentified` padding -- and the difference is measurable rather
     // than a matter of taste.  RA2's were padding: declared, never referenced,
     // existing only to reproduce a struct offset, so dropping them cost
@@ -1826,13 +1836,13 @@ struct gclient_s {
 
     // RA2 replaced baseq2's `showscores` bool with a small enum, because its
     // scoreboard has more than one mode.  Both are kept: `showscores` is what
-    // dm, ctf and sp test, `scoremode` is what arena tests (sec 7 rule 3).
+    // dm, ctf and sp test, `scoremode` is what arena tests.
     int         scoremode;
 
     // RA2: ZBot detection samples, and its own flood counter.  q2pro's
-    // FloodProtect() is the one that runs (sec 7 rule 6); these two are the
-    // donor's spam counter and are kept with its code rather than reconciled
-    // into a second answer.
+    // FloodProtect() is the one that runs; these two are the donor's spam
+    // counter and are kept with its code rather than reconciled into a second
+    // answer.
     //
     // `zbotscore` is the PORT the client connected from, stamped by
     // ClientConnect and read once by InitClientResp -- the misleading name is
@@ -1842,11 +1852,11 @@ struct gclient_s {
     int         spamcount;
     float       spamtime;
 
-    // R-MENU-2a: the menu owner is a SINGLE field, and every engine's open path
+    // The menu owner is a single field, and every engine's open path
     // goes through G_MenuOpen() which closes the incumbent first.  Four donor
-    // menu engines contend for one client input channel (R-MENU-1) and nothing
+    // menu engines contend for one client input channel and nothing
     // else structurally prevents two being open at once, so this field -- not a
-    // per-engine `inmenu` boolean -- is what makes R-MENU-3 true.  Threewave's
+    // per-engine `inmenu` boolean -- is what keeps that true.  Threewave's
     // own `inmenu` is therefore not carried: it would be a second answer to a
     // question that must have one.
     menu_owner_t    menu_owner;
@@ -1854,23 +1864,23 @@ struct gclient_s {
     float           menutime;       // next allowed refresh
     bool            menudirty;
 
-    // MENU_TOURNEY's handle.  `osp_` per sec 7 rule 4: OSP's pmenu_t puts `arg`
+    // MENU_TOURNEY's handle.  Prefixed `osp_`: OSP's pmenu_t puts `arg`
     // on the ENTRY and Threewave's on the HANDLE, so the two engines' types are
-    // incompatible and cannot share a name.  OSP's own `inmenu` bool is NOT
-    // carried -- R-MENU-2a says the owner is one field, and that is menu_owner.
+    // incompatible and cannot share a name.  OSP's own `inmenu` bool is not
+    // carried -- the owner is one field, and that is menu_owner.
     osp_pmenuhnd_t  *osp_menu;
 
-    // MENU_BOT's state (R-BOT-28).  By value, because the Gladiator engine
+    // MENU_BOT's state.  By value, because the Gladiator engine
     // keeps the cursor and the current submenu per client and the tree itself
-    // is shared.  Its own `showmenu` bool is NOT carried, for the same reason
+    // is shared.  Its own `showmenu` bool is not carried, for the same reason
     // RA2's was not: menu_owner is the one answer to "is a menu open".
     menustate_t     menustate;
     // The SDK paints a "loading" pic over the layout while a bot is being
     // created, and the menu has to keep painting it if one is open.  Emptied
-    // under tourney (R-BOT-29), whose own bar owns that channel.
+    // under tourney, whose own bar owns that channel.
     bool            showloading;
 
-    // ---- OSP Tourney DM (R-OSP-1..13) -------------------------------------
+    // ---- OSP Tourney DM ---------------------------------------------------
     // Offset-named for the same reason client_respawn_t's are, and carried for
     // the same reason: they are live state, not padding.  Several DO have a
     // meaning the reconstruction was able to name, and those carry it.
@@ -1899,10 +1909,10 @@ struct gclient_s {
     float     osp_t084;
 
     // MENU_ARENA's state.  RA2 carried a `showmenu` bool of its own; it is not
-    // here, because R-MENU-2a says the owner is ONE field and a second boolean
+    // here, because the owner is one field and a second boolean
     // is a second answer to the same question -- arena.c and menu.c ask
     // `menu_owner == MENU_ARENA` instead.  `ra_menutime` keeps the donor prefix
-    // of sec 7 rule 4: RA2's is an int frame count, ours above is float seconds,
+    // RA2's is an int frame count, ours above is float seconds,
     // and two members of one struct cannot share a name and disagree on both.
     qmenu_t         menuqueue;      // stack of open menus
     qmenu_t         *curmenulink;   // the one being drawn
@@ -1964,9 +1974,9 @@ struct gclient_s {
 
     bool        grenade_blew_up;
     int         grenade_framenum;
-    // XATRIX.  quadfire_framenum is R-VER-15 item 2's named case: it was
-    // missing from the client save table in the mission-pack port, so Quad-Fire
-    // did not survive a save/load.  R-SAVE-3 requires a descriptor.
+    // XATRIX.  quadfire_framenum was missing from the client save table in the
+    // mission-pack port, so Quad-Fire did not survive a save/load, so it needs
+    // a descriptor.
     int         quadfire_framenum;
     bool        trap_blew_up;
     float       trap_time;
@@ -1991,15 +2001,15 @@ struct gclient_s {
     // file.  It has here, so it is typed.
     //
     // The timeouts stay `float level.time` seconds rather than being converted
-    // to the `_framenum` model.  §7 rule 1 says q2pro wins on a timer, and
-    // q2pro's own CTF port is the tree that answers what q2pro thinks here: it
-    // kept every one of these as a float.  level.time is live and saved, the
-    // conversion would touch ~40 sites in g_ctf.c for no behavioural gain, and
-    // the _framenum model in this tree covers client powerup timers and entity
-    // debounces, not mod-internal timeouts (doc/reconciliation.md R-41).
+    // to the `_framenum` model.  Q2PRO wins on a timer, and q2pro's own CTF
+    // port is the tree that answers what q2pro thinks here: it kept every one
+    // of these as a float.  level.time is live and saved, the conversion would
+    // touch ~40 sites in g_ctf.c for no behavioural gain, and the _framenum
+    // model in this tree covers client powerup timers and entity debounces,
+    // not mod-internal timeouts.
     edict_t     *ctf_grapple;
     int         ctf_grapplestate;
-    int         ctf_hookstate;      // the offhand hook's latch (R-CTF-3)
+    int         ctf_hookstate;      // the offhand hook's latch
     float       ctf_grapplereleasetime;
     float       ctf_regentime;
     float       ctf_techsndtime;
@@ -2017,10 +2027,10 @@ struct gclient_s {
 //ROGUE
 //=======
 
-    // R-EXTRA-6: the Gladiator observer's eye and chase camera, live under
+    // The Gladiator observer's eye and chase camera, live under
     // `dm`, `sp` and `ctf`.  Not in a union with arena's `omode` pair or
     // tourney's camera state: the three implementations are per ruleset and one
-    // library serves all of them, and R-70's six sites are what sharing a field
+    // library serves all of them, and six sites are what sharing a field
     // between two donors' meanings costs.
     camera_t    camera;
 };
@@ -2178,9 +2188,9 @@ struct edict_s {
     // XATRIX
     int         orders;
 
-    // ROGUE.  gravityVector is R-SAVE-3a's named case -- it and the whole
-    // blindfire set were lost to a missing descriptor row in the mission-pack
-    // port.  R-SAVE-3 requires descriptors for all of these.
+    // ROGUE.  gravityVector -- it and the whole blindfire set were lost to a
+    // missing descriptor row in the mission-pack port -- need savegame
+    // descriptors.
     int         plat2flags;
     vec3_t      offset;
     vec3_t      gravityVector;
@@ -2190,25 +2200,28 @@ struct edict_s {
     edict_t     *target_hint_chain;
     int         hint_chain_id;
 
-    // R-CORE-11a and Q13: the content flavour, latched.
+    // The content flavour, latched.
     //
-    // R-CORE-11 gates a monster's frame tables at monster_start and forbids
+    // A monster's frame tables are gated at monster_start, which forbids
     // re-reading the gate mid-move, because a live mmove_t pointer must stay
-    // valid across a cvar change.  R-CORE-11a is the harder half: the files
+    // valid across a cvar change.  The harder half: the files
     // every monster calls every frame -- g_ai.c, m_move.c, g_monster.c,
     // g_phys.c -- have no monster_start to latch at.  So the flavour lives
-    // HERE, on the entity, set once at spawn, and those files read this field
+    // Here, on the entity, set once at spawn, and those files read this field
     // and never a cvar.  A cvar change mid-map cannot reach a monster that has
     // already spawned.
     //
     // Two independent bits rather than an enum, which is Q13's closure:
-    // R-MODE-3 allows `xatrix` and `rogue` on at once, and an enum would forbid
-    // exactly the combination the R-MODE-7 matrix promises.
+    // `xatrix` and `rogue` may be on at once, and an enum would forbid exactly
+    // the combination the composability matrix promises.
     int         content_flavour;
     float       lastMoveTime;
 
     // ---- OSP Tourney DM ---------------------------------------------------
-    char            osp_e37c[32];   // the client's dotted-quad, as a string
+    // (`osp_e37c`, the client's address, is now `client->pers.address`: every
+    // ruleset writes it at connect and reads it back at the departure, and
+    // tourney matches its bans and admin lines against the same string.  See
+    // that field.)
     int             osp_e39c;
     int             osp_infochange_framenum;
     char            osp_e3a0[16];   // default team name
@@ -2218,27 +2231,27 @@ struct edict_s {
     int             osp_e408;
     byte            osp_e40c[20];
     int             osp_e420;
-    // Tourney's four per-CLIENT strings of the same names as R-OSP-6's spawn
+    // Tourney's four per-client strings of the same names as its spawn
     // keys.  They are a different thing in a different struct, and the spawn
     // keys themselves are in spawn_temp_t, where the entity parser looks.
     //
     // All four are layout only, like the osp_eNNN placeholders above them.
     // `charname` USED to carry OSP's rename cooldown as a frame number cast to
     // and from this pointer; that stamp is `osp_infochange_framenum` now, which
-    // is what R-79 added the field for.
+    // is what the field was added for.
     char            *name;
     char            *skin;
     char            *charfile;
     char            *charname;
-    // The bot debug-draw bounding box (R-BOT-27), fourteen beam entities that
+    // The bot debug-draw bounding box, fourteen beam entities that
     // outline this entity when `sv bbox` is on for it.  Not saved: the lines
     // are TAG_LEVEL edicts and a reload rebuilds them from nothing.
     visiblebbox_t   box;
 
     // RA2: which arena this entity belongs to.  Zero on every map that is not
     // an arena map, which is what makes the handful of `if (ent->arena)` tests
-    // in the spine files self-gating (doc/reconciliation.md R-6x).  A spawn key
-    // and a savegame descriptor, both below.
+    // in the spine files self-gating.  A spawn key and a savegame descriptor,
+    // both below.
     int         arena;
 };
 
@@ -2304,7 +2317,7 @@ int  DBall_CheckDMRules(void);
 //============
 
 // Threewave CTF, at the bottom because g_ctf.h's prototypes need edict_t and
-// gclient_t.  Qualified path, never -Isrc/ctf: §5.2 has CTF and tourney both
+// gclient_t.  Qualified path, never -Isrc/ctf: CTF and tourney both
 // shipping a p_menu.h, so putting a donor directory on the include path is
-// precisely the thing that breaks later (R-25 item 3).
+// ship a p_menu.h, which is precisely the thing that breaks later.
 #include "ctf/g_ctf.h"

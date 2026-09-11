@@ -17,21 +17,19 @@ along with this program; if not, write to the Free Software
 Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 */
-// The Gladiator Bot menu engine, from gladiator-bot-restored@game (SPECS.md
-// sec 5.2, R-BOT-28).  osp-tourney cannot supply this: it moved its bot menu
-// into osp_menus.c on id's PMenu and ships neither p_menulib.c nor
-// p_botmenu.c.  The two reconstructions' copies are byte-identical, so there
-// is one source of truth.
+// The Gladiator Bot menu engine, from gladiator-bot-restored@game.
+// osp-tourney cannot supply this: it moved its bot menu into osp_menus.c on
+// id's PMenu and ships neither p_menulib.c nor p_botmenu.c.  The two
+// reconstructions' copies are byte-identical, so there is one source of truth.
 //
-// THE FOURTH MENU ENGINE, AND WHY EVERY EXPORTED NAME IS PREFIXED.
-// R-MENU-1 ships four donor engines over one client input channel and
-// R-MENU-2a puts one arbiter over all of them.  `SendStatusBar` and
-// `DisplayMenu` already exist in src/arena/menu.h with different signatures, so
-// sec 7 rule 4 applies: the donor prefix goes on.  `bot_SendLayout` also
+// The fourth menu engine, and why every exported name is prefixed.  Four donor
+// engines share one client input channel with one arbiter over all of them.
+// `SendStatusBar` and `DisplayMenu` already exist in src/arena/menu.h with
+// different signatures, so the donor prefix goes on.  `bot_SendLayout` also
 // corrects a misnomer -- the Gladiator "status bar" is an svc_layout unicast,
-// the same channel as the scoreboard, NOT the CS_STATUSBAR that RA2's menu
-// overwrites.  That difference is why closing this menu needs no repaint
-// (doc/reconciliation.md R-87) and why `showscores` is what gates its drawing.
+// the same channel as the scoreboard, not the CS_STATUSBAR that RA2's menu
+// overwrites.  That difference is why closing this menu needs no repaint and
+// why `showscores` is what gates its drawing.
 //===========================================================================
 //
 // Name:         p_menulib.h
@@ -73,12 +71,12 @@ typedef struct bot_menu_s {
 // `menustate_t` needs no prefix: nothing else in the tree carries the name, and
 // gclient_t names the field after it.  `bot_menu_t` and `bot_menuitem_t` do --
 // RA2's menu.h already defines a `menuitem_t` with different members, and
-// sec 7 rule 4 puts the donor prefix on the later arrival.
+// so the donor prefix goes on the later arrival.
 typedef struct menustate_s {
-    // The donor's `showmenu` is NOT here, and neither is gclient_t.showmenu.
-    // R-MENU-2a says the owner is ONE field and that field is menu_owner; a
-    // per-engine boolean is a second answer to the same question, which is
-    // exactly what Phase 4 removed from RA2 (doc/reconciliation.md R-87).
+    // The donor's `showmenu` is not here, and neither is gclient_t.showmenu.
+    // The owner is one field and that field is menu_owner; a per-engine
+    // boolean is a second answer to the same question, which is exactly what
+    // was removed from RA2.
     // Every `menustate->showmenu` test below is `menu_owner == MENU_BOT`.
     struct bot_menu_s *mainmenu;            // the main menu
     int menuid;                         // id of the current (sub)menu
@@ -112,7 +110,7 @@ void bot_SendLayout(edict_t *ent, const char *layout);
 void bot_MenuShow(edict_t *ent);
 // go backward in the menu (go back to parent menu)
 int bot_MenuBack(edict_t *ent);
-// R-MENU-4's three: the inventory keys drive this engine as they drive the
+// The three inventory keys drive this engine as they drive the
 // other three, so `invnext`/`invprev`/`invuse` reach the cursor and the help
 // screen's "your inventory key to select" becomes true.  The donor drove the
 // menu from forwardmove/sidemove alone, which is still wired in bot_MenuThink.

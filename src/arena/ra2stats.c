@@ -17,11 +17,10 @@ along with this program; if not, write to the Free Software
 Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 */
-// Rocket Arena 2 v2.25, from rocketarena2-public@d20e1ce (doc/provenance.md).
+// Rocket Arena 2 v2.25, from rocketarena2-public@d20e1ce.
 // Donor-only: baseq2 has no counterpart, so it lives in src/arena/ rather than
-// being merged into a spine file (R-CORE-7).  The reconstruction's asm-matching
-// address comments are stripped -- SPECS.md N1 makes those oracles meaningless
-// here, and they survive at the pin.
+// being merged into a spine file.  The reconstruction's asm-matching
+// address comments are stripped.
 // ra2stats.c -- local round statistics log.  See ra2stats.h for why.
 
 #include <time.h>
@@ -58,7 +57,7 @@ void RA2_Stats_Init(void)
         return;
 
     // <homedir-or-basedir>/<gamedir>/<name>, not "<gamedir>/<name>": the donor's
-    // relative path resolves against the server's WORKING DIRECTORY, so a
+    // relative path resolves against the server's working directory, so a
     // server started from anywhere but the installation wrote its stats
     // somewhere else or not at all.
     if (!G_FsGamePath(stats_path, sizeof(stats_path), g_statsname->string)) {

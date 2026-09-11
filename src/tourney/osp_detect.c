@@ -17,12 +17,11 @@ along with this program; if not, write to the Free Software
 Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 */
-// OSP Tourney DM v2.75, from osp-tourney@1d8427e (doc/provenance.md).
+// OSP Tourney DM v2.75, from osp-tourney@1d8427e.
 // Donor-only: baseq2 has no counterpart, so it lives in src/tourney/ rather
-// than being merged into a spine file (R-CORE-7).  The reconstruction's
-// asm-matching address comments are stripped -- SPECS.md N1 makes those oracles
-// meaningless here, and they survive at the pin.
-// osp_detect.c -- <INVENTED FILENAME>. Aim-bot and speed-cheat detection.
+// than being merged into a spine file.  The reconstruction's asm-matching
+// address comments are stripped.  osp_detect.c -- filename assigned by this
+// tree.  Aim-bot and speed-cheat detection.
 //
 // OSP_botDetect is a ZBOT detector.  It watches the view-angle deltas in
 // consecutive usercmd_t frames around an attack: a human's aim drifts between
@@ -42,7 +41,7 @@ void ClientDisconnect(edict_t *ent);
 // DECLARATION ORDER is read off real's .bss run, which lays these out in
 // exactly this sequence -- including a 4-byte object between zb_delta and
 // zb_attack that nothing in the image references.  Only that object's
-// existence and size are evidence; its name and type are <INVENTED>.
+// existence and size are evidence; its name and type are reconstructed.
 static int          zb_i;
 static float        zb_delta[2];
 static q_unused int zb_unused;
@@ -123,9 +122,8 @@ void OnBotDetection(edict_t *ent, char *why)
                ent->client->pers.netname);
 
     if (server_log) {
-        OSP_getPlayerAddr(ent);
         OSP_logAdminLog("BotDetect: %s (%s) [%s]", ent->client->pers.netname,
-                        why, ent->osp_e37c);
+                        why, ent->client->pers.address);
     }
 
     ent->movetype = MOVETYPE_NOCLIP;
@@ -152,7 +150,6 @@ void OSP_speedDetect(edict_t *ent)
                    ent->client->pers.netname);
 
         if (server_log) {
-            OSP_getPlayerAddr(ent);
             OSP_logAdminLog("SpeedDetect: %s [%d]", ent->client->pers.netname,
                             ent->client->pers.osp_speedstrikes);
         }

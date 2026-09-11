@@ -207,7 +207,7 @@ bool Pickup_Weapon(edict_t *ent, edict_t *other)
         (!deathmatch->value || other->client->pers.weapon == FindItem("blaster")))
         other->client->newweapon = ent->item;
 
-    // R-OSP-1/3.  Both are outside the auto-switch above in the donor too: a
+    // Both are outside the auto-switch above in the donor too: a
     // weapon pickup ends `client_protect` spawn protection and is logged
     // whether or not it was the one that changed the weapon in hand.
     if (G_IsOspRuleset()) {
@@ -264,7 +264,7 @@ void ChangeWeapon(edict_t *ent)
 
     ent->client->weaponstate = WEAPON_ACTIVATING;
     ent->client->ps.gunframe = 0;
-    // R-OSP-1: an observer is carrying this weapon and must not SEE it, which
+    // An observer is carrying this weapon and must not SEE it, which
     // is the donor's own condition on this line -- `resp.osp_r240` is 2 only
     // for a client PutClientInServer gave a body to.  Without it every weapon
     // change put the view model back on a tourney observer's screen, including
@@ -294,14 +294,14 @@ NoAmmoWeaponChange
 // PMM - added rogue weapons to the list
 
 /*
-THREE FIXES AND THREE REFUSALS, R-183.
+Three fixes and three refusals
 
 The list is a descending preference: the first branch that matches is the weapon
 a player out of ammo is switched to.  Xatrix's two entries were both dead, and
 both are still dead in upstream q2pro's `src/xatrix/p_weapon.c`, so this is id's
-own rather than the merge's -- but unlike R-22's Ion Ripper knockback, which
-sec 7 rule 2 keeps because its effect is a balance quirk, these two make a
-branch that cannot fire.
+own rather than the merge's -- but unlike the Ion Ripper knockback, which is
+kept because its effect is a balance quirk, these two make a branch that cannot
+fire.
 
   * `FindItem("ionrippergun")` matches NO pickup name.  The item is
     `weapon_boomer`, pickup name "Ionripper", so the lookup returned NULL and
@@ -318,13 +318,13 @@ branch that cannot fire.
     it too.  It is a real IT_WEAPON with its own ammo, so it goes in beside its
     siblings.
 
-Three that are deliberately NOT added, because each would be worse:
+Three that are deliberately not added, because each would be worse:
 
   * the CHAINFIST needs no ammo, which makes it tempting as the last resort --
     but the blaster needs none either and is strictly better at range, so
     forcing melee on a player who just ran dry is a downgrade.
-  * the DISRUPTOR carries no IT_WEAPON bit at all (R-16, Ground Zero's own
-    KILL_DISRUPTOR), so `give weapons` and the weapon-cycling keys already skip
+  * the DISRUPTOR carries no IT_WEAPON bit at all under Ground Zero's own
+    KILL_DISRUPTOR, so `give weapons` and the weapon-cycling keys already skip
     it; selecting it from here would be the one place in the tree that treats it
     as a weapon.
   * the TESLA and the TRAP are thrown devices that are their own ammunition, and
@@ -376,7 +376,7 @@ static void NoAmmoWeaponChange(edict_t *ent)
         ent->client->newweapon = FindItem("etf rifle");
         return;
     }
-    // R-183: beside its sibling, which is where Ground Zero's own list would
+    // Beside its sibling, which is where Ground Zero's own list would
     // have put it if it had one.
     if (ent->client->pers.inventory[ITEM_INDEX(FindItem("prox"))]
         &&  ent->client->pers.inventory[ITEM_INDEX(FindItem("prox launcher"))]) {
@@ -599,7 +599,7 @@ static void Weapon_Generic2(edict_t *ent, int FRAME_ACTIVATE_LAST, int FRAME_FIR
             }
         }
 
-        // R-OSP-1's `client_fastweap`: three frames of the lower animation per
+        // Tourney's `client_fastweap`: three frames of the lower animation per
         // server frame instead of one, so a weapon change costs a third of the
         // time without skipping the animation the way `instantweap` does.  The
         // clamp is the donor's -- overshooting FRAME_DEACTIVATE_LAST would run
@@ -615,14 +615,14 @@ static void Weapon_Generic2(edict_t *ent, int FRAME_ACTIVATE_LAST, int FRAME_FIR
     }
 
     if (ent->client->weaponstate == WEAPON_ACTIVATING) {
-        // No raise animation.  Threewave spells it `instantweap`; RA2 spells it
-        // `fastswitch` and makes it a per-arena setting -- R-RA-4's
-        // `ra_fastswitch`.  One concept, one owner at a time, and each read is
-        // gated on the ruleset that owns it: `instantweap` is REGISTERED for
-        // every ruleset only because CTFInit runs for every ruleset and a null
-        // cvar pointer is what R-42 fixed, so reading it ungated handed a
-        // deathmatch or campaign server Threewave's weapon switch the moment an
-        // operator set the cvar it also advertised to them (R-179).
+        // No raise animation.  Threewave spells it `instantweap`; RA2 spells
+        // it `fastswitch` and makes it a per-arena setting, `ra_fastswitch`.
+        // One concept, one owner at a time, and each read is gated on the
+        // ruleset that owns it: `instantweap` is REGISTERED for every ruleset
+        // only because CTFInit runs for every ruleset and a null cvar pointer
+        // is what that fixed, so reading it ungated handed a deathmatch or
+        // campaign server Threewave's weapon switch the moment an operator set
+        // the cvar it also advertised to them.
         if (ent->client->ps.gunframe == FRAME_ACTIVATE_LAST ||
             (G_Ruleset() == RULESET_CTF && instantweap->value) ||
             (G_Ruleset() == RULESET_ARENA &&
@@ -649,7 +649,7 @@ static void Weapon_Generic2(edict_t *ent, int FRAME_ACTIVATE_LAST, int FRAME_FIR
             ChangeWeapon(ent);
             return;
         }
-        // R-162: and no LOWER animation either, which is the other half of
+        // And no LOWER animation either, which is the other half of
         // `fastswitch` and had been left out -- only the raise above was
         // carried, so a switch under arena still paid the full deactivate
         // sequence and was slower than 1999 by it.  `arena.cfg` ships
@@ -740,7 +740,7 @@ static void Weapon_Generic2(edict_t *ent, int FRAME_ACTIVATE_LAST, int FRAME_FIR
                         gi.sound(ent, CHAN_ITEM, gi.soundindex("items/damage3.wav"), 1, ATTN_NORM, 0);
                     else if (ent->client->double_framenum > level.framenum)
                         gi.sound(ent, CHAN_ITEM, gi.soundindex("misc/ddamage3.wav"), 1, ATTN_NORM, 0);
-                    // R-OSP-1's strength rune is the fourth claimant on the same
+                    // Tourney's strength rune is the fourth claimant on the same
                     // channel and takes the same place in the chain as CTF's
                     // tech: after quad, because it is the rarer thing to hear.
                     else if (G_IsOspRuleset() &&
@@ -768,13 +768,13 @@ static void Weapon_Generic2(edict_t *ent, int FRAME_ACTIVATE_LAST, int FRAME_FIR
 // whenever it is not mid-fire so that it retracts at full speed.  Both are
 // false in every other ruleset, so this wrapper costs one predicate call.
 //
-// ONE FIX.  Threewave dereferences `pers.weapon->pickup_name` unguarded here.
+// One fix.  Threewave dereferences `pers.weapon->pickup_name` unguarded here.
 // pers.weapon is NULL for a client between InitClientPersistant and its first
 // ChangeWeapon, and for one that has just dropped its last weapon -- and this
 // runs from Think_Weapon, which ClientBeginServerFrame calls for every live
 // client every frame.  It is a null dereference rather than wrong behaviour, so
-// §7 rule 2 does not protect it: see doc/reconciliation.md R-46, and R-29 for
-// the precedent from Ground Zero.
+// a donor's own feature does not protect it, following the precedent from
+// Ground Zero.
 void Weapon_Generic(edict_t *ent, int FRAME_ACTIVATE_LAST, int FRAME_FIRE_LAST, int FRAME_IDLE_LAST, int FRAME_DEACTIVATE_LAST, const int *pause_frames, const int *fire_frames, void (*fire)(edict_t *ent))
 {
     int oldstate = ent->client->weaponstate;
@@ -791,8 +791,8 @@ void Weapon_Generic(edict_t *ent, int FRAME_ACTIVATE_LAST, int FRAME_FIRE_LAST, 
     if (grapple && ent->client->weaponstate == WEAPON_FIRING)
         return;
 
-    // R-OSP-1's haste rune is the same concept as Threewave's haste tech and
-    // shares this one implementation (sec 7 rule 6): run the state machine a
+    // Tourney's haste rune is the same concept as Threewave's haste tech and
+    // shares this one implementation: run the state machine a
     // second time in the same frame, but only if the first pass left the state
     // alone -- which doubles the rate of whatever the weapon was doing rather
     // than skipping it ahead.  Each predicate is a no-op in a ruleset that does
@@ -1241,9 +1241,9 @@ static void Weapon_RocketLauncher_Fire(edict_t *ent)
     int     damage;
     float   damage_radius;
     int     radius_damage;
-    // R-163.  `rocket_speed` is a per-arena setting out of arena.cfg -- parsed
+    // `rocket_speed` is a per-arena setting out of arena.cfg -- parsed
     // by maploop.c, stored in arenas[n], asserted at a fixed struct index in
-    // arena.h -- and NOTHING READ IT: this call passed baseq2's literal 650, so
+    // arena.h -- and nothing read it: this call passed baseq2's literal 650, so
     // a server that set the key got nothing and had no way to tell.  The
     // shipped file does not set it and the parser's own default is 650, which
     // is why every test agreed with a broken read.
@@ -1966,12 +1966,12 @@ void weapon_ionripper_fire(edict_t *ent)
     // applied no knockback in any released Reckoning build.
     //
     // The dead variable is removed rather than silenced, and the behaviour is
-    // deliberately NOT "fixed": §7 rule 2 gives the donor its own feature, and
-    // giving the Ion Ripper knockback it has never had would make Colosseum play
-    // differently from the game R-MP-2 says it reproduces.  The values are
+    // deliberately not "fixed": the donor keeps its own feature, and giving
+    // the Ion Ripper knockback it has never had would make Colosseum play
+    // differently from the game it reproduces.  The values are
     // recorded here so a later decision to change it has them.
     // Found by clang's -Wunused-but-set-variable under -Werror; gcc did not
-    // report it, which is the case for keeping both compilers gating (R-BUILD-2).
+    // report it, which is the case for keeping both compilers gating.
 
     VectorCopy(ent->client->v_angle, tempang);
     tempang[YAW] += crandom();

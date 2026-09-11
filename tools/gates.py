@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""Audit how ruleset behaviour is gated (SPECS.md §9 Phase 1 exit, R-MODE-5).
+"""Audit how ruleset behaviour is gated.
 
-Phase 1's exit criterion is: "Switching `g_ruleset` between `dm` and `sp` changes
+The criterion is: "Switching `g_ruleset` between `dm` and `sp` changes
 behaviour through the dispatch and through no `if (ctf->value)` anywhere."  The
 second half is a prohibition, and a prohibition nobody checks is a style note.
 This is the check.
@@ -10,7 +10,7 @@ WHAT IS FORBIDDEN
 
 A *ruleset* cvar tested at a call site.  The 1999 build gated on `ctf->value`,
 `rocketarena->value` and `ch->value` scattered through the tree, which is what
-forced InitGame to police the combinations with gi.error.  R-MODE-5 replaces that
+forced InitGame to police the combinations with gi.error.  This tree replaces that
 with one gate per concept: a dispatch row where a ruleset replaces behaviour, a
 named predicate where it only adjusts it.  So outside g_ruleset.c, no file may
 test a ruleset cvar at all.
@@ -19,8 +19,8 @@ WHAT IS NOT FORBIDDEN, and why the distinction matters
 
 `deathmatch` and `coop` are *not* ruleset cvars.  They are engine-visible state
 -- the engine registers them, forces `deathmatch` on a dedicated server, and
-gates savegames on it -- and R-MODE-2 keeps them working as legacy aliases.
-baseq2 tests them in 138 places and Colosseum inherits every one under R-CORE-5.
+gates savegames on it -- and they keep working as legacy aliases.
+baseq2 tests them in 138 places and Colosseum inherits every one.
 Converting them wholesale would be a large diff against the pin for no
 behavioural gain.
 
@@ -42,9 +42,9 @@ REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 # Cvars that name a ruleset.  Testing one of these at a call site is the defect.
 #
 # `ch` and `tourney` left in spec 1.36 with the things they named: Colored
-# Hitman's cvar is no longer read at all (N7, R-MODE-2) and `tourney` is no
+# Hitman's cvar is no longer read at all and `tourney` is no
 # longer a ruleset -- OSP's four modes of play are `dm`, `dmpro`, `tdm` and
-# `duel` now (R-OSP-12).  Neither is listed defensively, because a name here
+# `duel` now.  Neither is listed defensively, because a name here
 # that nothing can define is a check that cannot fire, and this list is meant
 # to be short enough to read.
 RULESET_CVARS = ('ctf', 'rocketarena', 'ra', 'arena')
@@ -59,8 +59,8 @@ RULESET_TEST = re.compile(
 # The legacy pair: allowed, counted.
 LEGACY_TEST = re.compile(r'\b(deathmatch|coop)\s*->\s*(value|integer)\b')
 
-# The specific idiom Phase 1 converted, kept as a regression check: if it comes
-# back, monsters silently stop spawning under ctf (R-MODE-7, reconciliation R-6).
+# The specific idiom that was converted, kept as a regression check: if it
+# comes back, monsters silently stop spawning under ctf.
 MONSTER_IDIOM = re.compile(
     r'if\s*\(\s*deathmatch\s*->\s*(value|integer)\s*\)\s*\{\s*'
     r'G_FreeEdict\s*\(\s*self\s*\)\s*;', re.S)
@@ -81,11 +81,11 @@ MONSTER_INFRA = {
 }
 
 
-# R-KEY-1 / R-VER-14, mechanised.  `spawn_temp_t.pausetime` is the member behind
+# The frozen key, mechanised.  `spawn_temp_t.pausetime` is the member behind
 # the `"pausetime"` map key, and Q2PRO's frame-number conversion renamed it to
 # `pause_framenum` when replayed tree-wide.  BOTH donor branches still carry that
 # rename, so every merge that touches g_func.c or g_spawn.c brings it back --
-# it has arrived three times in Phase 2 alone, from the g_local.h merge, the
+# it arrived three times from the mission-pack merges alone: the g_local.h merge, the
 # xatrix merge and the rogue merge.
 #
 # Vigilance is clearly not working, so it is a check.  `monsterinfo.pause_framenum`
@@ -102,21 +102,21 @@ def frozen_key_violations(name, text):
     for m in STALE_SPAWNTEMP.finditer(text):
         out.append((name, text[:m.start()].count('\n') + 1,
                     'st.pause_framenum -- the spawn_temp_t member is `pausetime`; '
-                    'the key text is frozen (R-KEY-1)'))
+                    'the key text is frozen'))
     if name == 'g_spawn.c':
         for key, member in FROZEN_KEYS.items():
             if f'"{key}"' not in text:
                 out.append((name, 0, f'the frozen map key "{key}" is missing from '
-                                     f'the spawn tables (R-KEY-1)'))
+                                     f'the spawn tables'))
             bad = re.search(r'\{\s*"%s"\s*,\s*STOFS\((\w+)\)' % key, text)
             if bad and bad.group(1) != member:
                 out.append((name, text[:bad.start()].count('\n') + 1,
                             f'key "{key}" resolves to {bad.group(1)}, must be '
-                            f'{member} (R-KEY-1)'))
+                            f'{member}'))
     return out
 
 
-# R-CORE-11 / R-CORE-11b, mechanised.  Where baseq2's version of a monster table
+# The content latch, mechanised.  Where baseq2's version of a monster table
 # or evasion function is kept alongside Ground Zero's under a `bq2_` prefix, the
 # gate is only real if EVERY assignment site chooses between them.  One
 # ungated site silently pins that animation to Ground Zero's version whatever
@@ -124,7 +124,7 @@ def frozen_key_violations(name, text):
 #
 # Also checks the shape: the gate must be an if/else with two literal
 # assignments, because genptr.py builds save_ptrs[] by scanning source text
-# (R-CORE-11b).  A ternary here compiles, runs, plays, and then fails to reload
+#.  A ternary here compiles, runs, plays, and then fails to reload
 # a savegame.
 # The pairing signal must come from the DEFINITION, not from a `&bq2_X` use:
 # if it came from the use, deleting a gate would delete the evidence that the
@@ -142,7 +142,7 @@ def gate_violations(name, text):
         out.append((name, text[:m.start()].count('\n') + 1,
                     'currentmove assigned through a ternary -- genptr.py cannot '
                     'see the table, so the savegame will not reload '
-                    '(R-CORE-11b)'))
+                    ''))
     paired = set(GATED.findall(text))
     if not paired:
         return out
@@ -166,7 +166,7 @@ def gate_violations(name, text):
             if f'&bq2_{tbl};' not in before:
                 out.append((name, text[:m.start()].count('\n') + 1,
                             f'`{tbl}` has a bq2_ counterpart but this assignment '
-                            f'is ungated -- R-CORE-11 requires the latch to '
+                            f'is ungated -- the latch has to '
                             f'select at every site'))
     return out
 
@@ -215,12 +215,12 @@ def main():
     ap.add_argument('--tree', default=os.path.join(REPO, 'src'))
     # The ratchet.  It moves only with a recorded reason, and only for genuinely
     # inherited sites.  History:
-    #   110  end of Phase 1 (baseq2, after 27 monster-gate conversions)
-    #   115  Phase 2, xatrix merged: +5, each checked individually and each a
+    #   110  baseq2 alone, after 27 monster-gate conversions
+    #   115  xatrix merged: +5, each checked individually and each a
     #        real deathmatch rule rather than a ruleset question in disguise --
     #        g_items.c's `deathmatch && DF_NO_HEALTH`, two weapon behaviours,
     #        and one `coop || deathmatch` spawn test.
-    #   174  Phase 2, rogue merged: +59 across 12 files.  Ground Zero is 12,263
+    #   174  rogue merged: +59 across 12 files.  Ground Zero is 12,263
     #        diff lines and carries its own deathmatch rules throughout -- the
     #        DM ball and tag rulesets, the sphere and nuke DM behaviours, the
     #        no-armour/no-items dmflags.  The five monster gates it brought
@@ -270,7 +270,7 @@ def main():
 
     for name, line, snippet in violations:
         print(f'  !! {name}:{line}: `{snippet}` -- a ruleset cvar tested at a '
-              f'call site (R-MODE-5). Use a predicate or a dispatch row.')
+              f'call site. Use a predicate or a dispatch row.')
 
     for name, line, msg in frozen:
         where = f'{name}:{line}' if line else name
@@ -279,7 +279,7 @@ def main():
     for name, line, fn in idiom:
         print(f'  !! {name}:{line} ({fn}): the monster-suppression idiom is '
               f'back. `deathmatch` is 1 under ctf, so this suppresses the '
-              f'monsters R-MODE-7 promises there. Use !G_MonstersAllowed().')
+              f'monsters that are promised there. Use !G_MonstersAllowed().')
 
     if total > a.budget:
         print(f'  !! inherited legacy sites rose above the budget of '

@@ -20,14 +20,14 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 //===========================================================================
 //
 // Name:        g_log.c
-// Function:    the Gladiator game log (R-EXTRA-1)
+// Function:    the Gladiator game log
 // Programmer:  Mr Elusive (MrElusive@demigod.demon.nl), 1997-12-31
 //
 // From gladiator-bot-restored/game/g_log.c, which the 1999 module carried
-// behind `#define LOGFILE`.  R-EXTRA's rule is that each of those defines
-// becomes a cvar and none is compiled out, so the switch is `g_gamelog`: a
-// FILENAME rather than a flag, because the feature's whole content is which
-// file it writes to, and "" is the natural off.
+// behind `#define LOGFILE`.  Each of those defines becomes a cvar and none is
+// compiled out, so the switch is `g_gamelog`: a FILENAME rather than a flag,
+// because the feature's whole content is which file it writes to, and "" is
+// the natural off.
 //
 // Three changes from the donor, each because this tree is not that one:
 //
@@ -37,9 +37,9 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 //     write outside the game directory.
 //   * `Log_Write`/`Log_WriteTimeStamped` carry `q_printf` so the compiler
 //     checks their callers, and `writelog` passes the operator's text as an
-//     ARGUMENT rather than as the format (R-SEC-9).
+//     ARGUMENT rather than as the format.
 //   * the timestamp is computed from `level.framenum`, because q2pro's
-//     conversion made frame numbers the unit that cannot drift (R-VER-21).
+//     conversion made frame numbers the unit that cannot drift.
 //     The donor's four-field h:mm:ss:cc shape is preserved exactly.
 //===========================================================================
 
@@ -102,9 +102,9 @@ void Log_Close(void)
     gi.dprintf("Closed log %s\n", logfilename);
 }
 
-// Called from ShutdownGame, which is the half of R-EXTRA-1 the requirement
-// names by hand: the donor's own ShutdownGame did this and a library that is
-// dlclose()d with a FILE * still open loses whatever was buffered.
+// Called from ShutdownGame: the donor's own ShutdownGame did this, and a
+// library that is dlclose()d with a FILE * still open loses whatever was
+// buffered.
 void Log_ShutDown(void)
 {
     if (logfp)
@@ -165,7 +165,7 @@ bool LogCmd(const char *cmd)
         // "round".
         //
         // And the text is an ARGUMENT.  The donor passed it as the format
-        // string, so `sv writelog %n` wrote through a stack pointer (R-SEC-9).
+        // string, so `sv writelog %n` wrote through a stack pointer.
         const char *args = gi.args();
         const char *text = args ? args : "";
 
@@ -183,7 +183,7 @@ bool LogCmd(const char *cmd)
     return true;
 }
 
-// For `sv extras` (R-VER-33).  The state of the log, without exposing the
+// For `sv extras`.  The state of the log, without exposing the
 // FILE * to anybody who might close it.
 bool Log_IsOpen(void)
 {

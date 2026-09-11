@@ -54,7 +54,7 @@ void Weapon_ProxLauncher(edict_t *ent);
 //=========
 
 // Not `static const`: OSP Tourney rewrites all three from its `armor_*` cvars
-// (R-OSP-1's per-match settings), so they have to be addressable and mutable.
+// (tourney's per-match settings), so they have to be addressable and mutable.
 // Every other ruleset leaves them at these values, which are baseq2's, and the
 // only writer is OSP_parseString() -- gated, in src/tourney/.
 gitem_armor_t jacketarmor_info = { 25,  50, .30f, .00f, ARMOR_JACKET};
@@ -73,7 +73,7 @@ static int  power_shield_index;
 static void Use_Quad(edict_t *ent, const gitem_t *item);
 // RAFAEL
 static void Use_QuadFire(edict_t *ent, const gitem_t *item);
-// R-OSP-3: Pickup_Powerup tells the stats log which powerup it just handed out
+// Pickup_Powerup tells the stats log which powerup it just handed out
 // by comparing `item->use`, so the four it names have to be visible from there.
 static void Use_Invulnerability(edict_t *ent, const gitem_t *item);
 static void Use_Silencer(edict_t *ent, const gitem_t *item);
@@ -161,7 +161,7 @@ void DoRespawn(edict_t *ent)
             master->item && (master->item->flags & IT_WEAPON)) {
             ent = master;
         } else if (G_IsOspRuleset()) {
-            // R-OSP-1: a referee can switch item classes off mid-match, and a
+            // A referee can switch item classes off mid-match, and a
             // switched-off member of a respawn team must not be the one that
             // comes back.  The choice is tourney's because the thing being
             // skipped is tourney's.
@@ -206,7 +206,7 @@ void DoRespawn(edict_t *ent)
 
 void SetRespawn(edict_t *ent, float delay)
 {
-    // R-OSP-1's fast respawn: everything except the two timed powerups comes
+    // Tourney's fast respawn: everything except the two timed powerups comes
     // back sooner on a busy server, scaled by the live player count clamped to
     // [fast_minpbound, fast_maxpbound].  Quad and Invulnerability keep their
     // fixed time -- a powerup whose respawn moved with the population would be
@@ -261,7 +261,7 @@ static bool Pickup_Powerup(edict_t *ent, edict_t *other)
         }
     }
 
-    // R-OSP-3.  `osp_r200` is the ENTITY the powerup came from, and it is what
+    // `osp_r200` is the ENTITY the powerup came from, and it is what
     // p_view.c hands OSP_Stats_ItemExpire when the timer runs out -- so a
     // report can say which quad on the map a player held and for how long.
     // Only these two carry it; the three below are logged by name alone and
@@ -280,7 +280,7 @@ static bool Pickup_Powerup(edict_t *ent, edict_t *other)
             if (G_IsOspRuleset())
         OSP_statsPickupMinor(ent->item->pickup_name, other);
 
-        // R-OSP-1: taking anything ends `client_protect` spawn protection.
+        // Taking anything ends `client_protect` spawn protection.
         other->client->resp.osp_r23c = 0;
     }
 
@@ -372,7 +372,7 @@ static bool Pickup_Bandolier(edict_t *ent, edict_t *other)
     return true;
 }
 
-// baseq2's ceilings: a pack raises each maximum TO AT LEAST its own number and
+// baseq2's ceilings: a pack raises each maximum to at least its own number and
 // never lowers one.  Lifted out of Pickup_Pack so that the tourney arm, which
 // SETS the ceilings from cvars and may legally set them lower, is one line
 // beside one line rather than a branch wrapped round forty.
@@ -405,14 +405,14 @@ static bool Pickup_Pack(edict_t *ent, edict_t *other)
     const gitem_t   *item;
     int     index;
 
-    // R-139 keeps the donor's persistent pack marker out of every other
+    // The donor's persistent pack marker is kept out of every other
     // ruleset's inventory, but OSP's armor ceiling needs its own marker.
     if (G_IsOspRuleset())
         other->client->pers.inventory[ITEM_INDEX(ent->item)]++;
 
-    // R-OSP-1: under tourney the pack's ceilings are cvars (`pack_items`), so a
+    // Under tourney the pack's ceilings are cvars (`pack_items`), so a
     // referee can set what a pack is worth -- including lower than baseq2's,
-    // which is why it REPLACES the block above rather than adding to it.
+    // which is why it replaces the block above rather than adding to it.
     if (G_IsOspRuleset())
         OSP_packPlayer(other);
     else
@@ -711,7 +711,7 @@ static void Use_Quad(edict_t *ent, const gitem_t *item)
     ent->client->pers.inventory[ITEM_INDEX(item)]--;
     ValidateSelectedItem(ent);
 
-    // R-OSP-3: the moment it is ACTIVATED, which on a DF_INSTANT_ITEMS server
+    // The moment it is ACTIVATED, which on a DF_INSTANT_ITEMS server
     // is the pickup and otherwise is not.
     if (G_IsOspRuleset())
         OSP_Stats_ItemUse("Quad", ent);
@@ -1008,7 +1008,7 @@ bool Pickup_Health(edict_t *ent, edict_t *other)
             other->health = other->max_health;
     }
 
-    // R-OSP-3: the three small ones are logged only when the server asked for
+    // The three small ones are logged only when the server asked for
     // every pickup; a mega health always is, below.
     if (G_IsOspRuleset()) {
         if (ent->count == 2)
@@ -1027,7 +1027,7 @@ bool Pickup_Health(edict_t *ent, edict_t *other)
         ent->svflags |= SVF_NOCLIENT;
         ent->solid = SOLID_NOT;
         if (G_IsOspRuleset()) {
-            // R-OSP-1: taking anything ends spawn protection.
+            // Taking anything ends spawn protection.
             other->client->resp.osp_r23c = 0;
             OSP_Stats_ItemPickup("Mega_Health", 0, other);
         }
@@ -1066,7 +1066,7 @@ bool Pickup_Armor(edict_t *ent, edict_t *other)
     int             newcount;
     float           salvage;
     int             salvagecount;
-    // R-OSP-1's armour ceiling, and 0 means "no ceiling of its own" -- which
+    // Tourney's armour ceiling, and 0 means "no ceiling of its own" -- which
     // is what every ruleset but tourney gets, leaving the per-type max_count
     // that baseq2 already applies as the only limit.  Under tourney the number
     // is `max_armor`, or `pack_armor` while the player is carrying an Ammo
@@ -1146,7 +1146,7 @@ bool Pickup_Armor(edict_t *ent, edict_t *other)
         }
     }
 
-    // R-OSP-3: every armour pickup is logged EXCEPT a shard, which needs
+    // Every armour pickup is logged EXCEPT a shard, which needs
     // `stats_logallpickups` like the other cheap items.
     if (G_IsOspRuleset()) {
         if (ent->item->tag != ARMOR_SHARD)
@@ -1158,7 +1158,7 @@ bool Pickup_Armor(edict_t *ent, edict_t *other)
     if (!(ent->spawnflags & DROPPED_ITEM) && (deathmatch->value))
         SetRespawn(ent, 20);
 
-    // R-OSP-1: taking anything ends `client_protect` spawn protection.
+    // Taking anything ends `client_protect` spawn protection.
     if (G_IsOspRuleset())
         other->client->resp.osp_r23c = 0;
 
@@ -1220,7 +1220,7 @@ bool Pickup_PowerArmor(edict_t *ent, edict_t *other)
 
     if (G_IsOspRuleset()) {
         OSP_Stats_ItemPickup(ent->item->pickup_name, 0, other);
-        // R-OSP-1: taking anything ends `client_protect` spawn protection.
+        // Taking anything ends `client_protect` spawn protection.
         other->client->resp.osp_r23c = 0;
     }
 
@@ -1251,7 +1251,7 @@ void Touch_Item(edict_t *ent, edict_t *other, cplane_t *plane, csurface_t *surf)
         return;     // dead people can't pickup
     if (!ent->item->pickup)
         return;     // not a grabbable item?
-    // R-EXTRA-6: an observer picks nothing up.  Structural today -- an observer
+    // An observer picks nothing up.  Structural today -- an observer
     // is SOLID_NOT and MOVETYPE_NOCLIP, and ClientThink does not run
     // G_TouchTriggers for a noclipper -- but the donor guarded it here and the
     // guard is what makes it true of any future path into this function.
@@ -1332,7 +1332,7 @@ void drop_make_touchable(edict_t *ent)
 
     // A dropped rune lives a minute and then goes back into the rune pool
     // rather than being freed: there are a fixed number of runes in a match and
-    // freeing one would take it out of the game (R-OSP-1).
+    // freeing one would take it out of the game.
     if (G_IsOspRuleset() && rune_stat &&
         ent->item && (ent->item->flags & IT_RUNE)) {
         ent->nextthink = level.framenum + 60 * BASE_FRAMERATE;
@@ -1362,7 +1362,7 @@ edict_t *Drop_Item(edict_t *ent, const gitem_t *item)
     VectorSet(dropped->mins, -15, -15, -15);
     VectorSet(dropped->maxs, 15, 15, 15);
     // All five runes share one mesh and are told apart by colour shell, so the
-    // model is a cvar rather than the item's own (R-OSP-1).
+    // model is a cvar rather than the item's own.
     if (G_IsOspRuleset() && rune_stat &&
         (item->flags & IT_RUNE) && runes_model && runes_model->string[0])
         gi.setmodel(dropped, runes_model->string);
@@ -1483,10 +1483,10 @@ void droptofloor(edict_t *ent)
 
     gi.linkentity(ent);
 
-    // R-OSP-1: an item class a referee has switched off is not freed, it is put
+    // An item class a referee has switched off is not freed, it is put
     // on a respawn far past the end of any match -- which is what lets the same
     // referee switch it back on and have it appear.  Freeing it would need the
-    // map reloaded.  A member of a respawn team goes away only if EVERY member
+    // map reloaded.  A member of a respawn team goes away only if every member
     // is disabled, or the team would come back one item short.
     if (G_IsOspRuleset() && OSP_disableItems(ent)) {
         if (!ent->team || !OSP_teamHasEnabled(ent->teammaster))
@@ -1612,8 +1612,8 @@ void SpawnItem(edict_t *ent, const gitem_t *item)
 
     // RA2 removes every item from the map: an arena hands out a fixed loadout
     // and anything lying on the floor is somebody's advantage.  Unconditional
-    // in the donor -- there is no `noitems` cvar in RA2 v2.25, that is a
-    // uGladQ2 addition (R-RA-4) -- so the gate is the ruleset, and baseq2's
+    // in the donor -- there is no `noitems` cvar in RA2 v2.25; that one is
+    // Gladiator's, in its own `g_items.c` -- so the gate is the ruleset, and baseq2's
     // dmflags filter below is what every other ruleset still needs.
     if (G_Ruleset() == RULESET_ARENA && item->pickup) {
         G_FreeEdict(ent);
@@ -1716,7 +1716,7 @@ void SpawnItem(edict_t *ent, const gitem_t *item)
         level.power_cubes++;
     }
 
-    // CTF's two flags are ordinary itemlist entries (R-CORE-2's union), so a
+    // CTF's two flags are ordinary itemlist entries in the merged union, so a
     // map that places them is loadable in every ruleset; only ctf makes them
     // real.  Elsewhere they are removed rather than left as scenery.
     if (strcmp(ent->classname, "item_flag_team1") == 0 ||
@@ -1884,10 +1884,10 @@ const gitem_t itemlist[] = {
             "weapons/grapple/grhang.wav",
             "weapons/grapple/grreset.wav",
             "weapons/grapple/grhit.wav",
-            // *** THIS FILE DOES NOT EXIST, ANYWHERE (R-185). ***
+            // This file does not exist, anywhere.
             //
             // CTFGrapplePull() plays it and Threewave never precached it; RA2's
-            // copy of the row does, and sec 7 rule 7 made the precache ours.
+            // copy of the row does, and the precache is kept here.
             // What none of that noticed is that the ASSET was never shipped:
             // Threewave CTF 1.5's own installer carries grfire, grhang, grhit,
             // grpull and grreset and no sixth, id's ctf/g_ctf.c names all six
@@ -1900,20 +1900,19 @@ const gitem_t itemlist[] = {
             // cannot resolve costs one configstring and a client-side console
             // line; REMOVING it would make this list disagree with the
             // `gi.sound` call in CTFGrapplePull, which is id's and which this
-            // tree does not rewrite (sec 7 rule 2).  An operator whose CTF pak
+            // tree does not rewrite.  An operator whose CTF pak
             // does contain a grhurt.wav -- somebody's replacement pack -- then
             // gets it precached at map load like the other five.
             //
-            // THE REMASTER DROPPED THE NAME, and it does not follow that we
+            // The remaster dropped the name, and it does not follow that we
             // should.  It could drop it because it redesigned the interaction:
             // its grapple damages once on impact and immediately resets, so
             // there is no hooked-and-draining state and nowhere for the sound
             // to be played (`rerelease/ctf/g_ctf.cpp:1265`).  Threewave's hook
-            // holds a player and takes a point a frame, which is what this tree
-            // implements and what R-CTF-3's offhand hook is built on -- a
-            // gameplay difference, so sec 7 rule 2 and not rule 1.  The
-            // remaster also ADDED `grfly.wav`, which this tree has no state
-            // for.
+            // holds a player and takes a point a frame, which is what this
+            // tree implements and what the offhand hook is built on -- a
+            // gameplay difference, not a correctness one.  The remaster also
+            // added `grfly.wav`, which this tree has no state for.
             "weapons/grapple/grhurt.wav",
             // CTFGrappleFire() takes this model index at the moment it fires,
             // so the hook was runtime-only in every donor.  RA2 upstream added
@@ -1927,7 +1926,7 @@ const gitem_t itemlist[] = {
 
     // RA2's own weapon_grapple row was here.  Dropped: the itemlist already
     // has Threewave's for the same classname and there is one grapple
-    // (sec 7 rule 6, R-50).  Its one real difference -- the grhurt.wav
+    // implementation.  Its one real difference -- the grhurt.wav
     // precache -- is on that entry instead.
 
     /* weapon_blaster (.3 .3 1) (-16 -16 -16) (16 16 16)
@@ -3247,10 +3246,10 @@ const gitem_t itemlist[] = {
         },
     },
 
-    // CTF (R-CTF-1): both flags and all five techs.  Content unions -- §7 rule 3
-    // -- so they are in the one itemlist every ruleset compiles against and
-    // SpawnItem removes the flags outside ctf.  Four tech classnames, five
-    // techs: item_tech1..4 plus the flag-carrier bonus is not an item.
+    // CTF: both flags and all five techs.  Content is unioned, so they are in
+    // the one itemlist every ruleset compiles against and SpawnItem removes
+    // the flags outside ctf.  Four tech classnames, five techs: item_tech1..4
+    // plus the flag-carrier bonus is not an item.
     /*QUAKED item_flag_team1 (1 0.2 0) (-16 -16 -24) (16 16 32)
     */
     {
@@ -3361,7 +3360,7 @@ const gitem_t itemlist[] = {
     },
 
     //
-    // OSP Tourney's five runes (R-OSP-1).  They are itemlist entries rather
+    // OSP Tourney's five runes.  They are itemlist entries rather
     // than a parallel system for the same reason CTF's techs are: a rune is
     // picked up, carried in the inventory, dropped on death and respawned by
     // the item code, and every one of those verbs already exists here.
@@ -3374,18 +3373,18 @@ const gitem_t itemlist[] = {
     // flag that keeps them out of every inventory sweep that means "weapons and
     // ammo".
     //
-    // THE IDENTITY IS THE `SID_`, NOT THE NUMBER, and this is where R-132's
-    // second half went wrong.  The donor writes `.quantity = 22` because its own
+    // The identity is the `SID_`, not the number, and that is where the port
+    // went wrong.  The donor writes `.quantity = 22` because its own
     // id for the resist rune *is* the literal 22 -- `#define STAT_RUNE_RESIST 22`
-    // in osp-tourney/g_local.h, the slot number doubling as the id.  R-OSP-7
-    // replaced that #define with a `statslot_t` whose value is its ordinal in
+    // in osp-tourney/g_local.h, the slot number doubling as the id.  The slot
+    // map replaces that #define with a `statslot_t` whose value is its ordinal in
     // STATSLOT_MAP (28), and the port carried the literals over unchanged while
     // renaming every consumer to `SID_OSP_RUNE_*`.  The two sides then disagreed
     // by six, silently, because both are ints:
     //
     //   G_SetStat(other, ent->item->quantity, 1)   set statslot_t 22, which is
     //                                              SID_RA_ID_VIEW -- unmapped
-    //                                              under tourney, so a NO-OP:
+    //                                              under tourney, so a no-op:
     //                                              picking up a rune granted
     //                                              nothing at all
     //   quantity == SID_OSP_RUNE_RESIST            22 == 28, false for all five,

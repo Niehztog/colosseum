@@ -17,7 +17,7 @@ along with this program; if not, write to the Free Software
 Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 */
-// The Gladiator Bot menu tree (R-BOT-28), from gladiator-bot-restored@game.
+// The Gladiator Bot menu tree, from gladiator-bot-restored@game.
 //
 // osp-tourney cannot supply this file: it moved its bot menu into
 // osp_menus.c's Bot_Menu on id's PMenu and dropped `botctfteam`,
@@ -25,7 +25,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 // here.  The 1999 structure is intact -- DM / CTF / RA2 / help / credits
 // submenus, title bitmaps, minimum players, teamplay and dmflags editing, rcon
 // gating -- with the donor's four #ifdefs replaced by the resolved ruleset and
-// the two content layers (sec 7 rule 6).
+// the two content layers.
 //===========================================================================
 //
 // Name:                p_botmenu.c
@@ -85,7 +85,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #define MID_RA2_BOTARENA            37
 #define MID_RA2_PLAYERCYCLE         38
 #define MID_RA2_BOTCYCLE            39
-// R-RA-7 / R-CTF-8 / R-DM-1 are one switch, so the row sits on the BOTS page,
+// The three fills are one switch, so the row sits on the bots page,
 // immediately below `minimum players` -- which is the number it replaces.  Its
 // label is the cvar's own name, because that is what an operator sets in a
 // config, and there is one name to print now: the three per-ruleset spellings
@@ -207,7 +207,7 @@ static const char *OnOffString(const char *name, int value)
     return buf;
 } //end of the function OnOffString
 //===========================================================================
-// R-RA-9: the `arena` row, which has to be able to SAY zero.
+// The `arena` row, which has to be able to SAY zero.
 //
 // 0 is not an unset cvar, it is a request with a meaning -- "put the bots where
 // the people are, and keep every populated arena at its own size" -- and since
@@ -289,7 +289,7 @@ static const char *TeamPlayMenuString(void)
 //========================================================================
 static const char *BotCTFTeamString(void)
 {
-    // R-BOT-28: re-registered here, because RA2's and tourney's ports both
+    // Re-registered here, because RA2's and tourney's ports both
     // dropped it and the add-bot path reads it to fill the `ctfteam` userinfo.
     cvar_t *botctfteam = gi.cvar("botctfteam", "0", 0);
 
@@ -301,8 +301,8 @@ static const char *BotCTFTeamString(void)
         return "bot team          auto assign";
 } //end of the function BotCTFTeam
 //========================================================================
-// R-BOT-28's "minimum players" row, which the donor's tree names and never
-// builds.  The cvar is the ruleset's own (R-OSP-11).
+// The "minimum players" row, which the donor's tree names and never
+// builds.  The cvar is the ruleset's own.
 //========================================================================
 static const char *MinPlayersString(void)
 {
@@ -445,7 +445,7 @@ static void MenuProc(edict_t *ent, int id)
         case MID_RA2_BOTARENA:
         {
             cvar_t *arena_cvar = gi.cvar("arena", "0", 0);
-            // R-RA-9: 0 IS IN THE CYCLE.  It used to wrap 1..num_arenas and
+            // 0 is in the cycle.  It used to wrap 1..num_arenas and
             // treat anything below 1 as 1, so an operator who opened this row
             // once could never get back to "follow the players" without a
             // console command -- which mattered little while 0 was a value
@@ -470,7 +470,7 @@ static void MenuProc(edict_t *ent, int id)
         } //end case
         case MID_EXIT:
         {
-            // Through the ARBITER, not through bot_MenuClose: R-MENU-2a says
+            // Through the arbiter, not through bot_MenuClose:
             // menu_owner is written in one place and this is a close.
             G_MenuClose(ent);
             return;
@@ -491,7 +491,7 @@ void bot_MenuOpen(edict_t *ent)
     if (!mainmenu) bot_MenuCreate();
     if (!mainmenu) return;
 
-    // R-MENU-2a/3: the arbiter closes whatever was open and records the owner.
+    // The arbiter closes whatever was open and records the owner.
     G_MenuOpen(ent, MENU_BOT);
 
     menustate = &ent->client->menustate;
@@ -505,7 +505,7 @@ void bot_MenuOpen(edict_t *ent)
     ent->client->showscores = true;
 } //end of the function bot_MenuOpen
 //========================================================================
-// The engine's own close.  G_MenuClose() calls THIS; nothing here may call
+// The engine's own close.  G_MenuClose() calls this; nothing here may call
 // G_MenuClose(), or the arbiter and the engine recurse into each other.
 //
 // Parameter:               -
@@ -520,7 +520,7 @@ void bot_MenuClose(edict_t *ent)
     menustate = &ent->client->menustate;
     menustate->redrawmenu = false;
     // The TREE is shared and stays; only this client's cursor is forgotten.
-    // R-87's second defect was a close that destroyed what it should have hid,
+    // The second defect was a close that destroyed what it should have hid,
     // in the other donor -- here the distinction is that the tree was never
     // this client's to begin with.
     menustate->mainmenu = NULL;
@@ -550,13 +550,13 @@ void bot_MenuToggle(edict_t *ent)
         G_MenuClose(ent);
         return;
     } //end if
-    // R-BOT-28: rcon password gating.  serveronlybotcmds defaults to 1 here
-    // (R-BOT-25), so unlike 1999 this gate is on unless a server operator turns
+    // Rcon password gating.  serveronlybotcmds defaults to 1 here
+    //So unlike 1999 this gate is on unless a server operator turns
     // it off -- which is the point: the menu adds and removes bots, and it does
     // it through BotServerCommand, i.e. as CONSOLE commands, so this gate is
     // the only thing standing between a client and bot management.
     //
-    // THE HOST OF A LISTEN SERVER IS EXEMPT, and the 1999 gate had no way to
+    // The host of a listen server is exempt, and the 1999 gate had no way to
     // say so.  A password typed as an argument is what a REMOTE operator needs;
     // the host has the server's own console, which is the authority rcon exists
     // to lend out, and the engine asks them for nothing.  They cannot use the
@@ -569,7 +569,7 @@ void bot_MenuToggle(edict_t *ent)
         !ent->client->pers.listenhost)
     {
         rcon_password = gi.cvar("rcon_password", "", 0);
-        // AN UNSET rcon_password IS NOT A PASSWORD OF "", which is what the
+        // An unset rcon_password is not a password of "", which is what the
         // donor's bare strcmp made it.  `menu ""` reaches the game as argc 2
         // with an empty argv(1) -- q2pro's Cmd_TokenizeString registers the
         // argument before it parses the quotes, and a client command is
@@ -596,9 +596,9 @@ void bot_MenuToggle(edict_t *ent)
     bot_MenuOpen(ent);
 } //end of the function bot_MenuToggle
 //========================================================================
-// R-BOT-28's per-ruleset trees.  The donor selects with `ctf->value` and
+// The per-ruleset trees.  The donor selects with `ctf->value` and
 // `ra->value`; here the resolved ruleset does, and the two content layers pick
-// their own dmflag rows (R-MODE-3).
+// their own dmflag rows.
 //
 // Parameter:               -
 // Returns:                 -
@@ -608,7 +608,7 @@ void bot_MenuCreate(void)
 {
     bot_menu_t *helpmenu, *botmenu, *addmenu, *removemenu, *dmmenu, *ra2menu, *ctfmenu;
     bot_menu_t *creditsmenu;
-    // R-RA-9: the `buf` that stood here composed the "bot arena" row inline; it
+    // The `buf` that stood here composed the "bot arena" row inline; it
     // is BotArenaString()'s now, because the row has to say "follow players"
     // for 0 and the toggle in bot_MenuAction needed the same text.
     int flags = (int)dmflags->value;
@@ -654,9 +654,9 @@ void bot_MenuCreate(void)
     bot_MenuAppend(botmenu, MI_SUBMENU, MID_BOT_REMOVE, removemenu, "remove bot", NULL);
     bot_MenuAppend(botmenu, MI_ITEM, MID_BOT_REMOVEALL, NULL, "remove all", NULL);
     bot_MenuAppend(botmenu, MI_ITEM, MID_BOT_MINPLAYERS, NULL, MinPlayersString(), NULL);
-    // R-RA-7 / R-CTF-8 / R-DM-1's switch, under the count it replaces.  The row
-    // is unconditional now: every ruleset that can reach this menu has bots, and
-    // every ruleset that has bots has a fill target (`sp` has neither).
+    // The fill switch, under the count it replaces.  The row is unconditional
+    // now: every ruleset that can reach this menu has bots, and every ruleset
+    // that has bots has a fill target (`sp` has neither).
     bot_MenuAppend(botmenu, MI_ITEM, MID_BOT_BOTFILL, NULL,
                    OnOffString("botfill",
                                (int)gi.cvar("botfill", "0", 0)->value), NULL);
@@ -703,43 +703,40 @@ void bot_MenuCreate(void)
     bot_MenuAppend(ctfmenu, MI_SEPERATOR, -1, NULL, "-----------", NULL);
     bot_MenuAppend(ctfmenu, MI_ITEM, MID_BACK, NULL, "back", NULL);
     //Rocket Arena 2
-    // *** THE RA2 PAGE IS THREE ROWS, NOT SIXTEEN, AND THE TWELVE THAT WENT
-    // BELONG TO AN ARENA THIS TREE DOES NOT HAVE. ***  (Four in 1.34; the
-    // fourth was the arena's bot fill, which 1.35 moved to the bots page.)
+    // The RA2 page is three rows, not sixteen: the twelve that went belong to
+    // an arena this tree does not have.
     //
     // The donor's page carried `selfdamage`, `healthprotect`, `armorprotect`
-    // and a switch per weapon.  Every one of those is a CVAR REGISTERED AND
-    // READ BY `gladq2_src/g_arena.c` -- the Gladiator SDK's own arena, which
-    // R-ARENA-1 explicitly does not carry across: its role is taken by the real
+    // and a switch per weapon.  Every one of those is a cvar registered and
+    // read by Gladiator's own g_arena.c -- the SDK's own arena, which this
+    // tree does not carry across: its role is taken by the real
     // Rocket Arena, where the same sixteen concepts are PER-ARENA settings read
     // out of `arena.cfg` into `arenas[n]`.  `g_combat.c` reads
     // `arenas[ctx].armorprotect`, `give_ammo` reads `arenas[ctx].weapons`, and
     // nothing anywhere reads a cvar by any of those names.
     //
     // So the twelve rows toggled cvars with no reader: a menu that reports
-    // itself.  That is the shape sec 7 rule 6 names -- two implementations of
-    // one thing -- with the second one dead, and a row that lies about what it
-    // controls is worse than no row.  They are not re-pointed at `arenas[n]`
-    // either, because `mainmenu` is one tree shared by every client while the
-    // settings are per arena, so a single row cannot say whose value it shows.
+    // itself.  That is two implementations of one thing with the second one
+    // dead, and a row that lies about what it controls is worse than no row.
+    // They are not re-pointed at `arenas[n]` either, because `mainmenu` is one
+    // tree shared by every client while the settings are per arena, so a
+    // single row cannot say whose value it shows.
     //
-    // RA2's own path for changing them at runtime already exists and is the one
-    // R-RA-4 lists: `arenaadmin` opens the settings menu for the arena you are
+    // RA2's own path for changing them at runtime already exists:
+    // `arenaadmin` opens the settings menu for the arena you are
     // in, `allowvoting*` gates each row, and the change is proposed and voted.
     // ra2menus.c builds exactly this list there, per arena and live.
     //
-    // R-BOT-28's "1999 structure intact" is unaffected: it names the DM / CTF /
-    // RA2 / credits submenus, `botctfteam`, `ra_playercycle`, `ra_botcycle`,
-    // minimum players, teamplay and dmflags editing.  All of those stay.
+    // The 1999 structure is otherwise intact: the DM / CTF / RA2 / credits
+    // submenus, `botctfteam`, `ra_playercycle`, `ra_botcycle`, minimum
+    // players, teamplay and dmflags editing all stay.
     ra2menu = bot_MenuTreeCreate(MID_RA2, "", "m_ra2");
     bot_MenuAppend(ra2menu, MI_ITEM, MID_RA2_BOTARENA, NULL, BotArenaString(), NULL);
     bot_MenuAppend(ra2menu, MI_ITEM, MID_RA2_PLAYERCYCLE, NULL, OnOffString("ra_playercycle", (int)gi.cvar("ra_playercycle", "1", 0)->value), NULL);
     bot_MenuAppend(ra2menu, MI_ITEM, MID_RA2_BOTCYCLE, NULL, OnOffString("ra_botcycle", (int)gi.cvar("ra_botcycle", "1", 0)->value), NULL);
-    // The arena's bot fill had a row here in 1.34 and it is on the BOTS page
-    // now -- one `botfill` cvar for every ruleset since 1.36 -- with
-    // ctf's and dm's, because 1.35 makes the three one concept.  It is not
-    // 1999's structure and R-BOT-28 does not name it, so moving it moves
-    // nothing a donor put here.
+    // The arena's bot fill is on the bots page now, with ctf's and dm's --
+    // one `botfill` cvar for every ruleset.  It is not part of 1999's
+    // structure, so moving it moves nothing a donor put here.
     bot_MenuAppend(ra2menu, MI_SEPERATOR, -1, NULL, "-----------", NULL);
     bot_MenuAppend(ra2menu, MI_ITEM, MID_BACK, NULL, "back", NULL);
     //

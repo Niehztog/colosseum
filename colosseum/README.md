@@ -1,10 +1,6 @@
-# `colosseum/` — the default gamedir config set (D6)
+# `colosseum/` -- the gamedir, and its default config set
 
-Copy the contents of this directory into the server's `colosseum` gamedir —
-`<basedir>/colosseum/` or `<homedir>/colosseum/`, whichever the server was
-started with — alongside the game library and the paks.  Nothing here is
-required for the library to run: every value is a default the code already
-carries, written down so an operator can see and change it.
+This directory **is** the server's `colosseum` gamedir -- `<basedir>/colosseum/` or `<homedir>/colosseum/`, whichever the server was started with: copy it into place under that name.  In a **release package** it arrives with the game library and the botlib already in it, so the paks are the only thing you add; in the **repository** it is the config set alone, and the library goes in beside it.  Nothing in that config set is required for the library to run: every value is a default the code already carries, written down so an operator can see and change it.
 
 | file | who reads it | format |
 |---|---|---|
@@ -16,110 +12,34 @@ carries, written down so an operator can see and change it.
 | `configs/ctf.cfg` | ditto | console commands |
 | `configs/arena.cfg` | ditto | console commands |
 | `configs/sp.cfg` | ditto | console commands |
-| `botcfg/bots.cfg` | the game library, at `InitGame`, via the `botfile` cvar | the 1999 bot roster format |
-| `arena.cfg` | the game library, at every map load under `arena`, via the `arenacfg` cvar | **RA2's own file** — its brace/colon format, with two deviations its own header names |
+| `game<cpu>.so` / `.dll` / `.dylib` | the engine, which loads it as the game library | the library itself, named for the platform it was built for. **Present in a release package, absent from this repository**: the build against the current game API, which is the one to keep on Q2PRO. Rename it to whatever your engine looks for -- the top-level `README.md`'s Installing section has the table |
+| `oldapi/` | nobody, until you use it | **Present in a release package, absent from this repository**: the same library against the classic game ABI, for R1Q2, Yamagi Quake II, id's own 3.20 or a Q2PRO without `USE_NEW_GAME_API`. The engine looks for its library in the gamedir itself and never in a subdirectory, so this one sits inert: copy it over the file above and delete the directory. Its own `README.md` says what the choice costs |
+| `gladiator.so` / `gladiator.dll` | the game library, which `dlopen`s it, under the name the `botlib` cvar carries | the botlib -- the bot AI itself, a shared library. **Present in a release package, absent from this repository**: each package's packaging job builds it for that package's own platform from the `gladiator-bot-restored` submodule, with the compiler it built the game library with |
+| `botcfg/` | the game library, via the `botfile` cvar | empty here on purpose: the bot list is the botlib's own `assets/bots.cfg`, installed beside `gladiator.so`/`.dll` rather than shipped from this repository |
+| `maps/*.aas` | the botlib, through its own file search rather than the engine's | the botlib's binary navigation format. **Present in a release package, absent from this repository**: the eight AAS files OSP Tourney DM precomputed for `q2dm1`..`q2dm8` in 1999, fetched and checksummed at release time. Every other map needs one made -- the top-level `README.md`'s Bots section is the procedure |
+| `arena.cfg` | the game library, at every map load under `arena`, via the `arenacfg` cvar | **RA2's own file** -- its brace/colon format, with two deviations its own header names |
 | `motd.txt` | the game library, at every map load under `arena` | one line per menu row |
 
-**There is no `default.cfg` here, and that is deliberate.** D6 asked for one,
-but `default.cfg` is **id's own file**: it ships inside `pak0.pak` and holds all
-68 key bindings a Quake II client starts with. q2pro execs `default.cfg` from
-the gamedir before `config.cfg`, and a real file in the gamedir wins over a pak
-entry — so a file of ours by that name leaves a client that joins with
-`+set game colosseum` with **no bindings at all**. The shared defaults are
-`server.cfg`.
+**There is no `default.cfg` here, and that is deliberate.** `default.cfg` is **id's own file**: it ships inside `pak0.pak` and holds all 68 key bindings a Quake II client starts with. q2pro execs `default.cfg` from the gamedir before `config.cfg`, and a real file in the gamedir wins over a pak entry -- so a file of ours by that name leaves a client that joins with `+set game colosseum` with **no bindings at all**. The shared defaults are `server.cfg`.
 
-**`arena.cfg` is Rocket Arena 2's own file** (1028 lines, CRLF as it shipped;
-`.gitattributes` keeps git from rewriting it). Every one of its 171 per-arena
-blocks is 1999's; the two deviations are in the header block that precedes
-them and the header says so — the `armor:`/`health:` default, and
-`armorprotect: 1` so that splash from your own launcher costs health and not
-armour (the built-in default, 2, exempts a team-mate but leaves your own rocket
-to eat it). It is the only file in this set that is a copy of somebody else's
-rather than a written-out default, apart from `botcfg/bots.cfg`. What it carries
-that a hand-written
-config cannot: 28 per-map blocks with per-arena weapons, armour, round counts
-and players-per-team — and **30 `pickup: 1` arenas**, which are what make
-an arena a *pickup arena*. Those show as ` (PT)` in the "Choose Your Arena"
-menu, and as two joinable teams, `#N Pickup Red` and `#N Pickup Blue`, in
-"Choose your team". Before 1.27 this file was a 69-line example with none of
-that, and on RA2's own maps the team menu offered nothing but *Start New Team*.
+**`arena.cfg` is Rocket Arena 2's own file** (1028 lines, CRLF as it shipped; `.gitattributes` keeps git from rewriting it). Every one of its 171 per-arena blocks is 1999's; the two deviations are in the header block that precedes them and the header says so -- the `armor:`/`health:` default, and `armorprotect: 1` so that splash from your own launcher costs health and not armour (the built-in default, 2, exempts a team-mate but leaves your own rocket to eat it). It is the only file in this set that is a copy of somebody else's rather than a written-out default. What it carries that a hand-written config cannot: 28 per-map blocks with per-arena weapons, armour, round counts and players-per-team -- and **30 `pickup: 1` arenas**, which are what make an arena a *pickup arena*. Those show as ` (PT)` in the "Choose Your Arena" menu, and as two joinable teams, `#N Pickup Red` and `#N Pickup Blue`, in "Choose your team".
 
-**Seven rulesets, and four of them are one code path.** `dm`, `dmpro`, `tdm`
-and `duel` are OSP Tourney DM's four structures of play, which until spec 1.36
-were selected by a second cvar — `match_mode` — *inside* a `tourney` ruleset.
-They are `g_ruleset` values now, `match_mode` is gone, and `g_ruleset tourney`
-is no longer a ruleset name at all — it warns like any other unrecognised value,
-lists the seven that are valid, and runs as `dm`. `configs/tourney.cfg` is
-replaced by the four files above.
+**Seven rulesets, and four of them are one code path.** `dm`, `dmpro`, `tdm` and `duel` are OSP Tourney DM's four structures of play, which OSP selected with a second cvar, `match_mode`, inside one `tourney` mod. Here each is a `g_ruleset` value of its own and there is no `match_mode`: a config carried over from OSP sets the ruleset instead.
 
-Two things an existing config will notice. **`dm` reads `bots_minplayers`, not
-`minimumplayers`** — under the OSP four the bot cvars are tourney's own
-(R-OSP-11), and `dm` is one of them now; the shipped `configs/dm.cfg` sets it.
-And **`teamplay` is refused** under all four with a message naming `tdm`, which
-is where team play lives.
+Two things an existing config will notice. **`dm` reads `bots_minplayers`, not `minimumplayers`** -- under the OSP four the bot cvars are tourney's own and `dm` is one of them now; the shipped `configs/dm.cfg` writes it, as a `0`, because `botfill` is what sizes the server there. And **`teamplay` is refused** under all four with a message naming `tdm`, which is where team play lives.
 
-**`configs/arena.cfg` sets `botfill 1` rather than a flat `minimumplayers`.**
-The bot count is taken from the arena the bots are being fed into: its
-`playersperteam` where this file carries one, and the count of that arena's own
-`info_player_deathmatch` entities where it does not. The second case is every
-**pickup** arena, because `arena_init()` replaces `playersperteam` with 128
-there — RA2 wants a pickup team unbounded — and all 30 of RA2's pickup arenas
-leave the key unset anyway. Spawn points are *not* used for the other kind and
-that is deliberate: RA2's mappers used them for variety, so `ra2map8` arena 3
-has thirteen of them and is declared 1v1. `set botfill 0` restores 1999's
-flat count, and `set minimumplayers 4` beside it is what this file used to say.
-Two things to know: **`maxclients` is latched and defaults to 4**, so the fill
-cannot exceed 2v2 until it is raised; and with it raised, bots will take every
-slot on an empty server, which is `minimumplayers`' own behaviour reached more
-easily. `sv arenadump` prints `want=` and `here=` per arena, and `sv ruleset`
-prints the target in force.
+**`configs/arena.cfg` sets `botfill 1`, as every bot-taking config here now does, and the arena is where the switch earns its keep.** The bot count is taken from the arena the bots are being fed into: its `playersperteam` where this file carries one, and the count of that arena's own `info_player_deathmatch` entities where it does not. The second case is every **pickup** arena, because `arena_init()` replaces `playersperteam` with 128 there -- RA2 wants a pickup team unbounded -- and all 30 of RA2's pickup arenas leave the key unset anyway. Spawn points are *not* used for the other kind and that is deliberate: RA2's mappers used them for variety, so `ra2map8` arena 3 has thirteen of them and is declared 1v1. `set botfill 0` restores 1999's flat count, with `set minimumplayers 4` beside it to choose the number - and that pair is how any of the six goes back to a fixed number. Two things to know: **`maxclients` is latched and defaults to 4**, so the fill cannot exceed 2v2 until it is raised; and with it raised, bots will take every slot on an empty server, which is `minimumplayers`' own behaviour reached more easily. `sv arenadump` prints `want=` and `here=` per arena, and `sv ruleset` prints the target in force.
 
 Two consequences worth knowing:
 
-* **Its `maploop` names RA2's own 28 maps**, not stock ones. Nothing under
-  `arena` sets a `timelimit`, so the rotation is reached only by a vote or an
-  explicit map change — but an operator who runs the arena ruleset on stock maps
-  *and* sets a timelimit should replace that one line.
-* **On a stock map you get pickup teams anyway.** A map with no `arena` key in
-  its worldspawn is an "idmap": one arena covering the whole level, and `pickup`
-  defaults to 1 there, so `#1 Pickup Red`/`#1 Pickup Blue` exist whatever this
-  file says. The per-arena settings only mean something on a map built with
-  arenas in it.
+* **Its `maploop` names RA2's own 28 maps**, not stock ones -- and this file sets `timelimit 20`, so that rotation is actually reached. RA2's round machine never ends a *level*: a finished best-of-N resets the round counter and starts another match on the same map, so the clock is the only thing that rotates the map on its own. **An operator who runs the arena ruleset on stock maps must replace that `maploop:` line**, because `get_next_map()` returns the first entry when the current map is not in the loop -- so with RA2's maps absent the clock rotates a stock-map server to `ra2map1`, the `gamemap` fails, the level does not change, and the limit is still past, so it repeats every frame. RA2's own `EndDMLevel` asks the maploop first as well, so the shape is the donor's; what is new is that something reaches it. `set timelimit 0` leaves the rotation in place with nothing to reach it.
+* **On a stock map you get pickup teams anyway.** A map with no `arena` key in its worldspawn is an "idmap": one arena covering the whole level, and `pickup` defaults to 1 there, so `#1 Pickup Red`/`#1 Pickup Blue` exist whatever this file says. The per-arena settings only mean something on a map built with arenas in it.
 
-**`configs/ctf.cfg` and the four OSP files carry the same switch, off.**
-There is **one** `botfill` cvar for every ruleset (R-RA-7, R-CTF-8, R-DM-1); it
-was three names — `ra_botfill`, `ctf_botfill`, `dm_botfill` — until spec 1.36
-unified them, and what stays per ruleset is the *target*, not the switch. It
-defaults to `0`, because a flat count is a perfectly good answer for one map and
-one game — it is just a number an operator has to re-guess every map change.
-`1` reads the target off the game instead. Under `dm` and `dmpro`
-that is the shared spawn pool, which is two short of the map's count because
-`SelectRandomDeathmatchSpawnPoint` refuses the two spots nearest a player: 8, 5,
-5, 9, 7, 6, 4, 4 across the eight `q2dm` maps, rounded down to even under
-`teamplay`. Under `ctf` it is twice the smaller of a base and half that shared
-pool, because a CTF client spawns at its base once and in the shared pool for
-ever after: 16, 12, 14, 4, 20, 14, 14, 16 across the eight Threewave maps. Base
-spawn points alone would say 28 for `q2ctf1`, which is played 8v8 — the same
-variety-not-capacity trap `arena.cfg`'s note above records. Under `tdm` and
-`duel` there is nothing to read off the map, because those two **declare** a
-capacity: the target is `2 * team_maxplayers`, which `duel` forces to 1, so it
-is exactly 2 there. `maxclients` is latched at 4 by default, so none of this
-does anything visible until it is raised, and `sv ruleset` prints the target in
-force and where the number came from.
+**Every shipped config that takes bots carries the same switch, on.** There is **one** `botfill` cvar for every ruleset, and what is per ruleset is the *target*, not the switch. The **cvar** still defaults to `0` -- a flat count is a perfectly good answer for one map and one game, it is just a number an operator has to re-guess every map change -- but all six of `configs/dm.cfg`, `dmpro.cfg`, `tdm.cfg`, `duel.cfg`, `ctf.cfg` and `arena.cfg` set it to `1` and zero the flat count beside it, so a server started from one of them sizes itself to the game it is running. `sp` has no bots and sets neither. Under `dm` and `dmpro` that is the shared spawn pool, which is two short of the map's count because `SelectRandomDeathmatchSpawnPoint` refuses the two spots nearest a player: 8, 5, 5, 9, 7, 6, 4, 4 across the eight `q2dm` maps, rounded down to even under `teamplay`. Under `ctf` it is twice the smaller of a base and half that shared pool, because a CTF client spawns at its base once and in the shared pool for ever after: 16, 12, 14, 4, 20, 14, 14, 16 across the eight Threewave maps. Base spawn points alone would say 28 for `q2ctf1`, which is played 8v8 -- the same variety-not-capacity trap `arena.cfg`'s note above records. Under `tdm` and `duel` there is nothing to read off the map, because those two **declare** a capacity: the target is `2 * team_maxplayers`, which `duel` forces to 1, so it is exactly 2 there - which means a `duel` server left alone bot-duels itself, and a person arriving joins the queue behind the two bots exactly as they would behind two people. `sv removebot all` opens a slot. `maxclients` is latched at 4 by default and clamps every one of these targets, so a server that leaves it there seats four whatever the map says. `sv ruleset` prints the target in force and where the number came from.
 
-**Two files called `arena.cfg`, and they are not the same file.**
-`configs/arena.cfg` is a console script for the `arena` RULESET — `set`
-commands the operator execs.  `arena.cfg` at the top level is Rocket Arena's
-own **arena definition** file, in its own brace-and-colon format, and it is
-read by `load_config()` in `src/arena/maploop.c` at every map load.  The
-collision is the donors': RA2 named its data file after the game type, and the
-Quake II convention names console scripts the same way.  The paths keep them
-apart and the `arenacfg` cvar can move the data one if an operator wants.
+**Two files called `arena.cfg`, and they are not the same file.** `configs/arena.cfg` is a console script for the `arena` RULESET -- `set` commands the operator execs.  `arena.cfg` at the top level is Rocket Arena's own **arena definition** file, in its own brace-and-colon format, and it is read by `load_config()` in `src/arena/maploop.c` at every map load.  The collision is the donors': RA2 named its data file after the game type, and the Quake II convention names console scripts the same way.  The paths keep them apart and the `arenacfg` cvar can move the data one if an operator wants.
 
-**Nothing here binds a key or sets a video mode**, and that is deliberate: those
-belong to a player's `config.cfg`, not to a server's gamedir. `tools/watch.sh`
-sets up a watcher's keyboard from `tools/drive/watch-keys.cfg`, which is not
-part of this set for the same reason.
+**Nothing here binds a key or sets a video mode**, and that is deliberate: those belong to a player's `config.cfg`, not to a server's gamedir. `tools/watch.sh` sets up a watcher's keyboard from `tools/drive/watch-keys.cfg`, which is not part of this set for the same reason.
 
 ## Using it
 
@@ -130,6 +50,4 @@ exec configs/tdm.cfg          // or dm / dmpro / duel / ctf / arena / sp
 map q2dm1
 ```
 
-The per-ruleset configs each `set g_ruleset` themselves, so exec'ing one is
-enough to choose the ruleset.  `g_ruleset` is latched: it takes effect at the
-next map load, which is why the exec goes before `map`.
+The per-ruleset configs each `set g_ruleset` themselves, so exec'ing one is enough to choose the ruleset.  `g_ruleset` is latched: it takes effect at the next map load, which is why the exec goes before `map`.

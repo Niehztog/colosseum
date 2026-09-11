@@ -254,11 +254,11 @@ static edict_t *medic_FindDeadMonster(edict_t *self)
     return best;
 }
 
-// *** THE CLAIM FIELD IS THE THING THE TWO MEDICS DISAGREE ABOUT EVERYWHERE,
-// *** AND IT IS WHY SPLITTING THE SEARCH ALONE WOULD MEAN NOTHING. ***
+// The claim field is the thing the two medics disagree about everywhere,
+// and it is why splitting the search alone would mean nothing.
 //
-// baseq2 marks a corpse it intends to heal by setting `ent->owner`, and skips a
-// corpse that already has one.  Ground Zero moved that to
+// baseq2 marks a corpse it intends to heal by setting `ent->owner`, and skips
+// a corpse that already has one.  Ground Zero moved that to
 // `monsterinfo.healer` -- its own header comment at the top of this file says
 // so, "owner moved to monsterinfo.healer instead" -- so that `owner` could go
 // on meaning what it means everywhere else in the game.
@@ -273,7 +273,7 @@ static edict_t *medic_FindDeadMonster(edict_t *self)
 // predicate reads `owner`, so the search and the claim have to move together
 // or the search tests a field nobody writes.
 //
-// What is NOT split, and is worth naming rather than leaving to be discovered:
+// What is not split, and is worth naming rather than leaving to be discovered:
 // the heal itself.  `medic_cable_attack`, `medic_hook_launch` and
 // `medic_hook_retract` are Ground Zero's for every flavour, and baseq2's
 // `bq2_medic_move_attackCable` drives them on id's frame distances.  Splitting
@@ -1090,7 +1090,7 @@ static const mframe_t medic_frames_attackCable[] = {
 };
 const mmove_t medic_move_attackCable = {FRAME_attack33, FRAME_attack60, medic_frames_attackCable, medic_run};
 
-// R-CORE-11: baseq2's medic_move_attackCable, kept alongside Ground Zero's.
+// Baseq2's medic_move_attackCable, kept alongside Ground Zero's.
 // Ground Zero rewrote the cable attack wholesale -- different frame count,
 // different hook launch timing, and AI_MANUAL_STEERING handling.
 static const mframe_t bq2_medic_frames_attackCable[] = {
@@ -1515,11 +1515,11 @@ bool medic_checkattack(edict_t *self)
     if (self->monsterinfo.aiflags & AI_MEDIC) {
         // if our target went away
         //
-        // KEPT FOR EVERY FLAVOUR, because baseq2 has no guard here at all and
+        // Kept for every flavour, because baseq2 has no guard here at all and
         // `medic_cable_attack` dereferences `self->enemy` on its first line --
         // id's arm reaches a null deref by the same road the supertank and
         // Chick guards are kept against.  It is belt-and-braces either way:
-        // `ai_run` sets `hesDeadJim` on a gone or revived enemy BEFORE it calls
+        // `ai_run` sets `hesDeadJim` on a gone or revived enemy before it calls
         // `checkattack`, so this is not reachable from that path.  `abortHeal`
         // is Ground Zero's and stays with it -- baseq2 has no `healer`,
         // `badMedic` or `medicTries` bookkeeping to unwind, so declining the
@@ -1532,8 +1532,8 @@ bool medic_checkattack(edict_t *self)
             return false;
         }
 
-        // *** THE DEADLINE AND THE WALK-IN ARE GROUND ZERO'S, AND THEY ARE A
-        // *** DIFFERENT DESIGN FROM ID'S -- NOT AN ADDITION TO IT.
+        // The deadline and the walk-in are Ground Zero's, and they are a
+        // different design from id's -- not an addition to it.
         //
         // baseq2 commits to the cable animation and lets `medic_cable_attack`
         // decline frame by frame on its own `distance > 256` test, so a medic
@@ -1542,8 +1542,8 @@ bool medic_checkattack(edict_t *self)
         // closer with AS_STRAIGHT when the corpse is beyond
         // MEDIC_MAX_HEAL_DISTANCE.  Neither half exists in id's file:
         // `timestamp` is Ground Zero's field, and running its deadline under
-        // `rogue 0` made every base medic answer to a clock its own donor never
-        // set.
+        // `rogue 0` made every base medic answer to a clock its own donor
+        // never set.
         if (!medic_UsesRogueBehavior(self)) {
             medic_attack(self);
             return true;
@@ -1796,8 +1796,8 @@ static void medic_precache(void)
 
 
 // ---------------------------------------------------------------------------
-// R-CORE-11: baseq2's duck-and-dodge for the medic, restored alongside Ground
-// Zero's rewrite so that BOTH ship and the spawn-time latch selects.
+// Baseq2's duck-and-dodge for the medic, restored alongside Ground
+// Zero's rewrite so that both ship and the spawn-time latch selects.
 //
 // Ground Zero does not add to this monster, it replaces its evasion: baseq2's
 // per-monster medic_dodge and medic_duck_* become the shared M_MonsterDodge with
@@ -1874,9 +1874,7 @@ void bq2_medic_dodge(edict_t *self, edict_t *attacker, float eta, trace_t *tr)
 */
 void SP_monster_medic(edict_t *self)
 {
-    // R-MODE-7 / R-CORE-8: the ruleset decides, not `deathmatch`.  The
-    // inherited test was right for baseq2 and wrong here, because `deathmatch`
-    // is 1 under ctf and R-MODE-7 promises monsters under ctf.
+    // deathmatch is 1 under ctf, which allows monsters: ask the ruleset.
     if (!G_MonstersAllowed()) {
         G_FreeEdict(self);
         return;
@@ -1915,10 +1913,8 @@ void SP_monster_medic(edict_t *self)
     self->monsterinfo.walk = medic_walk;
     self->monsterinfo.run = medic_run;
     // pmm
-    // *** R-CORE-11's gate. ***  Both evasion sets ship; the latch selects at
-    // spawn.  content_flavour is latched in ED_CallSpawn, which runs BEFORE this
-    // function -- R-CORE-11 names monster_start as the latch point and that is
-    // too late, see doc/reconciliation.md R-31.
+    // Both evasion sets ship; the latch selects at spawn.  content_flavour is
+    // latched in ED_CallSpawn, which runs before this function.
     //
     // An if/else with literal assignments, deliberately: genptr.py builds
     // save_ptrs[] by scanning the source for `= &name`, so a ternary or a macro

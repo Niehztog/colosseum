@@ -1193,9 +1193,7 @@ static void fixbot_precache(void)
 */
 void SP_monster_fixbot(edict_t *self)
 {
-    // R-MODE-7 / R-CORE-8: the ruleset decides, not `deathmatch`.  Converted on
-    // import for the same reason as baseq2's monsters -- `deathmatch` is 1 under
-    // ctf, and R-MODE-7 promises monsters there.
+    // deathmatch is 1 under ctf, which allows monsters: ask the ruleset.
     if (!G_MonstersAllowed()) {
         G_FreeEdict(self);
         return;

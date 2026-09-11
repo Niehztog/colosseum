@@ -17,12 +17,11 @@ along with this program; if not, write to the Free Software
 Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 */
-// OSP Tourney DM v2.75, from osp-tourney@1d8427e (doc/provenance.md).
+// OSP Tourney DM v2.75, from osp-tourney@1d8427e.
 // Donor-only: baseq2 has no counterpart, so it lives in src/tourney/ rather
-// than being merged into a spine file (R-CORE-7).  The reconstruction's
-// asm-matching address comments are stripped -- SPECS.md N1 makes those oracles
-// meaningless here, and they survive at the pin.
-// osp_teams.c -- <INVENTED FILENAME>. Team play: joining, leaving, the 1v1
+// than being merged into a spine file.  The reconstruction's
+// asm-matching address comments are stripped.
+// osp_teams.c -- filename assigned by this tree.  Team play: joining, leaving, the 1v1
 // queue, per-team frag accounting and the team client commands.
 //
 // A client is sent its OWN team's configstring from the plain team name and
@@ -33,7 +32,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "tourney/osp_stats.h"
 #include "bot/bl_main.h"
 #include "bot/bl_botcfg.h"
-// The two bot entry points, until Phase 6 -- see src/tourney/osp_botseam.c.
+// The two bot entry points.
 void BotServerCommand(char *str, ...);
 void BotDestroy(edict_t *bot);
 
@@ -1706,7 +1705,7 @@ void OSP_teamReset(void)
     for (i = 0; i < strlen(osp_teams[1].greenname); i++)
         osp_teams[1].greenname[i] += 128;
 
-    // R-OSP-3: the names a match is played under are the first thing the stats
+    // The names a match is played under are the first thing the stats
     // file needs, and a reset is where they are decided -- a report that only
     // learns them from a later RENAME cannot label the match that was not
     // renamed.
@@ -1889,14 +1888,14 @@ const char *OSP_teamName(int team)
 =================
 OSP_obituarySelf / OSP_obituaryFrag / OSP_obituaryDied
 
-Tourney's ClientObituary, as the three shapes the donor's own has (R-OSP-1):
+Tourney's ClientObituary, as the three shapes the donor's own has:
 a death nobody else caused, a death an attacking client caused, and the
 unnamed-cause fallback.  Each does the printing and the accounting for its
 shape, because in the donor they are the same block and splitting them would
 put half of a rule in a shared file.
 
-WHAT AN EARLIER MERGE LOST, and why it is one function per shape rather than
-one `resp.score += delta` for all three.  A frag under tourney moves NINE
+What an earlier merge lost, and why it is one function per shape rather than
+one `resp.score += delta` for all three.  A frag under tourney moves nine
 numbers, not one:
 
     resp.score          the player's own, which is all the merge kept
@@ -1916,7 +1915,7 @@ won: the team fraglimit never fired, every timed match drew 0-0 and went to
 overtime, and sudden death could never resolve because the two totals could
 never differ.
 
-THE THREE GATES ARE THE DONOR'S, and they are not the same gate:
+The three gates are the donor's, and they are not the same gate:
 
   * `sync_stat != 2` guards the PRINTING.  2 is the ten-second countdown, and a
     kill during it is not part of the match, so it is not announced.
@@ -2065,7 +2064,7 @@ void OSP_obituaryFrag(edict_t *self, edict_t *attacker, const char *message,
 
 // The fallback: a death the message tables could not name.  Broadcast rather
 // than unicast per client -- there is no second party to green -- and it does
-// NOT rank-sort, which is the donor's own asymmetry with OSP_obituarySelf.
+// Not rank-sort, which is the donor's own asymmetry with OSP_obituarySelf.
 void OSP_obituaryDied(edict_t *self)
 {
     if (sync_stat != 2)

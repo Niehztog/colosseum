@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
-"""Derive the R-CORE-12 replay-coverage ledger (deliverable D9).
+"""Derive the replay-coverage ledger.
 
-R-CORE-12: no donor received all 188 Q2PRO game commits, and because Colosseum
+No donor received all 188 Q2PRO game commits, and because Colosseum
 keeps the monsters and the campaigns the donors dropped, a commit a donor
-skipped for want of a site usually *has* a site here.  D9 is one row per
+skipped for want of a site usually *has* a site here.  this ledger is one row per
 (donor, skipped commit) with a verdict: *re-apply*, *not applicable*, or
-*superseded*.  R-VER-10 makes a row with no verdict block the phase that
+*superseded*.  A row with no verdict blocks the import that
 imports that donor.
 
 METHOD.  Every replayed commit on a `port_<donor>` branch carries a
@@ -16,12 +16,12 @@ donor.  Nothing here is inferred from the diff -- the trailer is the record.
 
 The verdicts themselves are judgement and live in VERDICTS below, keyed by
 commit subject.  A subject with no entry is emitted as `TODO` and makes this
-tool exit non-zero, which is R-VER-10 mechanised: the ledger cannot silently
+tool exit non-zero: the ledger cannot silently
 be incomplete.
 
 USAGE
     tools/coverage.py                       # markdown to stdout
-    tools/coverage.py --md doc/replay-coverage.md
+    tools/coverage.py --md coverage.md      # write it out instead
     tools/coverage.py --check               # exit 1 if any row lacks a verdict
 """
 import argparse
@@ -50,9 +50,9 @@ DONORS = [
 #                   donor's omission is correct here too
 #   superseded      a later change already covers it
 #
-# The rule that decides most of these: R-CORE-8 keeps every monster and both
+# The rule that decides most of these: this tree keeps every monster and both
 # campaigns, so a fix the donor skipped "for want of a site" has a site here.
-# R-VER-10's other half: "every *re-apply* verdict has a commit that lands it."
+# The other half: "every *re-apply* verdict has a commit that lands it."
 # A verdict is a judgement about a (donor, commit) pair; LANDED records that the
 # pair has actually been discharged, keyed the same way, because a verdict alone
 # does not say whether anyone acted on it.
@@ -62,35 +62,109 @@ DONORS = [
 # fix skipped by three donors is discharged once per import.
 LANDED = {
     ('ctf', 'Avoid generating missing savegame pointer'):
-        'landed, Phase 3: m_flyer.c carries no commented `&flyer_move_attack1` '
+        'landed: m_flyer.c carries no commented `&flyer_move_attack1` '
         'and check-ptrs passes',
     ('ctf', 'Fix crashes due to G_PickTarget() returning NULL'):
-        'landed, Phase 3 -- and it found a THIRD call site. The two the '
+        'landed -- and it found a THIRD call site. The two the '
         'commit names are guarded; turret_brain_link is Ground Zero\'s own '
-        'addition, arrived in Phase 2, and dereferenced the result unguarded. '
-        'See reconciliation.md R-53: re-applying a fix means re-asking its '
+        'addition, and dereferenced the result unguarded. '
+        'Re-applying a fix means re-asking its '
         'question of the merged tree, not confirming its hunks survived',
     ('ctf', 'Use initializer for aim vector'):
-        'landed, Phase 3: five `vec3_t aim = { ... }` initialisers across '
+        'landed: five `vec3_t aim = { ... }` initialisers across '
         'm_berserk.c and m_brain.c',
+
+    # THE OTHER EIGHTEEN, discharged by the osp and ra2 imports and by the
+    # rogue one, and recorded here a release late.  They were landed in the
+    # tree and not in this table, which is the failure mode a LANDED table
+    # exists to prevent: the ledger read `21 re-apply, 3 landed` and so
+    # announced eighteen upstream fixes still owed by a tree that already had
+    # every one of them.  Each row below names the site it was read at, so the
+    # claim is checkable rather than asserted -- `grep` the note.
+    #
+    # A fix skipped by more than one donor is one piece of work and several
+    # rows: `Use initializer for aim vector` is ctf's, osp's and ra2's, and
+    # lands once.  The note says so rather than pretending to three edits.
+    ('osp', 'Avoid generating missing savegame pointer'):
+        'landed with ctf: `make check-ptrs` passes against a regenerated '
+        'g_ptrs.c, and no mmove_t row in the tree carries a commented pointer',
+    ('ra2', 'Avoid generating missing savegame pointer'):
+        'landed with ctf: same regenerated g_ptrs.c, same check-ptrs',
+    ('osp', 'Fix annoying FOV change when exiting SP level'):
+        'landed: g_main.c carries the SECOND `if (level.exitintermission) '
+        '{ ExitLevel(); return; }`, below the G_RunEntity loop as well as '
+        'above it -- the later exit is the whole of the fix',
+    ('osp', 'Fix client disconnect in ss_pic state'):
+        'landed: ClientDisconnect guards the MZ_LOGOUT muzzleflash with '
+        '`if (ent->inuse)` (p_client.c)',
+    ('osp', 'Fix nofriendlyfire being applied to AI in coop'):
+        'landed: T_Damage tests `(coop->value && targ->client)` (g_combat.c), '
+        'so the coop arm no longer reaches a monster',
+    ('ra2', 'Fix nofriendlyfire being applied to AI in coop'):
+        'landed with osp: one site in T_Damage, shared by both',
+    ('osp', 'Fix nofriendlyfire flag not working correctly on easy skill'):
+        'landed: the easy-mode halving sits ABOVE the friendly-fire block in '
+        'T_Damage and above `meansOfDeath = mod`, which is the move the '
+        'commit is -- the value it halves has to be the one the block reads',
+    ('ra2', 'Fix nofriendlyfire flag not working correctly on easy skill'):
+        'landed with osp: the same statement in the same T_Damage',
+    ('osp', 'Fix out of array access'):
+        'landed: BeginIntermission strips keys over `n < game.num_items`, '
+        'not MAX_ITEMS (p_hud.c)',
+    ('osp', 'Re-introduce savegame and loadgame menus'):
+        'landed as the PAIR it belongs to: this commit spells respawn()\'s '
+        'restart `pushmenu loadgame` and its successor `Use menu_loadgame '
+        'inside baseq2 game library` spells it back, so the tree carrying '
+        '`menu_loadgame` (p_client.c) is both of them, at the later of the '
+        'two spellings',
+    ('osp', 'Use \'menu_loadgame\' inside baseq2 game library'):
+        'landed: respawn() calls `menu_loadgame` (p_client.c) -- the same '
+        'line as the row above, which is why they discharge together',
+    ('osp', 'Remove power cubes at end of unit'):
+        'landed: BeginIntermission clears `pers.power_cubes` beside the key '
+        'strip (p_hud.c)',
+    ('osp', 'Replace strstr() with strchr()'):
+        'landed: BeginIntermission tests `strchr(level.changemap, \'*\')` '
+        '(p_hud.c)',
+    ('osp', 'Require C99 semantics for \'bool\''):
+        'landed: Pickup_Ammo assigns `weapon = (ent->item->flags & '
+        'IT_WEAPON)` with no `!!` (g_items.c), which is only correct under '
+        'C99 bool -- and R-SEC-8 turns the same retype into a rule',
+    ('osp', 'Use initializer for aim vector'):
+        'landed with ctf: the same five initialisers in m_berserk.c and '
+        'm_brain.c',
+    ('ra2', 'Use initializer for aim vector'):
+        'landed with ctf: same five',
+    ('ra2', 'Make more game definitions static (monsters)'):
+        'landed through staticize.py rather than verbatim, as the verdict '
+        'said it must: m_actor.c\'s actorMachineGun, actor_dead and '
+        'actor_fire are static, and R-VER-12\'s linkage audit is what keeps '
+        'the ones a donor calls across a file boundary from joining them',
+    ('rogue', 'Properly check inuse flag in blocked functions'):
+        'landed, and re-asking found THREE more sites than the commit has. '
+        'It names four blocked handlers; this tree has seven, because Ground '
+        'Zero brought plat2_blocked, smart_water_blocked and '
+        'button_rotating_blocked. All seven guard BecomeExplosion1 on '
+        '`other->inuse` (g_func.c) -- the last spelled without the redundant '
+        'null test, with the reason at the site',
 }
 
 VERDICTS = {
     # --- monster / AI fixes.  Three donors deleted the monster set, so these
     # had nowhere to land there.  Colosseum keeps all 31 monster TUs, so every
-    # one of them has a site and must be re-applied.  R-CORE-8, R-SP-5.
+    # one of them has a site and must be re-applied.
     'Fix nofriendlyfire being applied to AI in coop':
-        ('re-apply', 'Coop + monsters both exist here (R-SP-3, R-CORE-8); '
+        ('re-apply', 'Coop + monsters both exist here; '
                      'the donor had no AI to apply it to'),
     'Fix nofriendlyfire flag not working correctly on easy skill':
         ('re-apply', 'Same site as the above; skill levels are live under '
-                     'g_ruleset sp (R-SP-1)'),
+                     'g_ruleset sp'),
     'Remove commented out monster code':
         ('not-applicable', 'A cleanup of dead code in files the donor deleted '
                            'outright. Colosseum keeps the files; the comment '
                            'removal is cosmetic and carries no behaviour'),
     'Make more game definitions static (monsters)':
-        ('re-apply', 'But subject to R-CORE-13: static survives only where NO '
+        ('re-apply', 'But subject to the linkage rule: static survives only where NO '
                      'donor calls across the file boundary, so this lands '
                      'through staticize.py, not verbatim'),
     'Use initializer for aim vector':
@@ -98,15 +172,15 @@ VERDICTS = {
 
     # --- savegame / single player.  Live under g_ruleset sp.
     'Avoid generating missing savegame pointer':
-        ('re-apply', 'Savegames are in scope for sp (R-SAVE-1..5) and g_ptrs.c '
-                     'is generated here (R-SAVE-2)'),
+        ('re-apply', 'Savegames are in scope for sp and g_ptrs.c '
+                     'is generated here'),
     'Fix annoying FOV change when exiting SP level':
-        ('re-apply', 'SP level exit exists here (R-SP-1)'),
+        ('re-apply', 'SP level exit exists here'),
     'Remove power cubes at end of unit':
         ('re-apply', 'Unit transitions are live in the baseq2 campaign'),
     'Re-introduce savegame and loadgame menus':
-        ('re-apply', 'R-VER-15 item 9 and the sp ruleset need them; note the '
-                     'menu engine is per-ruleset (R-MENU-1), so this lands in '
+        ('re-apply', 'The sp ruleset needs them; note the '
+                     'menu engine is per-ruleset, so this lands in '
                      'the dm/sp tree engine'),
     "Use 'menu_loadgame' inside baseq2 game library":
         ('re-apply', 'Same site as the above'),
@@ -115,32 +189,32 @@ VERDICTS = {
     'Fix client disconnect in ss_pic state':
         ('re-apply', 'Client state machine is shared by every ruleset'),
     'Fix out of array access':
-        ('re-apply', 'R-SEC-4 makes this mandatory rather than optional'),
+        ('re-apply', 'The bounds rule makes this mandatory rather than optional'),
     'Reduce status bar string duplication':
-        ('superseded', 'R-OSP-7a replaces stored bar strings with a composed '
+        ('superseded', 'The composed statusbar replaces stored bar strings with a '
                        'emitter, which subsumes the de-duplication entirely'),
     'Replace strstr() with strchr()':
         ('re-apply', 'Trivial and tree-wide'),
     "Require C99 semantics for 'bool'":
-        ('re-apply', 'Load-bearing: R-SAVE-3a depends on bool being C99, and '
+        ('re-apply', 'Load-bearing: the savegame descriptors depend on bool being C99, and '
                      "tourney's pers.spectator is deliberately int because a "
                      'C99 bool would saturate its >= 3 test'),
     # norm() folds curly quotes to straight ones, so the key carries them.
     "Fix broken viewangles with 'spectator 1'":
-        ('superseded', 'RA2 applied it later as its own commit -- §3.1 names '
+        ('superseded', 'RA2 applied it later as its own commit -- section 3.1 names '
                        'that commit by name. Verify it is present in '
                        'rocketarena2-public; do not re-apply on top'),
 
-    # Found by this tool, 2026-08-21, and absent from R-CORE-12's enumerated
+    # Found by this tool and absent from the enumerated
     # sets: the spec listed skips for RA2, tourney and CTF but recorded none for
     # rogue.  Rogue skipped one.
     'Properly check inuse flag in blocked functions':
         ('re-apply', 'A use-after-free guard on freed edicts in the blocked() '
                      'paths of g_func.c and the monster movers. Colosseum keeps '
-                     'both (R-CORE-8), and R-SEC-4 makes the check mandatory '
+                     'both, and the bounds rule makes the check mandatory '
                      'rather than discretionary'),
     'Fix crashes due to G_PickTarget() returning NULL':
-        ('re-apply', 'R-SEC-4; G_PickTarget is in g_utils.c, which is live'),
+        ('re-apply', 'Mandatory; G_PickTarget is in g_utils.c, which is live'),
 }
 
 
@@ -164,6 +238,20 @@ def trailers(ref):
                              body, re.M):
             out[m.group(1)] = subject.strip()
     return out
+
+
+def ascii_text(s):
+    """An upstream subject is spelled in ASCII when it is rendered.
+
+    The subjects come from other people's commit messages and carry curly
+    quotes and dashes; the documents in this tree are ASCII, and a generated
+    one has to stay that way without anybody editing it afterwards.
+    """
+    for a, b in (('\u2018', "'"), ('\u2019', "'"), ('\u201c', '"'),
+                 ('\u201d', '"'), ('\u2014', '--'), ('\u2013', '-'),
+                 ('\u2026', '...'), ('\u00a0', ' ')):
+        s = s.replace(a, b)
+    return s
 
 
 def norm(subject):
@@ -195,23 +283,21 @@ def build():
 
 def render(spine, per_donor, rows):
     todo = [r for r in rows if r['verdict'] == 'TODO']
-    w = ['# Replay coverage ledger (D9)',
+    w = ['# Replay coverage ledger',
          '',
-         'Generated by `tools/coverage.py` from the `q2pro-commit:` trailers in',
-         'the bundles vendored under `vendor/replay/` (R-PROV-1). One row per',
-         '(donor, skipped commit), with a verdict, per R-CORE-12. R-VER-10 makes',
-         'a row without a verdict block the phase that imports that donor.',
+         'Generated by `tools/coverage.py` from the `q2pro-commit:` trailers in'
+         ' the bundles vendored under `vendor/replay/`. One row per'
+         ' (donor, skipped commit), with a verdict. A row without a verdict'
+         ' blocks that donor\'s import.',
          '',
-         f'Spine: **{len(spine)}** Q2PRO game commits carry a trailer on',
-         '`baseq2`.',
+         f'Spine: **{len(spine)}** Q2PRO game commits carry a trailer on'
+         ' `baseq2`.',
          '',
-         '| donor | replayed | skipped | phase that imports it |',
-         '|---|---:|---:|---|']
-    phase = {'ctf': 'Phase 3', 'xatrix': 'Phase 2', 'rogue': 'Phase 2',
-             'ra2': 'Phase 4', 'osp': 'Phase 5'}
+         '| donor | replayed | skipped |',
+         '|---|---:|---:|']
     for label, _ in DONORS:
         got, miss = per_donor[label]
-        w.append(f'| {label} | {got} | {miss} | {phase[label]} |')
+        w.append(f'| {label} | {got} | {miss} |')
 
     w += ['',
           '## Rows',
@@ -227,8 +313,8 @@ def render(spine, per_donor, rows):
         v = r['verdict']
         mark = f'**{v}**' if v in ('re-apply', 'TODO') else v
         if r.get('landed'):
-            mark = f'{v} — done'
-        w.append(f'| {r["donor"]} | `{r["sha"][:12]}` | {r["subject"]} '
+            mark = f'{v} -- done'
+        w.append(f'| {r["donor"]} | `{r["sha"][:12]}` | {ascii_text(r["subject"])} '
                  f'| {mark} | {r["why"]} |')
 
     counts = {}
@@ -244,13 +330,25 @@ def render(spine, per_donor, rows):
             f'landed and recorded in LANDED.',
           '']
     if todo:
-        w += [f'**{len(todo)} row(s) have no verdict and block their phase '
-              f'(R-VER-10).**', '']
+        w += [f'**{len(todo)} row(s) have no verdict and block their import '
+              f'.**', '']
     else:
-        w += ['Every row has a verdict, which is the Phase 0 exit condition for',
-              'D9. The `re-apply` rows are the work R-CORE-12 predicted: each',
-              'needs a commit that lands it, and R-VER-10 re-runs this check',
-              'after each donor import.', '']
+        w += ['Every row has a verdict, which is the condition for this ledger.'
+              ' The `re-apply` rows are the predicted work: each needs a commit'
+              ' that lands it, and this check re-runs after each donor import.', '']
+        # A ledger that says "each needs a commit" while every row already has
+        # one is describing a tree it has stopped reading.  It said exactly
+        # that for eighteen rows through one release, so the state is now
+        # stated rather than left to be inferred from two numbers above.
+        missing = [r for r in rows
+                   if r['verdict'] == 're-apply' and not r.get('landed')]
+        if missing:
+            w += [f'**{len(missing)} of them do not yet: '
+                  + ', '.join(f'{r["donor"]} `{norm(r["subject"])}`'
+                              for r in missing) + '.**', '']
+        else:
+            w += ['**All of them have one.** Nothing here is outstanding; the'
+                  ' next donor import is what can make it so again.', '']
     return '\n'.join(w)
 
 

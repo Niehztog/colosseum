@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
-"""The game<->botlib ABI, compared against the brain's own header (R-VER-28).
+"""The game<->botlib ABI, compared against the brain's own header.
 
-WHY THIS EXISTS.  doc/reconciliation.md R-97.  `bsp_trace_t` is 88 bytes, so the
+WHY THIS EXISTS.  `bsp_trace_t` is 88 bytes, so the
 `Trace` slot always passes a hidden return buffer -- and on 32-bit that buffer
 IS the first visible argument while on x86-64 and aarch64 it is a hidden
 register.  The two spellings are therefore the same ABI at 32 bits and different
-ABIs at 64, and `osp-tourney`'s botlib.h -- which R-BOT-1 says to take -- carries
+ABIs at 64, and `osp-tourney`'s botlib.h -- the one this tree takes -- carries
 only the 32-bit one, because osp-tourney is a 32-bit port.
 
 Taken verbatim on aarch64 that shifts every argument one place: `passent`
@@ -14,7 +14,7 @@ brain believes it is wedged in solid everywhere, and the bots stand still.  It
 compiles, it links, it loads the library, it spawns the clients, and it plays
 exactly nothing.
 
-WHAT R-BOT-1 OFFERS AND WHY NEITHER HELPS.  `BotVersion` is slot 0 of
+WHAT THE CONTRACT OFFERS AND WHY NEITHER HELPS.  `BotVersion` is slot 0 of
 `bot_export_t` precisely so the two sides can shake hands -- and it returns
 "BotLib v0.96" on both sides of an ABI split, because the version is the
 brain's, not the convention's.  Risk 6 offers a `Test()` round trip at load, and
@@ -47,11 +47,11 @@ So `src/bot/botlib.h` carries a `_Static_assert` per contract struct, and this
 tool does not take those numbers on trust: it COMPILES a probe against the
 brain's own headers and compares what the brain's compiler says.  A number
 copied from a document goes stale; a number a compiler produced this minute does
-not.  `doc/reconciliation.md` R-100.
+not.
 
 WHAT IT STILL CANNOT SEE.  Member ORDER at equal size -- two structs of 84 bytes
 with two fields transposed pass -- and a slot the brain calls with the wrong
-argument count inside itself, which is what R-98 is.  Neither is a reason to
+argument count inside itself.  Neither is a reason to
 skip the two comparisons that do work.
 
 USAGE
@@ -187,7 +187,7 @@ def brain_sizes(brain_root, names):
     # win32 row the probe compiled fine, mingw wrote `probe.exe` where a
     # `probe` was asked for, and the tool died with FileNotFoundError instead of
     # measuring anything.  `make check` then failed the build on a broken tool
-    # rather than on a finding, which is R-TOOL-3 doing its job about the wrong
+    # rather than on a finding, which is the build gate doing its job about the wrong
     # thing.  The sizes are word-size independent (every struct here is
     # pointer-free), so the host compiler is the right one to ask.
     cc = shutil.which("cc") or shutil.which("gcc")
@@ -228,7 +228,7 @@ def compare_sizes(ours_text, brain_root):
     want = {m.group(1): int(m.group(2), 0) for m in ASSERT.finditer(ours_text)}
     if not want:
         return ["no _Static_assert(sizeof(...)) in our botlib.h -- the layout "
-                "half of R-VER-28 is not being checked at all"]
+                "half of the ABI contract is not being checked at all"]
     got = brain_sizes(brain_root, sorted(want))
     if got is None:
         return ["SKIP: could not build a probe against %s/game -- the layout "
@@ -238,7 +238,7 @@ def compare_sizes(ours_text, brain_root):
         if name not in got:
             bad.append("%s: the brain's headers do not declare it" % name)
         elif got[name] != want[name]:
-            bad.append("%s: we assert %d, the brain's compiler says %d (R-100)"
+            bad.append("%s: we assert %d, the brain's compiler says %d"
                        % (name, want[name], got[name]))
     return bad
 
@@ -272,7 +272,7 @@ def compare(ours_text, brain_text):
         bad.append('%s slot not found in %s' %
                    (GUARDED_SLOT, 'ours' if ga is None else 'the brain'))
     elif ga != gb:
-        bad.append('%s is selected by a different condition (R-97)\n'
+        bad.append('%s is selected by a different condition\n'
                    '      ours : %s\n      brain: %s'
                    % (GUARDED_SLOT, ga or '(unguarded)', gb or '(unguarded)'))
     return bad
@@ -301,15 +301,33 @@ SELFTEST_BRAIN = SELFTEST_OURS.replace('bot_import_s', 'botimport_block_s') \
                               .replace('bot_import_t;', 'botimport_block_t;')
 
 
+def find_brain():
+    """Where the brain is.
+
+    `vendor/gladiator-bot-restored` is the submodule and the documented place.
+    A sibling checkout beside the repository is still accepted, because that is
+    where it lived before the submodule existed and a working tree should not
+    stop working for a move.  $GLADDIR overrides both.
+    """
+    env = os.environ.get('GLADDIR')
+    if env:
+        return env
+    for d in (os.path.join(REPO, 'vendor', 'gladiator-bot-restored'),
+              os.path.join(REPO, '..', 'gladiator-bot-restored')):
+        if os.path.isdir(os.path.join(d, 'botlib')):
+            return d
+    return os.path.join(REPO, 'vendor', 'gladiator-bot-restored')
+
+
 def selftest():
     """Three mutations of a header that agrees with itself.
 
-    R-VER-9 clause 2: a check that has never failed is not trusted.  Mutation 1
-    is R-97 exactly -- the 32-bit spelling on both arms.
+    A check that has never failed is not trusted.  Mutation 1 is the original
+    defect exactly -- the 32-bit spelling on both arms.
     """
     cases = [
         ('unmutated', SELFTEST_OURS, SELFTEST_BRAIN, 0),
-        # R-97: our side loses the 64-bit arm.
+        # Our side loses the 64-bit arm.
         ('Trace unguarded on our side', re.sub(
             r'#if defined\(__x86_64__\).*?#endif\n',
             '    bsp_trace_t (*Trace)(vec3_t start, vec3_t mins, vec3_t maxs, '
@@ -341,19 +359,19 @@ def selftest():
 
     # ...and two for the LAYOUT half, against the real brain, because the
     # numbers those asserts carry are the whole point of them.  Mutation 1 is
-    # R-100 exactly: bsp_trace_t at 80 bytes, which is what osp-tourney's
+    # The second defect exactly: bsp_trace_t at 80 bytes, which is what osp-tourney's
     # `qboolean` -> `bool` sweep produced.  Skipped, out loud, when the brain
     # is not beside the repository -- a control that quietly does not run is
     # worse than no control.
     n = len(cases)
     real = os.path.join(REPO, 'src/bot/botlib.h')
-    root = os.path.join(REPO, '..', 'gladiator-bot-restored')
+    root = find_brain()
     if os.path.exists(real) and brain_sizes(root, ['bsp_trace_t']):
         text = read(real)
         n += 2
         for label, mutated, want in (
                 ('sizes unmutated', text, 0),
-                ('bsp_trace_t asserted at 80 (R-100)',
+                ('bsp_trace_t asserted at 80',
                  text.replace('sizeof(bsp_trace_t)          == 84',
                               'sizeof(bsp_trace_t)          == 80'), 1)):
             got = [g for g in compare_sizes(mutated, root)
@@ -376,8 +394,7 @@ def selftest():
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('--ours', default=os.path.join(REPO, 'src/bot/botlib.h'))
-    ap.add_argument('--brain', default=os.path.join(REPO, '..',
-                                                   'gladiator-bot-restored'))
+    ap.add_argument('--brain', default=find_brain())
     ap.add_argument('--selftest', action='store_true')
     a = ap.parse_args()
 
@@ -386,12 +403,12 @@ def main():
 
     brain_hdr = os.path.join(a.brain, 'botlib', 'be_interface.h')
     if not os.path.exists(brain_hdr):
-        # A brain beside the repository is a convenience, not a dependency --
-        # the same rule audit.py applies to q2pro.  Absent means skipped and
-        # said so, never a silent pass.
+        # A checked-out brain is a convenience, not a dependency -- the same
+        # rule audit.py applies to q2pro.  Absent means skipped and said so,
+        # never a silent pass.
         print('botabi.py: %s absent, so there is nothing to compare the '
-              'contract against (R-VER-28 needs the brain beside the repo)'
-              % brain_hdr)
+              'contract against (git submodule update --init '
+              'vendor/gladiator-bot-restored)' % brain_hdr)
         return 0
     if not os.path.exists(a.ours):
         print('botabi.py: %s absent' % a.ours)

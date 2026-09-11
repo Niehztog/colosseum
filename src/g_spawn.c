@@ -42,7 +42,7 @@ void SP_item_health_large(edict_t *self);
 void SP_item_health_mega(edict_t *self);
 
 void SP_info_player_start(edict_t *ent);
-void SP_bot(edict_t *ent);          // src/bot/bl_spawn.c (R-BOT-26)
+void SP_bot(edict_t *ent);          // src/bot/bl_spawn.c
 void SP_info_player_deathmatch(edict_t *ent);
 void SP_info_player_coop(edict_t *ent);
 void SP_info_player_intermission(edict_t *ent);
@@ -221,8 +221,7 @@ static const spawn_func_t spawn_funcs[] = {
 
     {"info_player_start", SP_info_player_start},
     // The Gladiator SDK's map-placed bot.  Its four keys are spawn_temp_t's
-    // (R-OSP-6) and it only ever QUEUES -- no bot is created inside
-    // SpawnEntities (R-BOT-18).
+    // and it only ever QUEUES -- no bot is created inside SpawnEntities.
     {"bot", SP_bot},
     {"info_player_deathmatch", SP_info_player_deathmatch},
     {"info_player_coop", SP_info_player_coop},
@@ -247,14 +246,13 @@ static const spawn_func_t spawn_funcs[] = {
     {"func_explosive", SP_func_explosive},
     {"func_killbox", SP_func_killbox},
 
-    // R-EXTRA-4
     {"func_button_rotating", SP_func_button_rotating},
 
-    // R-RA-4: RA2's own brush classname.  Its SP_ function was carried into
+    // RA2's own brush classname.  Its SP_ function was carried into
     // arena.c and its table row was not, so ED_CallSpawn refused the entity
     // outright -- ported, declared, unreachable.  Latent on the shipped
     // content: none of the 76 BSPs in the RA2 paks carries one.  Gated in
-    // g_misc.c like the other classnames a donor owns alone (R-44).
+    // g_misc.c like the other classnames a donor owns alone.
     {"func_illusionary", SP_func_illusionary},
 
     // RAFAEL
@@ -273,11 +271,9 @@ static const spawn_func_t spawn_funcs[] = {
     {"trigger_gravity", SP_trigger_gravity},
     {"trigger_monsterjump", SP_trigger_monsterjump},
 
-    // R-EXTRA-3's two, from the 1999 module.  Both spawn functions free their
-    // entity when their cvar is off, so the classnames stay known -- a map
-    // using them loads without "unknown classname" either way, which is what
-    // R-KEY-3's "every key any donor accepted is still accepted" is about at
-    // the classname level.
+    // The trigger-counting pair, from the 1999 module.  Both spawn functions
+    // free their entity when their cvar is off, so the classnames stay known --
+    // a map using them loads without "unknown classname" either way.
     {"trigger_counting", SP_trigger_counting},
     {"trigger_log", SP_trigger_log},
 
@@ -481,15 +477,15 @@ static const spawn_field_t temp_fields[] = {
     {"distance", STOFS(distance), F_INT},
     {"height", STOFS(height), F_INT},
     {"noise", STOFS(noise), F_LSTRING},
-    // *** R-KEY-1: FROZEN KEY. ***  The key text is what a .bsp contains, so it
+    // Frozen key.  The key text is what a .bsp contains, so it
     // is an external contract and a member rename may not change it.  Q2PRO's
     // "Convert monster timers to frame numbers." renamed the unrelated
     // monsterinfo_t.pausetime; replayed tree-wide it renamed spawn_temp_t's too
-    // AND this row with it, so every map setting `pausetime` on a func_timer got
+    // And this row with it, so every map setting `pausetime` on a func_timer got
     // "pausetime is not a field" and banks of timers fired in lockstep instead
     // of staggering.  Both donor branches still carry it; the xatrix merge
     // brought it back in and the compiler caught it only because g_local.h had
-    // already been corrected.  F_FLOAT agrees with the member type (R-KEY-2).
+    // already been corrected.  F_FLOAT agrees with the member type.
     {"pausetime", STOFS(pausetime), F_FLOAT},
     {"item", STOFS(item), F_LSTRING},
 
@@ -503,8 +499,8 @@ static const spawn_field_t temp_fields[] = {
     {"maxpitch", STOFS(maxpitch), F_FLOAT},
     {"nextmap", STOFS(nextmap), F_LSTRING},
 
-    // R-OSP-6: tourney's five extra keys -- the bot library to load, and the
-    // four a `bot` entity carries.  Frozen key text (R-KEY-1): these are what a
+    // Tourney's five extra keys -- the bot library to load, and the
+    // four a `bot` entity carries.  Frozen key text: these are what a
     // tourney .bsp contains.
     {"botlib", STOFS(botlib), F_LSTRING},
     {"name", STOFS(name), F_LSTRING},
@@ -552,20 +548,19 @@ void ED_CallSpawn(edict_t *ent)
         ent->classname = (FindItem("Plasma Beam"))->classname;
     // pmm
 
-    // R-CORE-11a / Q13: latch the content flavour HERE, before the spawn
-    // function runs.
+    // Latch the content flavour here, before the spawn function runs.
     //
-    // *** R-CORE-11 names monster_start() as the latch point, and that is too
-    // late. *** Every SP_monster_* assigns its mmove_t tables and AI hooks and
-    // only then calls walkmonster_start() -> monster_start(); in m_gunner.c the
-    // assignments are ~20 lines ahead of the call.  A gate placed in a spawn
-    // function to choose between a donor's frame table and baseq2's would
-    // therefore read 0 every time, always pick baseq2, and never crash -- the
-    // silent-wrong-answer shape this whole project keeps running into.
+    // monster_start() is too late: every SP_monster_* assigns its mmove_t
+    // tables and AI hooks and only then calls walkmonster_start() ->
+    // monster_start(); in m_gunner.c the assignments are ~20 lines ahead of
+    // the call.  A gate placed in a spawn function to choose between a donor's
+    // frame table and baseq2's would therefore read 0 every time, always pick
+    // baseq2, and never crash -- the silent-wrong-answer shape this whole
+    // project keeps running into.
     //
     // Latching in ED_CallSpawn fixes the ordering and generalises correctly:
     // every entity gets its flavour at birth, not just monsters, which is what
-    // R-CORE-11a's other three readers (g_phys.c especially) need.
+    // the other three readers (g_phys.c especially) need.
     ent->content_flavour = 0;
     if (G_LayerEnabled(LAYER_XATRIX))
         ent->content_flavour |= CONTENT_XATRIX;
@@ -596,8 +591,8 @@ void ED_CallSpawn(edict_t *ent)
     G_FreeEdict(ent);
 }
 
-// For `sv extras` (R-VER-33): is this classname in the spawn table at all?
-// R-EXTRA-3 and R-EXTRA-4 are gated at the spawn FUNCTION rather than at the
+// For `sv extras`: is this classname in the spawn table at all?
+// Those extras are gated at the spawn function rather than at the
 // table, so the row is there either way and a map that uses one loads without
 // "doesn't have a spawn function" whichever way the cvar is set -- which is
 // the property worth being able to check from outside.
@@ -922,7 +917,7 @@ void SpawnEntities(const char *mapname, const char *entities, const char *spawnp
 
     gi.FreeTags(TAG_LEVEL);
 
-    // A menu handle is TAG_LEVEL memory -- R-MENU-1's engines all allocate from
+    // A menu handle is TAG_LEVEL memory -- every menu engine allocates from
     // the game import -- so the free above has just invalidated every open menu.
     // Clearing the owner here is what keeps gclient_t.menu_owner honest across a
     // level change; the alternative is a dangling handle that PutClientInServer
@@ -932,7 +927,7 @@ void SpawnEntities(const char *mapname, const char *entities, const char *spawnp
         game.clients[i].ctf_menu = NULL;
         // MENU_TOURNEY's handle, which this loop has cleared for CTF since 1.12
         // and never for OSP.  Clearing the owner is not enough on its own for
-        // either of them: osp_menus.c calls osp_PMenu_Close(ent) UNCONDITIONALLY
+        // either of them: osp_menus.c calls osp_PMenu_Close(ent) unconditionally
         // in a dozen leaves -- OSP_voteMenu and OSP_helpMenu among them -- and
         // that close tests the handle, not the owner.  It was already a free of
         // a freed pointer; since 1.31 the handle owns an entries array and a
@@ -953,7 +948,7 @@ void SpawnEntities(const char *mapname, const char *entities, const char *spawnp
         // freed nodes.  `rocketarena2@28a8af7` puts it here for that reason:
         // the free is what invalidates them, so the free is what clears them.
         //
-        // Gated for R-VER-25, and the gate is safe rather than merely quiet:
+        // Gated, and the gate is safe rather than merely quiet:
         // `g_ruleset` is CVAR_LATCH and G_InitRuleset() runs once per InitGame,
         // which is also where `game.clients` is allocated -- so the ruleset
         // cannot change between two SpawnEntities calls that share an array.
@@ -962,7 +957,7 @@ void SpawnEntities(const char *mapname, const char *entities, const char *spawnp
             game.clients[i].menuqueue.prev = NULL;
             game.clients[i].curmenulink = NULL;
             game.clients[i].selected = NULL;
-            // R-KEY-5, and the fifth thing this loop clears is the one that
+            // The fifth thing this loop clears is the one that
             // was a SIGSEGV rather than a leak.  `teams` is TAG_LEVEL and the
             // free above has just invalidated the ARRAY -- arena_init()
             // reallocates it empty a few hundred lines later, inside this same
@@ -980,11 +975,11 @@ void SpawnEntities(const char *mapname, const char *entities, const char *spawnp
             // REACHABILITY lump.  Anything walking the client list in between
             // meets those clients, and the scoreboard walks the client list:
             // Serverwide_ScoreboardMessage died on `teams[teamnum].it->name`
-            // with `.it` NULL (doc/reconciliation.md R-186).
+            // with `.it` NULL.
             //
             // Here rather than at arena_init()'s TagMalloc, which is where the
-            // first fix put it: R-KEY-5 says the clear belongs where the array
-            // is DROPPED, and this is that place -- the same reason the four
+            // first fix put it: the clear belongs where the array is dropped,
+            // and this is that place -- the same reason the four
             // menu handles above are cleared here and not at each engine's
             // next open.  Nothing reads a carried teamnum, so this costs
             // nothing: RA_BotJoinArena's "already on a team: a level change"
@@ -1001,23 +996,26 @@ void SpawnEntities(const char *mapname, const char *entities, const char *spawnp
 
     // The bot index tables hold TAG_LEVEL strings that the FreeTags above has
     // just released, so the pointer arrays are cleared before anything
-    // precaches into them again (R-BOT-11).  ClearIndexes does NOT free the
+    // precaches into them again.  ClearIndexes does not free the
     // strings, for exactly that reason.
     ClearIndexes();
 
     memset(&level, 0, sizeof(level));
 
-    // R-OSP-1: FOUR PER-CLIENT EDICT FIELDS OUTLIVE A LEVEL.  They are not
+    // Three PER-CLIENT EDICT FIELDS OUTLIVE A LEVEL.  They are not
     // per-life state, they are facts about the connection, and the donor
     // memsets the client edicts one at a time so it can put them back:
     //
     //   osp_e39c  referee status -- lost here, an admin had to re-`referee`
     //             with the password on every single map change
-    //   osp_e37c  the address with the port stripped, which every ban check,
-    //             every admin-log line and the stats log's "addr" field read
     //   osp_e3a0  the client's remembered default team name, and
     //   osp_e3b0  its skin, which is how OSP_defaultTeam puts a returning
     //             player back on the side they always play for
+    //
+    // *Four, until the address stopped being one of them.* `osp_e37c` was
+    // carried here too; it is `client->pers.address` now (R-LOG-1), and
+    // `game.clients` is allocated once in InitGame and is not touched by a
+    // level change, so the address survives without being copied out and back.
     //
     // The world's edicts have no such state, so they take the wholesale memset
     // they had before.
@@ -1025,18 +1023,15 @@ void SpawnEntities(const char *mapname, const char *entities, const char *spawnp
         for (int i = 1; i <= game.maxclients; i++) {
             edict_t *e = g_edicts + i;
             int      referee = e->osp_e39c;
-            char     address[sizeof(e->osp_e37c)];
             char     teamname[sizeof(e->osp_e3a0)];
             char     teamskin[sizeof(e->osp_e3b0)];
 
-            Q_strlcpy(address, e->osp_e37c, sizeof(address));
             Q_strlcpy(teamname, e->osp_e3a0, sizeof(teamname));
             Q_strlcpy(teamskin, e->osp_e3b0, sizeof(teamskin));
 
             memset(e, 0, sizeof(*e));
 
             e->osp_e39c = referee;
-            Q_strlcpy(e->osp_e37c, address, sizeof(e->osp_e37c));
             Q_strlcpy(e->osp_e3a0, teamname, sizeof(e->osp_e3a0));
             Q_strlcpy(e->osp_e3b0, teamskin, sizeof(e->osp_e3b0));
         }
@@ -1164,11 +1159,11 @@ void SpawnEntities(const char *mapname, const char *entities, const char *spawnp
             OSP_setFeatures();
         }
 
-        // The rune spawners and the round's stats file (R-OSP-1, R-OSP-3).
+        // The rune spawners and the round's stats file.
         // The donor's own test is integer (port_osp:g_spawn.c:761), and it
         // has to be: rune_stat is derived with the same cast, so a fractional
         // runes_enable would schedule a spawner with no rune type enabled
-        // (R-211, and R-207's rule for hook_enable).
+        // -- the same rule as hook_enable.
         if (runes_enable && (int)runes_enable->value)
             OSP_setupRuneSpawn(0);
         OSP_Stats_GameInit();
@@ -1209,9 +1204,9 @@ void SpawnEntities(const char *mapname, const char *entities, const char *spawnp
     // The bot layer's level start, last, because all three steps read the
     // index tables the precaches above have just filled:
     //   * the muzzleflash -> soundindex map, which is how a shot the bot did
-    //     not see becomes a sound it can hear (R-BOT-10);
+    //     not see becomes a sound it can hear;
     //   * the bots that were in the game before the level change, which are
-    //     re-marked in place rather than reconnected (R-BOT-14);
+    //     re-marked in place rather than reconnected;
     //   * the new map, handed to every loaded brain with the whole index space.
     BotInitMuzzleFlashToSoundindex();
     BotSpawn();
@@ -1245,7 +1240,7 @@ endif
 #endif
 
 // The three statusbar literals -- baseq2's single_statusbar and dm_statusbar
-// here, Threewave's ctf_statusbar in g_ctf.c -- are gone.  R-OSP-7a: a literal
+// here, Threewave's ctf_statusbar in g_ctf.c -- are gone.  A literal
 // hardcodes its slot numbers, so a ruleset that needs a slot the bar already
 // uses has nowhere to go, and CTF is the case with no free pair left at all.
 // The bar is now emitted at runtime from the active ruleset's slot map by
@@ -1347,21 +1342,21 @@ void SP_worldspawn(edict_t *ent)
 
     gi.configstring(game.csr.maxclients, va("%i", game.maxclients));
 
-    // R-OSP-1: tourney's own level state -- the hi-score table, the MOTD, the
+    // Tourney's own level state -- the hi-score table, the MOTD, the
     // team name and banner configstrings, the overtime counters.  Before
     // G_SetStatusbar() rather than after, because the bar it composes reads the
     // ruleset and this is what sets the state that bar describes.
     if (G_IsOspRuleset())
         OSP_worldspawn();
 
-    // status bar program -- composed, not stored (R-OSP-7a)
+    // status bar program -- composed, not stored
     G_SetStatusbar();
 
     // CTF's own precache set: the flag models and icons, the tech models, the
     // team pics the statusbar draws.  A no-op in every other ruleset.
     CTFPrecache();
 
-    // R-161: RA2's, and it is the table RA_SkinIcon() matches against as much
+    // RA2's, and it is the table RA_SkinIcon() matches against as much
     // as it is a precache.  After G_SetStatusbar() for the same reason CTF's
     // is: the bar decides which of these slots is drawn at all.
     if (G_Ruleset() == RULESET_ARENA)

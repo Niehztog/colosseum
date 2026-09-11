@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Normalise a reconstruction donor's copy of a spine file before the merge.
 
-doc/reconciliation.md R-65.  Used for RA2 in Phase 4 and for osp-tourney in
-Phase 5, which is the same kind of tree with the same two habits.
+Used for RA2 and for osp-tourney, which are the same kind of tree with the
+same two habits.
 
 
 Two categories of difference in the RA2 reconstruction are not RA2's feature
@@ -11,11 +11,11 @@ each one as a conflict to resolve by hand:
 
   * the asm-matching address comments.  `rocketarena2-public` is byte-matched
     against the shipped 1999 binaries and annotates every function with the
-    address range it matched.  SPECS.md N1: those oracles are meaningless in
+    address range it matched.  Those oracles are meaningless in
     this tree.  1,563 lines of them across the donor.
   * the stripped GPL header.  The reconstruction drops id's licence block; every
-    file in Colosseum carries one (R-LIC-1), and the spine's is the one to use
-    under sec 7 rule 1.
+    file in Colosseum carries one, and the spine's is the one to use
+    where the two disagree.
 """
 import re
 import sys

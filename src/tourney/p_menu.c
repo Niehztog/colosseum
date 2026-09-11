@@ -17,34 +17,34 @@ along with this program; if not, write to the Free Software
 Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 */
-// OSP Tourney DM v2.75, from osp-tourney@1d8427e (doc/provenance.md).
+// OSP Tourney DM v2.75, from osp-tourney@1d8427e.
 // Donor-only: baseq2 has no counterpart, so it lives in src/tourney/ rather
-// than being merged into a spine file (R-CORE-7).  The reconstruction's
-// asm-matching address comments are stripped -- SPECS.md N1 makes those oracles
-// meaningless here, and they survive at the pin.
+// than being merged into a spine file.  The reconstruction's asm-matching
+// address comments are stripped -- those oracles are meaningless here, and
+// they survive at the pin.
 //
-// THE SAME THREE DEPARTURES src/ctf/p_menu.c MAKES, MADE HERE TOO (1.31).  The
+// The same three departures src/ctf/p_menu.c makes, made here too (1.31).  The
 // two files are forks of one engine (see p_menu.h), so CTF's copy is not a
 // model this one is being rewritten towards -- it is this one, three fixes
-// later.  R-MENU-1 keeps the two engines apart because the *menus* are part of
+// later.  The two engines stay apart because the menus are part of
 // the ruleset a player is choosing; it does not ask the transport underneath
 // them to stay broken in one of the two.  Each departure is a requirement, not
 // taste:
 //
-//  1. THE BUILDER IS BOUNDED (R-MENU-5).  The donor writes into a
+//  1. The builder is bounded.  The donor writes into a
 //     `char string[1400]` with `sprintf(string + strlen(string), ...)` and no
 //     check at all.  Colosseum's copy had already been given `Q_snprintf`,
 //     which cannot overrun -- but a snprintf that runs out of room stops
 //     wherever it happens to be, and "wherever it happens to be" is the middle
 //     of a token: a half-written `xv 6`, or a `"` that never closes.
-//     R-MENU-5 wants truncation "on a whole item, never mid-token", so each
+//     Truncation has to be on a whole item, never mid-token, so each
 //     entry is composed into its own scratch buffer and appended only if it
 //     fits whole.  With today's tables every line is capped at 31 characters
 //     by the statics in osp_menus.c and the total lands near 1300, so this is
 //     the requirement being met before a longer table reaches it rather than
 //     after.
 //
-//  2. THE ENTRIES ARE COPIED PER CLIENT.  This is the one that was doing
+//  2. The entries are copied per client.  This is the one that was doing
 //     damage.  The donor points the handle straight at the caller's array --
 //     and osp_menus.c's thirteen tables are FILE-SCOPE GLOBALS whose text
 //     points at file-scope statics, restaged from one client's `resp` state by
@@ -58,12 +58,12 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 //     written from the same globals.  Open now deep-copies the rows and their
 //     strings, so what a client sees is the client's own.
 //
-//  3. THE REDRAW IS RATE-LIMITED (R-MENU-4).  The donor rebuilds and unicasts
+//  3. The redraw is rate-limited.  The donor rebuilds and unicasts
 //     ~1300 reliable bytes on every cursor keypress.  Update() now marks the
 //     menu dirty and ClientThink flushes at the engine's cadence, which is
-//     what CTF's half of R-MENU-4 has done since 1.12 and what the shared
+//     what CTF's copy of this engine does and what the shared
 //     `menutime`/`menudirty` pair in gclient_t is for -- one menu is open at a
-//     time (R-MENU-3), so one pair of fields answers for whichever engine owns
+//     time, so one pair of fields answers for whichever engine owns
 //     it.
 //
 #include "g_local.h"
@@ -73,11 +73,11 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 // same reason: it is what svc_layout carries.
 #define OSP_MENU_MAX    MAX_STATUSBAR
 
-// R-MENU-5.  One whole item at a time; an item that does not fit is dropped and
+// One whole item at a time; an item that does not fit is dropped and
 // the caller is told once, rather than the buffer being run past its end.
 //
 // ctf/p_menu.c has this function too, byte for byte, and it stays duplicated:
-// both are static, R-MENU-1 keeps the two engines in separate translation
+// both are static, the two engines are in separate translation
 // units on purpose, and a shared helper would be the one thread between them
 // that a future change to either could pull.
 static bool menu_append(char *string, size_t size, size_t *len, const char *item)
@@ -103,13 +103,13 @@ void osp_PMenu_Open(edict_t *ent, const osp_pmenu_t *entries, int cur, int num)
     if (!ent->client)
         return;
 
-    // R-MENU-3, and the reason the donor's "warning, ent already has a menu"
+    // And the reason the donor's "warning, ent already has a menu"
     // dprintf is gone: the incumbent is closed by the one open path, whichever
     // engine owned it, so having one open is normal rather than notable.
     G_MenuOpen(ent, MENU_TOURNEY);
 
     // gi.TagMalloc, not malloc: the free below is gi.TagFree and the pair has
-    // to match (R-55).  TAG_LEVEL because a menu does not outlive its level.
+    // to match.  TAG_LEVEL because a menu does not outlive its level.
     hnd = gi.TagMalloc(sizeof(*hnd), TAG_LEVEL);
 
     hnd->entries = gi.TagMalloc(sizeof(osp_pmenu_t) * num, TAG_LEVEL);
@@ -140,7 +140,7 @@ void osp_PMenu_Open(edict_t *ent, const osp_pmenu_t *entries, int cur, int num)
     gi.unicast(ent, true);
 }
 
-// The engine's own teardown.  G_MenuClose() calls THIS; nothing here may call
+// The engine's own teardown.  G_MenuClose() calls this; nothing here may call
 // G_MenuClose(), or the arbiter and the engine recurse into each other.
 void osp_PMenu_Close(edict_t *ent)
 {
@@ -163,15 +163,14 @@ void osp_PMenu_Close(edict_t *ent)
     // is so the two forks of the engine say the same thing.
     ent->client->menudirty = false;
 
-    // R-MENU-3, and the same argument ctf/p_menu.c writes out: osp_menus.c
-    // closes its own menus in 38 places -- every leaf that does something and
-    // dismisses -- so the owner has to be released HERE as well as in
-    // G_MenuClose.  Leaving it set makes G_MenuActive() true with a NULL
-    // handle, and every OSP_*Menu() entry point is written
-    // `if (owner == MENU_TOURNEY) close; else open`, so the next press closed a
-    // menu that was already gone and the menu could be opened exactly once per
-    // life.  Setting it twice is harmless; setting it in one of the two paths
-    // is not.
+    // The same argument ctf/p_menu.c writes out: osp_menus.c closes its own
+    // menus in 38 places -- every leaf that does something and dismisses -- so
+    // the owner has to be released here as well as in G_MenuClose.  Leaving it
+    // set makes G_MenuActive() true with a NULL handle, and every OSP_*Menu()
+    // entry point is written `if (owner == MENU_TOURNEY) close; else open`, so
+    // the next press closed a menu that was already gone and the menu could be
+    // opened exactly once per life.  Setting it twice is harmless; setting it
+    // in one of the two paths is not.
     ent->client->menu_owner = MENU_NONE;
 
     gi.WriteByte(svc_layout);
@@ -208,7 +207,7 @@ osp_menus.c rather than a fix to the engine.  So the template keeps its job as
 the STAGING AREA and this function takes the copy: after it returns, nothing
 another client does to the globals can be seen by this one.
 
-SILENT WHEN NO MENU IS OPEN, and that is the interesting half.  The builders
+Silent when no menu is open, and that is the interesting half.  The builders
 are called from two places -- the openers, which stage and then call
 osp_PMenu_Open (which takes its own copy), and the leaves, which restage while
 the menu is up.  Only the leaves need this, and they are exactly the fourteen
@@ -303,14 +302,14 @@ void osp_PMenu_Do_Update(edict_t *ent)
 
     if (dropped) {
         gi.dprintf("Colosseum: tourney menu exceeded %d bytes; entries were "
-                   "dropped whole (R-MENU-5)\n", OSP_MENU_MAX);
+                   "dropped whole\n", OSP_MENU_MAX);
     }
 
     gi.WriteByte(svc_layout);
     gi.WriteString(string);
 }
 
-// R-MENU-4's cadence.  The donor composed and unicast ~1300 reliable bytes here
+// The flush cadence.  The donor composed and unicast ~1300 reliable bytes here
 // on every keypress; this defers to ClientThink, which flushes at most five
 // times a second and forces one through after a second of silence.
 void osp_PMenu_Update(edict_t *ent)
@@ -395,7 +394,7 @@ void osp_PMenu_Prev(edict_t *ent)
     osp_PMenu_Update(ent);
 }
 
-// R-OSP-13.  `invuse` and `invdrop` are one key to an OSP menu; the difference
+// `invuse` and `invdrop` are one key to an OSP menu; the difference
 // between them is `resp.osp_r264`, which every settings row reads as its step
 // direction (`osp_r290--` against `osp_r290++`) and the kick/player list reads
 // as its scan direction.  The merge carried only `invuse` and never set the

@@ -17,24 +17,23 @@ along with this program; if not, write to the Free Software
 Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 */
-// OSP Tourney DM v2.75, from osp-tourney@1d8427e (doc/provenance.md).
+// OSP Tourney DM v2.75, from osp-tourney@1d8427e.
 // Donor-only: baseq2 has no counterpart, so it lives in src/tourney/ rather
-// than being merged into a spine file (R-CORE-7).  The reconstruction's
-// asm-matching address comments are stripped -- SPECS.md N1 makes those oracles
-// meaningless here, and they survive at the pin.
-// osp_main.c -- <INVENTED FILENAME>. The mod's core: the config loader, the
+// than being merged into a spine file.  The reconstruction's asm-matching
+// address comments are stripped.
+// osp_main.c -- filename assigned by this tree.  The mod's core: the config loader, the
 // cvar registration, the match-state machine, the item enable/disable layer,
 // the player-ID overlay and the scoreboard/params builders.
 
 #include "g_local.h"
 #include "tourney/osp_types.h"
 // old_botcount, which OSP_endClean resets -- declared by the file that defines
-// it (R-OSP-5).
+// it.
 #include "bot/bl_spawn.h"
 #include "tourney/osp_stats.h"
 #include "bot/bl_main.h"
 #include "bot/bl_botcfg.h"
-// The two bot entry points, until Phase 6 -- see src/tourney/osp_botseam.c.
+// The two bot entry points.
 void BotServerCommand(char *str, ...);
 void BotDestroy(edict_t *bot);
 
@@ -52,7 +51,7 @@ int connected_clients = 0;
 int active_clients = 0;
 int bot_watch = 1;
 int game_init = 0;
-// R-OSP-12.  `m_mode` and `match_mode` are gone; these are the two questions
+// `m_mode` and `match_mode` are gone; these are the two questions
 // that meant a RANGE of the old modes.  Everything that meant one mode tests
 // the ruleset by name.
 bool OSP_IsMatch(void)
@@ -65,9 +64,9 @@ bool OSP_IsTeams(void)
     return G_Ruleset() == RULESET_TDM || G_Ruleset() == RULESET_DUEL;
 }
 
-// R-DM-1 / doc/reconciliation.md R-156: the capacity `tdm` and `duel` declare,
-// which is what their bot fill is sized from.  OSP_gameInit has already
-// registered it and clamped it so that twice it fits `maxclients`.
+// The capacity `tdm` and `duel` declare, which is what their bot fill is sized
+// from.  OSP_gameInit has already registered it and clamped it so that twice
+// it fits `maxclients`.
 int OSP_TeamMaxPlayers(void)
 {
     return team_maxplayers ? (int)team_maxplayers->value : 0;
@@ -93,12 +92,12 @@ char    wav_file[125] =
 // The accuracy report's rows, in the order they print.  NULL-TERMINATED rather
 // than counted: three loops in two other files walked this with their own copy
 // of `10`, so adding a row meant editing four places and the compiler could not
-// say if you missed one (R-181).
+// say if you missed one.
 //
 // The donor's ten are first and unchanged, ACC_BFG's missing row included --
 // osp-tourney collects the BFG's accuracy and never prints it, which is its
-// choice about a weapon its rulesets remove, and sec 7 rule 2 leaves a donor its
-// own feature.  The nine after them are the content layers' (R-MODE-3), and the
+// choice about a weapon its rulesets remove, and a donor keeps its own
+// feature.  The nine after them are the content layers', and the
 // names are padded to the same eleven columns so the report stays a table.
 a_info_t a_info[] = {
     {  ACC_BLASTER,          "Blaster   :" },
@@ -150,7 +149,6 @@ cvar_t * team_duelrecover;
 cvar_t * match_pausetime;
 cvar_t * vote_threshold;
 cvar_t * console_timestamp;
-cvar_t * nextlevel_click;
 cvar_t * match_type;
 cvar_t * bots_warmuptime;
 int max_items[11];
@@ -279,7 +277,6 @@ cvar_t * runes_max;
 char    reconn_player[32];
 cvar_t * warmup_health;
 cvar_t * hook_incdamage;
-cvar_t * nextlevel_lazy;
 cvar_t * runes_flash;
 cvar_t * qualifier_forceskins;
 cvar_t * numgibs;
@@ -327,15 +324,18 @@ void OSP_gameInit(void)
     gi.cvar("sv_airaccelerate", "0", 0);
     resp_delay = gi.cvar("respawn_delay", "0", 0);
     console_timestamp = gi.cvar("console_timestamp", "0", 0);
-    // R-COMPAT-6: `gamename` is Colosseum's serverinfo identity, registered
-    // once in g_main.c with GAMEVERSION.  Re-obtained here with the SAME
+    // `gamename` is Colosseum's serverinfo identity, registered
+    // once in g_main.c with GAMEVERSION.  Re-obtained here with the same
     // default so that a second registration cannot decide what the server calls
     // itself; the mod's own version banner is the OSP_CS(9) configstring
     // OSP_worldspawn writes, which is where it belongs.
     osp_game = gi.cvar("gamename", GAMEVERSION,
                        CVAR_SERVERINFO | CVAR_NOSET);
-    nextlevel_click = gi.cvar("nextlevel_click", "15.0", 0);
-    nextlevel_lazy = gi.cvar("nextlevel_default", "45.0", 0);
+    // `nextlevel_click` and `nextlevel_default` were registered here.  They
+    // moved to InitGame when `arena` became a second reader (R-RA-10): one
+    // registration owns a name's default, and a second one here would decide
+    // it for whichever ruleset booted first.  `map_halt` below still sets
+    // both to 0, which is this ruleset's own use of them.
     numgibs = gi.cvar("numgibs", "4", 0);
 
     time_remaining = gi.cvar("time_remaining", "ServerInit", CVAR_SERVERINFO);
@@ -353,7 +353,7 @@ void OSP_gameInit(void)
     bots_noclients = gi.cvar("bots_noclients", "0", 0);
     bots_warmuptime = gi.cvar("bots_warmuptime", "0", 0);
 
-    // `match_mode` is gone: the mode of play is the ruleset (R-OSP-12), latched
+    // `match_mode` is gone: the mode of play is the ruleset, latched
     // by `g_ruleset` and resolved before this runs.  `match_type` stays, because
     // it is what a server browser and every stats record read, and it is set
     // from the ruleset in the banner block below.
@@ -562,16 +562,48 @@ void OSP_gameInit(void)
     }
 
     // 1v1 is two teams of one, whatever the server asked for.
+    //
+    // Forced per map, not write-protected for ever.  The donor re-gets
+    // this cvar with CVAR_NOSET here (`port_osp:osp_main.c`, `m_mode == 3`),
+    // and Q2PRO's `Cvar_Get` ORs new flags onto an existing cvar and never
+    // clears them -- so one `duel` map made `team_maxplayers` unwritable for
+    // the life of the server process.  `gi.cvar_set` is `Cvar_UserSet`, which
+    // refuses a CVAR_NOSET write with "may be set from command line only", so
+    // after a duel map:
+    //
+    //   * the clamp below could not fire, and announced a change that was
+    //     refused;
+    //   * a later `tdm` map read 1 and could not be told otherwise, making
+    //     every TeamPlay match on that server a 1v1 -- the cross-ruleset leak
+    //     a ruleset must not cause, and the whole model here is that these
+    //     four rotate;
+    //   * and the OPERATOR could not set it either, from console or config.
+    //
+    // Measured: `g_ruleset duel` + `team_maxplayers 4`, one map, then
+    // `set team_maxplayers 4` -> "team_maxplayers may be set from command line
+    // only", value 1, default 4.
+    //
+    // There is no way to take a flag back off a cvar from a game library, so
+    // the flag cannot be scoped to the ruleset that wants it -- the enforcement
+    // moves to the VALUE instead, forced on every map load, which is where
+    // `g_ruleset` is decided anyway (it is latched).  `cvar_forceset` is
+    // `Cvar_Set` at FROM_CODE and writes through whatever the flags say.
+    //
+    // One deviation from the donor, deliberately: an operator who writes
+    // `team_maxplayers` in the middle of a duel map is no longer refused, and
+    // the value stands until the next map load forces it back to 1.  That is
+    // the price of not poisoning the cvar, and it is the smaller of the two.
     if (OSP_IsTeams()) {
         if (G_Ruleset() == RULESET_DUEL) {
-            gi.cvar_set("team_maxplayers", "1");
+            gi.cvar_forceset("team_maxplayers", "1");
             gi.dprintf("1V1 Mode: setting teams' maxplayers to 1.\n");
-            team_maxplayers = gi.cvar("team_maxplayers", "1", CVAR_NOSET);
         }
 
+        // Also forceset: this is the game enforcing a bound that the slots
+        // make necessary, not a user request, and it must not be refusable.
         if ((int)team_maxplayers->value * 2 > (int)game.maxclients) {
             Q_snprintf(buf, sizeof(buf), "%d", (int)game.maxclients / 2);
-            gi.cvar_set("team_maxplayers", buf);
+            gi.cvar_forceset("team_maxplayers", buf);
             gi.dprintf("team_maxplayers too high!\nSetting maxplayers to: %s\n",
                        buf);
         }
@@ -647,11 +679,11 @@ void OSP_gameInit(void)
     if ((int)qualifier_numspots->value < 0)
         gi.cvar_set("qualifier_numspots", "0");
 
-    // R-OSP-12's four rows, one per ruleset.  `match_type` is still published to
+    // Four rows, one per ruleset.  `match_type` is still published to
     // serverinfo -- server browsers read it and osp_stats.c writes it into every
     // JSON record -- but it is DERIVED from the ruleset now rather than being a
     // second place the mode is stored, so the banner and the behaviour cannot
-    // disagree the way R-OSP-13 records them doing.
+    // disagree.
     if (G_Ruleset() == RULESET_DM) {
         sync_stat = 8;
         sync_frame = 0;
@@ -823,10 +855,10 @@ void OSP_endClean(void)
 
 /*
 =================
-THE LOADOUT SLOTS, BY NAME -- R-180
+The loadout slots, by name
 
-*** THE DONOR ADDRESSES THE ITEMLIST BY ABSOLUTE INDEX, and this tree's
-*** itemlist is not the donor's. ***
+The donor addresses the itemlist by absolute index, and this tree's itemlist is
+not the donor's.
 
 osp-tourney's is baseq2 3.20's, and `OSP_seedPlayer` is written against it:
 1..3 the three armours, 7..17 the eleven weapons in `weapon_initial` /
@@ -845,14 +877,14 @@ constant, which is why a shift would not have fixed it either:
 What it cost, measured rather than argued: the warmup arm below set
 `pers.weapon = &itemlist[7]`, so **every player under dm, dmpro, tdm and duel
 spawned holding the CTF grapple** -- which is also why the grapple's view model
-and HUD icon were still being registered on a deathmatch server after R-173
-gated the precache away, the two configstrings that led here.  `bl_main.c`
+and HUD icon were still being registered on a deathmatch server after the
+precache was gated away, the two configstrings that led here.  `bl_main.c`
 already documents the same offset for the brain's own inventory table
 ("`weapon_grapple` is index 7 here and the Blaster is 7 there"); nothing carried
 that knowledge across to the loadout.
 
 RESOLVED LAZILY, and that is not a style choice: `OSP_initWeapItem` is called
-from `OSP_gameInit`, which InitGame runs BEFORE `InitItems()` -- so
+from `OSP_gameInit`, which InitGame runs before `InitItems()` -- so
 `game.num_items` is still 0 there and `FindItemByClassname` would find nothing
 and return NULL for all twenty names.  Every reader is a per-client spawn path,
 long after that, so the first one resolves.  The itemlist is `const` and static,
@@ -870,7 +902,7 @@ so once is enough for the life of the library.
 // order.  Rank 5 is `ammo_grenades` and not a weapon_* row, which is baseq2's
 // own quirk -- hand grenades are ammo that fires itself -- and is why this
 // table is the donor's order rather than the itemlist's.
-// *** THIS TABLE IS THE CVAR CONTRACT.  APPEND ONLY, NEVER REORDER. ***
+// This table is the cvar contract.  Append only, never reorder.
 // Bit k-1 of `weapon_have` and of `weapon_initial` is rank k, so moving a row
 // silently changes what an operator's config means.
 static const char *const osp_weapnames[OSP_NUM_WEAPS] = {
@@ -880,11 +912,11 @@ static const char *const osp_weapnames[OSP_NUM_WEAPS] = {
     "weapon_machinegun", "weapon_chaingun", "ammo_grenades",
     "weapon_grenadelauncher", "weapon_rocketlauncher", "weapon_hyperblaster",
     "weapon_railgun", "weapon_bfg",
-    // The content layers' eight, bits 0x400..0x20000 (R-181).  Ranks 11..18, in
+    // The content layers' eight, bits 0x400..0x20000.  Ranks 11..18, in
     // the merged itemlist's own order, continuing where the donor's eleven stop.
     // Both `ammo_trap` and `ammo_tesla` are IT_AMMO|IT_WEAPON -- a thrown device
     // that is its own ammunition, exactly like `ammo_grenades` at rank 5 -- so
-    // they appear here AND in osp_layerammonames below, and the count written
+    // they appear here and in osp_layerammonames below, and the count written
     // second wins, which is the pattern the donor already has for grenades.
     "weapon_etf_rifle",         // 0x400   Ground Zero
     "ammo_trap",                // 0x800   Xatrix
@@ -907,7 +939,7 @@ static const char *const osp_armornames[OSP_NUM_ARMOR] = {
     "item_armor_jacket", "item_armor_combat", "item_armor_body",
 };
 
-// The layers' five ammo types, in OSP_LAYER_* order (R-181).  `ammo_disruptor`
+// The layers' five ammo types, in OSP_LAYER_* order.  `ammo_disruptor`
 // is absent for the same reason the Disruptor is: IT_NOT_GIVEABLE.
 static const char *const osp_layerammonames[OSP_NUM_LAYER_AMMO] = {
     "ammo_magslug", "ammo_flechettes", "ammo_prox", "ammo_tesla", "ammo_trap",
@@ -919,7 +951,7 @@ static int  osp_armorslot[OSP_NUM_ARMOR];
 static int  osp_layerslot[OSP_NUM_LAYER_AMMO];
 static bool osp_slots_resolved;
 
-// The layers' start / ceiling / pack amounts, the three arrays R-181 adds
+// The layers' start / ceiling / pack amounts, the three arrays added
 // beside the donor's `start_items`, `max_items` and `pack_items`.  Static
 // because nothing outside this file reads them, which is true of the donor's
 // three as well.
@@ -946,7 +978,7 @@ static int OSP_loadoutSlot(const char *classname)
 
     if (!it) {
         gi.dprintf("Colosseum: the tourney loadout wants %s and the itemlist "
-                   "has no such item (R-180)\n", classname);
+                   "has no such item\n", classname);
         return 0;   // itemlist[0] is the reserved NULL row: an inert write
     }
     return ITEM_INDEX(it);
@@ -1014,13 +1046,12 @@ void OSP_initWeapItem(void)
     pack_armor = gi.cvar("pack_armor", "250", 0);
     pack_health = gi.cvar("pack_health", "100", 0);
 
-    // *** THE CONTENT LAYERS' FIFTEEN (R-181). ***
+    // The content layers' fifteen.
     //
-    // Colosseum's own, not a donor's, so sec 7 rule 6 governs the naming rather
-    // than R-OSP-11: they extend an existing tourney family and keep its
-    // prefixes.  Every `start_*` defaults to 0 and every `max_*` and `pack_*` to
-    // the number the code already used, so an untouched config behaves exactly
-    // as before:
+    // Colosseum's own, not a donor's: they extend an existing tourney family
+    // and keep its prefixes.  Every `start_*` defaults to 0 and every `max_*`
+    // and `pack_*` to the number the code already used, so an untouched config
+    // behaves exactly as before:
     //
     //   max_*   InitClientPersistant's ceilings -- 50, 200, 50, 50, 5 -- so
     //           OSP_seedPlayer's assignment is a no-op at the default.
@@ -1052,7 +1083,7 @@ void OSP_initWeapItem(void)
     // The donor's ladder, one bit per rank, highest set bit wins -- the same
     // eleven in the same order as `osp_weapnames` above.  It records the RANK
     // rather than the itemlist index the donor wrote here, because the itemlist
-    // cannot be searched yet (R-180); OSP_resolveLoadoutSlots turns it into
+    // cannot be searched yet; OSP_resolveLoadoutSlots turns it into
     // `initial_weap` on the first spawn.
     osp_initial_rank = OSP_WEAP_BLASTER;
     if (initial & 0x1)
@@ -1075,7 +1106,7 @@ void OSP_initWeapItem(void)
         osp_initial_rank = 9;
     if (initial & 0x200)
         osp_initial_rank = 10;
-    // R-181's eight, continuing the donor's one-bit-per-rank scheme.
+    // The layers' eight, continuing the donor's one-bit-per-rank scheme.
     if (initial & 0x400)
         osp_initial_rank = 11;
     if (initial & 0x800)
@@ -1104,7 +1135,7 @@ void OSP_initWeapItem(void)
     start_weap[8] = (have & 0x80) != 0;
     start_weap[9] = (have & 0x100) != 0;
     start_weap[10] = (have & 0x200) != 0;
-    // R-181's eight.  Zero unless an operator asks, so a config that predates
+    // The layers' eight.  Zero unless an operator asks, so a config that predates
     // them hands out exactly the eleven it always did.
     start_weap[11] = (have & 0x400) != 0;
     start_weap[12] = (have & 0x800) != 0;
@@ -1151,7 +1182,7 @@ void OSP_initWeapItem(void)
     pack_items[6] = (int)pack_armor->value;
     pack_items[7] = (int)pack_health->value;
 
-    // R-181's three, in OSP_LAYER_* order.
+    // The layers' three, in OSP_LAYER_* order.
     start_layer[OSP_LAYER_MAGSLUG] = (int)start_magslug->value;
     start_layer[OSP_LAYER_FLECHETTES] = (int)start_flechettes->value;
     start_layer[OSP_LAYER_PROX] = (int)start_prox_a->value;
@@ -1180,7 +1211,7 @@ void OSP_seedPlayer(gclient_t *client)
     int         ready;
     int         i;
 
-    // R-180: the donor's absolute itemlist indices, resolved by classname.
+    // The donor's absolute itemlist indices, resolved by classname.
     // First call does the lookups; every call keeps `initial_weap` in step.
     OSP_resolveLoadoutSlots();
 
@@ -1217,7 +1248,7 @@ void OSP_seedPlayer(gclient_t *client)
         client->pers.inventory[osp_weapslot[i]] = start_weap[i];
 
     // ...and its nine `start_items` writes, in the donor's order, which matters
-    // for exactly one of them: hand grenades are `ammo_grenades` in BOTH tables,
+    // for exactly one of them: hand grenades are `ammo_grenades` in both tables,
     // so the count below deliberately lands on the slot the have/have-not flag
     // above just wrote, and the count is meant to win.
     client->pers.inventory[osp_armorslot[2]] = start_items[10];     // body
@@ -1230,7 +1261,7 @@ void OSP_seedPlayer(gclient_t *client)
     client->pers.inventory[osp_ammoslot[4]] = start_items[4];       // rockets
     client->pers.inventory[osp_ammoslot[5]] = start_items[5];       // slugs
 
-    // R-181's five, after the weapon loop for the same reason the donor's ammo
+    // The layers' five, after the weapon loop for the same reason the donor's ammo
     // block is: `ammo_trap` and `ammo_tesla` are ranks 12 and 18 of that loop as
     // well as layer ammo, so the count is written second and wins.
     for (i = 0; i < OSP_NUM_LAYER_AMMO; i++)
@@ -1245,7 +1276,7 @@ void OSP_seedPlayer(gclient_t *client)
 
     // ...and the layers' five ceilings, which InitClientPersistant has just set
     // to the numbers these cvars default to, so this is a no-op unless a
-    // referee has moved one (R-181).  Five statements rather than a loop
+    // referee has moved one.  Five statements rather than a loop
     // because they are five distinct struct members.
     client->pers.max_magslug = max_layer[OSP_LAYER_MAGSLUG];
     client->pers.max_flechettes = max_layer[OSP_LAYER_FLECHETTES];
@@ -1262,9 +1293,9 @@ void OSP_seedPlayer(gclient_t *client)
 
     // client_protect seconds of spawn protection, but only in plain DM, only
     // for a player actually in the game, and only if they spawn with the
-    // BLASTER -- i.e. not on a weapons-start server.  The donor spells that
+    // BLASTER -- i.e. Not on a weapons-start server.  The donor spells that
     // `initial_weap == 7`, which is the itemlist index of the blaster there and
-    // of weapon_grapple here (R-180); asked by rank it needs no index at all.
+    // of weapon_grapple here; asked by rank it needs no index at all.
     if ((int)client_protect->value && client->resp.osp_entered == ENTERED_ENTERED &&
         G_Ruleset() == RULESET_DM && osp_initial_rank == OSP_WEAP_BLASTER)
         client->resp.osp_r23c = level.framenum +
@@ -1277,7 +1308,7 @@ void OSP_seedPlayer(gclient_t *client)
 =================
 OSP_itemFreed
 
-R-OSP-3: a powerup that timed out in the world rather than on a player.
+A powerup that timed out in the world rather than on a player.
 
 `nextthink <= level.framenum` is the whole test for "it expired" as against "it
 was removed": a quad taken by a player, swept by a referee's allow_item_quad 0
@@ -1307,7 +1338,7 @@ void OSP_itemFreed(edict_t *ed)
         OSP_Stats_ItemExpire("Invulnerability", NULL, ed - g_edicts);
 }
 
-// R-OSP-1's armour numbers, asked by the shared Pickup_Armor so that g_items.c
+// Tourney's armour numbers, asked by the shared Pickup_Armor so that g_items.c
 // needs neither the cvars nor max_items[]/pack_items[].  0 means "no ceiling of
 // its own", which is what Pickup_Armor starts from and what every ruleset but
 // tourney keeps.
@@ -1344,11 +1375,11 @@ void OSP_packPlayer(edict_t *ent)
     ent->client->pers.max_slugs = pack_items[5];
     ent->client->pers.max_health = pack_items[7];
 
-    // R-181: the layers' five, which this function had no cvar to read -- so a
+    // The layers' five, which this function had no cvar to read -- so a
     // pack under tourney raised the six baseq2 ceilings and left magslug and
     // flechettes where every other ruleset's pack_raise_ceilings() lifts them.
     // Assigned rather than raised, which is this function's whole shape: a
-    // referee may set a pack worth LESS than baseq2's.
+    // referee may set a pack worth less than baseq2's.
     ent->client->pers.max_magslug = pack_layer[OSP_LAYER_MAGSLUG];
     ent->client->pers.max_flechettes = pack_layer[OSP_LAYER_FLECHETTES];
     ent->client->pers.max_prox = pack_layer[OSP_LAYER_PROX];
@@ -1366,7 +1397,7 @@ void OSP_packPlayer(edict_t *ent)
 
 /*
 =================
-THE allow_* FAMILY, IN ONE TABLE -- R-183
+THE allow_* family, in one table
 
 An operator turns an item off with `allow_<thing> 0` and three separate pieces
 of code have to agree about what that means: SpawnItem asks whether to inhibit
@@ -1376,14 +1407,14 @@ compares here, fourteen banner tags here, fourteen cvar/name pairs in
 osp_stats.c -- and they did not even cover the same set: `allow_ammo_cells` and
 `allow_item_pack` inhibit an item that neither the banner nor the log mentions.
 
-THAT DRIFT IS THE POINT.  All three lists stopped at baseq2, so under `xatrix 1`
-or `rogue 1` -- which R-MODE-3 makes valid with every ruleset -- a referee could
+That drift is the point.  All three lists stopped at baseq2, so under `xatrix 1`
+or `rogue 1` -- both valid with every ruleset -- a referee could
 switch off the shotgun and not the Ion Ripper, and no banner or log could have
 said so.  One table now, and a row that omits a tag or a log name says so with
 NULL rather than by being absent from a second list.
 
-The ammo rules below the table are NOT rows, and deliberately: shells are gone
-when BOTH shotgun weapons are, bullets when both bullet weapons are, and so on.
+The ammo rules below the table are not rows, and deliberately: shells are gone
+when both shotgun weapons are, bullets when both bullet weapons are, and so on.
 That is a rule about other cvars rather than a cvar of its own, which is the one
 shape a single row cannot carry.
 =================
@@ -1407,13 +1438,13 @@ const osp_allow_t osp_allow_items[] = {
     // The donor inhibits these two and names them nowhere.  Kept that way: the
     // banner is a fixed-width HUD line and the log is a wire format, so adding
     // to either is a change to what a client draws or a parser reads, and
-    // neither is what R-183 is about.
+    // neither is what the pack rows are about.
     { "allow_ammo_cells",       "ammo_cells",            NULL,       NULL },
     { "allow_item_pack",        "item_pack",             NULL,       NULL },
 
-    // R-183: the content layers.  Xatrix first, then Ground Zero, each in its
+    // The content layers.  Xatrix first, then Ground Zero, each in its
     // own itemlist order.  The Disruptor is here even though it is
-    // IT_NOT_GIVEABLE (R-16): `give` cannot hand it out, but a map may still
+    // IT_NOT_GIVEABLE: `give` cannot hand it out, but a map may still
     // PLACE one, and inhibiting a placed entity is exactly what this table does.
     { "allow_ionripper",        "weapon_boomer",         "IR",       "Ionripper" },
     { "allow_phalanx",          "weapon_phalanx",        "PH",       "Phalanx" },
@@ -2099,7 +2130,7 @@ bool OSP_disableItems(edict_t *ent)
             return true;
 
     // The derived ammo rules: ammunition goes when every weapon that fires it
-    // has gone.  The donor's four, and R-183's four beside them -- one per pack
+    // has gone.  The donor's four, and the packs' four beside them -- one per pack
     // weapon that has ammo of its own.  `ammo_cells` is not here because it has
     // a cvar in the table: three weapons share cells and the donor gave the
     // ammo its own switch rather than deriving it from all three.
@@ -2934,7 +2965,7 @@ void OSP_startDemos(void)
     int         cids[2];
     int         i;
     int         index;
-    // <INVENTED NAME>: separate from `chars` below.
+    // Name reconstructed: separate from `chars` below.
     int         found;
     int         chars;
     int         c;
@@ -3315,26 +3346,14 @@ void OSP_logAdminLog(char *fmt, ...)
     fflush(server_log);
 }
 
-// Caches the client's dotted-quad (without the port) in edict+0x37c, which is
-// what every ban and every admin log line prints.
-void OSP_getPlayerAddr(edict_t *ent)
-{
-    char        buf[128];
-    char        *p;
-
-    if (ent->osp_e37c[0])
-        return;
-
-    p = Info_ValueForKey(ent->client->pers.userinfo, "ip");
-    Q_strlcpy(buf, p, sizeof(buf));
-    p = strchr(buf, ':');
-    if (p)
-        *p = 0;
-    // osp_e37c is 32 bytes and osp_e39c -- the referee flag -- is the field
-    // right behind it, so an address that did not fit used to hand out
-    // referee status.  An IPv6 literal is long enough to do it.
-    Q_strlcpy(ent->osp_e37c, buf, sizeof(ent->osp_e37c));
-}
+// *`OSP_getPlayerAddr` is gone with the field it filled.*  It derived the
+// address a second time, lazily, out of `pers.userinfo` -- and that copy of
+// the `ip` key is whatever the CLIENT last sent, because the engine force-sets
+// it in the connect packet only.  So a client that reached any of its callers
+// with the field still empty could name the address its own ban line, its own
+// referee-attempt line and the admin's kick menu would print.  The address is
+// latched once now, in ClientConnect, into `client->pers.address` (R-LOG-1),
+// and the two reads it had to guess for are reads of that.
 
 // A muzzle-flash-channel sound played on the player themselves.  In 1v1 with a
 // match running, only players actually in the game make a noise.
@@ -3392,10 +3411,10 @@ void OSP_parseString(const char *str, gitem_armor_t *info)
 =================
 OSP_CheckRules
 
-R-OSP-1's match system as the tourney ruleset's CheckRules row (R-MODE-5).
+Tourney's match system as the tourney ruleset's CheckRules row.
 
 The donor drives all of this from G_RunFrame directly, beside CheckDMRules,
-which is the same shape RA2 had and R-76 corrected there: two match-rule systems
+which is the same shape RA2 had, corrected there the same way: two match-rule systems
 at one call site with nothing saying how they compose.  Here the row says it.
 The match clock, the vote timeout, the team frag totals and the pre-match sync
 are tourney's ROUND-scope work; CheckDMRules ends the LEVEL, and tourney keeps
@@ -3406,7 +3425,7 @@ are tourney's ROUND-scope work; CheckDMRules ends the LEVEL, and tourney keeps
 =================
 OSP_CheckRules
 
-Tourney's CheckRules row (R-MODE-5, R-OSP-1).  It REPLACES CheckDMRules rather
+Tourney's CheckRules row.  It replaces CheckDMRules rather
 than wrapping it, because every one of baseq2's three answers is different here:
 
   * the clock runs from `sync_time`, the frame the match went live, not from the
@@ -3444,8 +3463,8 @@ void OSP_CheckRules(void)
             ot_count = 0;
             gi.bprintf(PRINT_HIGH, "Timelimit hit.\n");
             sl_SoftGameEnd(&gi, level);
-            // R-OSP-3: every way a match ends closes the accuracy table and
-            // stamps the record with WHY, which is the field a report groups
+            // Every way a match ends closes the accuracy table and
+            // stamps the record with why, which is the field a report groups
             // by.  `overtime_timer` non-zero means this was an overtime period
             // running out rather than the match's own clock.
             OSP_Stats_AccuracyAll();
@@ -3457,7 +3476,7 @@ void OSP_CheckRules(void)
     } else if (connected_clients - botglobals.numbots <= 0 &&
                level.time > 3600) {
         // An hour with nobody on it: end the level so the rotation moves and a
-        // server left running does not sit on one map for ever.  BOTS DO NOT
+        // server left running does not sit on one map for ever.  Bots do not
         // COUNT -- they never leave, so counting them makes a bot-filled server
         // one that never rotates again.
         ot_count = 0;
@@ -3508,9 +3527,35 @@ void OSP_CheckRules(void)
 =================
 OSP_EndLevel
 
-R-OSP-9's third rotation, and the third time the answer is the EndLevel row
+The third rotation, and the third time the answer is the EndLevel row
 rather than a second rotation inside EndDMLevel.  `osp_maps.c`'s list decides;
 an empty list falls back to baseq2's, which is one choice made in one place.
+
+Four callers were still reaching past this function.  In the donor there is no
+split -- `port_osp:g_main.c`'s `EndDMLevel` holds all five of the things below,
+so its map vote, its `r_map`, its admin menu and its config vote each got the
+whole of it.  Hoisting the OSP half up here left those four calling
+`EndDMLevel()` by name, which is now only baseq2's half.
+
+What they lost, and the first item is the feature itself: `NextMap()` is the
+only reader of `selected_map`/`next_map`, which is where `OSP_mapExists(.., true)`
+puts a voted-for map -- so a passed map vote, a referee `r_map` and the admin
+menu's map choice all ended the level without applying the map they had just
+chosen, and `EndDMLevel` fell through to `level.nextmap`, a `target_changelevel`
+or the same map again.  The choice was not discarded: `selected_map` stayed set,
+so the next level end from the rules row picked it up, one map late.  They also
+lost `EnitityListClean()` -- the camera lists hold edicts that are about to be
+reused -- and `endlvl_frame`, which `osp_display.c` reads twice.
+
+Contrast CTF, whose four level-end sites were the same shape and were not a
+defect: Threewave passes its warp target in `level.forcemap`, which BASEQ2's
+`EndDMLevel` reads, so the map survived the bypass.  They dispatch now anyway,
+because `ops_ctf.EndLevel` being NULL is what made them harmless and that is
+not a property a call site should depend on.
+
+The tell was in this function: `hs_mode && !manual_map` could not be false,
+because `manual_map` is only ever non-zero on the four paths that were skipping
+this test.  `tools/dispatch.py` is the standing check.
 =================
 */
 void OSP_EndLevel(void)
@@ -3557,7 +3602,7 @@ const ruleset_ops_t ops_tourney = {
     // BeginIntermission, SelectSpawnPoint and ClientPlaced stay dm's: tourney
     // places players through OSP_startObserve() and its own team spawns, which
     // p_client.c reaches directly, and its intermission is EndLevel's.
-    // R-MODE-6 makes a NULL row inherit rather than crash.
+    // A NULL row inherits rather than crashing.
 };
 
 /*
@@ -3569,9 +3614,9 @@ spawn rather than by telefragging whoever is there.
 
 The donor's SelectSpawnPoint returns false when a player is within 60 units of
 the chosen spot, and PutClientInServer then leaves the client frozen and
-bodiless -- `osp_r240` 0 -- which R-191's respawn trigger retries on the next
-think.  The two only make sense together: the refusal is safe BECAUSE the retry
-exists, and the retry has something to retry BECAUSE placements can be refused.
+bodiless -- `osp_r240` 0 -- which the respawn trigger retries on the next
+think.  The two only make sense together: the refusal is safe because the retry
+exists, and the retry has something to retry because placements can be refused.
 
 Two exclusions that PlayersRangeFromSpot does not make, both the donor's and both
 load-bearing rather than tidy:
@@ -3582,8 +3627,8 @@ load-bearing rather than tidy:
     would find the same spot and the same body.
   * an OBSERVER is not a player.  `resp.osp_entered != ENTERED_ENTERED` is
     exactly the test, and without it one client hovering over a spawn point
-    blocks it for everybody.  It is the same finding R-RA-4 records for arena's
-    farthest-spawn one ruleset over, made by the donor for its own reason.
+    blocks it for everybody.  It is the same finding as arena's farthest-spawn
+    one ruleset over, made by the donor for its own reason.
 
 60.0 is a double in the donor and the comparison is written the way the
 decompilation has it, `60.0 > range`, which is not the same as `range < 60.0f`
@@ -3638,7 +3683,7 @@ bool OSP_teamLost(int team)
 OSP_GibCount
 
 `numgibs` (default 4), which p_client.c's two gib loops ask for.  Registered,
-documented, clamped by nothing and read by nobody until R-193: the default
+documented, clamped by nothing and read by nobody: the default
 matches baseq2's literal 4, which is exactly why the omission was invisible --
 the cvar worked on every server that left it alone.
 =================
@@ -3653,11 +3698,11 @@ int OSP_GibCount(void)
     n = (int)numgibs->value;
     // The donor takes the value as it stands; a negative one is a loop that
     // does not run, and a huge one is an entity flood, so it is bounded here for
-    // the same reason R-VER-11 bounds every other operator number.
+    // the same reason every other operator number is bounded.
     return Q_clip(n, 0, 32);
 }
 
-// R-OSP-1's fast respawn, as a function so that g_items.c's SetRespawn stays
+// Tourney's fast respawn, as a function so that g_items.c's SetRespawn stays
 // one line of tourney.  The donor computes it inline there; the arithmetic and
 // the three cvars are tourney's, so they live here.
 //
@@ -3687,7 +3732,7 @@ float OSP_respawnDelay(float delay)
 
 /*
 =================
-R-185: THE TWO READS THE IMPORT DROPPED
+The two reads the import dropped
 
 Both cvars below were registered by the merge and read by nobody, so an operator
 could set them and nothing happened.  Upstream reads both, and the reads are
@@ -3699,18 +3744,18 @@ what came across as blanks:
     and `:212` assign them to `damagePerCell`, which the merge left as the
     hardcoded 1 and 2.
 
-BOTH ARE GATED ON RegularDM, because upstream gates them on `!m_mode` and
-`m_mode` is the donor's match mode -- the selector R-OSP-12 flattened into
-`g_ruleset`, where 0 is `RULESET_DM`.  Outside RegularDM the donor uses the fixed
+Both are gated on RegularDM, because upstream gates them on `!m_mode` and
+`m_mode` is the donor's match mode -- the selector flattened into `g_ruleset`,
+where 0 is `RULESET_DM`.  Outside RegularDM the donor uses the fixed
 ratios, so a tournament cannot be re-balanced by a cvar mid-series.
 
-NEITHER IS MEASURABLE FROM A BOT TEST, and R-185 records why rather than
-claiming one: `respawn_delay` is only on the forced-respawn arm and a bot holds
+Neither is measurable from a bot test, and the reason is recorded here rather
+than a test claimed: `respawn_delay` is only on the forced-respawn arm and a bot holds
 attack, so it respawns through the button arm regardless; and the ratios' clamp
 only fires for a player holding power armour, which no map with an `.aas` places
 and `start_armortype` cannot grant.
 
-*** WITH THE DEFAULTS, NEITHER CHANGES ANYTHING. *** `respawn_delay` defaults to
+With the defaults, neither changes anything.  `respawn_delay` defaults to
 0, and 0 frames makes the added test identical to the one already above it;
 the two ratios default to exactly the 1 and 2 that were hardcoded.  That is the
 point: a faithful restoration of a dropped read is invisible until somebody sets
@@ -3718,14 +3763,14 @@ the cvar, which is precisely why nobody noticed it was missing.
 =================
 */
 
-// Seconds, into frames.  *** UPSTREAM DOES NOT SCALE THIS. ***
+// Seconds, into frames.  Upstream does not scale this.
 // `osp-tourney/p_client.c:2625` writes `client->respawn_framenum +
 // resp_delay->value` -- a FRAME count plus a value its own documentation calls
 // "an allowable delay (in seconds)".  At 10 fps that makes `respawn_delay 1`
 // mean a tenth of a second, so the cvar is off by BASE_FRAMERATE for its whole
 // documented range.  This is the unit-bug class `tools/units.py` exists for and
-// the same one R-CTF-1 found in the flag return; §7 rule 1 takes the reading
-// that matches the donor's own documentation, so the seconds are seconds here.
+// the same one found in the CTF flag return.  The reading that matches the
+// donor's own documentation wins, so the seconds are seconds here.
 int OSP_forcedRespawnDelay(void)
 {
     // `resp_delay` is NULL until OSP_gameInit has run, and this is reached from
@@ -3757,7 +3802,7 @@ float OSP_powerArmorPerCell(bool screen)
 }
 
 // Choose which member of a respawn team comes back, skipping the ones a referee
-// has switched off (R-OSP-1).  g_items.c's DoRespawn calls this instead of
+// has switched off.  g_items.c's DoRespawn calls this instead of
 // walking the chain itself: the skip has to happen when COUNTING as well as
 // when choosing, or the random index points past the survivors and the walk
 // runs off the end of the chain.  Returns NULL when every member is disabled,
@@ -3807,7 +3852,7 @@ bool OSP_teamHasEnabled(edict_t *master)
 OSP_worldspawn
 
 Everything the donor does in SP_worldspawn, in one call so that the shared file
-holds one gate rather than forty lines of tourney (R-MODE-5).
+holds one gate rather than forty lines of tourney.
 
 Ordering inside is the donor's and two parts of it matter.  The hi-score table
 is read from disk before the MOTD is built, because the MOTD can quote it.  And
@@ -3816,8 +3861,8 @@ scores those names are drawn beside -- the other order shows last match's
 numbers under this match's names for one frame.
 
 The configstring indices are OSP_CS(5), (7), (9) and (10): the donor spells them
-0x625, 0x627, 0x629 and 0x62a, which is CS_GENERAL_OLD plus the offset, and
-R-81 is why they are not spelled that way here.
+0x625, 0x627, 0x629 and 0x62a, which is CS_GENERAL_OLD plus the offset; the
+remapped names are used here instead.
 =================
 */
 void OSP_worldspawn(void)
@@ -3836,9 +3881,9 @@ void OSP_worldspawn(void)
 
     // The mode used to be re-read here, because `match_mode` was not latched and
     // a referee's mid-match `set match_mode 3` had to reach the next map through
-    // the clamp rather than around it.  `g_ruleset` IS latched (R-MODE-1), so
+    // the clamp rather than around it.  `g_ruleset` IS latched, so
     // there is nothing to re-read and no window in which the announced mode and
-    // the running one can differ -- which is what R-OSP-13 existed to police.
+    // the running one can differ.
     sync_stat = OSP_IsMatch() ? 0 : 8;
 
     OSP_setMOTD();
@@ -3890,7 +3935,7 @@ void OSP_levelSpawned(void)
 OSP_frameStart
 
 The per-frame work the donor does at the top of G_RunFrame, after the clock has
-advanced (R-OSP-1).  Five independent things, none of which is a rule check --
+advanced.  Five independent things, none of which is a rule check --
 OSP_CheckRules is the ops row for that.
 =================
 */
@@ -4118,29 +4163,48 @@ bool OSP_exitLevel(void)
 
     OSP_serverbotsRemove();
 
-    // R-OSP-1: an overtime count belongs to the match that ran it, not to the
-    // next one.  Reset on EVERY exit, not only on the two timelimit arms of the
+    // An overtime count belongs to the match that ran it, not to the
+    // next one.  Reset on every exit, not only on the two timelimit arms of the
     // rules row -- a match that went to overtime and then ended on the team
     // fraglimit was handing its count to the match after it.
     ot_count = 0;
 
-    // A CONFIG VOTE CHANGES THE MAP LIST, and the new list only exists now.
+    // A config vote changes the map list, and the new list only exists now.
     // OSP_config_vote sets manual_map = 2, queues `exec <config>` through
     // gi.AddCommandString and ends the level; the exec runs during the
     // intermission, so this is the first moment the voted-for configuration is
-    // actually in force.  Re-reading `maps.txt` here and picking from THAT is
+    // actually in force.  Re-reading `maps.txt` here and picking from that is
     // what makes the vote change the rotation -- without this arm the next
     // level came from the map list of the configuration being replaced.
+    //
+    // `gamemap`, not `map`, and the flags are cleared here.  This arm
+    // returns true, which is what stops ExitLevel() from running -- and
+    // ExitLevel() is where `exitintermission` and `intermission_framenum` are
+    // normally cleared.  So an arm that returns true without clearing them is
+    // re-entered on the NEXT frame, and on every frame after that.
+    //
+    // With `map` that loop never ends.  Q2PRO ignores a `map` issued while a
+    // game is running unless `sv_allow_map` is set -- `should_really_restart()`
+    // prints "Using 'map' will cause full server restart" and returns -1 -- so
+    // the level does not change, the flags stay set, and this arm re-reads
+    // maps.txt from disk and re-issues the ignored command for ever.  Measured
+    // by `scenarios/ospmapchange`: 360 iterations in 40 seconds, and a passed
+    // config vote left the server wedged in the intermission.
+    //
+    // `ExitLevel()` in g_main.c has always spelled it `gamemap`; these two were
+    // the only `map` commands in the tree.
     if (manual_map == 2) {
         OSP_loadMaps();
         ent = NextMap();
-        gi.AddCommandString(va("map %s\n",
+        level.exitintermission = 0;
+        level.intermission_framenum = 0;
+        gi.AddCommandString(va("gamemap \"%s\"\n",
                                ent ? ent->map : level.mapname));
         return true;
     }
 
     // Same level again, with somebody still on the server: restart in place.
-    // BOTS DO NOT COUNT as somebody: they never leave, so a bot-filled server
+    // Bots do not count as somebody: they never leave, so a bot-filled server
     // would restart this level for ever instead of moving on.
     if (((int)dmflags->value & DF_SAME_LEVEL) && manual_map != 1 &&
         level.framenum < 64000 &&
@@ -4196,8 +4260,18 @@ bool OSP_exitLevel(void)
         gi.dprintf("Changing back to default config: %s\n",
                    vote_config_defaultname->string);
         G_QueueOspHookRequest();
-        gi.AddCommandString(va("exec %s\n", vote_config_defaultname->string));
-        gi.AddCommandString(va("map %s\n", level.mapname));
+        // QUOTED.  A config name is a filename out of `serverconfigs.txt`;
+        // unquoted, one containing a space splits into two tokens and `exec`
+        // gets the wrong name.  The `gamemap` sites either side of this
+        // already quote theirs.
+        gi.AddCommandString(va("exec \"%s\"\n", vote_config_defaultname->string));
+        // The second such site, and the same two reasons: `map` is ignored
+        // mid-game by Q2PRO, and returning true past ExitLevel() means this
+        // function owns the clearing.  Reloading the same map is still a level
+        // change -- it is how the default config's settings take effect.
+        level.exitintermission = 0;
+        level.intermission_framenum = 0;
+        gi.AddCommandString(va("gamemap \"%s\"\n", level.mapname));
         return true;
     }
 
@@ -4209,8 +4283,8 @@ bool OSP_exitLevel(void)
 =================
 OSP_clientBeginPre
 
-Everything the donor does in ClientBeginDeathmatch BEFORE the client is placed
-(R-OSP-1, R-OSP-2).
+Everything the donor does in ClientBeginDeathmatch before the client is placed
+.
 
 Most of it is stufftext: the mod asks the client for four things it cannot know
 otherwise -- whether they hold a referee password, their default team name and
@@ -4228,7 +4302,7 @@ void OSP_clientBeginPre(edict_t *ent)
 {
     gclient_t *cl = ent->client;
 
-    // R-OSP-3: the connect record, here rather than lazily from the first event
+    // The connect record, here rather than lazily from the first event
     // that needs one, so the log's order matches the game's.  `osp_r2a8` is the
     // "already announced" latch and it lives in resp, which the InitClientResp
     // immediately above has just cleared for a client that is not recovering.
@@ -4349,7 +4423,7 @@ bool OSP_clientBegunPost(edict_t *ent)
 
     cl->resp.osp_r0d4 = level.framenum + 60;
 
-    // R-OSP-4: arm the speed watch, or mark this client as one that is never
+    // Arm the speed watch, or mark this client as one that is never
     // sampled.  16 is the donor's "not watched" value and it is what
     // ClientBeginServerFrame tests; a bot has no console to answer
     // `_init_state` from, so it is never a candidate.
@@ -4367,7 +4441,7 @@ bool OSP_clientBegunPost(edict_t *ent)
 =================
 OSP_botJoin / OSP_botReady
 
-R-OSP-11's behaviour half, which is Phase 7's because it needs a bot to exist.
+The behaviour half of tourney's bot handling.
 
 A client under tourney connects as an OBSERVER -- OSP_clientBeginPre sets
 `entered` to ENTERED_OBSERVER for everyone -- and enters the game by pressing a
@@ -4377,7 +4451,7 @@ bot presses nothing.  Neither the donor's bot layer nor the 1999 brain sends
 drop / invuse / invdrop / wave plus EA_Command, and nothing in `bl_*.c` or
 `bots.cfg` issues one either.  So bots under `osp-tourney` connect, sit in the
 audience and are not counted -- which is what they did here too, silently,
-because R-58's `entered`/`osp_entered` split had been applied to most of the
+because the `entered`/`osp_entered` split had been applied to most of the
 tree and not to CheckMinimumPlayers' accessor, and a `bool` reads ENTERED_
 OBSERVER (2) as equal to ENTERED_ENTERED (1).
 
@@ -4389,7 +4463,7 @@ all of them.
 
 1v1 is deliberately left alone: OSP_clientBeginLevel already calls OSP_1v1Add
 for mode 3, so a bot takes its place in the spectator queue and enters when the
-queue reaches it, which is R-OSP-12's rule and not something a bot may skip.
+queue reaches it, which is the ruleset's rule and not something a bot may skip.
 =================
 */
 void OSP_botJoin(edict_t *ent)
@@ -4400,7 +4474,7 @@ void OSP_botJoin(edict_t *ent)
         return;
 
     // OSP_startObserve is the toggle behind the `observe` command and it is
-    // the ONE function that handles all four modes: it asks OSP_1v1AllowJoin
+    // the one function that handles all four modes: it asks OSP_1v1AllowJoin
     // under mode 3, OSP_addTeamMember(ent, 2) under 2 and 3 -- 2 being the
     // donor's "pick a side for me", which balances, honours a locked or full
     // team and consults OSP_defaultTeam -- and under 0 and 1 simply enters.
@@ -4421,8 +4495,7 @@ before a bot will ready up in qualifier, teamplay or 1v1 modes.  If 0, a bot
 will automatically ready itself when all other real clients have moved to ready
 status."  Both halves are implemented here.
 
-THE DONOR DOES IMPLEMENT THE FIRST HALF, contrary to what
-doc/reconciliation.md R-105 used to say: `osp-tourney`'s ClientThink opens with
+The donor does implement the first half: `osp-tourney`'s ClientThink opens with
 
     if (ent->flags & FL_BOT) {
         if (resp.entered != ENTERED_ENTERED)
@@ -4435,7 +4508,7 @@ doc/reconciliation.md R-105 used to say: `osp-tourney`'s ClientThink opens with
 -- which is the join (OSP_botJoin above) and this, both of them.  Three things
 here are deliberately the donor's and one is deliberately not:
 
-  * THE CLOCK IS PER BOT, from `resp.enterframe`, not absolute from the start of
+  * The clock is per bot, from `resp.enterframe`, not absolute from the start of
     the level.  A bot that joins late gets its own `bots_warmuptime` rather than
     being ready the moment it arrives.
   * `quiet` is 2, which is what suppresses both the "%s is ready!" broadcast and
@@ -4461,7 +4534,7 @@ void OSP_botReady(void)
     if (level.framenum & 31)
         return;
 
-    // A BOT THAT IS NOT IN THE GAME IS PUT BACK IN IT.  The donor asks this on
+    // A bot that is not in the game is put back in it.  The donor asks this on
     // every frame of every bot's ClientThink, and it is not only about the
     // first join: the inactivity rule, a forfeited team and a referee's
     // `kickplayer` all end with a bot sitting in the audience, and nothing else
@@ -4526,7 +4599,7 @@ OSP_clientBeginLevel
 
 The ClientBegin half: a client that is already connected and is arriving on a
 new level, or coming back after a disconnect.  Separate from the two above
-because it runs on EVERY level load, where those run once per connection.
+because it runs on every level load, where those run once per connection.
 =================
 */
 void OSP_clientBeginLevel(edict_t *ent)
@@ -4542,10 +4615,11 @@ void OSP_clientBeginLevel(edict_t *ent)
         // resp.clientid survives it too, deliberately (see InitClientResp).
         if (cl->resp.clientid >= 0 &&
             cl->resp.clientid < (int)q_countof(p_acc))
-            Q_strlcpy(p_acc[cl->resp.clientid].osp_a010, ent->osp_e37c,
+            Q_strlcpy(p_acc[cl->resp.clientid].osp_a010,
+                      cl->pers.address,
                       sizeof(p_acc[cl->resp.clientid].osp_a010));
     } else {
-        // R-OSP-3: a player who took their seat back is a reconnect, not a new
+        // A player who took their seat back is a reconnect, not a new
         // player -- the log has to say so or the report counts them twice.
         OSP_Stats_PlayerReconnect(ent);
         // ...and the camera system tracks them again.  Without this a
@@ -4569,7 +4643,7 @@ void OSP_clientBeginLevel(edict_t *ent)
         }
     }
 
-    // THE MATCH WAS WAITING FOR THIS PLAYER, and only for this one.  The other
+    // The match was waiting for this player, and only for this one.  The other
     // side has been playing a man down since they dropped; `reconn_player` is
     // whose name ClientDisconnect wrote there, and matching it is what stops
     // any other arrival ending a pause that is not theirs to end.
@@ -4590,7 +4664,7 @@ void OSP_clientBeginLevel(edict_t *ent)
 =================
 OSP_clientLeaving / OSP_clientLeft
 
-The two halves of tourney's disconnect (R-OSP-1), split where the SPINE has to
+The two halves of tourney's disconnect, split where the SPINE has to
 do its own work in between: the first runs before the edict is torn down and
 needs the client still linked and still on its team, the second after, and
 recounts the server.
@@ -4642,7 +4716,7 @@ void OSP_clientLeaving(edict_t *ent, int *out_team)
 
     sl_LogPlayerDisconnect(&gi, level, ent);
     OSP_Stats_PlayerLeave(ent);
-    // R-OSP-3: their accuracy row, while the client is still addressable.  Not
+    // Their accuracy row, while the client is still addressable.  Not
     // at intermission, where OSP_Stats_AccuracyAll has already written it.
     if (!level.intermission_framenum)
         OSP_Stats_Accuracy(ent);
@@ -4773,7 +4847,7 @@ bool OSP_clientLeft(edict_t *ent, int tno)
     else if (G_Ruleset() == RULESET_DMPRO)
         OSP_checkHalt(2);
 
-    // THE LAST HUMAN LEFT.  Bots a vote put here are the vote's, not the
+    // The last human left.  Bots a vote put here are the vote's, not the
     // server's, so with nobody left to have voted they go too -- unless
     // `bots_noclients` says to keep a bot-only server running.
     if (!(ent->flags & FL_BOTCLIENT) &&
@@ -4791,7 +4865,7 @@ bool OSP_clientLeft(edict_t *ent, int tno)
 =================
 OSP_userinfoChanged
 
-Tourney's half of ClientUserinfoChanged (R-OSP-1, R-OSP-4), run before the spine
+Tourney's half of ClientUserinfoChanged, run before the spine
 copies the name and skin out of the userinfo it is handed -- because what this
 does is EDIT that userinfo in place, and the spine reading it afterwards is what
 makes the edit stick.
@@ -4802,7 +4876,7 @@ Four things, and each is a rule about what a player may call themselves:
     `client_infochange` seconds, is refused and the old one put back.  The
     second is not vanity policing: a player who renames every frame makes the
     scoreboard unreadable for everyone else, and the userinfo-key-order auto-ban
-    R-OSP-4 names came from the same place.
+    came from the same place.
   * a real rename is written to both logs and to the admin log.
   * `pers.greenname` is the name with the high bit set on every byte, which is
     how the mod draws it in the alternate charset; it is rebuilt here so that
@@ -4819,10 +4893,10 @@ void OSP_userinfoChanged(edict_t *ent, char *userinfo)
     size_t    i;
     int       tnum;
 
-    // R-OSP-4's rate cap, and it is edited into the userinfo the caller is
-    // about to copy out, like everything else here.  A bot has no connection to
-    // rate-limit; `pers.connected` false is the first ClientUserinfoChanged of
-    // a connect, where there is nobody to tell yet.
+    // The rate cap, edited into the userinfo the caller is about to copy out,
+    // like everything else here.  A bot has no connection to rate-limit;
+    // `pers.connected` false is the first ClientUserinfoChanged of a connect,
+    // where there is nobody to tell yet.
     if ((int)client_maxrate->value && !(ent->flags & FL_BOTCLIENT)) {
         s = Info_ValueForKey(userinfo, "rate");
         if ((int)client_maxrate->value < Q_atoi(s)) {
@@ -4855,9 +4929,9 @@ void OSP_userinfoChanged(edict_t *ent, char *userinfo)
 
     if (Q_stricmp(cl->pers.netname, s)) {
         // The rename cooldown, in an int.  The donor stamps it on `charname`
-        // and casts a frame number to and from a `char *`; R-79 carried that
-        // as-is and added `osp_infochange_framenum` for it, then never wired
-        // the field -- so the cast stayed and the field sat dead.  The cast
+        // and casts a frame number to and from a `char *`.  The merge carried
+        // that as-is and added `osp_infochange_framenum` for it, then never
+        // wired the field -- so the cast stayed and the field sat dead.  The cast
         // survives LP64 by luck, not by contract: nothing stops a later reader
         // treating that member as the string its type says it is, and the
         // three other `char *` beside it ARE strings.
@@ -4901,7 +4975,7 @@ void OSP_userinfoChanged(edict_t *ent, char *userinfo)
         }
     }
 
-    // THE SKIN IS THE SERVER'S UNDER THREE RULES, and `resp.osp_r0f4` is the
+    // The skin is the server's under three rules, and `resp.osp_r0f4` is the
     // one in force -- what the player asked for is only ever a proposal.
     //
     //   * a qualifier match can force every player onto one skin so that the
@@ -4933,7 +5007,7 @@ void OSP_userinfoChanged(edict_t *ent, char *userinfo)
 =================
 OSP_clientAllowed
 
-The player-list check on the connect path (R-OSP-1, R-OSP-4).  False means the
+The player-list check on the connect path.  False means the
 connection is refused and `rejmsg` says why.
 
 The four refusals are the donor's and they are the reason the mod has a player
@@ -4942,9 +5016,10 @@ wrong password for a reserved name, and a banned address.  Each gets its own
 message, because "connection refused" with no reason is what makes a player try
 again forever.
 
-R-OSP-4's `strcpy` of the client address is fixed here rather than carried: the
+The donor's `strcpy` of the client address is fixed here rather than carried: the
 donor copies an unbounded `ip` userinfo value into a 1024-byte stack buffer and
-then into `ent->osp_e37c`, which is 32.
+then into a 32-byte field; here the copies are bounded and the field is
+`client->pers.address`, sized `MAX_CLIENT_ADDRESS` (R-LOG-4).
 =================
 */
 bool OSP_clientAllowed(edict_t *ent, char *userinfo)
@@ -4975,37 +5050,27 @@ bool OSP_clientAllowed(edict_t *ent, char *userinfo)
 =================
 OSP_clientConnected
 
-The tail of the connect path: remember where they came from, and say so on the
-console and in the admin log.  `osp_e37c` is the address with the port stripped,
-which is what the player list matches a reserved name against.
+The tail of the connect path: tourney's own half of it.  The address and the
+console line that used to be derived and printed here are the tree's now --
+`G_LatchClientAddress` and the record beside it in ClientConnect, under every
+ruleset (R-LOG-1) -- and `client->pers.address` is the same string this
+function wrote, which is what the player list matches a reserved name against.
+
+What stays is what is tourney's: the admin log, and the first arming of the
+bot watchdog.
 =================
 */
-void OSP_clientConnected(edict_t *ent, char *userinfo)
+void OSP_clientConnected(edict_t *ent)
 {
-    char *colon;
-
-    if (ent->flags & FL_BOTCLIENT) {
-        Q_strlcpy(ent->osp_e37c, "SERVER_BOT", sizeof(ent->osp_e37c));
-    } else {
-        Q_strlcpy(ent->osp_e37c, Info_ValueForKey(userinfo, "ip"),
-                  sizeof(ent->osp_e37c));
-        colon = strchr(ent->osp_e37c, ':');
-        if (colon)
-            *colon = 0;
-    }
-
-    gi.dprintf("(%s connected from %s)\n", ent->client->pers.netname,
-               ent->osp_e37c);
-
     if (server_log) {
         char date[64];
 
         OSP_getDateInfo(date);
-        OSP_logAdminLog("Connect: %s - %s (%s)", ent->osp_e37c,
+        OSP_logAdminLog("Connect: %s - %s (%s)", ent->client->pers.address,
                         ent->client->pers.netname, date);
     }
 
-    // R-OSP-4: the first arming, half a second sooner than the one at the end
+    // The first arming, half a second sooner than the one at the end
     // of ClientBeginDeathmatch -- a client that connects and never enters is
     // still sampled once.
     if (bot_watch && !(ent->flags & FL_BOT)) {

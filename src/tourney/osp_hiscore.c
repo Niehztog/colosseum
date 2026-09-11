@@ -17,12 +17,11 @@ along with this program; if not, write to the Free Software
 Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 */
-// OSP Tourney DM v2.75, from osp-tourney@1d8427e (doc/provenance.md).
+// OSP Tourney DM v2.75, from osp-tourney@1d8427e.
 // Donor-only: baseq2 has no counterpart, so it lives in src/tourney/ rather
-// than being merged into a spine file (R-CORE-7).  The reconstruction's
-// asm-matching address comments are stripped -- SPECS.md N1 makes those oracles
-// meaningless here, and they survive at the pin.
-// osp_hiscore.c -- <INVENTED FILENAME>. The persistent per-map high score
+// than being merged into a spine file.  The reconstruction's
+// asm-matching address comments are stripped.
+// osp_hiscore.c -- filename assigned by this tree.  The persistent per-map high score
 // table.
 //
 // Ten entries of name/score/date plus a "set this session" flag, kept in the

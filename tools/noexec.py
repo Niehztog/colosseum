@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""The game library opens no socket and starts no process (R-SEC-7).
+"""The game library opens no socket and starts no process.
 
-WHY.  R-SEC-7 allows exactly one outbound thing and names it: `autolaunchbspc`,
+WHY.  Exactly one outbound thing is allowed: `autolaunchbspc`,
 which is a LIBVAR handed to the bot brain -- the brain launches BSPC, this
 library does not, and the cvar that enables it is empty by default so the libvar
 is never pushed.  Everything else is forbidden, and "forbidden" in a tree with
@@ -15,7 +15,7 @@ The list is what libc and winsock actually offer; a wrapper around one of them
 is caught at the wrapper.
 
 WHAT IS NOT.  `fopen`/`fread`/`fwrite` -- the stats writers, the config readers
-and the round log are all local files and R-SEC-7 says nothing about them.
+and the round log are all local files and are not covered.
 Comments and string literals are stripped first, so this file's own prose and
 `osp_stats.h`'s description of the ngStatsQ2T uploader it does NOT do are not
 findings.
@@ -151,7 +151,7 @@ def main():
         return 0 if selftest() else 1
     hits = scan(os.path.abspath(a.tree))
     for path, line, name in hits:
-        print('!! %s:%d: %s() %s (R-SEC-7)' % (path, line, name, BANNED[name]))
+        print('!! %s:%d: %s() %s' % (path, line, name, BANNED[name]))
     print('noexec: %d process/network call(s)' % len(hits))
     return 1 if hits else 0
 

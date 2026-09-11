@@ -18,7 +18,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 */
 // Debug lines, from osp-tourney@1d8427e -- code-identical to the 1999 original
-// (R-BOT-30) apart from R-BOT-27's engine-extension path.
+// apart from the engine-extension path.
 //===========================================================================
 //
 // Name:                bl_debug.c
@@ -35,7 +35,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 /*
 ===============================================================================
 
-R-BOT-27 -- TWO IMPLEMENTATIONS OF ONE INTERFACE
+Two implementations of one interface
 
 The 1999 scheme gives every debug line an EDICT: a non-solid RF_BEAM entity
 whose origin and old_origin are the endpoints and whose skinnum is a packed
@@ -47,7 +47,7 @@ Q2PRO offers DEBUG_DRAW_API_V1, which draws on the LOCAL client only and costs
 nothing on the wire.  It is available only in a non-dedicated build with a
 renderer and USE_DEBUG on (q2pro src/server/game.c PF_GetExtension), so on a
 dedicated server -- which is what this library is for -- the beam scheme is the
-one that runs, and the fallback R-BOT-27 asks for is the normal case rather
+one that runs, and the fallback is the normal case rather
 than the exception.
 
 DebugLineCreate/Delete/Show keep their bot_import_t signatures either way, so
@@ -61,8 +61,8 @@ BotDebugFrame().
 
 // The 1999 colours are packed byte quadruples for the Q2 palette-indexed beam
 // renderer.  The extension wants RGBA, so the five the contract names get a
-// colour each and anything else comes out white -- R-BOT-27's "the LINECOLOR_*
-// values map to RGBA".
+// colour each and anything else comes out white: the LINECOLOR_* values map
+// to RGBA.
 //
 // The switch is on an UNSIGNED value and the labels are cast to match, and that
 // is not tidying.  `LINECOLOR_RED` is 0xf2f2f0f0L: it does not fit in an `int`,
@@ -71,7 +71,7 @@ BotDebugFrame().
 // condition's type is a constraint violation.  gcc converts it silently; clang
 // says `overflow converting case value to switch condition type (4076007664 to
 // -218959632)` and, under -Werror, refuses to compile.  Five labels, five
-// errors, and only on one of the two compilers R-BUILD-6 requires.
+// errors, and only on one of the two compilers this tree builds with.
 static uint32_t BotLineColorRGBA(int color)
 {
     switch ((uint32_t)color) {
@@ -109,7 +109,7 @@ void BotDebugInit(void)
 
     use_extension = G_DebugDraw() != NULL;
     if (!announced) {
-        gi.dprintf("Colosseum: bot debug lines via %s (R-BOT-27)\n",
+        gi.dprintf("Colosseum: bot debug lines via %s\n",
                    use_extension ? "the engine's DEBUG_DRAW_API_V1"
                                  : "the 1999 beam entities");
         announced = true;
@@ -351,8 +351,8 @@ void ToggleVisibleBoundingBox(edict_t *ent)
     edict_t *cam;
 
     // The donor's #ifdef OBSERVER: someone watching through the chase camera
-    // wants the box on what they are LOOKING AT, not on their own invisible
-    // body.  R-CTF-5's predicate is the ruleset-neutral form of the test.
+    // wants the box on what they are looking at, not on their own invisible
+    // body.  G_IsObserver() is the ruleset-neutral form of the test.
     if (G_IsObserver(ent) && ent->client)
     {
         cam = ent->client->chase_target;

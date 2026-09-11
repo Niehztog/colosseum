@@ -1,4 +1,4 @@
-"""R-142's check: two names for one position in a list somebody else indexes.
+"""Two names for one position in a list somebody else indexes.
 
 The defect this exists for is not a collision in the abstract -- plenty of
 unrelated constants share a value harmlessly, and MAX_ITEMS being 256 like
@@ -8,11 +8,11 @@ numbers are POSITIONS IN AN ORDERED LIST that something outside this tree walks:
   * `WEAP_*` is the ordinal of a weapon's `#w_*.md2` in SP_worldspawn's
     precache block, because ChangeWeapon puts it in the high byte of
     `s.skinnum` and the client draws `weaponmodel[skinnum >> 8]`.  Each donor
-    numbered its own extras from 12, R-CORE-2 unioned the CONTENT into one
+    numbered its own extras from 12, the merge unioned the content into one
     ordered list, and seven weapons then drew somebody else's model.
 
   * the brain's `INVENTORY_*` is the same shape one boundary further out, and
-    is R-141: `botfiles/inv.h` numbers this tree's itemlist and the itemlist
+    is the bot inventory: `botfiles/inv.h` numbers this tree's itemlist and the itemlist
     moved under it.  That half is checked by comparing the two lists, which
     only `sv botinv` can do at runtime; this tool checks the half that is
     visible in the source -- that no two names in such a family share a slot.
@@ -28,7 +28,7 @@ TWO CHECKS.
   ORDER        `WEAP_*` specifically, against the precache block that defines
                what its numbers mean.  A value check cannot see a family that
                is internally consistent and disagrees with the list it indexes,
-               which is exactly what R-142 was: no two WEAP_* collided after a
+               which is exactly what happened: no two WEAP_* collided after a
                renumbering, and they would still have been wrong if the block
                and the header had been renumbered differently.
 
@@ -183,7 +183,7 @@ def main():
     elif info:
         print(f'  ..    {len(info)} harmless same-value pair(s) in families that are '
               f'not ordered lists (-v to list them)')
-    # '!!' is the marker audit.py's driver greps for (R-TOOL-3).
+    # '!!' is the marker audit.py's driver greps for.
     for row in dup:
         print(f'  !! ordered family collides: {row}')
     for row in order:

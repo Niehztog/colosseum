@@ -1,17 +1,17 @@
 #!/usr/bin/env python3
 """The function-level donor diff: does this tree carry each donor's behaviour?
 
-R-VER-35, doc/donor-fdiff.md, doc/reconciliation.md R-195.
+See docs/donor-fdiff.md.
 
 WHY.  `tools/divergence.py` states the merge load per FILE, in diff lines
-(R-CORE-10).  A line count cannot answer the question a merge is actually judged
+.  A line count cannot answer the question a merge is actually judged
 by -- *for each definition a donor touched, is that donor's behaviour here?* --
 and every instrument that could was pointed somewhere narrower: `lostref.py`
 asks it of the symbols a donor DELETED, `donorgate.py` of whether a donor's
 surface is gated, `deadvalue.py` of the values a field can hold.  None of them
 walks the donor's own feature set definition by definition.  This does.
 
-METHOD.  R-PROV-3: `git diff baseq2 port_<donor>` in the vendored bundles IS
+METHOD.  `git diff baseq2 port_<donor>` in the vendored bundles IS
 that donor's feature set, because both sides sit on the same spine tip.  For
 every top-level definition a donor added, changed or removed against that spine,
 three texts are extracted by brace matching over a comment/string-masked copy --
@@ -23,10 +23,10 @@ compared against the right body.
     as_spine        the tree kept the BASE version: the donor's change is absent
     merged          neither, so the donor's delta is checked line by line
     absent          no definition of that name in src/ (a rename search runs)
-    donor_deleted   the donor removed it; R-CORE-8 does not replay a deletion
+    donor_deleted   the donor removed it; a deletion is not replayed
 
 THE FINDING, and why it is not "a line is missing".  A missing line is the
-NORMAL case here and must not be a finding: R-MODE-5 puts a donor's concept in
+NORMAL case here and must not be a finding: a donor's concept goes in
 the donor's own file and leaves one call at the site, so 1,168 of the donor
 lines that are absent from their own site are elsewhere in the tree verbatim.
 So every missing line is asked a second question, against the whole of `src/`:
@@ -39,16 +39,16 @@ So every missing line is asked a second question, against the whole of `src/`:
 `ABSENT` is the sharp one -- a field nothing reads, a constant nothing names, a
 string no player can ever see -- and it is still not a finding on its own,
 because a recorded decision removes identifiers by the hundred: 490 lines are
-the libc replacements of R-SEC-1, 222 are `m_mode` comparisons that R-OSP-12
+the bounded-string replacements, 222 are `m_mode` comparisons that the ruleset
 deleted with the cvar, 167 are the ngLog stack `osp_stats.c` replaced. CLUSTERS
 below attributes each one to the decision that removed it, and **a line no
 cluster claims and no EXEMPT row names is the finding**.
 
 WHAT IS NOT A FINDING.  A definition inside a donor file the tree does not carry
 at all (`gstats.c`, `q2log.c`, `nglog.c`, `ngmark.c`, `g_monsters.c`, the
-container libraries): that is a file-level decision, recorded in
-`doc/provenance.md` and R-114, and reporting it per definition would bury the
-per-definition question under 500 rows of it.
+container libraries): that is a file-level decision, recorded in SPECS.md
+section 4.1, and reporting it per definition would bury the per-definition
+question under 500 rows of it.
 
 USAGE
     tools/fnsweep.py                    # the report: matrix, attribution, findings
@@ -72,10 +72,10 @@ sys.path.insert(0, TOOLS)
 
 # The bundle refs and the cache builder are divergence.py's, imported rather
 # than copied: the two tools must answer about the same donors or the file-level
-# and definition-level numbers are not comparable (R-PROV-3, R-PROV-6).
+# and definition-level numbers are not comparable.
 divergence = importlib.import_module('divergence')
 
-# label -> the subfolder(s) that donor's own files landed in (R-CORE-7).  Only a
+# label -> the subfolder(s) that donor's own files landed in.  Only a
 # tie-break: a tree definition is chosen by body similarity first, because
 # `M_walkmove` exists in both `src/m_move.c` and Rogue's `src/rogue/m_move2.c`
 # and preferring the donor's own subfolder picked the wrong one and reported
@@ -88,12 +88,12 @@ SUBDIRS = {
     'osp':    ['src/tourney', 'src/bot'],
 }
 
-EXCLUDE = {'g_ptrs.c'}          # generated (R-SAVE-2), as in divergence.py
+EXCLUDE = {'g_ptrs.c'}          # generated, as in divergence.py
 
 
 # ---------------------------------------------------------------------------
 # The extractor.  Real brace matching, because the regex version of this
-# question is what R-SAVE-3's `auditsave.py` got wrong (see audit.py's note),
+# question is what `auditsave.py` got wrong (see audit.py's note),
 # and because a trailing `//PGM` after a parameter list is enough to make a
 # name-by-regex extractor merge two functions into one -- which it did, to
 # `check_dodge`, until the mask was used for the decision as well as the scan.
@@ -335,17 +335,18 @@ def norm_key(text):
 # FIRST so no later pattern can swallow one.
 # ---------------------------------------------------------------------------
 CLUSTERS = [
-    ('findings (R-195)',
-     r'^(osp_r008|SVF_PROJECTILE|hooked|item_spehre_defender)$'),
-    ('unsafe libc/raw scanner replaced (R-SEC-1, R-VER-30)',
+    ('findings',
+     r'^(osp_r008|SVF_PROJECTILE|hooked|item_spehre_defender|'
+     r'OSP_getPlayerAddr|reconnected|nConnected)$'),
+    ('unsafe libc/raw scanner replaced',
      r'^(sprintf|strcat|strncpy|strncat|vsprintf|fscanf|stricmp|strcasecmp)$'),
-    ('match_mode deleted, four values of g_ruleset instead (R-OSP-12)',
+    ('match_mode deleted, four values of g_ruleset instead',
      r'^(m_mode|MODE_TEAM)$'),
-    ('the ngLog / ngWorldStats stack, replaced by osp_stats.c (R-OSP-1)',
+    ('the ngLog / ngWorldStats stack, replaced by osp_stats.c',
      r'^(q2log_|nglog_|ngLog_|ngStats$|ngmark|sl_nglog|__nglog|ngloglog|'
      r'ngWorldStats|ngworldstats|_ngws_client_id$|browser$|OSP_ngStatsView$|'
      r'__dummy_nglog_name$|Quake2$|com$)'),
-    ('STAT_* macros replaced by the SID_* map (R-OSP-7a)', r'^(STAT_|SID_)'),
+    ('STAT_* macros replaced by the SID_* map', r'^(STAT_|SID_)'),
     ('symbol collisions prefixed (sec 7 rule 4)',
      r'^(fire_heat|monster_fire_heat|CheckFlood|TECH[1-5]_INDEX|'
      r'MAX_(MODEL|SOUND|IMAGE)INDEXES|avertexnormals|NUMVERTEXNORMALS|maxdot|'
@@ -353,15 +354,15 @@ CLUSTERS = [
      r'GAMEVERSION|BOT_IMPORT|grapple_state_t|jacketarmor_info|spawn_funcs|'
      r'SP_none|gladi386|RA2_NumArenas|BotDebugCmd|OSP_PrecacheCTFRunes|'
      r'Cmd_ServerCommand|q2log_stdlog)'),
-    ('trigger_push bit collision resolved by targetname (R-27)',
+    ('trigger_push bit collision resolved by targetname',
      r'^(targeted)$'),
-    ('verified present under another name (doc/donor-fdiff.md sec 4.4)',
+    ('verified present under another name (docs/donor-fdiff.md sec 4.4)',
      r'^(allow_|supershotgun|rocketlauncher|grenadelauncher|railgun|_default_|'
      r'_is_referee|_init_state|_client_hud|'
      r'checkvwepmodel|mylcase|hookbutton|worldlog_file|'
      r'FL_OSP_(NOCMD|BOT)|framecount|timeframes|starttime|'
      r'debug_(ainet|goalai|moveai|weapai)|ra_time)$'),
-    ("RA2's GameSpy / remote stats (R-114, R-RA-1a, R-SEC-7)",
+    ("RA2's GameSpy / remote stats",
      r'^(statsptr|bopfuncs|bucketfuncs|BUCKET_|BOP_|Array|Bucket|Table|'
      r'Do(Get|Set|Find|Send|Escape|Lower)$|bint$|bfloat$|hashFn$|freefn$|'
      r'cmpFn$|mylsearch$|g_crc32$|xcode_buf$|current_time$|'
@@ -380,13 +381,13 @@ CLUSTERS = [
      r'lastprio|osp_dead|protratio|when|damagescale|didskin|maxfps_command|'
      r'intermission_command|inactive_seconds|tents|guys|much|tb|clock_t|'
      r'vid_restart|ospdm|Elusive|Supported|disconnect)$'),
-    ('donor build switches resolved statically (R-CORE-3)',
+    ('donor build switches resolved statically',
      r'^(TOURNEY|ROCKETARENA|BOT_DEBUG|ZOID|XATRIX|ROGUE|CH|WIN32|__LCC__|'
      r'KILL_DISRUPTOR|max_rounds|AMMO_DISRUPTOR)$'),
-    ('the menu engines renamed (R-MENU-1, sec 7 rule 4)',
+    ('the menu engines renamed',
      r'^(showmenu|inmenu|clear_menus|PMenu_|pmenu|PMENU_ALIGN|DisplaySimpMenu$|'
      r'MySelect|PrintMenu)'),
-    ('donor file I/O replaced by g_fs.c (R-BOT-8, R-BOT-26)',
+    ('donor file I/O replaced by g_fs.c',
      r'^(MAX_PATH|globbuf|filespec|fileinfo|_find(first|next)|globfree|glob|'
      r'ConvertPath|LoadLibrary|HANDLE|_finddata_t|gl_path[cv]|access|ungetc|'
      r'feof|getcwd|CreateProcess|system|rename|remove|fseek|ftell|ferror|exit|'
@@ -399,18 +400,18 @@ CLUSTERS = [
      r'osp_[a-z0-9]{4}$|op$|fn$|p$|t$|q$)'),
     ('MD5 (not carried)',
      r'^(MD5|ROTATE_LEFT$|Encode$|Decode$|FF$|GG$|HH$|II$|[GH]$)'),
-    ('statusbar literals replaced by the composed bar (R-OSP-7a)',
+    ('statusbar literals replaced by the composed bar',
      r'^(ctf_statusbar|dm_statusbar|single_statusbar|team_statusbar)'),
 ]
 CLUSTERS = [(n, re.compile(p)) for n, p in CLUSTERS]
 FINDINGS_CLUSTER = CLUSTERS[0][0]
 
-# What is left of R-195 inside this check's own space, each with the row that
+# What is left inside this check's own space, each with the row that
 # records it.  An entry whose identifier no longer appears in any donor's
 # missing set is STALE and is reported: an exemption that has stopped applying
 # is how a check rots (deadvalue.py's controls make the same point).
 #
-# ONE HISTORICAL ENTRY REMAINS HERE AFTER R-197. R-196 ported R-195.7's
+# One historical entry remains here.  The
 # first two -- `SVF_PROJECTILE` on CTF's blaster bolts and tourney's
 # `MOD_GRAPPLE` obituary -- and the build went red on the next `make`, naming
 # both exemptions as no longer matching a donor line.  That is the stale-
@@ -418,52 +419,76 @@ FINDINGS_CLUSTER = CLUSTERS[0][0]
 # the fix and the exemption have to be retired together or the check rots
 # silently.
 EXEMPT = {
-    'osp_r008':       'R-195.4 -- tourney\'s second ZBot heuristic ("cr") and '
+    'osp_r008':       'tourney\'s second ZBot heuristic ("cr") and '
                       'the userinfo flag that fed it',
     'item_spehre_defender':
-                      'R-195.7 -- id\'s typo, which this tree spells correctly, '
+                      'id\'s typo, which this tree spells correctly, '
                       'so its substitution fires where the donor\'s never did',
+    'OSP_getPlayerAddr':
+                      'the SECOND derivation of the client address, deleted '
+                      'with the edict field it filled: it read `pers.userinfo`, '
+                      'which is client-writable after connect, so a ban line '
+                      'could name an address the player chose.  ClientConnect '
+                      'latches `pers.address` once from the userinfo the engine '
+                      'force-set and its eight callers read that (R-LOG-4)',
+    # Spelled `nConnected` because that is the TOKEN: the identifier regex
+    # runs over the raw line, `\n` contributes a bare `n`, and nothing
+    # separates it from the word that follows -- so the donor's
+    # "\\n%s\\nConnected with ZBOT\\n" yields `nConnected` and an exemption
+    # named `Connected` would match nothing and be reported stale.
+    'nConnected':     'RA2\'s ZBot report, re-tagged rather than dropped '
+                      '(R-LOG-6): the donor writes "\\n%s\\nConnected with '
+                      'ZBOT\\n" with the whole userinfo, and the merge folded '
+                      'that into a line shaped like an arrival which named '
+                      'nobody.  It reads "ZBOT: <name> from <addr> -- userinfo '
+                      '..." now, so the userinfo the admin wanted is kept and '
+                      'nothing parsing R-LOG-1\'s pair can mistake it for one',
+    'reconnected':    'tourney\'s player-facing "%s reconnected" broadcast, '
+                      'deliberately not carried: it is the second console line '
+                      'R-LOG-1 exists to remove, and what it announced is '
+                      'recorded by osp_stats.c\'s `reconnect` event off the '
+                      'same resp.osp_r210 the donor tested (R-LOG-3)',
 }
 
-# AND THE R-195 FINDINGS THIS CHECK CANNOT SEE, which is worth stating in the
+# And the findings this check cannot see, which is worth stating in the
 # tool rather than only in the report: every identifier they turn on EXISTS in
 # this tree, so no line of theirs is ever ABSENT and no exemption would ever
 # fire.  They were found by reading the sweep -- the `as_spine` column, the
 # `missing_added` lists and the call delta -- not by this rule.
 #
-#   R-195.1  WITHDRAWN, and kept here because the withdrawal is the lesson.
+#   1.  Withdrawn, and kept here because the withdrawal is the lesson.
 #            The sweep was right that RA2's four `p_weapon.c` gate lines are
 #            absent; the conclusion drawn from that -- that a person can
-#            pre-fire an arena countdown -- was wrong, because R-151 answers the
+#            pre-fire an arena countdown -- was wrong, because the gate answers the
 #            same question one level up, at the latch in `ClientLagThink`.  What
-#            made it believable was `doc/reconciliation.md` R-149 still reading
+#            made it believable was the note still reading
 #            "Open, deliberately" two entries before the one that closed it.  An
 #            absence is a finding only once you know what else could be
 #            answering the question, and no line-level rule can know that.
-#   R-195.2  CLOSED BY R-197. RA2's chat-spam counter now runs after
+#   2.  Closed.  RA2's chat-spam counter now runs after
 #            FloodProtect(), as the donor does. It remains outside this check's
 #            ABSENT-line space because every identifier involved exists here.
 #
-# CLOSED BY R-196, and listed because a reader of this file should be able to
+# Closed, and listed because a reader of this file should be able to
 # tell "this check never saw it" from "this check still cannot see it":
 #
-#   R-195.3  the chat log now has its Cmd_Say_f call (g_cmds.c), measured on the
+#   3.  The chat log now has its Cmd_Say_f call (g_cmds.c), measured on the
 #            wire by scenarios/ospchatlog.
-#   R-195.5  the spawn exclusions: `ent` is threaded through
+#   5.  The spawn exclusions: `ent` is threaded through
 #            PlayersRangeFromSpot and both selectors.
-#   R-195.6  TossClientWeapon's two quad events and ShutdownGame's accuracy
+#   6.  TossClientWeapon's two quad events and ShutdownGame's accuracy
 #            dump, both measured by the same scenario.
 #
-# ...and R-196 added one finding OF ITS OWN that no rule in this file could ever
+# ...and there was one finding no rule in this file could ever
 # have raised, because it is a MISSING GUARD around a line that is present: the
 # donor writes `if (sync_stat != 2)` in front of both of player_die's death
 # sounds so a tourney match does not start on a chorus of screams.  A gate that
 # is absent is invisible to a rule about lines and to a rule about calls alike
-# (doc/donor-fdiff.md sec 6 item 1), and it was found by playing the game.
-NOT_MECHANISED = ('R-195.1',)
+# and it was found by playing the game.
+NOT_MECHANISED = ("the missing sync_stat guard on player_die's death sounds",)
 
 # A donor file the tree carries no file of that name for.  A file-level decision
-# (doc/provenance.md, R-114, and g_monsters.c under R-CORE-8), so its
+# (SPECS.md section 4.1, and g_monsters.c), so its
 # definitions are counted and not reported.
 KEYWORDS = set('''if else for while do switch case default break continue return
 goto sizeof typedef struct union enum static const extern register volatile
@@ -621,7 +646,7 @@ def call_delta(rec, spine_d, donor_d, tree_d):
 
     Line matching answers "is the donor's text here"; this answers "is the
     donor's ACT here", which is the sharper question and the one that found
-    R-195.3 and R-195.6 -- a log event whose function exists, has callers, and
+    A log event whose function exists, has callers, and
     is not called from the site the donor calls it from.  `lostref.py` asks this
     of the symbols a donor DELETED; this is the other half.
     """
@@ -776,7 +801,7 @@ def report(all_records, out=sys.stdout):
     w = out.write
     # The matrix is over the definitions in files this tree CARRIES.  A donor
     # file it carries no file of that name for is a file-level decision
-    # (doc/provenance.md, R-114, R-CORE-8) and its definitions would otherwise
+    # (SPECS.md section 4.1) and its definitions would otherwise
     # arrive as several hundred `absent` rows that say one thing once.
     records = [r for r in all_records if r.get('carried', True)]
     dropped = collections.Counter()
@@ -869,7 +894,7 @@ def report(all_records, out=sys.stdout):
     f = findings(all_records)
     w('\n%d definition-level finding(s), %d exempt identifier(s), '
       '%d recorded findings outside this check\'s space '
-      '(doc/reconciliation.md R-195)\n'
+      '\n'
       % (len(f), len(EXEMPT), len(NOT_MECHANISED)))
     for rec, d, why in f:
         w('  !! %s %s:%s -- %s\n' % (rec['donor'], rec['file'], rec['name'], why))
@@ -878,7 +903,7 @@ def report(all_records, out=sys.stdout):
         w('  -- %-16s %d line(s): %s\n'
           % (u, len(exempt_sites[u]), '; '.join(sorted(set(exempt_sites[u])))))
         w('       %s\n' % EXEMPT[u])
-    w('  -- outside this check\'s space, recorded in R-195: %s\n'
+    w('  -- outside this check\'s space: %s\n'
       % ', '.join(NOT_MECHANISED))
     w('\nfnsweep.py: %d definitions touched by at least one donor, %d of them '
       'in files this tree carries\n' % (len(all_records), len(records)))
@@ -892,12 +917,12 @@ def check(records):
                        d['line'][:100]))
     for k in stale_exemptions(records):
         hits.append('  !! exemption "%s" no longer applies -- it names no '
-                    'donor line any more (R-195)' % k)
+                    'donor line any more' % k)
     return hits
 
 
 # ---------------------------------------------------------------------------
-# The controls.  R-VER-9 clause 2: a check that has never failed is not
+# The controls.  A check that has never failed is not
 # trusted, so they run in the build beside the check.
 #
 # The expensive half of this tool is donor extraction and it is tree-
@@ -1049,9 +1074,9 @@ def main():
     for _label, bundle, _r in divergence.DONORS:
         p = os.path.join(divergence.BUNDLES, bundle + '.bundle')
         if not os.path.exists(p):
-            # The bundles are vendored (R-PROV-1), so this is a partial checkout
+            # The bundles are vendored, so this is a partial checkout
             # rather than a state to pass silently.  A skip, and it says so.
-            print('fnsweep.py: SKIP -- %s is not present, so R-PROV-3\'s donor '
+            print('fnsweep.py: SKIP -- %s is not present, so the donor '
                   'diffs cannot be taken' % os.path.relpath(p, REPO))
             return 0
 
@@ -1068,7 +1093,7 @@ def main():
         for h in hits:
             print(h)
         print('fnsweep.py: %d definitions, %d finding(s) beyond the %d exempt '
-              'identifier(s) of R-195, whose other %d findings are outside this '
+              'exempt identifier(s), whose other %d findings are outside this '
               'check\'s space (see NOT_MECHANISED)'
               % (len(records), len(hits), len(EXEMPT), len(NOT_MECHANISED)))
         return 1 if hits else 0

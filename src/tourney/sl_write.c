@@ -17,13 +17,11 @@ along with this program; if not, write to the Free Software
 Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 */
-// OSP Tourney DM v2.75, from osp-tourney@1d8427e (doc/provenance.md).
+// OSP Tourney DM v2.75, from osp-tourney@1d8427e.
 // Donor-only: baseq2 has no counterpart, so it lives in src/tourney/ rather
-// than being merged into a spine file (R-CORE-7).  The reconstruction's
-// asm-matching address comments are stripped -- SPECS.md N1 makes those oracles
-// meaningless here, and they survive at the pin.
-// sl_write.c -- the Standard Log's low-level writers: one function per record
-// field, plus the log file's own open/close.
+// than being merged into a spine file.  The reconstruction's asm-matching
+// address comments are stripped.  sl_write.c -- the Standard Log's low-level
+// writers: one function per record field, plus the log file's own open/close.
 //
 // StdLog 1.2 is not a NetGames USA format and has nothing to do with ngLog
 // beyond having borrowed its file writer in v2.75 -- which is why the two were

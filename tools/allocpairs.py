@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""The allocator-pair contract, mechanised (R-VER-22, doc/reconciliation.md R-55/R-63).
+"""The allocator-pair contract, mechanised.
 
 A pointer must be released by the allocator that produced it.  This tree has
 two allocator families and they are not interchangeable:
@@ -9,7 +9,7 @@ two allocator families and they are not interchangeable:
 
 `gi.TagFree` walks the engine's tag block list and asserts on a header it did
 not write, so crossing the families is undefined behaviour rather than a leak.
-R-55 is the live case: a regex pass converted CTFWarp's `free(mlist)` to
+The live case: a regex pass converted CTFWarp's `free(mlist)` to
 `gi.TagFree(mlist)` and left the `strdup` that produced `mlist` alone.  It was
 client-reachable -- the first `warp` command -- and no check in the tree could
 see it, because every check was about types, slots or clocks.
@@ -17,7 +17,7 @@ see it, because every check was about types, slots or clocks.
 WHY THIS IS NOT A LIBC BAN.  The obvious check is "no malloc/strdup/free in a
 tree whose frees go through gi.TagFree", and it is wrong here: `src/g_main.c`'s
 `EndDMLevel` strdups `sv_maplist` and frees it with `free()`, a correct pair,
-and it is upstream's code that R-CORE-5 keeps byte-identical.  A ban would fail
+and it is upstream's code, kept byte-identical.  A ban would fail
 the build on correct inherited code and the only way to pass would be to edit
 it.  Nor is a file-level co-occurrence check enough: `g_main.c` also calls
 `gi.TagMalloc` for `g_edicts`, so "this file uses both families" describes the
@@ -28,7 +28,7 @@ tree and reports the ones both clocks touch; this one tracks a pointer.
 THREE CHECKS
 
   MIX      one pointer, allocated by one family and freed by the other, in the
-           same file.  R-55 exactly.
+           same file.  The live case exactly.
   SPLIT    one struct MEMBER allocated by BOTH families across the tree.
            Whichever family the free site names, it is wrong for half the
            allocations.  This is the merged-tree case: two donors allocate the
@@ -221,7 +221,7 @@ def run(tree, files):
         out.append('  !! wrapper list has rotted: %s' % w)
     for name, i, k, fn, afn, ai in mix:
         out.append('  !! %s:%d: `%s(%s)` releases a pointer allocated by `%s` '
-                   'at line %d -- the families do not match (R-55)'
+                   'at line %d -- the families do not match'
                    % (name, i, fn, k, afn, ai))
     for k, c in split:
         minority = 'libc' if c['libc'] < c['tag'] else 'tag'
@@ -242,8 +242,8 @@ def run(tree, files):
     return out
 
 
-# R-VER-9 clause 2: a check that has never failed is not trusted.  Control 1 is
-# R-55's actual bug, restored.  Controls 2 and 3 are the two failure modes it
+# A check that has never failed is not trusted.  Control 1 is the actual bug,
+# restored.  Controls 2 and 3 are the two failure modes it
 # did not have, so that each check has fired at least once.
 SELFTESTS = [
     ('mix', 'g_ctf.c',

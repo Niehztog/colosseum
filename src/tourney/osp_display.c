@@ -17,22 +17,21 @@ along with this program; if not, write to the Free Software
 Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 */
-// OSP Tourney DM v2.75, from osp-tourney@1d8427e (doc/provenance.md).
+// OSP Tourney DM v2.75, from osp-tourney@1d8427e.
 // Donor-only: baseq2 has no counterpart, so it lives in src/tourney/ rather
-// than being merged into a spine file (R-CORE-7).  The reconstruction's
-// asm-matching address comments are stripped -- SPECS.md N1 makes those oracles
-// meaningless here, and they survive at the pin.
-// osp_display.c -- <INVENTED FILENAME>. The MOTD, match-params and
+// than being merged into a spine file.  The reconstruction's
+// asm-matching address comments are stripped.
+// osp_display.c -- filename assigned by this tree.  The MOTD, match-params and
 // scoreboard/player text builders.
 
 #include "g_local.h"
 #include "tourney/osp_types.h"
 #include "bot/bl_main.h"
 #include "bot/bl_botcfg.h"
-// The two bot entry points, from the headers that own them.  Until Phase 6
-// these were re-declared here, which is the very shape R-OSP-5 names: a donor's
-// name declared outside the header that declares it.  The seam file they
-// resolved to is gone.
+// The two bot entry points, from the headers that own them.  These were once
+// re-declared here, which is the shape to avoid: a donor's name declared
+// outside the header that declares it.  The seam file they resolved to is
+// gone.
 #include "bot/bl_redirgi.h"
 #include "bot/bl_spawn.h"
 
@@ -918,7 +917,7 @@ void OSP_showPlayer(edict_t *ent)
 ==================
 OSP_ScoreboardMessage
 
-Tourney's ScoreboardMessage row (R-MODE-5, R-OSP-1).
+Tourney's ScoreboardMessage row.
 
 The donor writes this dispatch inside DeathmatchScoreboardMessage in the shared
 p_hud.c, which is where its scoreboard would collide with three other donors'.

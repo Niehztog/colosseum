@@ -17,22 +17,21 @@ along with this program; if not, write to the Free Software
 Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 */
-// OSP Tourney DM v2.75, from osp-tourney@1d8427e (doc/provenance.md).
+// OSP Tourney DM v2.75, from osp-tourney@1d8427e.
 // Donor-only: baseq2 has no counterpart, so it lives in src/tourney/ rather
-// than being merged into a spine file (R-CORE-7).  The reconstruction's
-// asm-matching address comments are stripped -- SPECS.md N1 makes those oracles
-// meaningless here, and they survive at the pin.
-// osp_config.c -- <INVENTED FILENAME>. The serverconfigs.txt loader and its
+// than being merged into a spine file.  The reconstruction's
+// asm-matching address comments are stripped.
+// osp_config.c -- filename assigned by this tree.  The serverconfigs.txt loader and its
 // three lookup helpers.
 
 #include "g_local.h"
 #include "tourney/osp_types.h"
 #include "bot/bl_main.h"
 #include "bot/bl_botcfg.h"
-// The two bot entry points, from the headers that own them.  Until Phase 6
-// these were re-declared here, which is the very shape R-OSP-5 names: a donor's
-// name declared outside the header that declares it.  The seam file they
-// resolved to is gone.
+// The two bot entry points, from the headers that own them.  These were once
+// re-declared here, which is the shape to avoid: a donor's name declared
+// outside the header that declares it.  The seam file they resolved to is
+// gone.
 #include "bot/bl_redirgi.h"
 #include "bot/bl_spawn.h"
 
@@ -185,11 +184,35 @@ bool OSP_configExists(edict_t *ent, char *name)
     int     i;
 
     for (i = 0; i < conf_size; i++) {
-        if (!Q_stricmp(name, conf_name[i]))
+        // Both arms normalise, and the name arm is the one that matters.
+        // The match is case-INSENSITIVE and the caller then hands `name`
+        // straight to `exec`, so the donor -- which rewrites `name` on the
+        // description arm only -- execs the spelling the CLIENT typed rather
+        // than the one the operator listed.
+        //
+        // The exposure is narrower than it looks, and the reason is worth
+        // writing down because it is what a first draft of the check got
+        // wrong: Q2PRO retries a mixed-case path in lower case on non-Windows
+        // (`common/files.c`, PATH_MIXED_CASE), so an all-lower-case config file
+        // resolves whatever the client shouted.  What the engine cannot do is
+        // re-capitalise a request.  So the case that bites is a
+        // `serverconfigs.txt` naming a MIXED-CASE file: a vote spelled any
+        // other way then execs a path that does not exist, the map still
+        // changes, and the configuration is silently never applied.  Measured
+        // in `scenarios/ospmapchange` row 6, which needed a mixed-case fixture
+        // before it could tell the two builds apart at all.
+        //
+        // `name` is `vote_value` and both are [64], so the bound is the
+        // destination's as well as the source's.  Still gated on `!ent`: with a
+        // client the caller passed `gi.argv()`, which is the engine's and is
+        // not ours to write.
+        if (!Q_stricmp(name, conf_name[i])) {
+            if (!ent)
+                Q_strlcpy(name, conf_name[i], sizeof(conf_name[i]));
             return true;
+        }
 
         if (conf_info[i][0] && !Q_stricmp(name, conf_info[i])) {
-            // `name` is vote_value, which is the same size as conf_name[]
             if (!ent)
                 Q_strlcpy(name, conf_name[i], sizeof(conf_name[i]));
             return true;

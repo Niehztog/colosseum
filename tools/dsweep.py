@@ -89,11 +89,39 @@ def run(lbl, base_h, port_h, port_save, verbose=False):
     return lost_state, lost_ptr
 
 if __name__ == '__main__':
-    # R-TOOL-1: donor trees come from the workspace beside this repo, not /mnt/c.
+    # Donor trees come from the workspace beside this repo, not /mnt/c.
     WS = os.environ.get('Q2DEV', os.path.dirname(os.path.dirname(
         os.path.dirname(os.path.abspath(__file__)))))
     Q = os.path.join(WS, 'q2pro'); B = Q + '/src/game/g_local.h'
     v = '-v' in sys.argv
+    ROWS = [('ctf', Q + '/src/ctf'), ('xatrix', Q + '/src/xatrix'),
+            ('rogue', Q + '/src/rogue'),
+            ('RA2', os.path.join(WS, 'rocketarena2-public')),
+            ('OSP', os.path.join(WS, 'osp-tourney'))]
+
+    # A MISSING INPUT IS A SKIP AND NOT A FINDING.  Every tree this sweep reads
+    # is the WORKSPACE's rather than this repository's, and `q2pro/src/{ctf,
+    # xatrix,rogue}` is a local replay branch rather than anything that can be
+    # cloned (SPECS section 4.1) -- so a machine holding only this repository, a
+    # release runner or a fresh clone, cannot have them and never could.  Until
+    # this guard existed the first `read()` below raised FileNotFoundError,
+    # audit.py reported the traceback as a finding, and a finding fails the
+    # build: every job of the release workflow died here, on a tree with
+    # nothing wrong with it.  audit.py lifts the line below into its
+    # "not applicable" list, which is what `assets` and `fnsweep` already do,
+    # and it is the only thing printed because that is the shape audit.py
+    # rewrites.
+    need = [B]
+    for _, d in ROWS:
+        need += [d + '/g_local.h', d + '/g_save.c']
+    missing = [p for p in need if not os.path.exists(p)]
+    if missing:
+        print('dsweep.py: SKIP -- %d of the %d reference files are not in the '
+              'workspace beside this repository (first: %s), so the mod-added '
+              'members have nothing to be swept against'
+              % (len(missing), len(need), os.path.relpath(missing[0], WS)))
+        sys.exit(0)
+
     # sanity: the extractor must find the three members the method already named
     rb = struct_body(read(Q + '/src/rogue/g_local.h'), 'edict_s')
     rm = members(rb)
@@ -104,7 +132,5 @@ if __name__ == '__main__':
     print('extractor self-test: rogue edict_s has all three probes; no struct bleed\n')
     print('mechanism (d) -- mod-added members of saved structs with no descriptor row')
     print('-' * 78)
-    for lbl, d in [('ctf', Q+'/src/ctf'), ('xatrix', Q+'/src/xatrix'), ('rogue', Q+'/src/rogue'),
-                   ('RA2', os.path.join(WS, 'rocketarena2-public')),
-                   ('OSP', os.path.join(WS, 'osp-tourney'))]:
+    for lbl, d in ROWS:
         run(lbl, B, os.path.join(d, 'g_local.h'), os.path.join(d, 'g_save.c'), v)

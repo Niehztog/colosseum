@@ -3,12 +3,18 @@
 # The SP and Q2 assignments below hold the dead WSL scratchpad and q2pro paths
 # this harness was written against, and they are DELIBERATELY NOT REPAIRED:
 # Colosseum does not re-run the replay -- `vendor/replay/`'s three bundles are
-# its output and supersede it (R-PROV-1) -- and the paths are the record of
-# where the work was done.  SPECS.md R-TOOL-1 and doc/reconciliation.md section
+# its output and supersede it -- and the paths are the record of
+# where the work was done.  See the provenance notes, section
 # 2 both say so.  No shebang and no exec bit, so nothing runs it by accident.
 #
+# For the public release the tool directory, the account name and the session
+# id inside them are REDACTED to `<tooldir>`, `<user>` and `<session>`.  That
+# is redaction, not repair: the shape of the path is what carries the record --
+# a WSL `/mnt/c` checkout under an ephemeral `/tmp` scratchpad -- and the shape
+# is intact.
+#
 set -e
-SP=/tmp/claude-1000/-mnt-c-Users-<user>-q2-dev-q2pro/<session>/scratchpad
+SP=/tmp/<tooldir>/-mnt-c-Users-<user>-q2-dev-q2pro/<session>/scratchpad
 Q2=/mnt/c/Users/<user>/q2-dev/q2pro
 R=$SP/replay
 rm -rf $R && mkdir -p $R && cd $R

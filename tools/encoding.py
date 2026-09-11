@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""Every source file is valid UTF-8 (doc/reconciliation.md R-60).
+"""Every source file is valid UTF-8.
 
-Trivial, and it has bitten this project twice: Phase 2 left `g_ai.c` and
+Trivial, and it has bitten this project twice: a merge left `g_ai.c` and
 `g_combat.c` holding a latin-1 `\xa7` where a `§` was meant, and the import in
 1.14 did the same to `g_misc.c` and `g_ctf.c` -- both times because an edit was
 written through a latin-1 encoder while containing a non-ASCII character.

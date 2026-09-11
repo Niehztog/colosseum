@@ -20,21 +20,21 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 // osp_types.h -- OSP Tourney DM's own aggregate types.
 //
 // They live in the donor's g_local.h, which Colosseum has exactly one of
-// (R-CORE-6) and which every translation unit includes.  These six are read by
+// and which every translation unit includes.  These six are read by
 // `src/tourney/` alone, so they belong on this side of the seam -- the same
-// argument sec 5.2 makes for the menu engines.
+// argument that applies to the menu engines.
 //
 // `osp_team_t` is prefixed `osp_team_t`: Rocket Arena already has a `osp_team_t` in
 // src/arena/arena.h, they are different structs for two mods' notions of a
-// team, and sec 7 rule 4 resolves that by prefix rather than by rename.
+// team, so the collision is resolved by prefix rather than by rename.
 
 #ifndef OSP_TYPES_H
 #define OSP_TYPES_H
 
 #include "tourney/osp_hooks.h"
 
-// The four statusbar literals the donor keeps are NOT here and are not anywhere:
-// R-OSP-7a composes the bar from the slot map, and tourney is the ruleset that
+// The four statusbar literals the donor keeps are not here and are not anywhere:
+// the bar is composed from the slot map, and tourney is the ruleset that
 // proves why -- its four bars differ only in where two panels sit, which two
 // booleans express and four literals cannot share.
 
@@ -45,8 +45,8 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 // The mod's eleven status configstrings.  The donor hardcodes them 0x620..0x62a,
 // which is CS_GENERAL_OLD + 0..10 -- correct only while the server runs the OLD
 // configstring remap.  This library is compiled with USE_PROTOCOL_EXTENSIONS and
-// negotiates at runtime (R-ENG-2), so the number has to come from game.csr like
-// every other one in this tree (R-CTF-6 as amended in 1.15, R-62).
+// negotiates at runtime, so the number has to come from game.csr like
+// every other one in this tree.
 #define OSP_CS(n)       (game.csr.general + (n))
 
 // The donor defines this below hs_player_t, which uses it; here the struct and
@@ -67,11 +67,11 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #define ACC_BFG             9
 #define ACC_GRENADE         10
 
-// *** THE CONTENT LAYERS' NINE, APPENDED -- R-MODE-3, R-181. ***
+// The content layers' nine, appended.
 //
 // The donor's report has eleven columns because osp-tourney's itemlist has
 // eleven weapons.  This tree's has Xatrix's and Ground Zero's too, and
-// R-MODE-3 makes both layers valid with every ruleset -- so a `tdm` match on a
+// both layers are valid with every ruleset -- so a `tdm` match on a
 // Reckoning or Ground Zero map is fought with weapons the report could not see:
 // `acc_column()` returned -1 for every one of their MODs and the layer fire
 // functions called `OSP_accShot` from nowhere at all.  What a player got was
@@ -83,9 +83,9 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 // same eleven keys and simply gains new ones when a layer weapon is used.
 //
 // The Disruptor gets a column even though `weapon_disintegrator` is
-// IT_NOT_GIVEABLE (R-16, Ground Zero's own KILL_DISRUPTOR): a map may still
+// IT_NOT_GIVEABLE under Ground Zero's own KILL_DISRUPTOR: a map may still
 // place one, the report only prints a row that has shots in it, and a column
-// that stays empty costs four ints.  The A-M Bomb does NOT: `ammo_nuke` is
+// that stays empty costs four ints.  The A-M Bomb does not: `ammo_nuke` is
 // IT_POWERUP, and a powerup that happens to do damage is not a weapon -- which
 // is what -1 goes on meaning.
 #define ACC_RIPPER          11      // Ionripper       -- Xatrix
@@ -102,7 +102,8 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 typedef struct {
     char    netname[16];        // ClientUserinfoChanged writes[15] = 0
-    char    osp_a010[32];       // invented name; copied from ent->osp_e37c
+    char    osp_a010[MAX_CLIENT_ADDRESS];   // invented name; copied from
+                                            // client->pers.address
     int     dgiven;
     int     dtaken;
     int     shots[ACC_COUNT];
@@ -115,10 +116,10 @@ typedef struct {
 // every byte, which is how Quake II's charset renders it green.
 typedef struct {
     char    netname[32];
-    char    greenname[32];      // <INVENTED NAME>
+    char    greenname[32];      // name reconstructed
     char    skin[128];
     byte    osp_m0c0[32];
-    char    joincode[16];       // <INVENTED NAME>
+    char    joincode[16];       // name reconstructed
     int     osp_m0f0;
     int     osp_m0f4;           // non-zero = team is locked
     int     osp_m0f8;           // the team's frag total
@@ -141,7 +142,7 @@ typedef struct {
     int     priority;
 } loc_t;
 
-// osp_maps.c's map queue entry (<INVENTED type name>).  `map` is a realloc'd
+// osp_maps.c's map queue entry (type name reconstructed).  `map` is a realloc'd
 // array, one entry per maps.txt line: `<map name> [min players] [max players]`.
 typedef struct {
     int     minplayers;
@@ -151,7 +152,7 @@ typedef struct {
 } map_t;
 
 // The accuracy report's row table: which p_acc_t.shots/hits column each
-// printed row names.  Type and member names <INVENTED>.
+// printed row names.  Type and member names reconstructed.
 typedef struct {
     int     index;          // a weapon index into p_acc_t.shots/hits
     char    name[128];
@@ -167,11 +168,11 @@ typedef struct {
 // ---------------------------------------------------------------- the mod
 //
 // OSP's own globals, cvars and constants.  They live in the donor's g_local.h;
-// Colosseum has exactly one of those (R-CORE-6) and every translation unit
+// Colosseum has exactly one of those and every translation unit
 // includes it, so tourney's 300-odd private names would be in scope everywhere.
 // They belong on this side of the seam for the same reason the types above do.
 //
-// `osp_teams` keeps the donor prefix of sec 7 rule 4: Rocket Arena already has
+// `osp_teams` keeps its donor prefix: Rocket Arena already has
 // a `teams`, in src/arena/arena.c, and they are two mods' team tables.  The
 // PREFIX is on the identifier only -- the rename that introduced it also ran
 // over comments and string literals, and thirteen player-facing messages, a
@@ -221,8 +222,8 @@ extern gitem_armor_t    bodyarmor_info;
 
 // id CTF's grapple tuning, from its g_ctf.h.
 
-// How many of each rune are loose in the world, indexed by
-// `item->quantity - STAT_RUNE_RESIST`.
+// How many of each rune are loose in the world, indexed by `item->quantity -
+// STAT_RUNE_RESIST`.
 extern  int     r_count[5];
 
 // The rune spawn pool.
@@ -350,7 +351,7 @@ extern  cvar_t  *vote_threshold;
 
 // id CTF's `loc_t`, unchanged.
 
-// osp_maps.c's map queue entry (<INVENTED type name>).  `map` is a realloc'd
+// osp_maps.c's map queue entry (type name reconstructed).  `map` is a realloc'd
 // array, one entry per maps.txt line: `<map name> [min players] [max players]`.
 
 extern  map_t   *map;
@@ -380,10 +381,10 @@ extern  int     vote_yea;
 extern  int     vote_nay;
 extern  char    wav_file[125];
 // The accuracy report's row table: which p_acc_t.shots/hits column each
-// printed row names.  Type and member names <INVENTED>.
+// printed row names.  Type and member names reconstructed.
 
 // Unsized on purpose: the table is NULL-terminated and every reader walks it
-// to the sentinel, so a row can be added in one place (R-181).  `a_info[10]`
+// to the sentinel, so a row can be added in one place.  `a_info[10]`
 // here meant three loops carried their own copy of the count and the BFG row
 // the donor never added would have needed all four edited.
 extern  a_info_t a_info[];
@@ -414,7 +415,6 @@ extern  cvar_t  *hook_holdplayertime;
 extern  cvar_t  *team_duelrecover;
 extern  cvar_t  *match_pausetime;
 extern  cvar_t  *console_timestamp;
-extern  cvar_t  *nextlevel_click;
 extern  cvar_t  *bots_warmuptime;
 extern  int     max_items[11];
 extern  cvar_t  *team_a_score;
@@ -470,17 +470,17 @@ extern  cvar_t  *weapon_have;
 extern  cvar_t  *armor_shard;
 extern  cvar_t  *match_endinfo;
 extern  int     level_start;
-// ---- the loadout tables' shapes (R-180, R-181) ----
+// ---- the loadout tables' shapes ----
 //
 // OSP_NUM_WEAPS is the length of the `weapon_initial` / `weapon_have` /
 // `start_weap` family: the donor's ELEVEN baseq2 weapons and then the content
-// layers' EIGHT, which R-181 appended because R-MODE-3 makes both layers valid
-// with every ruleset and the donor's bitmask had no bit for any of them.  The
-// order is a CVAR CONTRACT -- bit k-1 of `weapon_have` is rank k -- so
-// osp_main.c's `osp_weapnames[]` may be appended to and must never be reordered.
+// layers' eight, appended because both layers are valid with every ruleset and
+// the donor's bitmask had no bit for any of them.  The order is a CVAR
+// CONTRACT -- bit k-1 of `weapon_have` is rank k -- so osp_main.c's
+// `osp_weapnames[]` may be appended to and must never be reordered.
 //
 // The Disruptor is deliberately absent: `weapon_disintegrator` carries
-// IT_NOT_GIVEABLE and no IT_WEAPON bit (R-16, Ground Zero's own KILL_DISRUPTOR),
+// IT_NOT_GIVEABLE and no IT_WEAPON bit under Ground Zero's KILL_DISRUPTOR,
 // so a loadout cannot hand it out and a bit for it would be a bit that lies.
 #define OSP_NUM_WEAPS       19
 #define OSP_NUM_AMMO        6       // start_items[0..5], the donor's
@@ -489,7 +489,7 @@ extern  int     level_start;
 // The layers' five ammo types.  They get their OWN three arrays rather than
 // slots appended to `start_items` / `max_items` / `pack_items`, because those
 // three carry the donor's layout -- ammo at 0..5, health at 7, armour at 8..10,
-// 6 dead -- and bolting a second meaning onto the gaps is how R-180 happened.
+// 6 dead -- and bolting a second meaning onto the gaps is how that goes wrong.
 #define OSP_LAYER_MAGSLUG       0
 #define OSP_LAYER_FLECHETTES    1
 #define OSP_LAYER_PROX          2
@@ -543,7 +543,6 @@ extern  cvar_t  *team_overtime_count;
 extern  char    reconn_player[32];
 extern  cvar_t  *warmup_health;
 extern  cvar_t  *hook_incdamage;
-extern  cvar_t  *nextlevel_lazy;
 extern  cvar_t  *qualifier_forceskins;
 extern  cvar_t  *armor_combat;
 extern  cvar_t  *client_minping;
@@ -575,8 +574,8 @@ extern  char    pl_pass[200][32];
 extern  char    pl_addr[200][16];
 extern  int     next_map;
 
-// osp_hiscore.c (<INVENTED FILENAME>). One entry of the per-map high
-// score table.  Type and member names <INVENTED>.
+// osp_hiscore.c (filename assigned by this tree). One entry of the per-map high
+// score table.  Type and member names reconstructed.
 // The three fields are drawn in fixed-width scoreboard columns, so they are
 // short.  OSP_HS_FIELD is what the file parser and the date formatter write
 // through, and it has to match.
@@ -590,7 +589,7 @@ extern  int         sync_frame;
 extern  int         endlvl_frame;
 extern  int         manual_map;
 
-// osp_cmds.c (<INVENTED FILENAME>). The client/vote/referee commands.
+// osp_cmds.c (filename assigned by this tree). The client/vote/referee commands.
 // FL_OSP_NOCMD is edict_t.flags bit 0x2000, the mod's own.  <invented name>.
 // edict_t.flags bit 0x10000 -- the mod's "this client is a bot" flag.
 
@@ -603,9 +602,9 @@ extern  int         manual_map;
 #define ITEM_SET_QUAD   1
 #define ITEM_SET_BFG    8
 
-// osp_main.c (<INVENTED FILENAME>).
+// osp_main.c (filename assigned by this tree).
 
-// osp_teams.c / osp_players.c (<INVENTED FILENAMES>).
+// osp_teams.c / osp_players.c (filenames assigned by this tree).
 
     // Moved here out of client_persistant_t; see the note there.
 
@@ -632,9 +631,8 @@ extern  gclient_t   saved_clients[128];
 
 // ---------------------------------------------------------------- prototypes
 //
-// The mod's own functions.  Anything g_local.h already declares is NOT repeated
-// here: one declaration, one place, which is the rule R-OSP-5 exists to enforce
-// from the other direction.
+// The mod's own functions.  Anything g_local.h already declares is not repeated
+// here: one declaration, one place.
 bool OSP_Pickup_Rune(edict_t *ent, edict_t *other);
 void     OSP_Drop_Rune(edict_t *ent, const gitem_t *item);
 bool OSP_runesHasHaste(edict_t *ent);
@@ -650,7 +648,7 @@ void     OSP_rmpause_cmd(void);
 void     OSP_rstopmatch_cmd(edict_t *ent);
 void     OSP_playerlist_svcmd(void);
 // `BotCmd` was declared here, by the donor, with `char *` where the SDK's own
-// bl_cmd.h says `const char *`.  R-OSP-5's shape a third time -- a name
+// bl_cmd.h says `const char *`.  The same shape a third time -- a name
 // declared outside the header that owns it -- and this one had a signature that
 // disagreed as well.  Nothing in src/tourney/ calls it; the two call sites are
 // g_svcmds.c and g_cmds.c, and both include bot/bl_cmd.h.
@@ -852,7 +850,7 @@ bool OSP_configFileExists(char *name);
 void     OSP_gameInit(void);
 void     OSP_endClean(void);
 void     OSP_initWeapItem(void);
-// R-183's one table for the allow_* family: the cvar an operator sets, the
+// One table for the allow_* family: the cvar an operator sets, the
 // entity it inhibits, the short tag the scoreboard banner prints and the name
 // the stats log records.  A NULL tag or log name means "inhibited but not
 // named", which two of the donor's own rows are.  NULL-terminated.
@@ -952,8 +950,8 @@ bool OSP_makeHSDir(char *base);
 int      OSP_readLine(FILE *f, char *a, char *b, char *c);
 void     OSP_highscoreDate(char *out);
 
-// The Standard Log writers (R-OSP-3), declared `static` in the donor's
-// g_local.h and therefore missed by the prototype sweep.
+// The Standard Log writers, declared `static` in the donor's g_local.h and
+// therefore missed by the prototype sweep.
 void    sl_WriteStdLogDeath(game_import_t *import, level_locals_t level,
                             edict_t *targ, edict_t *inflictor, edict_t *attacker);
 void    sl_WriteStdLogPlayerEntered(game_import_t *import, level_locals_t level,
@@ -967,7 +965,7 @@ void    sl_LogPlayerRename(game_import_t *import, char *oldname, char *newname,
 void    sl_LogScore(game_import_t *import, char *player, char *other,
                     char *event, char *weapon, int score, float time, int ping);
 
-// The delegated client-command dispatcher (R-OSP-2).
+// The delegated client-command dispatcher.
 bool OSP_ClientCommand(edict_t *ent);
 void OSP_CheckRules(void);
 void OSP_EndLevel(void);

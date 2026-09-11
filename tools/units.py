@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""The timer-unit contract, mechanised (R-VER-21, doc/reconciliation.md R-54/R-56).
+"""The timer-unit contract, mechanised.
 
 q2pro's `Convert ... to frame numbers.` commits retype every timer from a float
 count of seconds to an int count of frames.  A field's *type* therefore no
@@ -15,7 +15,7 @@ so each one is internally consistent even where they disagree: xatrix declares
 `float` and writes seconds, and neither is wrong on its own.  Colosseum has ONE
 g_local.h, so exactly one of those declarations survives the merge and every
 site written against the other is now a unit mix.  That is how the gekk's three
-`attack_finished` sites came to disagree with the other fifty (R-56), and no
+`attack_finished` sites came to disagree with the other fifty, and no
 upstream check could have seen it.
 
 FOUR CHECKS
@@ -34,13 +34,13 @@ FOUR CHECKS
          server and **0** on one that negotiated extensions, so `160 >> 3` and
          a bare `14` are the pre-extension spellings and hold for an eighth as
          long as they say on an extended server.  RA2's own post-port fix list
-         names one instance of this (`reconciliation.md`, R-SEC-2's sixteen);
+         names one instance of this;
          four more survived in CTF, Ground Zero and the Gladiator observer
          until somebody read the assignments side by side.
 
 None of the three can see a comparison written entirely in the wrong unit --
 `SV_RunThink`'s `thinktime > level.time` mentions no timer field at all.  Only
-running a level and waiting finds that, which is R-VER-20's job and why
+running a level and waiting finds that, which is the census check's job and why
 `sv ruleset` prints level.framenum.
 
 USAGE
@@ -110,7 +110,7 @@ def sources(tree):
     return out
 
 
-# R-VER-9 clause 2: a check that has never failed is not trusted.  Each control
+# A check that has never failed is not trusted.  Each control
 # is a real reversion of a real fix from this import, applied to a copy of the
 # tree in memory.
 SELFTESTS = [
@@ -285,7 +285,7 @@ def run(tree, files):
         out.append('  every declared timer field agrees with the clock it is '
                    'used with')
         out.append('  (this cannot see a comparison written entirely in the '
-                   'wrong unit -- R-VER-20 covers that)')
+                   'wrong unit -- the temporal check covers that)')
     return out
 
 

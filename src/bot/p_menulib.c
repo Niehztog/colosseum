@@ -17,9 +17,8 @@ along with this program; if not, write to the Free Software
 Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 */
-// The Gladiator Bot menu engine (R-BOT-28, R-MENU-1), from
-// gladiator-bot-restored@game.  The two reconstructions ship byte-identical
-// copies, so there is one source of truth.
+// The Gladiator Bot menu engine, from gladiator-bot-restored@game.  The two
+// reconstructions ship byte-identical copies, so there is one source of truth.
 //===========================================================================
 //
 // Name:                p_menulib.c
@@ -38,7 +37,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #define MENUITEMTEXT_XOFFSET    66
 #define MENUCHANGE_MOVE         1
 
-// R-MENU-2a: "is this menu up" is menu_owner, not a boolean of this engine's
+// "is this menu up" is menu_owner, not a boolean of this engine's
 // own.  Every `menustate->showmenu` test in the donor is this.
 static bool bot_MenuUp(edict_t *ent)
 {
@@ -271,7 +270,7 @@ void bot_MenuRemoveItem(bot_menu_t *menu, int id)
 // Sends a LAYOUT, not a statusbar.  svc_layout is the channel the scoreboard
 // and the inventory use, which is why opening this menu sets showscores and
 // closing it clears it -- and why closing needs no repaint, unlike RA2's menu,
-// which really does overwrite CS_STATUSBAR (doc/reconciliation.md R-87).
+// which really does overwrite CS_STATUSBAR.
 //
 // Parameter:               -
 // Returns:                 -
@@ -572,7 +571,7 @@ static int MenuUp(edict_t *ent)
     return true;
 } //end of the function MenuUp
 
-// R-MENU-4's three, so the inventory keys reach this engine the way they reach
+// The three, so the inventory keys reach this engine the way they reach
 // the other three.
 void bot_MenuNext(edict_t *ent)   { MenuDown(ent); }
 void bot_MenuPrev(edict_t *ent)   { MenuUp(ent); }
@@ -655,6 +654,5 @@ void bot_MenuShow(edict_t *ent)
     // single_statusbar -- is commented out in the reconstruction and is not
     // restored: this engine writes a LAYOUT, and a layout stops being drawn
     // when showscores goes false.  bot_MenuClose is what clears it, and
-    // G_LayoutClear is the one place that knows how (R-87's lesson, applied
-    // before the defect rather than after).
+    // G_LayoutClear is the one place that knows how.
 } //end of the function bot_MenuShow

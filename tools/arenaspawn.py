@@ -1,11 +1,22 @@
 #!/usr/bin/env python3
-"""Guard RA2 spawn-pad and arena-bound safety (R-146).
+"""Guard RA2 spawn-pad and arena-bound safety.
 
 Arena spawn selection deliberately ranks candidates only by fighters in the
 requested arena.  A second predicate must nevertheless keep a live,
 collidable body already on a same-arena pad from being selected.  This source
 audit checks that both selectors retain that predicate before their ranking,
 and that their first-candidate saturated-map fallback remains intact.
+
+The measure the predicate is taken with is pinned here for
+the same reason the predicate is: a spawn entity is not where a body put on it
+stands -- move_to_arena clips the placement to the floor -- so every question
+about a candidate is asked at its LANDING point, and one 56-unit drop was enough
+to make an occupied pad report itself clear.  So: one landing helper holding the
+placement's own trace, both selectors and the placement calling it, the
+occupancy test asking what that trace HIT (a radius cannot see the body the
+trace stopped on), the radius measured from the landing point, the placed body
+given its bounding box before the trace, and a landing that ended on a client
+arming check_telefrag.
 
 Arena 0 is the lobby and 1..MAX_ARENAS are playable.  The second half checks
 that storage includes ID 32, worldspawn counts fall back safely, external
@@ -25,6 +36,7 @@ import sys
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 CLEARANCE = 'ARENA_SPAWN_CLEARANCE'
 HELPER = 'ArenaSpawnSpotClear'
+LANDING = 'ArenaSpawnLanding'
 
 
 def mask(text):
@@ -93,8 +105,8 @@ def require(hits, condition, message):
 
 def gate_position(body, name):
     gate = re.search(
-        r'if\s*\(\s*!%s\s*\(\s*spot\s*,\s*arenanum\s*,\s*ignore\s*\)\s*\)'
-        r'\s*continue\s*;' % HELPER, body)
+        r'if\s*\(\s*!%s\s*\(\s*spot\s*,\s*arenanum\s*,\s*ignore\s*,'
+        r'\s*place\s*\)\s*\)\s*continue\s*;' % HELPER, body)
     if not gate:
         return -1
     score = re.search(r'ArenaFightersRangeFromSpot\s*\(', body)
@@ -131,19 +143,46 @@ def check_all(text, header, bot, misc, maploop=None, menus=None):
         r'VectorLength\s*\(\s*v\s*\)\s*<=\s*%s' % CLEARANCE, compact),
             '%s must reject bodies within its clearance' % HELPER)
 
+    # The four rules that make the clearance a measure of anything.
+    require(hits, re.search(
+        r'%s\s*\(\s*spot\s*,\s*ignore\s*,\s*place\s*\)' % LANDING, compact),
+            '%s must take its landing point from %s' % (HELPER, LANDING))
+    require(hits, re.search(
+        r'VectorSubtract\s*\(\s*place\s*,\s*player\s*->\s*s\s*\.\s*origin'
+        r'\s*,\s*v\s*\)', compact),
+            '%s must measure its clearance from the landing point, not from the '
+            'spawn entity' % HELPER)
+    require(hits, re.search(
+        r'tr\s*\.\s*ent\s*&&\s*tr\s*\.\s*ent\s*->\s*client\s*&&'
+        r'\s*ArenaLiveBody\s*\(\s*tr\s*\.\s*ent\s*,\s*ignore\s*\)'
+        r'\s*&&\s*tr\s*\.\s*ent\s*->\s*solid\s*!=\s*SOLID_NOT', compact),
+            '%s must refuse a pad whose column holds a live collidable client -- '
+            'a radius cannot see the body the landing trace stopped on' % HELPER)
+
+    landing = re.sub(r'\s+', ' ', function(text, LANDING))
+    require(hits, re.search(
+        r'from\s*\[\s*2\s*\]\s*\+=\s*16\s*;', landing) and
+            re.search(r'to\s*\[\s*2\s*\]\s*-=\s*64\s*;', landing) and
+            re.search(r'gi\s*\.\s*trace\s*\(\s*from\s*,\s*mins\s*,\s*maxs\s*,'
+                      r'\s*to\s*,\s*ent\s*,\s*MASK_PLAYERSOLID\s*\)', landing),
+            '%s must be the placement trace: the player box, entity +16 down to '
+            '-64, MASK_PLAYERSOLID, ignoring the arriving client' % LANDING)
+
     for name, body in (('SelectRandomArenaSpawnPoint', random),
                        ('SelectFarthestArenaSpawnPoint', farthest)):
         require(hits, gate_position(body, name) >= 0,
                 '%s must reject an occupied pad before fighter ranking' % name)
 
     require(hits, re.search(
-        r'ArenaFightersRangeFromSpot\s*\(\s*spot\s*,\s*arenanum\s*,\s*ignore\s*\)'
+        r'ArenaFightersRangeFromSpot\s*\(\s*place\s*,\s*arenanum\s*,\s*ignore\s*\)'
         r'\s*>\s*%s' % CLEARANCE, random),
-            'SelectRandomArenaSpawnPoint must retain fighter-only ranking')
+            'SelectRandomArenaSpawnPoint must retain fighter-only ranking, taken '
+            'at the landing point')
     require(hits, re.search(
-        r'bestplayerdistance\s*=\s*ArenaFightersRangeFromSpot\s*\(\s*spot\s*,'
+        r'bestplayerdistance\s*=\s*ArenaFightersRangeFromSpot\s*\(\s*place\s*,'
         r'\s*arenanum\s*,\s*ignore\s*\)', farthest),
-            'SelectFarthestArenaSpawnPoint must retain fighter-only ranking')
+            'SelectFarthestArenaSpawnPoint must retain fighter-only ranking, taken '
+            'at the landing point')
 
     first = random.find('if (!first)')
     gate = gate_position(random, 'SelectRandomArenaSpawnPoint')
@@ -153,6 +192,36 @@ def check_all(text, header, bot, misc, maploop=None, menus=None):
             'SelectRandomArenaSpawnPoint must collide only on a saturated map')
     require(hits, 'return SelectRandomArenaSpawnPoint(' in farthest,
             'SelectFarthestArenaSpawnPoint must retain its saturated-map fallback')
+
+    # The placement side: one copy of the trace, a body with a box to do
+    # it with, and the separator armed when the landing ended on somebody.
+    try:
+        place = function(text, 'move_to_arena')
+    except ValueError as exc:
+        return hits + [str(exc)]
+
+    compact_place = re.sub(r'\s+', ' ', place)
+    box = compact_place.find('VectorCopy(mins, ent->mins);')
+    land = compact_place.find('%s(dest, ent, ent->s.origin)' % LANDING)
+    kill = compact_place.find('KillBox(ent)')
+    arm = compact_place.find('resp.spawn_recheck = level.framenum')
+
+    require(hits, land >= 0,
+            'move_to_arena must place through %s, so the selector asks the same '
+            'question the placement answers' % LANDING)
+    require(hits, not re.search(
+        r'gi\s*\.\s*trace\s*\([^;]*\bmins\s*,\s*maxs\b', compact_place),
+            'move_to_arena must not carry a second copy of the landing trace')
+    require(hits, box >= 0 and land > box and
+            'VectorCopy(maxs, ent->maxs);' in compact_place,
+            'move_to_arena must give the body its bounding box before the '
+            'landing trace: an observer Pmove leaves the pair at zero, which '
+            'makes KillBox a point test and the body already on the pad a '
+            'point-sized obstacle')
+    require(hits, arm >= 0 and kill >= 0 and arm > kill and
+            re.search(r'mode == 0 && tr\.ent && tr\.ent->client', compact_place),
+            'move_to_arena must arm spawn_recheck when the landing ended on a '
+            'client, after KillBox, which clears it')
 
     if header is None:
         return hits
@@ -302,13 +371,29 @@ def selftest(text, header, bot, misc, maploop, menus):
         ('reservations cross arena boundaries', 'ArenaSpawnSpotClear',
          'player->client->resp.context != arenanum && idmap == false', 'false'),
         ('random selector loses occupied-pad gate', 'SelectRandomArenaSpawnPoint',
-         'if (!ArenaSpawnSpotClear(spot, arenanum, ignore))', 'if (false)'),
+         'if (!ArenaSpawnSpotClear(spot, arenanum, ignore, place))', 'if (false)'),
         ('farthest selector loses occupied-pad gate', 'SelectFarthestArenaSpawnPoint',
-         'if (!ArenaSpawnSpotClear(spot, arenanum, ignore))', 'if (false)'),
+         'if (!ArenaSpawnSpotClear(spot, arenanum, ignore, place))', 'if (false)'),
         ('clear fallback is not recorded', 'SelectRandomArenaSpawnPoint',
          'if (!clear)', 'if (false)'),
         ('random selector loses saturation fallback', 'SelectRandomArenaSpawnPoint',
          'return clear ? clear : first;', 'return NULL;'),
+        # Five controls, each one the defect it was.
+        ('clearance is measured from the spawn entity again', 'ArenaSpawnSpotClear',
+         'VectorSubtract(place, player->s.origin, v);',
+         'VectorSubtract(spot->s.origin, player->s.origin, v);'),
+        ('the pad column is no longer asked', 'ArenaSpawnSpotClear',
+         'if (tr.ent && tr.ent->client', 'if (false && tr.ent->client'),
+        ('the landing trace stops short of the floor', 'ArenaSpawnLanding',
+         'to[2] -= 64;', 'to[2] -= 0;'),
+        ('the placed body keeps the box its observer Pmove left it',
+         'move_to_arena', 'VectorCopy(mins, ent->mins);', '(void)mins;'),
+        ('landing on a client no longer arms the separator', 'move_to_arena',
+         'if (mode == 0 && tr.ent && tr.ent->client)', 'if (false)'),
+        ('the placement grows a second copy of the landing trace', 'move_to_arena',
+         'tr = ArenaSpawnLanding(dest, ent, ent->s.origin);',
+         'tr = gi.trace(dest->s.origin, mins, maxs, dest->s.origin, ent, '
+         'MASK_PLAYERSOLID);'),
     )
     for label, name, old, new in mutations:
         mutated = mutate_function(text, name, old, new)

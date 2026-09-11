@@ -20,12 +20,12 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 //===========================================================================
 //
 // Name:        p_lag.c
-// Function:    client lag simulation (R-EXTRA-2)
+// Function:    client lag simulation
 // Programmer:  Mr Elusive (MrElusive@demigod.demon.nl), 1999-04-02
 //
 // From gladiator-bot-restored/game/p_lag.c, behind `#define CLIENTLAG`.
 //
-// WHAT IT SIMULATES, because the name misleads.  It does not delay movement:
+// What it simulates, because the name misleads.  It does not delay movement:
 // pmove still runs on the command that just arrived, so a lagged player walks
 // normally.  What it delays is the BUTTON half -- the weapon fires from the
 // position and view angles the player had `delay` milliseconds ago, which is
@@ -43,10 +43,10 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 //   * the pool is capped, and says so once.  The donor extended it forever.
 //   * `Lag_ForgetGameMemory()`, because the pool is TAG_GAME and `ReadGame`
 //     frees every TAG_GAME block in the library before re-establishing the two
-//     arrays it knows about (doc/reconciliation.md R-108).  A third owner that
+//     arrays it knows about.  A third owner that
 //     does not forget its pointers hands the next allocation a freed block.
 //   * `gi.error()` on an out-of-range client index becomes a return.  A game
-//     library that kills the server on a bad index is R-SEC-5's shape: the
+//     library that kills the server on a bad index is the wrong shape: the
 //     index cannot be out of range here, and if it ever is, one dead client is
 //     better than one dead server.
 //===========================================================================
@@ -94,7 +94,7 @@ static void Lag_FreeDelayeducmd(delayeducmd_t *ducmd)
     freedelayeducmds = ducmd;
 }
 
-// R-108's pair.  ReadGame's `gi.FreeTags(TAG_GAME)` invalidates every block
+// The pair.  ReadGame's `gi.FreeTags(TAG_GAME)` invalidates every block
 // this file owns and every queue pointer into them, so both go before the
 // free rather than being discovered afterwards.  There is no matching Setup:
 // the pool re-extends on the next command, which is the next frame.
@@ -116,7 +116,7 @@ static bool Lag_ExtendDelayeducmdHeap(void)
     if (numblocks >= LAGMAXBLOCKS) {
         if (!saidfull) {
             gi.dprintf("WARNING: the client-lag pool is full at %d commands; "
-                       "further input is not delayed (R-EXTRA-2)\n",
+                       "further input is not delayed\n",
                        numblocks * LAGHEAPSIZE);
             saidfull = true;
         }
@@ -158,7 +158,7 @@ static int Lag_MilliSecondsSubtract(int seca, int mseca, int secb, int msecb)
 }
 
 // The index every entry point derives.  Out of range is impossible from the
-// engine and is not worth a dead server if it ever happens (R-SEC-4).
+// engine and is not worth a dead server if it ever happens.
 static int Lag_ClientIndex(edict_t *ent)
 {
     // Not DF_ENTCLIENT: that macro is the bot layer's own and this file is not
@@ -209,7 +209,7 @@ void Lag_StoreClientInput(edict_t *ent, usercmd_t *ucmd, vec3_t origin, vec3_t v
             clientlag[client].delay = 0;
         else if (clientlag[client].delay > LAG_MAX_DELAY)
             clientlag[client].delay = LAG_MAX_DELAY;
-        //set the client ping.  AFTER the clamp: the donor set it from the
+        //set the client ping.  After the clamp: the donor set it from the
         //unclamped value, so a big variance showed a ping the simulation was
         //not actually applying.
         ent->client->ping = clientlag[client].delay;
@@ -318,7 +318,7 @@ void Lag_SetClientLagVariance(edict_t *ent, int lagvariance)
     gi.cprintf(ent, PRINT_HIGH, "lag variance set to %d\n", lagvariance);
 }
 
-// For `sv extras` (R-VER-33).
+// For `sv extras`.
 int Lag_PoolBlocks(void)
 {
     return numblocks;

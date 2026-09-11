@@ -806,8 +806,8 @@ static void brain_precache(void)
 
 
 // ---------------------------------------------------------------------------
-// R-CORE-11: baseq2's duck-and-dodge for the brain, restored alongside Ground
-// Zero's rewrite so that BOTH ship and the spawn-time latch selects.
+// Baseq2's duck-and-dodge for the brain, restored alongside Ground
+// Zero's rewrite so that both ship and the spawn-time latch selects.
 //
 // Ground Zero does not add to this monster, it replaces its evasion: baseq2's
 // per-monster brain_dodge and brain_duck_* become the shared M_MonsterDodge with
@@ -876,9 +876,7 @@ void bq2_brain_dodge(edict_t *self, edict_t *attacker, float eta, trace_t *tr)
 */
 void SP_monster_brain(edict_t *self)
 {
-    // R-MODE-7 / R-CORE-8: the ruleset decides, not `deathmatch`.  The
-    // inherited test was right for baseq2 and wrong here, because `deathmatch`
-    // is 1 under ctf and R-MODE-7 promises monsters under ctf.
+    // deathmatch is 1 under ctf, which allows monsters: ask the ruleset.
     if (!G_MonstersAllowed()) {
         G_FreeEdict(self);
         return;
@@ -903,10 +901,8 @@ void SP_monster_brain(edict_t *self)
     self->monsterinfo.walk = brain_walk;
     self->monsterinfo.run = brain_run;
 // PMM
-    // *** R-CORE-11's gate. ***  Both evasion sets ship; the latch selects at
-    // spawn.  content_flavour is latched in ED_CallSpawn, which runs BEFORE this
-    // function -- R-CORE-11 names monster_start as the latch point and that is
-    // too late, see doc/reconciliation.md R-31.
+    // Both evasion sets ship; the latch selects at spawn.  content_flavour is
+    // latched in ED_CallSpawn, which runs before this function.
     //
     // An if/else with literal assignments, deliberately: genptr.py builds
     // save_ptrs[] by scanning the source for `= &name`, so a ternary or a macro
@@ -920,7 +916,7 @@ void SP_monster_brain(edict_t *self)
     }
 //  self->monsterinfo.dodge = brain_dodge;
 // pmm
-    // *** The xatrix arm of the same gate. ***  baseq2 and Ground Zero both
+    // The xatrix arm of the same gate.  baseq2 and Ground Zero both
     // ship this line COMMENTED OUT -- id never gave the brain a ranged attack
     // -- and The Reckoning turns it on: `self->monsterinfo.attack =
     // brain_attack` in its own SP_monster_brain, with brain_attack and its two

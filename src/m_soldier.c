@@ -833,7 +833,7 @@ static const mframe_t soldier_frames_attack6[] = {
 };
 const mmove_t soldier_move_attack6 = {FRAME_runs01, FRAME_runs14, soldier_frames_attack6, soldier_run};
 
-// R-CORE-11: baseq2's soldier_move_attack6, kept alongside Ground Zero's.
+// Baseq2's soldier_move_attack6, kept alongside Ground Zero's.
 // Ground Zero swaps ai_charge for ai_run over part of the run-and-shoot and
 // adds soldier_start_charge, so the soldier closes differently.
 static const mframe_t bq2_soldier_frames_attack6[] = {
@@ -916,8 +916,8 @@ void soldier_attack(edict_t *self)
         (range(self, self->enemy) >= RANGE_NEAR) &&
         (r < (skill->value * 0.25f) &&
          (self->s.skinnum <= 3))) {
-        // R-CORE-11: both sequences ship; the latch selects (if/else with
-        // literal assignments so genptr.py sees both -- R-CORE-11b).
+        // Both sequences ship; the latch selects (if/else with
+        // literal assignments so genptr.py sees both).
         if (self->content_flavour & CONTENT_ROGUE)
             self->monsterinfo.currentmove = &soldier_move_attack6;
         else
@@ -955,8 +955,8 @@ void soldier_sight(edict_t *self, edict_t *other)
     if ((skill->value > 0) && (self->enemy) && (range(self, self->enemy) >= RANGE_NEAR)) {
 //  PMM - don't let machinegunners run & shoot
         if ((random() > 0.75f) && (self->s.skinnum <= 3)) {
-            // R-CORE-11: both sequences ship; the latch selects (if/else with
-            // literal assignments so genptr.py sees both -- R-CORE-11b).
+            // Both sequences ship; the latch selects (if/else with
+            // literal assignments so genptr.py sees both).
             if (self->content_flavour & CONTENT_ROGUE)
                 self->monsterinfo.currentmove = &soldier_move_attack6;
             else
@@ -1072,8 +1072,8 @@ void soldier_dodge (edict_t *self, edict_t *attacker, float eta, trace_t *tr)
         {
             if ((g_showlogic) && (g_showlogic->value))
                 gi.dprintf ("shooting back!\n");
-            // R-CORE-11: both sequences ship; the latch selects (if/else with
-            // literal assignments so genptr.py sees both -- R-CORE-11b).
+            // Both sequences ship; the latch selects (if/else with
+            // literal assignments so genptr.py sees both).
             if (self->content_flavour & CONTENT_ROGUE)
                 self->monsterinfo.currentmove = &soldier_move_attack6;
             else
@@ -1410,7 +1410,7 @@ static const mframe_t soldier_frames_death4[] = {
 // PMM -changed to soldier_dead2 to get a larger bounding box
 const mmove_t soldier_move_death4 = {FRAME_death401, FRAME_death453, soldier_frames_death4, soldier_dead2};
 
-// R-CORE-11: baseq2's soldier_move_death4, kept alongside Ground Zero's.
+// Baseq2's soldier_move_death4, kept alongside Ground Zero's.
 // Ground Zero's death4 ends in soldier_dead2 rather than soldier_dead.
 static const mframe_t bq2_soldier_frames_death4[] = {
     { ai_move, 0,   NULL },
@@ -1561,8 +1561,8 @@ void soldier_die(edict_t *self, edict_t *inflictor, edict_t *attacker, int damag
     else if (n == 1)
         self->monsterinfo.currentmove = &soldier_move_death2;
     else if (n == 2)
-        // R-CORE-11: both sequences ship; the latch selects (if/else with
-        // literal assignments so genptr.py sees both -- R-CORE-11b).
+        // Both sequences ship; the latch selects (if/else with
+        // literal assignments so genptr.py sees both).
         if (self->content_flavour & CONTENT_ROGUE)
             self->monsterinfo.currentmove = &soldier_move_death4;
         else
@@ -1583,8 +1583,8 @@ void soldier_sidestep(edict_t *self)
 //      if ((g_showlogic) && (g_showlogic->value))
 //          gi.dprintf ("shooting back!\n");
         if (self->monsterinfo.currentmove != &soldier_move_attack6) {
-            // R-CORE-11: both sequences ship; the latch selects (if/else with
-            // literal assignments so genptr.py sees both -- R-CORE-11b).
+            // Both sequences ship; the latch selects (if/else with
+            // literal assignments so genptr.py sees both).
             if (self->content_flavour & CONTENT_ROGUE)
                 self->monsterinfo.currentmove = &soldier_move_attack6;
             else
@@ -1686,7 +1686,7 @@ static void soldier_precache_x(void)
     sound_cock   = gi.soundindex("infantry/infatck3.wav");
 }
 
-// Forward declaration: the restored baseq2 evasion (R-CORE-11) is defined below,
+// Forward declaration: the restored baseq2 evasion is defined below,
 // after the shared spawn helper whose gate references it.
 void bq2_soldier_dodge(edict_t *self, edict_t *attacker, float eta, trace_t *tr);
 
@@ -1712,10 +1712,8 @@ static void SP_monster_soldier_x(edict_t *self)
     self->monsterinfo.stand = soldier_stand;
     self->monsterinfo.walk = soldier_walk;
     self->monsterinfo.run = soldier_run;
-    // *** R-CORE-11's gate. ***  Both evasion sets ship; the latch selects at
-    // spawn.  content_flavour is latched in ED_CallSpawn, which runs BEFORE this
-    // function -- R-CORE-11 names monster_start as the latch point and that is
-    // too late, see doc/reconciliation.md R-31.
+    // Both evasion sets ship; the latch selects at spawn.  content_flavour is
+    // latched in ED_CallSpawn, which runs before this function.
     //
     // An if/else with literal assignments, deliberately: genptr.py builds
     // save_ptrs[] by scanning the source for `= &name`, so a ternary or a macro
@@ -1758,9 +1756,7 @@ Blind - monster will just stand there until triggered
 */
 void SP_monster_soldier_light(edict_t *self)
 {
-    // R-MODE-7 / R-CORE-8: the ruleset decides, not `deathmatch`.  The
-    // inherited test was right for baseq2 and wrong here, because `deathmatch`
-    // is 1 under ctf and R-MODE-7 promises monsters under ctf.
+    // deathmatch is 1 under ctf, which allows monsters: ask the ruleset.
     if (!G_MonstersAllowed()) {
         G_FreeEdict(self);
         return;
@@ -1790,8 +1786,8 @@ static void soldier_precache(void)
 
 
 // ---------------------------------------------------------------------------
-// R-CORE-11: baseq2's duck-and-dodge for the soldier, restored alongside Ground
-// Zero's rewrite so that BOTH ship and the spawn-time latch selects.
+// Baseq2's duck-and-dodge for the soldier, restored alongside Ground
+// Zero's rewrite so that both ship and the spawn-time latch selects.
 //
 // Ground Zero does not add to this monster, it replaces its evasion: baseq2's
 // per-monster soldier_dodge and soldier_duck_* become the shared M_MonsterDodge with
@@ -1886,9 +1882,7 @@ Blind - monster will just stand there until triggered
 */
 void SP_monster_soldier(edict_t *self)
 {
-    // R-MODE-7 / R-CORE-8: the ruleset decides, not `deathmatch`.  The
-    // inherited test was right for baseq2 and wrong here, because `deathmatch`
-    // is 1 under ctf and R-MODE-7 promises monsters under ctf.
+    // deathmatch is 1 under ctf, which allows monsters: ask the ruleset.
     if (!G_MonstersAllowed()) {
         G_FreeEdict(self);
         return;
@@ -1917,9 +1911,7 @@ Blind - monster will just stand there until triggered
 */
 void SP_monster_soldier_ss(edict_t *self)
 {
-    // R-MODE-7 / R-CORE-8: the ruleset decides, not `deathmatch`.  The
-    // inherited test was right for baseq2 and wrong here, because `deathmatch`
-    // is 1 under ctf and R-MODE-7 promises monsters under ctf.
+    // deathmatch is 1 under ctf, which allows monsters: ask the ruleset.
     if (!G_MonstersAllowed()) {
         G_FreeEdict(self);
         return;
@@ -3126,9 +3118,7 @@ void SP_monster_soldier_h(edict_t *self)
 */
 void SP_monster_soldier_ripper(edict_t *self)
 {
-    // R-MODE-7 / R-CORE-8: the ruleset decides, not `deathmatch`.  Converted on
-    // import for the same reason as baseq2's monsters -- `deathmatch` is 1 under
-    // ctf, and R-MODE-7 promises monsters there.
+    // deathmatch is 1 under ctf, which allows monsters: ask the ruleset.
     if (!G_MonstersAllowed()) {
         G_FreeEdict(self);
         return;
@@ -3151,9 +3141,7 @@ void SP_monster_soldier_ripper(edict_t *self)
 */
 void SP_monster_soldier_hypergun(edict_t *self)
 {
-    // R-MODE-7 / R-CORE-8: the ruleset decides, not `deathmatch`.  Converted on
-    // import for the same reason as baseq2's monsters -- `deathmatch` is 1 under
-    // ctf, and R-MODE-7 promises monsters there.
+    // deathmatch is 1 under ctf, which allows monsters: ask the ruleset.
     if (!G_MonstersAllowed()) {
         G_FreeEdict(self);
         return;
@@ -3174,9 +3162,7 @@ void SP_monster_soldier_hypergun(edict_t *self)
 */
 void SP_monster_soldier_lasergun(edict_t *self)
 {
-    // R-MODE-7 / R-CORE-8: the ruleset decides, not `deathmatch`.  Converted on
-    // import for the same reason as baseq2's monsters -- `deathmatch` is 1 under
-    // ctf, and R-MODE-7 promises monsters there.
+    // deathmatch is 1 under ctf, which allows monsters: ask the ruleset.
     if (!G_MonstersAllowed()) {
         G_FreeEdict(self);
         return;

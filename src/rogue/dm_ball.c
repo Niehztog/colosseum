@@ -45,9 +45,9 @@ cvar_t  *goallimit;
 void DBall_BallDie(edict_t *self, edict_t *inflictor, edict_t *attacker, int damage, vec3_t point);
 void DBall_BallRespawn(edict_t *self);
 
-// R-211, the same shape as dm_tag.c's Tag_Active().  Deathball is commented
+// The same shape as dm_tag.c's Tag_Active().  Deathball is commented
 // out of InitGameRules(), so `gamerules 3` used to be reset to 0 by its
-// `default:` arm before any map could spawn a dball entity.  R-203 stopped
+// `default:` arm before any map could spawn a dball entity.  The merge stopped
 // calling InitGameRules() outside CTF/Arena, which removed that reset -- so
 // under OSP the six spawn functions below saw a live 3 and let a dball map
 // build a goal, a ball and its start points with no game running them.

@@ -1,13 +1,12 @@
 #!/usr/bin/env python3
-"""R-26's sixth rule: a merge may not drop a call to a symbol the donor deleted.
+"""A merge may not drop a call to a symbol the donor deleted.
 
-R-VER-24, doc/reconciliation.md R-64.
 
-THE PROBLEM.  Three donors delete the whole monster set (R-CORE-8) -- CTF drops
+THE PROBLEM.  Three donors delete the whole monster set -- CTF drops
 45 files, RA2 46, tourney 44 -- and Colosseum replays none of those deletions,
 because it keeps the campaign.  For CTF that was free: the deletions were whole
 FILES, and a file the merge never opens cannot lose anything.  RA2 deletes
-monster code from inside the SHARED files as well, and there R-26's five rules
+monster code from inside the SHARED files as well, and there the five rules
 are blind -- where our copy of a file happens to equal the base, rule 2
 ("base==ours: take theirs") takes the donor's version of the hunk, monster
 deletion and all.
@@ -21,7 +20,7 @@ runs, and is wrong -- and none of them is in any boot, census or savegame check.
 THE CHECK.  Take every function DEFINED in the files those donors delete -- the
 22 monster pairs, m_move.c and g_chase.c.  For each SHARED file, count how many
 times the reference tree calls each of those names and how many times we do.  A
-count that went DOWN is a call R-CORE-8 says we keep and somebody dropped.
+count that went DOWN is a call this tree keeps and somebody dropped.
 
 Comments are stripped first.  Without that the check is asleep exactly when it
 matters most: a donor that explains why it dropped a call names the function in
@@ -67,7 +66,7 @@ def defined_in_deleted(tree):
 
 
 # g_ptrs.c/.h are genptr.py's output: a table of symbol NAMES, not call sites.
-# R-CORE-11b renamed six monsters' dodge functions when it split them into a
+# Six monsters' dodge functions were renamed when they were split into a
 # baseq2 and a Ground Zero variant, so the old names are legitimately absent
 # there -- and check-ptrs already proves that file matches its generator.
 GENERATED = ('g_ptrs.c', 'g_ptrs.h')
@@ -97,7 +96,7 @@ def run(ref, tree, override=None):
             na, nb = len(r.findall(a)), len(r.findall(b))
             if nb < na:
                 out.append('  !! %s: %s called %d time(s) upstream, %d here -- '
-                           'a monster-API call this tree keeps (R-CORE-8) was '
+                           'a monster-API call this tree keeps was '
                            'dropped by a merge' % (f, s, na, nb))
                 bad += 1
     out.insert(0, 'lostref.py: %d symbol(s) from the deleted set, %d shared '
@@ -108,8 +107,8 @@ def run(ref, tree, override=None):
     return out
 
 
-# R-VER-9 clause 2.  Each control is a real deletion this merge actually made
-# before the check existed -- see doc/reconciliation.md R-64.
+# Each control is a real deletion this merge actually made before the check
+# existed.
 SELFTESTS = [
     ('barrel', 'g_misc.c',
      'M_walkmove(self, vectoyaw(v), 20 * ratio * FRAMETIME);',

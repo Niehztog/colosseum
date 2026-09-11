@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
 """Count the acceptance-criteria surfaces: classnames, cvars, client commands.
 
-R-TOOL-2: "Every number this spec publishes as an acceptance criterion --
+"Every number this spec publishes as an acceptance criterion --
 classname, cvar and command counts [...] -- is produced by a script in `tools/`
-that ships with it.  A figure with no script is indicative only (§3) and cannot
-gate a phase."  R-TOOL-5 records that this script had never been written, which
-is why R-BASE-1/2/3, R-MP-1, R-OSP-2 and R-RA-2 were unenforceable as written.
+that ships with it.  A figure with no script is indicative only and cannot gate
+a phase."  For a long time this script had not been written, which left the
+count requirements unenforceable as written.
 
-This is that script.  It does not attempt to reproduce the numbers in SPECS.md;
+This is that script.  It does not attempt to reproduce the documented numbers;
 it measures the tree and prints what is there, so that a claim and a measurement
 can be compared instead of a claim being compared with another claim.
 
@@ -24,11 +24,11 @@ WHAT IS COUNTED, and why each definition is the arguable part
               `gi.cvar("x")` and `import->cvar("x")` alike, since it is the same
               engine function whether it is reached through the global or
               through a parameter.  It counts a cvar registered twice as one,
-              which is exactly the R-COMPAT-6 defect (`statsfile` registered by
+              which is exactly the duplicate-cvar defect (`statsfile` registered by
               both RA2 and tourney), so --duplicates reports those separately
               rather than hiding them in a unique count.
 
-              A NAME THAT IS NOT A LITERAL IS STILL A NAME.  R-183 moved the
+              A name that is not a literal is still a name.  A change moved the
               twenty-six `allow_*` names out of literal position into
               `osp_allow_items[]` and reaches them as
               `gi.cvar(osp_allow_items[i].cvar, ...)`; before that they were
@@ -114,7 +114,7 @@ def classnames(files):
 # Only gi.cvar() REGISTERS a cvar.  gi.cvar_set() and gi.cvar_forceset() write
 # one that already exists, and counting them as registrations is what turns
 # baseq2's 37 into 38: g_spawn.c force-sets `skill` and sets `sv_gravity`, both
-# of which g_main.c registered.  It also invents an R-COMPAT-6 duplicate out of
+# of which g_main.c registered.  It also invents a duplicate out of
 # a cvar the same tree legitimately writes twice.
 # `gi.cvar("x", ...)` and `import->cvar("x", ...)` are the same engine call
 # reached two ways -- the second is how stdlog.c registers `sl_log_logbots`,
@@ -177,7 +177,7 @@ def table_column(files, table, member):
 def cvars(files, unresolved=None, headers=None):
     """name -> [(file, default), ...] so a double REGISTRATION is visible.
 
-    R-COMPAT-6 is about two translation units registering one name with
+    The rule is about two translation units registering one name with
     different defaults -- RA2 and tourney both claiming `statsfile`.  Two
     registrations of the same name with the same default are idiomatic: the
     second gi.cvar() returns the first's cvar, which is how a donor re-obtains a
@@ -203,7 +203,7 @@ def cvars(files, unresolved=None, headers=None):
                 continue
             # The DEFAULT is at the call site, not in the table -- one
             # `gi.cvar(t[i].cvar, "1", 0)` gives every resolved name the same
-            # default.  Recording a placeholder instead invented six R-COMPAT-6
+            # default.  Recording a placeholder instead invented six duplicate
             # duplicates out of names whose defaults agree.
             for n in names:
                 out.setdefault(n, []).append((base, m.group(3) or '?'))
@@ -253,7 +253,7 @@ def report(label, tree, args):
              if len({d for _, d in v}) > 1 and len({f for f, _ in v}) > 1}
     if dupes:
         print(f'  !! {len(dupes)} cvar name(s) registered from more than one '
-              f'translation unit WITH DIFFERENT DEFAULTS (R-COMPAT-6):')
+              f'translation unit WITH DIFFERENT DEFAULTS:')
         for k in sorted(dupes):
             for fn, d in sorted(set(dupes[k])):
                 print(f'       {k}: {fn} -> {d}')
@@ -261,7 +261,7 @@ def report(label, tree, args):
               if len({f for f, _ in v}) > 1 and len({d for _, d in v}) == 1}
     if benign:
         print(f'  ({len(benign)} name(s) registered twice with the same default '
-              f'-- idiomatic re-obtain, not R-COMPAT-6)')
+              f'-- idiomatic re-obtain, not a duplicate)')
     if unresolved:
         # Not a finding -- a name arriving as a bare parameter is legitimate and
         # this script cannot follow it.  Printed so the count is read as a floor
@@ -318,7 +318,7 @@ def selftest():
     """Controls for each extraction shape, because the count is an assertion.
 
     Every one of these has occurred in the tree: the pointer form is how
-    stdlog.c registers `sl_log_logbots`, the table column is R-183's
+    stdlog.c registers `sl_log_logbots`, the table column is the
     `osp_allow_items[]`, the bare parameter is BotSetVarIfSet, and cvar_set is
     what turned baseq2's 37 into 38 before this script excluded it.
     """
@@ -357,7 +357,7 @@ def selftest():
         dupes = {k: v for k, v in cv.items()
                  if len({d for _, d in v}) > 1 and len({f for f, _ in v}) > 1}
         want(list(dupes) == ['collides'],
-             'two files, two defaults, one name -> R-COMPAT-6 reported')
+             'two files, two defaults, one name -> reported as a duplicate')
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
     return ok
@@ -370,7 +370,7 @@ def main():
     ap.add_argument('--list', action='append', default=[],
                     choices=['classnames', 'spawn', 'items', 'cvars', 'commands'])
     ap.add_argument('--duplicates', action='store_true',
-                    help='exit 1 if any cvar is registered twice (R-COMPAT-6)')
+                    help='exit 1 if any cvar is registered twice')
     ap.add_argument('--selftest', action='store_true',
                     help='controls for each extraction shape')
     a = ap.parse_args()

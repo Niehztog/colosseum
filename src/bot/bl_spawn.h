@@ -17,7 +17,7 @@ along with this program; if not, write to the Free Software
 Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 */
-// Fake clients, from osp-tourney@1d8427e (SPECS.md sec 5.4.4, R-BOT-14..19).
+// Fake clients, from osp-tourney@1d8427e.
 //===========================================================================
 //
 // Name:         bl_spawn.h
@@ -33,9 +33,9 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 // The mod's own bot-count latch, not the SDK's: CheckMinimumPlayers compares it
 // against the count it just took so that it does not ask for the same bot twice
 // while the first one is still in the queue, and tourney's OSP_endClean resets
-// it at the end of a match.  Declared HERE because bl_spawn.c defines it --
-// R-OSP-5 is about exactly this, a donor's object declared somewhere other than
-// the header that owns it, and it was in src/tourney/osp_types.h until Phase 6.
+// it at the end of a match.  Declared here because bl_spawn.c defines it --
+// a donor's object declared somewhere other than the header that owns it is
+// the shape to avoid, and this one was in src/tourney/osp_types.h.
 extern int old_botcount;
 
 // spawns bots after level change
@@ -59,16 +59,16 @@ void AddBotToQueue(edict_t *ent, const char *library, const char *userinfo);
 void AddQueuedBots(void);
 //
 void CheckMinimumPlayers(void);
-// R-RA-7, R-CTF-8, R-DM-1: the target `botfill` asks for, clamped
-// to two sides, `game.maxclients` and whatever the roster could actually supply,
-// or 0 when the switch is off.  `sv ruleset` prints it, because it is computed
-// rather than stored and there is nowhere else to read it back from (R-VER-19).
+// The target `botfill` asks for, clamped to two sides, `game.maxclients` and
+// whatever the roster could actually supply, or 0 when the switch is off.  `sv
+// ruleset` prints it, because it is computed rather than stored and there is
+// nowhere else to read it back from.
 int  BotFillTarget(void);
 void BotFillNoMore(int achieved);
-// Where BotFillTarget()'s number came from, for `sv ruleset` (R-VER-19).
+// Where BotFillTarget()'s number came from, for `sv ruleset`.
 void BotFillDescribe(char *buf, size_t len);
-// the loading image the SDK paints while a bot is being created (R-BOT-29:
-// emptied under tourney, which has its own bar)
+// the loading image the SDK paints while a bot is being created (emptied under
+// tourney, which has its own bar)
 void ShowLoadImage(edict_t *ent);
 void RemoveLoadImage(edict_t *ent);
 

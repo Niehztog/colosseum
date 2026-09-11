@@ -17,12 +17,11 @@ along with this program; if not, write to the Free Software
 Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 */
-// OSP Tourney DM v2.75, from osp-tourney@1d8427e (doc/provenance.md).
+// OSP Tourney DM v2.75, from osp-tourney@1d8427e.
 // Donor-only: baseq2 has no counterpart, so it lives in src/tourney/ rather
-// than being merged into a spine file (R-CORE-7).  The reconstruction's
-// asm-matching address comments are stripped -- SPECS.md N1 makes those oracles
-// meaningless here, and they survive at the pin.
-// stdlog.c -- <INVENTED FILENAME>. Standard Log 1.2 writer.
+// than being merged into a spine file.  The reconstruction's asm-matching
+// address comments are stripped.  stdlog.c -- filename assigned by this tree.
+// Standard Log 1.2 writer.
 
 #include "g_local.h"
 #include "tourney/osp_types.h"
@@ -135,7 +134,7 @@ void sl_WriteStdLogDeath(game_import_t *import, level_locals_t level,
                 weapon = "Crushed";
                 suicide = 1;
                 break;
-            // R-183: HERE and not in the weapon switch below, which is where
+            // Here and not in the weapon switch below, which is where
             // reviewing this diff found it.  dm_ball.c raises MOD_DBALL_CRUSH
             // from `T_Damage(other, ent, ent, ...)` where `ent` is the ball, so
             // the attacker is not a client, the weapon switch below cannot be
@@ -236,7 +235,7 @@ void sl_WriteStdLogDeath(game_import_t *import, level_locals_t level,
                     weapon = "Grappling Hook";
                     break;
 
-                // R-183: the content layers, which R-MODE-3 makes valid with every ruleset
+                // The content layers, which are valid with every ruleset
                 // -- so a Reckoning or Ground Zero kill was reaching this table and falling
                 // out of it as "UNKNOWN".  The names are the items' own pickup names, which
                 // is what `acc_names[]` in the accuracy record already uses, so a consumer

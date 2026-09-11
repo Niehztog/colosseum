@@ -17,7 +17,7 @@ along with this program; if not, write to the Free Software
 Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 */
-// bots.cfg, from osp-tourney@1d8427e (SPECS.md sec 5.4.6, R-BOT-26).
+// bots.cfg, from osp-tourney@1d8427e.
 //===========================================================================
 //
 // Name:                bl_botcfg.h

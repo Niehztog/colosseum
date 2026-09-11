@@ -1,13 +1,13 @@
-# Colosseum, built in place under q2pro (R-BUILD-3).
+# Colosseum, built in place under q2pro.
 #
 # Mirrors q2pro/src/ctf/meson.build: drop this tree at q2pro/src/colosseum and
 # it builds through the same mission-pack mechanism, sharing game_shared_src and
 # engine_inc rather than compiling its own copies of shared.c and m_flash.c.
 # The standalone Makefile stays primary -- it is the one that covers all five
-# targets of R-BUILD-5, both settings of R-ENG-1a, and the R-TOOL-3 audits.
+# build targets, both settings of the game ABI, and the contract audits.
 #
 # THE FILE LIST BELOW IS THE MAKEFILE'S GAME_SRC, IN ITS ORDER.  It fell 43
-# files behind between Phase 2 and Phase 8 -- every donor subdirectory added
+# files behind as the merge progressed -- every donor subdirectory added
 # after xatrix and rogue was appended to the Makefile and not to this file, so
 # an in-tree build produced a library with no CTF, no arena, no tourney and no
 # bots.  Two omissions are deliberate and both are stated where they apply:
@@ -76,17 +76,17 @@ colosseum_src = files(
   'src/p_view.c',
   'src/p_weapon.c',
 
-  # CTF -- Threewave Capture The Flag 1.52 (R-CTF-1..7)
+  # CTF -- Threewave Capture The Flag 1.52
   'src/ctf/g_ctf.c',
   'src/ctf/p_menu.c',
 
-  # XATRIX -- the four Reckoning-only monsters (R-SP-5)
+  # XATRIX -- the four Reckoning-only monsters
   'src/xatrix/m_boss5.c',
   'src/xatrix/m_fixbot.c',
   'src/xatrix/m_gekk.c',
   'src/xatrix/m_gladb.c',
 
-  # ROGUE -- Ground Zero.  m_move2.c is deliberately NOT here: R-MP-5 ships it
+  # ROGUE -- Ground Zero.  m_move2.c is deliberately NOT here: it ships
   # as reference and unbuilt, because it redefines all nine of m_move.c's
   # functions with external linkage.
   'src/rogue/dm_ball.c',
@@ -104,7 +104,7 @@ colosseum_src = files(
   'src/rogue/m_widow.c',
   'src/rogue/m_widow2.c',
 
-  # ARENA -- Rocket Arena 2 v2.25 (R-RA-1..6)
+  # ARENA -- Rocket Arena 2 v2.25
   'src/arena/arena.c',
   'src/arena/gslog.c',
   'src/arena/maploop.c',
@@ -112,7 +112,7 @@ colosseum_src = files(
   'src/arena/ra2menus.c',
   'src/arena/ra2stats.c',
 
-  # BOT -- the Gladiator Bot SDK glue (R-BOT-1..30)
+  # BOT -- the Gladiator Bot SDK glue
   'src/bot/bl_botcfg.c',
   'src/bot/bl_cmd.c',
   'src/bot/bl_debug.c',
@@ -123,7 +123,7 @@ colosseum_src = files(
   'src/bot/p_menulib.c',
   'src/bot/p_observer.c',
 
-  # TOURNEY -- OSP Tourney DM v2.75 (R-OSP-1..13)
+  # TOURNEY -- OSP Tourney DM v2.75
   'src/tourney/osp_acc.c',
   'src/tourney/osp_clientcmd.c',
   'src/tourney/osp_cmds.c',

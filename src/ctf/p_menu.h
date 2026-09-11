@@ -18,12 +18,12 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 */
 
-// Threewave's menu engine -- one of the four R-MENU-1 ships.  §5.2 gives it
+// Threewave's menu engine -- one of the four that ship.  It lives in
 // `src/ctf/p_menu.c/.h` and the `ctf_` prefix, because OSP ships a p_menu.h of
 // its own with an INCOMPATIBLE pmenu_t (`arg` per entry rather than on the
 // handle) and the same basename.  The subfolder keeps the files apart, the
 // prefix keeps the symbols apart, and neither directory goes on the include
-// path (R-25 item 3): a user writes `#include "ctf/p_menu.h"`.
+// path: a user writes `#include "ctf/p_menu.h"`.
 
 #ifndef CTF_P_MENU_H
 #define CTF_P_MENU_H

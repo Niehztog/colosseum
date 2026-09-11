@@ -2810,7 +2810,7 @@ void SP_object_repair(edict_t *ent)
 /*
 ==============================================================================
 
-func_button_rotating   R-EXTRA-4, from the 1999 module's FUNC_BUTTON_ROTATING
+func_button_rotating   from the 1999 module's FUNC_BUTTON_ROTATING
 
 ==============================================================================
 */
@@ -2965,7 +2965,7 @@ void button_rotating_blocked(edict_t *self, edict_t *other)
 
 void SP_func_button_rotating(edict_t *ent)
 {
-    // R-EXTRA-4's cvar.  A spawn function that is switched off frees its
+    // The cvar.  A spawn function that is switched off frees its
     // entity rather than leaving an inert one in the census.
     if (!g_rotatingbutton->value) {
         G_FreeEdict(ent);

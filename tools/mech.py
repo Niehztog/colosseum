@@ -10,9 +10,9 @@ import os, subprocess, sys
 
 SP = os.path.dirname(os.path.abspath(__file__))
 R  = os.path.join(SP, 'replay')
-# R-TOOL-1: was the rescued harness's own binary at SP/opt/root/usr/bin/astyle,
+# Was the rescued harness's own binary at SP/opt/root/usr/bin/astyle,
 # a path that does not exist on this machine.  The host's astyle is 3.1 -- the
-# version R-CONV-1a pins -- and produces byte-identical output (R-BUILD-6), so
+# pinned version -- and produces byte-identical output, so
 # the pin is satisfied natively.  $ASTYLE overrides; the Makefile exports it.
 AS = os.environ.get('ASTYLE', 'astyle')
 ASTYLE = [AS, '--style=linux', '--indent=spaces=4', '--pad-oper', '--unpad-paren',

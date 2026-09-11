@@ -18,11 +18,10 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 */
 // The Gladiator Bot SDK's debug-line interface, from osp-tourney@1d8427e --
-// which carries a working Q2PRO port of the 1999 glue (SPECS.md sec 3).
-// bl_debug.c is code-identical to the 1999 original (R-BOT-30) and transfers
-// unchanged apart from R-BOT-27's engine-extension path.
-// The reconstruction's asm-matching address comments are stripped -- SPECS.md
-// N1 makes those oracles meaningless here, and they survive at the pin.
+// which carries a working Q2PRO port of the 1999 glue.
+// bl_debug.c is code-identical to the 1999 original and transfers
+// unchanged apart from the engine-extension path.
+// The reconstruction's asm-matching address comments are stripped.
 //===========================================================================
 //
 // Name:         bl_debug.h
@@ -56,7 +55,7 @@ void DebugLineShow(int line, vec3_t start, vec3_t end, int color);
 void SetVisibleBoundingBox(visiblebbox_t *box, edict_t *ent);
 // toggles a visible bounding box
 void ToggleVisibleBoundingBox(edict_t *ent);
-// R-BOT-27: bound to Q2PRO's DEBUG_DRAW_API_V1 at InitGame when the engine
+// Bound to Q2PRO's DEBUG_DRAW_API_V1 at InitGame when the engine
 // offers it, and to the 1999 beam-entity scheme when it does not.  Reported
 // once, because which one is running changes what a debug line costs.
 void BotDebugInit(void);

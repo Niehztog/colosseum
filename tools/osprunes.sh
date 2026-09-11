@@ -1,9 +1,9 @@
 #!/bin/sh
-# osprunes.sh -- do the OSP runes actually do anything? (R-VER-27, R-132)
+# osprunes.sh -- do the OSP runes actually do anything?
 #
 # WHY THIS EXISTS BESIDE playtest.sh.  The 81-row battery asks `sv ruleset` and
 # `sv slots` and believes them, which is right for a dispatch and wrong for a
-# mechanic.  R-132 is the case that separates the two: the slot map said the five
+# mechanic.  One case separates the two: the slot map said the five
 # runes were at 22..26 and it was TELLING THE TRUTH, while the pickup wrote
 # statslot_t 22 (another ruleset's stat, unmapped here) and the gameplay code
 # read ordinals 28..32.  Nothing that consults the map could see that, and
@@ -25,7 +25,7 @@
 # holding the STRENGTH and HASTE runes -- doubled damage and haste fire rate from
 # a pent.
 #
-# ...and it detects R-132's other half without reaching any of that, because a
+# ...and it detects the other half without reaching any of that, because a
 # pre-fix library cannot survive an OSP ruleset with `runes 1`:
 # OSP_spawnRuneAt incremented r_count[-6] rather than r_count[0..4], so
 # OSP_checkMinRunes never saw its count rise and the two tail-called each other
@@ -39,18 +39,19 @@
 #
 # REQUIREMENTS -- the same set playtest.sh documents.
 #   go                        the harness is Go
-#   $HARNESS                  default ~/.claude/skills/q2-playtest/harness
-#   ~/q2-dev/libq2            the protocol library the harness imports
+#   $HARNESS                  default tools/playtest-harness, in this
+#                             repository.  Its dependencies are vendored, so
+#                             no network and no other checkout is needed.
 #   $Q2PRO_BUILD/q2proded     default ../q2pro/builddir-native
 #   $Q2DATA                   retail baseq2 paks
 #   $CTFDATA                  Threewave paks (Install links both; unused here)
 #
 # USAGE
 #   tools/osprunes.sh [-l <game.so>] [extra args]
-#   tools/osprunes.sh -l release-oldapi/gamex86_64.so     # R-ENG-1a, both ABIs
+#   tools/osprunes.sh -l release-oldapi/gamex86_64.so     # the other game ABI
 set -e
 
-HARNESS=${HARNESS:-$HOME/.claude/skills/q2-playtest/harness}
+HARNESS=${HARNESS:-$(cd "$(dirname "$0")/playtest-harness" && pwd)}
 Q2PRO_BUILD=${Q2PRO_BUILD:-$(dirname "$0")/../../q2pro/builddir-native}
 Q2DATA=${Q2DATA:-/usr/share/games/quake2/baseq2}
 CTFDATA=${CTFDATA:-/usr/share/games/quake2/ctf}

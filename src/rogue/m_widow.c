@@ -1543,7 +1543,7 @@ static void WidowPrecache(void)
 */
 void SP_monster_widow(edict_t *self)
 {
-    // R-MODE-7 / R-CORE-8: the ruleset decides, not `deathmatch` (see R-25).
+    // The ruleset decides, not `deathmatch`.
     if (!G_MonstersAllowed()) {
         G_FreeEdict(self);
         return;

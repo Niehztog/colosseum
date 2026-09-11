@@ -1,37 +1,36 @@
-// Colosseum ruleset dispatch -- R-MODE-1..7.
+// Colosseum ruleset dispatch
 //
-// Resolution runs once, from InitGame, and never calls gi.error.  R-MODE-1 and
-// R-MODE-4 both say so explicitly, and the reason is in the 1999 build this
-// replaces: gladq2_src/g_save.c policed its three ruleset booleans by calling
-// gi.error on each conflicting pair, so a bad config did not start a server with
-// a warning -- it aborted the process.  Every branch below corrects the value,
-// says so once, and continues.
+// Resolution runs once, from InitGame, and never calls gi.error.  The reason
+// is in the 1999 build this replaces: Gladiator's g_save.c policed its three
+// ruleset booleans by calling gi.error on each conflicting pair, so a bad
+// config did not start a server with a warning -- it aborted the process.
+// Every branch below corrects the value, says so once, and continues.
 
 #include "g_local.h"
-// R-88's decision needs the two switches the runes modifier is derived FROM:
+// The runes modifier is derived from these two switches:
 // Threewave's DF_CTF_NO_TECH and tourney's rune_stat.  See G_ResolveModifiers.
 #include "ctf/g_ctf.h"
 #include "tourney/osp_hooks.h"
-// R-ENG-6's second half: no savegame while a bot exists.
+// No savegame while a bot exists.
 #include "bot/bl_main.h"
-// R-CTF-8 / R-DM-1's target, which the botfill rows below print.
+// The bot-fill target, which the botfill rows below print.
 #include "bot/bl_spawn.h"
-// Phase 7's bot-placement census reads RA2's FIGHT_* and tourney's ENTERED_*.
+// The bot-placement census reads RA2's FIGHT_* and tourney's ENTERED_*.
 #include "arena/arena.h"
 
 // ---------------------------------------------------------------- state
 //
 // Resolved once by G_InitRuleset() and read everywhere.  Not a cvar lookup at
-// the point of use: R-MODE-2 says the legacy cvars are evaluated *once*, at
-// InitGame, and a mid-map cvar change must not be able to move the ruleset out
-// from under code that already branched on it.
+// the point of use: the legacy cvars are evaluated once, at InitGame, and a
+// mid-map cvar change must not be able to move the ruleset out from under code
+// that already branched on it.
 static ruleset_t    g_active_ruleset = RULESET_DM;
 static bool         g_modifier[MOD_COUNT];
 static bool         g_layer[LAYER_COUNT];
 // OSP configuration changes execute before the next map's SpawnEntities().
 static bool         g_osp_hook_request_queued;
 
-// R-COMPAT-6, and see reconcile above: one pair, two donors.
+// See reconcile above: one pair, two donors.
 cvar_t             *g_statsfile;
 cvar_t             *g_statsname;
 static const ruleset_ops_t *g_active_ops;
@@ -57,12 +56,12 @@ static const char *modifier_names[MOD_COUNT] = {
     [MOD_BOTS]     = "bots",
 };
 
-// R-MODE-7's composability matrix, as data rather than prose.  A matrix in a
+// The composability matrix, as data rather than prose.  A matrix in a
 // comment is a matrix nothing checks; this one is what G_ModifierEnabled()
-// actually consults, so the table in SPECS.md and the behaviour cannot drift
+// actually consults, so the documented table and the behaviour cannot drift
 // apart without a test noticing.
 //
-// EVERY CELL IS DESIGNATED, and that is not a style choice.  These rows were
+// Every cell is designated, and that is not a style choice.  These rows were
 // positional five-element brace lists until the flattening, so adding three
 // rulesets would have padded the new columns with `false` -- silently, because
 // the build sets -Wno-missing-field-initializers, and invisibly, because no
@@ -72,9 +71,9 @@ static const char *modifier_names[MOD_COUNT] = {
 // reader is looking for it.
 static const bool modifier_ok[MOD_COUNT][RULESET_COUNT] = {
     // Team play is a RULESET now (`tdm`, `duel`), so the modifier that also
-    // reached it is refused across the OSP four -- R-MODE-4, and the whole
-    // argument of the flattening applied to itself.  arena keeps it: its teams
-    // are the arena's, and the modifier is how an operator asks for them.
+    // reached it is refused across the OSP four -- the whole argument of the
+    // flattening applied to itself.  arena keeps it: its teams are the
+    // arena's, and the modifier is how an operator asks for them.
     [MOD_TEAMPLAY] = {
         [RULESET_DM] = false, [RULESET_DMPRO] = false,
         [RULESET_TDM] = false, [RULESET_DUEL] = false,
@@ -101,18 +100,18 @@ static const bool modifier_ok[MOD_COUNT][RULESET_COUNT] = {
 
 // ---------------------------------------------------------------- base ops
 //
-// The BASE fills every row (R-MODE-6), and every row here is baseq2's own
-// implementation -- Phase 1 cut the seam, it did not change what happens on
+// The BASE fills every row, and every row here is baseq2's own
+// implementation -- cutting the seam did not change what happens on
 // either side of it.  A ruleset that replaces one of these fills its own row;
 // one that only adjusts it uses a predicate instead.
 //
-// NOTHING SELECTS THIS TABLE.  It was `ops_dm` and was two things wearing one
+// Nothing selects this table.  It was `ops_dm` and was two things wearing one
 // name: the `dm` ruleset's row set, and the table every NULL row falls back to.
 // The flattening separated them -- `dm` is OSP's RegularDM now and has its own
 // rows -- and this is only the second.
 //
 // All five functions stay, and not merely for the fallback.  ctf, arena and the
-// OSP four call them BY NAME from their own C: ctf_CheckRules and RA_CheckRules
+// OSP four call them by name from their own C: ctf_CheckRules and RA_CheckRules
 // both call CheckDMRules, OSP_EndLevel and RA_EndLevel both fall back to
 // EndDMLevel, and PutClientInServer calls G_SelectSpawnPoint() for every
 // ruleset before arena and the OSP four re-place the client.  Deleting one is
@@ -137,18 +136,18 @@ static const ruleset_ops_t ops_base = {
 
 // sp differs from dm inside these functions rather than replacing them --
 // baseq2 already branches internally on deathmatch/coop -- so it inherits every
-// row (R-MODE-6) and the difference stays where baseq2 put it.  Converting
+// row and the difference stays where baseq2 put it.  Converting
 // those internal branches into replaced rows now would be churn with no donor
-// to justify it, which is the trap R-MODE-5 documents via dm_game_rt.
+// to justify it, which is the trap dm_game_rt documents.
 static const ruleset_ops_t ops_sp = {
     .name = "sp",
 };
 
-// A MISSING ROW HERE IS NOT A COMPILE ERROR.  It is NULL, and G_InitRuleset's
+// A missing row here is not a compile error.  It is NULL, and G_InitRuleset's
 // `?:` below then hands that ruleset the BASE -- i.e. baseq2 deathmatch, quietly,
 // under whatever name the operator asked for.  Every ruleset gets a row.
 static const ruleset_ops_t *ruleset_ops[RULESET_COUNT] = {
-    // The OSP four are one code path selected four ways (R-OSP-12); what differs
+    // The OSP four are one code path selected four ways; what differs
     // between them lives inside tourney's own functions, not in the row set.
     [RULESET_DM]      = &ops_tourney, // src/tourney/osp_main.c
     [RULESET_DMPRO]   = &ops_tourney,
@@ -174,13 +173,13 @@ static bool ruleset_from_name(const char *s, ruleset_t *out)
     return false;
 }
 
-// R-MODE-2.  The legacy cvars of the 1999 build and of every donor's own
+// The legacy cvars of the 1999 build and of every donor's own
 // documentation keep working, so an existing config and a twenty-year-old readme
 // still select what they always selected.  Evaluated once, here.
 //
-// The tie-break order is fixed by R-MODE-2 -- ctf, then arena -- so two
-// conflicting aliases produce the same ruleset on every machine rather than
-// depending on which cvar the engine happened to register first.
+// The tie-break order is fixed -- ctf, then arena -- so two conflicting
+// aliases produce the same ruleset on every machine rather than depending on
+// which cvar the engine happened to register first.
 static bool resolve_legacy_alias(ruleset_t *out, const char **why)
 {
     static const struct {
@@ -203,7 +202,7 @@ static bool resolve_legacy_alias(ruleset_t *out, const char **why)
             found = true;
         } else {
             gi.dprintf("Colosseum: legacy '%s 1' and '%s 1' both set; "
-                       "using '%s' (R-MODE-2 order: ctf, arena)\n",
+                       "using '%s' (order: ctf, arena)\n",
                        first, aliases[i].cvar, ruleset_names[*out]);
         }
     }
@@ -218,7 +217,7 @@ static bool resolve_legacy_alias(ruleset_t *out, const char **why)
 // forces `deathmatch 1` on a dedicated server unless `coop` is set, on the
 // stated grounds that "dedicated servers can't be single player".
 //
-// So resolution runs in both directions, which is what R-MODE-2 means by
+// So resolution runs in both directions, which is what is meant by
 // honouring the legacy cvars as aliases: the legacy value can *select* the
 // ruleset, and once selected the ruleset is authoritative and the legacy cvars
 // are made to agree with it.  Nothing downstream has to know which way the
@@ -232,7 +231,7 @@ static void reconcile_legacy_cvars(void)
     // `g_ruleset ctf` without `ctf 1` has to advertise CTF, and `ctf 1` with
     // `g_ruleset dm` must not.  Threewave registers this cvar itself with
     // default 1; it is registered here instead, because resolution owns it
-    // (R-MODE-2) and a second registration would re-assert a default that
+    // and a second registration would re-assert a default that
     // resolution has already decided.
     gi.cvar_forceset("ctf", g_active_ruleset == RULESET_CTF ? "1" : "0");
     gi.cvar("ctf", "0", CVAR_SERVERINFO);
@@ -260,14 +259,14 @@ void G_InitRuleset(void)
     ruleset_t   r = RULESET_DM;
     const char *via = NULL;
 
-    // R-MODE-1: latched, so it cannot change under a running map.
+    // Latched, so it cannot change under a running map.
     rs = gi.cvar("g_ruleset", "", CVAR_LATCH | CVAR_SERVERINFO);
 
     if (*rs->string) {
         if (ruleset_from_name(rs->string, &r)) {
             via = "g_ruleset";
         } else {
-            // R-MODE-1: invalid values fall back to dm with a warning; they
+            // Invalid values fall back to dm with a warning; they
             // never abort startup.  `tourney` is one of those values and gets
             // no sentence of its own -- the message names the seven that are
             // valid, which is the answer to "what should I have written"
@@ -296,35 +295,35 @@ void G_InitRuleset(void)
 
     reconcile_legacy_cvars();
 
-    // R-MODE-3: independent latched content layers, valid with every ruleset,
+    // Independent latched content layers, valid with every ruleset,
     // and both may be on at once.
     g_layer[LAYER_XATRIX] = gi.cvar("xatrix", "0", CVAR_LATCH)->value != 0;
     g_layer[LAYER_ROGUE]  = gi.cvar("rogue", "0", CVAR_LATCH)->value != 0;
 
-    // R-MODE-4: a modifier declares which rulesets accept it, and an
-    // unsupported combination is refused with one message naming the ruleset,
-    // the modifier and what was done instead.  It never calls gi.error.
+    // A modifier declares which rulesets accept it, and an unsupported
+    // combination is refused with one message naming the ruleset, the modifier
+    // and what was done instead.  It never calls gi.error.
     g_modifier[MOD_TEAMPLAY] = gi.cvar("teamplay", "0", CVAR_LATCH)->value != 0;
     g_modifier[MOD_HOOK]     = gi.cvar("hook", "0", CVAR_LATCH)->value != 0;
     // The REQUEST, so that the refusal below still fires under dm and arena.
     // G_ResolveModifiers() overwrites it at the end of InitGame with what the
     // ruleset's own switch actually says -- see there.
     g_modifier[MOD_RUNES]    = gi.cvar("runes", "0", CVAR_LATCH)->value != 0;
-    // R-88's other half.  `bots` is the operator's switch for the whole layer
-    // and DEFAULTS TO 1 where the ruleset accepts it, so a server that says
+    // The other half.  `bots` is the operator's switch for the whole layer
+    // and defaults to 1 where the ruleset accepts it, so a server that says
     // nothing behaves exactly as it did before the modifier existed.  It is not
     // a second answer to G_BotsAllowed() -- it is what G_BotsAllowed() reads,
     // which is why there is still one question asked by name.  The reason it
-    // exists at all is R-SEC-2's staged exposure: a public server wants to be
+    // exists at all is staged exposure: a public server wants to be
     // able to turn the bot layer off without turning the ruleset off.
     g_modifier[MOD_BOTS]     = gi.cvar("bots", "1", CVAR_LATCH)->value != 0;
 
-    // R-COMPAT-6: `statsfile` and `statsname` are registered ONCE, here, with a
-    // default chosen by the ruleset that will use them.  Both donors ship a
-    // local-file statistics log (R-RA-7, R-OSP-3) and both named their cvars
-    // the same, with different defaults -- which is a cvar whose value depends
-    // on which translation unit happened to register it first.  Resolution owns
-    // the pair because resolution is what decides which log is going to run.
+    // `statsfile` and `statsname` are registered ONCE, here, with a default
+    // chosen by the ruleset that will use them.  Both donors ship a local-file
+    // statistics log and both named their cvars the same, with different
+    // defaults -- which is a cvar whose value depends on which translation
+    // unit happened to register it first.  Resolution owns the pair because
+    // resolution is what decides which log is going to run.
     g_statsfile = gi.cvar("statsfile", "1", 0);
     g_statsname = gi.cvar("statsname",
                           g_active_ruleset == RULESET_ARENA ? "ra2stats.jsonl"
@@ -333,7 +332,7 @@ void G_InitRuleset(void)
     for (int m = 0; m < MOD_COUNT; m++) {
         if (g_modifier[m] && !modifier_ok[m][g_active_ruleset]) {
             gi.dprintf("Colosseum: ruleset '%s' does not accept modifier '%s'; "
-                       "disabling it (R-MODE-4)\n",
+                       "disabling it\n",
                        ruleset_names[g_active_ruleset], modifier_names[m]);
             g_modifier[m] = false;
 
@@ -346,16 +345,16 @@ void G_InitRuleset(void)
             if (m == MOD_TEAMPLAY && G_IsOspRuleset()) {
                 if (OSP_IsTeams())
                     gi.dprintf("Colosseum: ...'%s' IS team play; the modifier is "
-                               "what it replaced (R-MODE-7)\n",
+                               "what it replaced\n",
                                ruleset_names[g_active_ruleset]);
                 else
                     gi.dprintf("Colosseum: ...team play is a ruleset here -- "
-                               "'g_ruleset tdm' or 'duel' (R-MODE-7)\n");
+                               "'g_ruleset tdm' or 'duel'\n");
             }
         }
     }
 
-    // The slot map is per ruleset (R-OSP-7) and must be resolved before any
+    // The slot map is per ruleset and must be resolved before any
     // stat is written or any statusbar composed, which is why it hangs off
     // resolution rather than off SP_worldspawn.
     G_InitStats();
@@ -451,13 +450,14 @@ bool G_ApplyQueuedOspHookRequest(void)
 // `sv ruleset` -- what resolution decided, what each predicate answers, and what
 // the world actually contains.  Wired into ServerCommand (g_svcmds.c).
 //
-// This exists because R-MODE-* is otherwise unobservable from outside. The
-// entity census is the part that matters: `entities inhibited` in SpawnEntities
-// counts spawnflag filtering only, so it moves with `deathmatch` and `coop` and
-// says nothing about whether G_MonstersAllowed() was consulted -- monsters that
-// the gate rejects are spawned and then freed, which no engine message reports.
-// R-VER-2's boot matrix is 20 combinations; each one needs an answer to "did
-// this do what the matrix says", and this is that answer.
+// This exists because the resolved ruleset is otherwise unobservable from
+// outside.  The entity census is the part that matters: `entities inhibited`
+// in SpawnEntities counts spawnflag filtering only, so it moves with
+// `deathmatch` and `coop` and says nothing about whether G_MonstersAllowed()
+// was consulted -- monsters that the gate rejects are spawned and then freed,
+// which no engine message reports.  The boot matrix is 20 combinations; each
+// one needs an answer to "did this do what the matrix says", and this is that
+// answer.
 void G_Svcmd_Ruleset_f(void)
 {
     int monsters = 0, corpses = 0, gibs = 0, clients = 0, inuse = 0;
@@ -491,7 +491,7 @@ void G_Svcmd_Ruleset_f(void)
                 flav_x++;
             if (e->content_flavour & CONTENT_ROGUE)
                 flav_r++;
-            // R-CORE-11's gate, observed rather than asserted: which evasion
+            // The content gate, observed rather than asserted: which evasion
             // set did this monster actually get installed at spawn?
             if (e->monsterinfo.dodge == M_MonsterDodge)
                 evade_rogue++;
@@ -506,10 +506,9 @@ void G_Svcmd_Ruleset_f(void)
                "modifiers    teamplay=%d hook=%d runes=%d bots=%d\n"
                "predicates   monsters=%d campaign=%d teamplay=%d bots=%d saves=%d\n"
                "legacy       deathmatch=%d coop=%d\n"
-               "flavour      %d monster(s) latched xatrix, %d rogue "
-               "(R-CORE-11a)\n"
+               "flavour      %d monster(s) latched xatrix, %d rogue\n"
                "evasion      %d monster(s) on Ground Zero's dodge, %d on "
-               "baseq2's (R-CORE-11)\n"
+               "baseq2's\n"
                "world        frame %d, %d edicts in use, %d clients, "
                "%d live monsters, %d corpses, %d gibs\n",
                G_RulesetName(G_Ruleset()),
@@ -522,7 +521,7 @@ void G_Svcmd_Ruleset_f(void)
                flav_x, flav_r, evade_rogue, evade_bq2,
                level.framenum, inuse, clients, monsters, corpses, gibs);
 
-    // R-CTF-1's content, counted rather than assumed.  Nine CTF maps booting
+    // The CTF content, counted rather than assumed.  Nine CTF maps booting
     // clean says nothing about whether the flags and techs are in the world:
     // both are ordinary itemlist entries whose absence looks exactly like a map
     // that has none.  Only printed under ctf, where the question means something.
@@ -559,12 +558,12 @@ void G_Svcmd_Ruleset_f(void)
                    techs, spawn1, spawn2, banners);
     }
 
-    // R-VER-19's argument, applied to Phase 7: a bot's PLACEMENT has to be
+    // The same argument applied to bots: a bot's placement has to be
     // observable from outside the library, or "bots play in ctf" is a claim
     // about source rather than a fact about a server.  `sv clientdump` says
     // which slots hold bots and which library each uses; it cannot say which
     // team, which arena or whether the match counts them, and those are exactly
-    // what R-CTF-4, R-RA-4 and R-OSP-11 are about.
+    // what the three per-ruleset bot-placement paths are about.
     //
     // Two lines: the census, then the ruleset's own placement.  Both are
     // printed under every ruleset that accepts bots, including when there are
@@ -590,7 +589,7 @@ void G_Svcmd_Ruleset_f(void)
                    "at %s\n", nbots, clients, game.maxclients,
                    nbots ? slots : "-");
 
-        // FL_BOT and FL_BOTCLIENT are two different bits (R-CORE-14) and Phase
+        // FL_BOT and FL_BOTCLIENT are two different bits and Phase
         // 6 sets both on every bot.  A site that tests one and means the other
         // compiles, so the two counts are printed separately rather than
         // assumed equal: if they ever diverge, this is where it shows.
@@ -615,25 +614,25 @@ void G_Svcmd_Ruleset_f(void)
                     blue++;
                 else
                     noteam++;
-                // WHAT THE BRAIN IS TOLD, which is not what the wire carries.
+                // What the brain is told, which is not what the wire carries.
                 // `clientsettings[].skin` is the only currency the Gladiator
-                // brain has for CTF teams -- BotCTFTeam() is
-                // `strstr(skin, "ctf_r") ? RED : BLUE` and BotSameTeam()
-                // compares the half after the '/' -- and bl_main.c fills it
-                // from THIS string, the game's own copy of the userinfo.
-                // CTFAssignSkin writes the playerskins configstring either way,
-                // so a client reading the wire cannot tell the two apart: a bot
-                // wearing `ctf_r` on every screen while its brain still reads
-                // `male/viper` is a bot that thinks the whole server is on the
-                // other side.  Nothing else in this tree can report it, which
-                // is why it is a field here (R-CTF-4).
+                // brain has for CTF teams -- BotCTFTeam() is `strstr(skin,
+                // "ctf_r") ?  RED : BLUE` and BotSameTeam() compares the half
+                // after the '/' -- and bl_main.c fills it from this string,
+                // the game's own copy of the userinfo.  CTFAssignSkin writes
+                // the playerskins configstring either way, so a client reading
+                // the wire cannot tell the two apart: a bot wearing `ctf_r` on
+                // every screen while its brain still reads `male/viper` is a
+                // bot that thinks the whole server is on the other side.
+                // Nothing else in this tree can report it, which is why it is
+                // a field here.
                 if (strstr(Info_ValueForKey(e->client->pers.userinfo, "skin"),
                            "ctf_"))
                     teamskin++;
             }
             gi.cprintf(NULL, PRINT_HIGH,
                        "botplace     ctf red=%d blue=%d noteam=%d teamskin=%d, "
-                       "FL_BOTCLIENT=%d (R-CTF-4)\n",
+                       "FL_BOTCLIENT=%d\n",
                        red, blue, noteam, teamskin, nbotclient);
             break;
         }
@@ -655,7 +654,7 @@ void G_Svcmd_Ruleset_f(void)
             }
             gi.cprintf(NULL, PRINT_HIGH,
                        "botplace     arena in-arena=%d (arena1=%d) on-team=%d "
-                       "fighting=%d, FL_BOTCLIENT=%d (R-RA-4)\n",
+                       "fighting=%d, FL_BOTCLIENT=%d\n",
                        placed, arena1, teamed, fighting, nbotclient);
             break;
         }
@@ -680,7 +679,7 @@ void G_Svcmd_Ruleset_f(void)
             }
             gi.cprintf(NULL, PRINT_HIGH,
                        "botplace     %s entered=%d ready=%d "
-                       "team0=%d team1=%d, FL_BOTCLIENT=%d (R-OSP-11)\n",
+                       "team0=%d team1=%d, FL_BOTCLIENT=%d\n",
                        G_RulesetName(G_Ruleset()), entered, ready, t0, t1,
                        nbotclient);
             break;
@@ -696,14 +695,14 @@ void G_Svcmd_Ruleset_f(void)
             break;
         }
 
-        // ONE botfill line for every ruleset, which is the point of there being
-        // one cvar (R-RA-7, R-CTF-8, R-DM-1).  It was four shapes in four arms
-        // while the switch was three cvars, and four shapes is how a play test
-        // ends up with three regexes and a gap.
+        // One botfill line for every ruleset, which is the point of there
+        // being one cvar.  It was four shapes in four arms while the switch
+        // was three cvars, and four shapes is how a play test ends up with
+        // three regexes and a gap.
         //
         // `want` is what survives the ceilings and the source text is where the
         // number came from -- printing only the first hides a clamp, which is
-        // the reason R-VER-19 wants this line at all.
+        // the reason this line exists at all.
         if (BotFillEnabled()) {
             char src[96];
 
@@ -743,7 +742,7 @@ void G_Svcmd_Ruleset_f(void)
 
 // ---------------------------------------------------------------- gates
 //
-// One place implements R-MODE-6.  The base fills every row, so falling back to
+// One place implements row inheritance.  The base fills every row, so falling back to
 // ops_base is always defined; a NULL row on the base itself means "baseq2
 // genuinely does nothing here", which is only ClientPlaced today.
 
@@ -755,6 +754,26 @@ void G_CheckRules(void)
         GATE(CheckRules)();
 }
 
+/*
+=================
+G_EndLevel
+
+Ending the level is `G_EndLevel()`.  A by-name `EndDMLevel()` is a fallback,
+not a way out.
+
+The rule, because this row has been got wrong twice in two rulesets and once on
+the row next door (the `G_BeginIntermission` banner in g_main.c): a call to one
+of `ops_base`'s five
+functions by name is legitimate only from inside the override of the same row,
+which is the "I have nothing better, use baseq2's" fallback -- `RA_EndLevel`
+and `OSP_EndLevel` both end that way and both are correct.  A call from
+anywhere else reaches past whatever the active ruleset put in the row, and the
+symptom is silence: the row is filled, the override is referenced so every
+name-based sweep sees it as live, and the behaviour simply never happens.
+
+`tools/dispatch.py` is the standing check and carries the exemption list.
+=================
+*/
 void G_EndLevel(void)
 {
     if (GATE(EndLevel))
@@ -782,10 +801,10 @@ bool G_SelectSpawnPoint(edict_t *ent, vec3_t origin, vec3_t angles)
     // installer is Ground Zero's `case RDM_DEATHBALL`, which is commented out
     // here and byte-identically commented out in q2pro, so nothing has ever set
     // it and a caller would be unreachable.  Recorded rather than written
-    // (doc/reconciliation.md R-192); a tree that restores DBall needs this
+    //A tree that restores DBall needs this
     // branch as well as that case.
     //
-    // R-MODE-6: a NULL row inherits rather than crashes, and "no hook" means
+    // A NULL row inherits rather than crashes, and "no hook" means
     // "the spot stands" -- only tourney refuses one.
     if (GATE(SelectSpawnPoint))
         return GATE(SelectSpawnPoint)(ent, origin, angles);
@@ -803,15 +822,15 @@ void G_ClientPlaced(edict_t *ent)
 bool G_MonstersAllowed(void)
 {
     switch (g_active_ruleset) {
-    case RULESET_ARENA:                 // R-RA-6
-    case RULESET_DM:                    // R-OSP-8, and baseq2's own rule before
+    case RULESET_ARENA:
+    case RULESET_DM:                    // baseq2's own rule before
     case RULESET_DMPRO:                 // the flattening: no monsters in a
     case RULESET_TDM:                   // deathmatch
     case RULESET_DUEL:
         return false;
     case RULESET_CTF:
-        // R-MODE-7 promises monsters under ctf and R-VER-2 adds the combination
-        // to the boot matrix explicitly, because q2pro/src/ctf deleted the
+        // Monsters are promised under ctf, and the combination is in the boot
+        // matrix explicitly, because q2pro/src/ctf deleted the
         // monster set so Threewave's edits to g_ai.c, g_monster.c, g_combat.c
         // and g_turret.c have never been compiled against live monster code.
         // Q14 closed it as "unproven rather than broken".  Answering true here
@@ -832,19 +851,19 @@ bool G_IsCampaign(void)
 bool G_TeamplayEnabled(void)
 {
     switch (g_active_ruleset) {
-    case RULESET_CTF:                   // implied, per R-MODE-7
+    case RULESET_CTF:                   // implied by the ruleset
     case RULESET_TDM:                   // team play IS the ruleset now
     case RULESET_DUEL:                  // two teams of one, forced
         return true;
     default:
         // arena is the only ruleset left that reaches team play through the
-        // modifier; the OSP four refuse it (R-MODE-4) and sp has no teams, so
+        // modifier; the OSP four refuse it and sp has no teams, so
         // both answer false here through modifier_ok rather than by name.
         return G_ModifierEnabled(MOD_TEAMPLAY);
     }
 }
 
-// R-OSP-12.  A range test, which is why the four are contiguous and first in
+// A range test, which is why the four are contiguous and first in
 // the enum -- an `||` chain is a list, and a list is a thing a later ruleset
 // gets left off.
 bool G_IsOspRuleset(void)
@@ -854,25 +873,25 @@ bool G_IsOspRuleset(void)
 
 bool G_BotsAllowed(void)
 {
-    // N6, R-MODE-7: every ruleset but sp -- and then the operator's own switch,
+    // Every ruleset but sp -- and then the operator's own switch,
     // which is refused under sp anyway so the first test is what decides there.
     return g_active_ruleset != RULESET_SP && g_modifier[MOD_BOTS];
 }
 
-// ---------------------------------------------------------------- R-88
+// ------------------------------------------------------------- modifiers
 //
-// WHAT A MODIFIER IS, decided in 1.22 for the two that were not one.
+// What a modifier is, decided in 1.22 for the two that were not one.
 //
-// R-MODE-4 says a modifier is requested by cvar and refused where unsupported.
-// It does not say what it does where it is ACCEPTED, and for `runes` the answer
+// A modifier is requested by cvar and refused where unsupported.  That does not
+// say what it does where it is accepted, and for `runes` the answer
 // was "nothing": CTF's techs come from CTFSetupTechSpawn on DF_CTF_NO_TECH
 // alone and tourney's runes from the `runes_enable` BITMASK read at the call
 // site, so G_ModifierEnabled(MOD_RUNES) had exactly one caller -- `sv ruleset`,
 // printing it.  1.20 recorded that rather than choosing, because every fix
 // available then changed behaviour: gating CTF's techs on `runes` takes techs
 // out of a default CTF server, and replacing `runes_enable` with a boolean
-// loses the bitmask that selects WHICH runes spawn.  Phase 6 adds `bots` to the
-// same question and 1.21's prompt asked for both to be decided together.
+// loses the bitmask that selects which runes spawn.  `bots` joins the same
+// question, and both are decided together.
 //
 // The decision is that a modifier is **the resolved answer, not the request**.
 // Both of the switches above are already the authority on whether runes or
@@ -901,7 +920,7 @@ bool G_BotsAllowed(void)
 // Called at the END of InitGame, after the ruleset's own init: `runes_enable`
 // is registered by OSP_gameInit and `rune_stat` computed from it there, and
 // reading either earlier would be reading a cvar this file had registered first
-// with a default of its own -- R-COMPAT-6's exact trap.
+// with a default of its own, which is the trap.
 void G_ResolveModifiers(void)
 {
     cvar_t *req = gi.cvar("runes", "0", CVAR_LATCH);
@@ -918,8 +937,8 @@ void G_ResolveModifiers(void)
             // only ever fires when it has chosen none.
             gi.cvar_set("runes_enable", "31");
             OSP_SyncRuneState();
-            gi.dprintf("Colosseum: 'runes 1' sets runes_enable to all five "
-                       "(R-MODE-4, R-88)\n");
+            gi.dprintf("Colosseum: 'runes 1' sets runes_enable to all "
+                       "five\n");
         }
         g_modifier[MOD_RUNES] = rune_stat != 0;
         return;
@@ -930,8 +949,8 @@ void G_ResolveModifiers(void)
         flags = (int)dmflags->value;
         if (wanted && (flags & DF_CTF_NO_TECH)) {
             gi.cvar_set("dmflags", va("%d", flags & ~DF_CTF_NO_TECH));
-            gi.dprintf("Colosseum: 'runes 1' clears DF_CTF_NO_TECH so the techs "
-                       "spawn (R-MODE-4, R-88)\n");
+            gi.dprintf("Colosseum: 'runes 1' clears DF_CTF_NO_TECH so the "
+                       "techs spawn\n");
         }
         g_modifier[MOD_RUNES] = !((int)dmflags->value & DF_CTF_NO_TECH);
         break;
@@ -946,15 +965,16 @@ void G_ResolveModifiers(void)
 
 bool G_SavegamesAllowed(void)
 {
-    // R-ENG-6, both halves as of 1.22.  The second is a GUARD rather than a
-    // gate and it is worth being honest about that: no bot can exist under sp,
-    // because G_BotsAllowed() is false there and every path that creates one
-    // asks -- so `botglobals.numbots` is 0 whenever the first test passes and
-    // this clause has never fired.  It is here because the requirement says so
-    // and because the day something makes a bot reachable under sp, a savegame
-    // written with a fake client in a slot is not a thing that can be reloaded:
-    // the brain is not saved, and the client it describes would come back
-    // without one.  game_export_ex_t's CanSave() is where the engine could be
-    // told BEFORE the file is opened; that hook is declared and not yet filled.
+    // Both halves.  The second is a guard rather than a gate and it is worth
+    // being honest about that: no bot can exist under sp, because
+    // G_BotsAllowed() is false there and every path that creates one asks --
+    // so `botglobals.numbots` is 0 whenever the first test passes and this
+    // clause has never fired.  It is here because the requirement says so and
+    // because the day something makes a bot reachable under sp, a savegame
+    // written with a fake client in a slot is not a thing that can be
+    // reloaded: the brain is not saved, and the client it describes would come
+    // back without one.  game_export_ex_t's CanSave() is where the engine
+    // could be told before the file is opened; that hook is declared and not
+    // yet filled.
     return g_active_ruleset == RULESET_SP && botglobals.numbots == 0;
 }

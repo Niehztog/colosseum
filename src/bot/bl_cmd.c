@@ -17,7 +17,7 @@ along with this program; if not, write to the Free Software
 Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 */
-// Bot commands, from osp-tourney@1d8427e (SPECS.md sec 5.4.6).
+// Bot commands, from osp-tourney@1d8427e.
 //===========================================================================
 //
 // Name:                bl_cmd.c
@@ -75,7 +75,7 @@ static const nearbyitem_t nearbyitems[] =
     //CTF
     {"item_flag_team1",         100},
     {"item_flag_team2",         100},
-    // R-183.  The table had already been extended once -- the two flags above
+    // The table had already been extended once -- the two flags above
     // are Colosseum's, under a `//CTF` fence -- and stopped there, so the rest
     // of what a merged tree can place was invisible to it: every Reckoning and
     // Ground Zero item, CTF's four techs and its grapple, and three baseq2 rows
@@ -91,7 +91,7 @@ static const nearbyitem_t nearbyitems[] =
     // create the edicts at runtime -- which is exactly why they belong here:
     // they ARE world entities and this loop walks g_edicts.
     //
-    // THE GRAPPLE IS NOT HERE, and checking why is what kept it out: its
+    // The grapple is not here, and checking why is what kept it out: its
     // itemlist row is documented "always owned, never in the world", nothing
     // spawns one, and no pak in the test data places one.  This loop matches
     // `item->classname` on live edicts, so the row could never have fired.
@@ -121,13 +121,13 @@ static const nearbyitem_t nearbyitems[] =
     {"key_green_key",           40},
     {"key_nuke_container",      40},
     // The Disruptor is absent on purpose: it is IT_NOT_GIVEABLE and carries no
-    // IT_WEAPON bit (R-16), so nothing else in this tree treats it as a weapon
+    // IT_WEAPON bit, so nothing else in this tree treats it as a weapon
     // a player would cross a room for.
     {NULL,                      0}
 };
 
 //===========================================================================
-// The GPS commands v0.93 grew (R-BOT-24).
+// The GPS commands v0.93 grew.
 //
 // Parameter:               -
 // Returns:                 -
@@ -164,7 +164,7 @@ static void ShowGPSText(edict_t *ent, vec3_t goal)
 //===========================================================================
 // `gps <x> <y> <z>` -- the compass the bot's checkpoint chatter refers to.
 // The donor kept ShowGPSText and dropped the command that reaches it, which
-// makes the function dead; R-BOT-24 lists "the GPS and macro commands
+// makes the function dead; the contract lists "the GPS and macro commands
 // bl_cmd.c grew in v0.93" as required, so the command comes back.
 //===========================================================================
 static void GPS_f(edict_t *ent)
@@ -324,10 +324,10 @@ static void BotDumpInventory(void)
     } //end for
 } //end of the function BotDumpInventory
 //===========================================================================
-// R-BOT-25.  `serveronlybotcmds` gates client access to the bot commands and
-// DEFAULTS TO 1 -- the 1999 default of 0 exposed bl_spawn.c's bot-name copies
+// `serveronlybotcmds` gates client access to the bot commands and
+// Defaults to 1 -- the 1999 default of 0 exposed bl_spawn.c's bot-name copies
 // to any client, and osp-tourney's own port doc flags exactly this.  Adopted
-// deliberately as policy (R-BOT-30).
+// deliberately as policy.
 //===========================================================================
 static bool BotCmdRefused(edict_t *ent, const char *what)
 {
@@ -374,7 +374,7 @@ static bool BotServerCmd(const char *cmd, edict_t *ent, int server)
     } //end else if
     else if (Q_stricmp(cmd, "botpause") == 0)
     {
-        // R-BOT-24 requires it and the donor dropped the branch; the SDK's own
+        // The contract requires it and the donor dropped the branch; the SDK's own
         // was behind BOT_DEBUG, which is never defined (see bl_main.h).
         if (!BotCmdRefused(ent, "pause the bots"))
         {
@@ -385,10 +385,10 @@ static bool BotServerCmd(const char *cmd, edict_t *ent, int server)
     } //end else if
     else if (Q_stricmp(cmd, "menu") == 0)
     {
-        // R-BOT-24/28: the `menu` command, dropped from osp-tourney's bl_cmd.c
+        // The `menu` command, dropped from osp-tourney's bl_cmd.c
         // because that mod has its own menus, comes back with the bot menu.
         // ToggleBotMenu does its own gating, which is why it is not behind
-        // BotCmdRefused: R-BOT-28 gates the menu on the rcon password rather
+        // BotCmdRefused: the menu is gated on the rcon password rather
         // than on serveronlybotcmds alone, and exempts the host of a listen
         // server, which BotCmdRefused's console-or-nothing test cannot express.
         bot_MenuToggle(ent);
@@ -409,7 +409,7 @@ bool BotCmd(const char *cmd, edict_t *ent, int server)
 {
     char userinfo[MAX_INFO_STRING];
 
-    // R-MODE-7/N6: the Gladiator botlib is deathmatch-only, so under `sp` the
+    // The Gladiator botlib is deathmatch-only, so under `sp` the
     // whole command set is simply not there.  Answering false lets the caller
     // report "unknown command", which is the truth.
     if (!G_BotsAllowed())
@@ -433,7 +433,7 @@ bool BotCmd(const char *cmd, edict_t *ent, int server)
     } //end else if
     else if (server && Q_stricmp(cmd, "indexprobe") == 0)
     {
-        //R-VER-6's control.  gi.argv(2) is the table, gi.argv(3) the index.
+        //The index-table control.  gi.argv(2) is the table, gi.argv(3) the index.
         BotIndexProbe(gi.argc() > 2 ? gi.argv(2) : NULL,
                       gi.argc() > 3 ? Q_atoi(gi.argv(3)) : -1);
     } //end else if
@@ -443,7 +443,7 @@ bool BotCmd(const char *cmd, edict_t *ent, int server)
     } //end else if
     else if (server && Q_stricmp(cmd, "botperf") == 0)
     {
-        //R-BOT-23's measurement.  An argument of "reset" starts a new window,
+        //The frame measurement.  An argument of "reset" starts a new window,
         //so a script can discard the frames a map load and 32 connects cost
         //and measure only the steady state.
         if (gi.argc() > 2 && !Q_stricmp(gi.argv(2), "reset"))
@@ -466,12 +466,12 @@ bool BotCmd(const char *cmd, edict_t *ent, int server)
     } //end else if
     else if (server && Q_stricmp(cmd, "botinv") == 0)
     {
-        //R-141's instrument: the inventory as the BRAIN reads it.
+        //The slot instrument: the inventory as the brain reads it.
         BotInventoryDump();
     } //end else if
     else if (ent && Q_stricmp(cmd, "bbox") == 0)
     {
-        // R-BOT-27's visible bounding box, which the SDK reaches from its debug
+        // The visible bounding box, which the SDK reaches from its debug
         // build only.  Behind sv_cheats, because it shows through walls.
         if (sv_cheats->value) ToggleVisibleBoundingBox(ent);
         else gi.cprintf(ent, PRINT_HIGH, "bbox needs cheats\n");
@@ -479,7 +479,7 @@ bool BotCmd(const char *cmd, edict_t *ent, int server)
     //so the bot can easily change its name
     else if (ent && Q_stricmp(cmd, "name") == 0)
     {
-        // R-BOT-30: the three userinfo NUL terminations.  Q_strlcpy is what
+        // The three userinfo NUL terminations.  Q_strlcpy is what
         // gives all three at once -- the donor's memcpy of sizeof(userinfo)-1
         // copies the terminator's neighbour, not the terminator.
         Q_strlcpy(userinfo, ent->client->pers.userinfo, sizeof(userinfo));

@@ -84,20 +84,20 @@ edict_t *G_Find(edict_t *from, int fieldofs, char *match)
 G_SpawnPointPool
 
 How many spawn points of `classname` a random selection can actually draw from,
-which is NOT the number the map carries.
+which is not the number the map carries.
 
-R-DM-1 and R-CTF-8 both need this number and neither may guess it.  Both random
+The dm and ctf bot fills both need this number and neither may guess it.  Both random
 selectors in this tree -- SelectRandomDeathmatchSpawnPoint and
 SelectCTFSpawnPoint -- find the two spots nearest a player, refuse them, and
 choose among `count - 2`; the arm that keeps both is `if (count <= 2)`, for a
 map with nothing to spare.  So a map's usable pool is two short of its count and
 the two rules that size a bot fill to a map ask for it here rather than each
-writing the loop and the subtraction (sec 7 rule 6).
+writing the loop and the subtraction.
 
 Arena's answer is its own -- `ArenaSpawnCount` filters by arena number, and
-SelectRandomArenaSpawnPoint refuses NOTHING: it walks every candidate on the
+SelectRandomArenaSpawnPoint refuses nothing: it walks every candidate on the
 side's parity and takes the first with 50 units of clearance, so a pickup arena
-seats its whole even count (R-RA-7).  Two selectors, two pools, one rule.
+seats its whole even count.  Two selectors, two pools, one rule.
 =================
 */
 int G_SpawnPointPool(char *classname)
@@ -259,6 +259,30 @@ void G_UseTargets(edict_t *ent, edict_t *activator)
     edict_t     *master;
     bool    done = false;
 
+    // R-SEC-10's SECOND boundary, and it is a second one rather than an
+    // extension of the first because nothing on this path has reached
+    // `T_Damage` yet: a `func_door` whose `activator` was never assigned, or a
+    // `func_clock` that is not START_OFF and therefore never had one, hands
+    // what it holds straight to here, and the message arm below reads
+    // `activator->svflags` eleven lines down.  An empty server dies by itself
+    // -- no client, no damage, no bot -- a few seconds into a map carrying a
+    // `target_explosion` with a `message` on it.
+    //
+    // The normalisation is the same one for the same reason: `world` is the
+    // tree's idiom for "nobody", `world->client` is NULL, and `menu_centerprint`
+    // below already answers a non-client activator by falling through to
+    // `gi.centerprintf`, which the engine drops for a non-client with a
+    // developer-only note.  So a message with nobody to tell goes nowhere,
+    // which is what it meant.
+    //
+    // The donor's `Think_Delay with no activator` dprintf goes with it.  It
+    // warned about the one path here that could NOT crash -- a delayed use,
+    // where the NULL is only stored -- and the boundary above it now makes the
+    // condition unreachable; a diagnostic that can never fire is worse than no
+    // diagnostic, because a reader takes its silence for evidence.
+    if (!activator)
+        activator = world;
+
 //
 // check for a delay
 //
@@ -269,8 +293,6 @@ void G_UseTargets(edict_t *ent, edict_t *activator)
         t->nextthink = level.framenum + ent->delay * BASE_FRAMERATE;
         t->think = Think_Delay;
         t->activator = activator;
-        if (!activator)
-            gi.dprintf("Think_Delay with no activator\n");
         t->message = ent->message;
         t->target = ent->target;
         t->killtarget = ent->killtarget;
@@ -285,7 +307,7 @@ void G_UseTargets(edict_t *ent, edict_t *activator)
         // open arena menu.  menu_centerprint falls back to gi.centerprintf when
         // no menu is open, so it WOULD be transparent everywhere -- but "it
         // happens to be transparent" is not a gate, and donorgate.py is right
-        // to say so (R-VER-25).
+        // to say so.
         if (G_Ruleset() == RULESET_ARENA)
             menu_centerprint(activator, ent->message);
         else
@@ -491,7 +513,7 @@ char *G_CopyString(char *in)
     size_t  len = strlen(in) + 1;
 
     // The block is allocated from the source's own length, so this is a
-    // sized copy rather than an unbounded one (R-SEC-1).
+    // sized copy rather than an unbounded one.
     out = gi.TagMalloc(len, TAG_LEVEL);
     memcpy(out, in, len);
     return out;
@@ -568,7 +590,7 @@ Marks the edict as free
 */
 void G_FreeEdict(edict_t *ed)
 {
-    // R-OSP-3: a quad or an invulnerability that ran out its own clock in the
+    // A quad or an invulnerability that ran out its own clock in the
     // WORLD, with nobody holding it.  Asked in the tourney layer because the
     // two `use` functions this has to recognise are static to g_items.c; the
     // other half of the pair, a powerup that expired ON a player, is p_view.c's.
@@ -668,8 +690,8 @@ bool KillBox(edict_t *ent)
             AngleVectors(angle, forward, NULL, NULL);
             VectorScale(forward, 600, forward);
 
-            // *** OPPOSITE DIRECTIONS, WHICH IS THE WHOLE POINT AND WHICH THE
-            // DONOR DOES NOT DO. ***  RA2 adds the SAME vector to both bodies:
+            // Opposite directions, which is the whole point and which the
+            // donor does not do.  RA2 adds the same vector to both bodies:
             // 600 units per second each, along one random yaw, so the pair
             // drifts as a pair and the distance between them never changes.
             // Two players who drew the same spawn point are therefore still

@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """Every literal compared against an entity classname resolves to one the tree
-can actually produce (R-188).
+can actually produce.
 
 WHY, AND WHY IT IS NOT `itemnames.py`.  That check resolves classname-shaped
 literals against the **itemlist**, and it earns its keep: it is what found Ground
-Zero's `item_spehre_defender` (R-183 item 11).  It asks the wrong question about
+Zero's `item_spehre_defender`.  It asks the wrong question about
 a literal that is not an item's name.  Two independent narrowings put `"telsa"`
 outside it:
 
@@ -19,7 +19,7 @@ years -- Ground Zero's typo, still in upstream q2pro -- and the branch it guards
 never ran once.  Nothing warns: `strcmp` against a misspelling is a valid call
 that is simply always false, so the guarded branch is dead and control falls
 wherever the chain's final `else` goes.  In that case it re-targeted the monster
-and re-set `AI_BLOCKED` on every blocked frame (R-187 §2).
+and re-set `AI_BLOCKED` on every blocked frame.
 
 So this asks the OTHER question: not "is this a real item" but **"can anything in
 this tree ever put this string in an `edict_t.classname`?"**  A literal that no
@@ -366,10 +366,10 @@ def main():
         return 1
     for path, line, what, name in hits:
         if what == 'stale exemption':
-            print('!! %s: stale exemption: %s (R-188)' % (path, name))
+            print('!! %s: stale exemption: %s' % (path, name))
         else:
             print('!! %s:%d: %s(..., "%s") -- no code path produces that '
-                  'classname (R-188)' % (path, line, what, name))
+                  'classname' % (path, line, what, name))
     names = producible(tree)
     print('classnames: %d dead comparison(s); %d classname(s) are producible '
           'and %d literal comparison(s) resolve against them, %d exempt%s'

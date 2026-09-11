@@ -1,5 +1,5 @@
-// Colosseum per-ruleset stat slot map and composed statusbar -- R-OSP-7,
-// R-OSP-7a.  The map itself is in g_stats.h; this is the resolution, the
+// Colosseum per-ruleset stat slot map and composed statusbar --
+// The map itself is in g_stats.h; this is the resolution, the
 // accessors and the emitter.
 
 #include "g_local.h"
@@ -13,7 +13,7 @@ typedef struct {
 } slotdef_t;
 
 // A column is a NUMBERING, not a ruleset, and the four OSP rulesets share one:
-// they are one code path emitting one bar (R-OSP-12), so a slot that meant
+// they are one code path emitting one bar, so a slot that meant
 // something different under `tdm` than under `dm` would be a bar addressing a
 // number its own emitter did not choose.
 //
@@ -49,12 +49,12 @@ static int8_t g_slot[SID_COUNT];
 
 // ---------------------------------------------------------------- resolution
 
-// The highest slot + 1 that is reachable right now, and it is TWO bounds at
+// The highest slot + 1 that is reachable right now, and it is two bounds at
 // once rather than one.
 //
-// R-OSP-7 clause 6 reads as a single question -- did the client negotiate the
+// This reads as a single question -- did the client negotiate the
 // protocol extension? -- and that was the whole story while USE_NEW_GAME_API
-// was fixed on.  It stopped being the whole story when R-ENG-1a made the game
+// was fixed on.  It stopped being the whole story once the game
 // API a build switch, because the two switches are INDEPENDENT in both
 // directions.  g_local.h's PM_TIME_SHIFT already handles one direction (the new
 // API without extensions); this is the other, and it is the dangerous one:
@@ -93,9 +93,9 @@ void G_InitStats(void)
     for (int i = 0; i < SID_COUNT; i++) {
         int slot = slotdefs[i].slot[r];
 
-        // R-OSP-7 clause 6, and it is the reason CTF's timer pair may sit at
+        // The same question, and it is the reason CTF's timer pair may sit at
         // 32/33 at all: those slots exist only for a client that negotiated the
-        // protocol extension AND only on a library built against the new game
+        // protocol extension and only on a library built against the new game
         // API, so short of both the stat is dropped -- from the bar and from the
         // write together, because both go through this array.
         if (slot >= ceiling)
@@ -109,19 +109,19 @@ void G_InitStats(void)
         // The two invariants the build-time check (tools/slotkind.py) also
         // asserts, restated here so that a bad map is loud at InitGame rather
         // than a wrong number on a HUD.  Neither is reachable from a config, so
-        // neither is a gi.error case: R-MODE-1's "never abort startup" is about
+        // neither is a gi.error case: "never abort startup" is about
         // user input, and a programming error the build should have caught is
         // better reported than fatal on a live server.
         if (slot < 16) {
             gi.dprintf("Colosseum: %s claims universal slot %d -- slots 0..15 "
-                       "are unclaimable (R-OSP-7 clause 1)\n",
+                       "are unclaimable\n",
                        slotnames[i], slot);
             g_slot[i] = -1;
             continue;
         }
         if (used[slot] >= 0) {
             gi.dprintf("Colosseum: slot %d claimed by both %s and %s in "
-                       "ruleset '%s' (R-OSP-7)\n", slot, slotnames[used[slot]],
+                       "ruleset '%s'\n", slot, slotnames[used[slot]],
                        slotnames[i], G_RulesetName(r));
             g_slot[i] = -1;
             continue;
@@ -155,7 +155,7 @@ int G_GetStat(edict_t *ent, statslot_t id)
 // One complete item at a time.  A statusbar program that is cut mid-token does
 // not fail loudly -- the client stops interpreting at the break and the rest of
 // the HUD silently vanishes -- so a dropped item is recorded and the bar stays
-// syntactically whole.  Same discipline as R-MENU-5 asks of the menu core.
+// syntactically whole.  Same discipline as the menu core's.
 
 void sb_init(statusbar_t *sb)
 {
@@ -165,7 +165,7 @@ void sb_init(statusbar_t *sb)
     sb->skip = 0;
 }
 
-// SUPPRESSING A WHOLE BLOCK, and why this is not a detail.
+// Suppressing a whole block, and why this is not a detail.
 //
 // An `if` whose slot the active ruleset does not have must take its entire body
 // with it.  The first version emitted nothing for the `if` and then emitted the
@@ -177,7 +177,7 @@ void sb_init(statusbar_t *sb)
 // -- two stray cursor moves and an `endif` with no `if`, which unbalances every
 // conditional after it.  Found by running `sv slots` under ctf; the dm bar is
 // unaffected because dm maps every slot its bar mentions, which is exactly the
-// kind of blind spot R-VER-19 exists to remove.
+// kind of blind spot the diagnostics exist to remove.
 static bool sb_suppressed(statusbar_t *sb)
 {
     return sb->skip > 0;
@@ -225,14 +225,14 @@ void sb_endif(statusbar_t *sb)
     sb_append(sb, "endif ");
 }
 
-// The kind check.  A mismatch here is R-OSP-7 clause 7's type error, caught at
+// The kind check.  A mismatch here is a type error, caught at
 // the one place that knows both the intent and the declaration.
 static bool sb_kind_ok(statslot_t id, statkind_t want, const char *op)
 {
     if (slotdefs[id].kind == want)
         return true;
     gi.dprintf("Colosseum: statusbar draws %s with `%s` but the slot map "
-               "declares it kind %d (R-OSP-7 clause 7)\n",
+               "declares it kind %d\n",
                slotnames[id], op, slotdefs[id].kind);
     return false;
 }
@@ -325,18 +325,18 @@ void sb_ustat_string(statusbar_t *sb, int slot)
 // help/weapon icon.  Every ruleset draws this and every donor shipped its own
 // copy of it -- which is why three complete bars existed to disagree.
 // Two shape differences between the donors' copies of the block above.  They
-// are coordinates and an ordering, not content, but R-OSP-7a asks the emitter
+// are coordinates and an ordering, not content, but the emitter is asked
 // to reproduce each donor's bar rather than approximate it, so they are
 // parameters instead of a second copy of sixty lines.
 typedef struct {
     bool    icon_above;     // RA2 lifts the health icon to its own row at -32
-    // 262 in baseq2 ONLY.  Threewave's ctf_statusbar reads `if 9 xv 246 num 2
+    // 262 in baseq2 only.  Threewave's ctf_statusbar reads `if 9 xv 246 num 2
     // 10 xv 296 pic 9 endif` -- the same 246 RA2 and tourney use -- and this
     // comment said 262 for it, which is how ctf came to be handed
     // sb_shape_baseq2 and draw the powerup countdown sixteen pixels right of
     // where 1999 put it.  The composed bar is token-identical to the donor's
     // literal in every other respect, read off a client on q2ctf1, so this one
-    // number was the whole divergence (R-175).
+    // number was the whole divergence.
     int     timer1_x;
 } sb_shape_t;
 
@@ -405,10 +405,10 @@ static void sb_universal(statusbar_t *sb, const sb_shape_t *shape)
     sb_upic(sb, STAT_TIMER_ICON);
     sb_endif(sb);
 
-    // timer 2 (pent).  The shared mechanic of R-OSP-7 clause 4: one call site,
-    // one place in the bar, and the slot pair comes from the ruleset's map --
-    // 18/19 under dm and sp, 32/33 under ctf, nothing at all on a server
-    // without protocol extensions under ctf.
+    // timer 2 (pent).  The shared mechanic: one call site, one place in the
+    // bar, and the slot pair comes from the ruleset's map -- 18/19 under dm
+    // and sp, 32/33 under ctf, nothing at all on a server without protocol
+    // extensions under ctf.
     sb_if(sb, SID_TIMER2_ICON);
     sb_layout(sb, "yb", -76);
     sb_layout(sb, "xv", 262);
@@ -434,7 +434,7 @@ static void sb_frags(statusbar_t *sb)
     sb_unum(sb, 3, STAT_FRAGS);
 }
 
-// BASEQ2'S DM TAIL IS GONE, and the compiler is what said so.  It drew the
+// BASEQ2'S DM tail is gone, and the compiler is what said so.  It drew the
 // spectator banner and the chase-cam name, and it was reached through the
 // composer's `default:` arm, which only RULESET_DM ever took -- `sp` breaks
 // early with no tail at all and the other rulesets have their own.  When `dm`
@@ -442,7 +442,7 @@ static void sb_frags(statusbar_t *sb)
 // reported it on the first build after the switch was made exhaustive.
 //
 // Nothing inherits it: SID_SPECTATOR is mapped only under `sp` now (the OSP
-// column claims 17 for SID_OSP_MATCHSTATE, which R-OSP-7 clause 2 permits for a
+// column claims 17 for SID_OSP_MATCHSTATE, which is permitted for a
 // ruleset with its own observer), and every remaining bar draws its own frags.
 
 // Threewave's own block: tech icon, both team panels with their capture counts
@@ -537,7 +537,7 @@ static void sb_ctf_tail(statusbar_t *sb)
 // The queue panel's two `stat_string` slots are the ones whose names say _ICON:
 // RA2 writes them as `game.csr.items + game.num_items + N`, which is a
 // configstring index, and the map records SK_CS so the kind check agrees with
-// the bar rather than with the name (R-OSP-7 clause 7).
+// the bar rather than with the name.
 static void sb_arena_head(statusbar_t *sb)
 {
     // countdown, arena status line and round info
@@ -573,7 +573,7 @@ static void sb_arena_head(statusbar_t *sb)
 // RA2 draws the frag counter and one more line: the name of whoever the
 // crosshair or the tracking camera is on.  It has no spectator banner and no
 // chase-cam element, because slots 16 and 17 are its own and its observer is
-// arena.c's (R-EXTRA-6).
+// arena.c's.
 static void sb_arena_tail(statusbar_t *sb)
 {
     sb_frags(sb);
@@ -585,12 +585,12 @@ static void sb_arena_tail(statusbar_t *sb)
     sb_endif(sb);
 }
 
-// OSP Tourney's tail.  The donor ships FOUR complete bars and they differ only
-// in where two panels sit: `client_hud` moves the match clock, and `OSP_IsTeams()`
-// (team play and 1v1) replaces the frags/rank pair with a team layout.  Four
-// literals in the donor, two booleans here -- which is the case R-OSP-7a was
-// written for and the reason a literal bar cannot express a per-client option
-// at all.
+// OSP Tourney's tail.  The donor ships four complete bars and they differ only
+// in where two panels sit: `client_hud` moves the match clock, and
+// `OSP_IsTeams()` (team play and 1v1) replaces the frags/rank pair with a team
+// layout.  Four literals in the donor, two booleans here -- which is the case
+// the composed bar was written for and the reason a literal bar cannot express
+// a per-client option at all.
 static void sb_tourney_tail(statusbar_t *sb, bool alt, bool team)
 {
     // popup menu / layout line
@@ -731,7 +731,7 @@ static bool sb_unbalanced(const statusbar_t *sb)
 // The whole composition, in one place.  `sv slots` prints the bar it is going
 // to install, and it can only do that honestly if it runs the same code -- when
 // arena's head block landed, a duplicated switch here would have installed one
-// bar and reported another (R-VER-19).
+// bar and reported another.
 static void sb_compose(statusbar_t *sb, ruleset_t r)
 {
     sb_init(sb);
@@ -745,7 +745,7 @@ static void sb_compose(statusbar_t *sb, ruleset_t r)
                  : G_IsOspRuleset()     ? &sb_shape_tourney
                  : &sb_shape_baseq2);
 
-    // EVERY ruleset has an arm.  There was a `default:` here that composed
+    // Every ruleset has an arm.  There was a `default:` here that composed
     // baseq2's tail, and `dm` was the only ruleset that reached it -- so when
     // `dm` became OSP's RegularDM the default would have kept handing it
     // baseq2's bar while its stat map said OSP's, which is a statusbar
@@ -813,7 +813,7 @@ void G_SetStatusbar(void)
     if (sb_unbalanced(&sb)) {
         gi.dprintf("Colosseum: composed statusbar for ruleset '%s' is not "
                    "if/endif balanced -- an emitter suppressed a condition "
-                   "without its body (R-OSP-7a)\n",
+                   "without its body\n",
                    G_RulesetName(G_Ruleset()));
     }
 
@@ -821,7 +821,7 @@ void G_SetStatusbar(void)
         // Never silently: a bar that lost an item draws a HUD with a hole in
         // it, and the hole is the only symptom.
         gi.dprintf("Colosseum: statusbar for ruleset '%s' exceeded %d bytes; "
-                   "items were dropped (R-MENU-5)\n",
+                   "items were dropped\n",
                    G_RulesetName(G_Ruleset()), MAX_STATUSBAR);
     }
 
@@ -840,14 +840,14 @@ void G_Svcmd_Slots_f(void)
     // The reachable range is read off stat_ceiling() rather than recomputed
     // from game.csr, so this line cannot claim a range resolution did not use.
     // It said `0..63` whenever extensions were on, which is a lie on an
-    // old-API build (R-ENG-1a) -- and `sv slots` exists precisely because a
+    // old-API build -- and `sv slots` exists precisely because a
     // slot number that only lives inside the library cannot be checked from
     // outside it, so a wrong figure here is worse than no figure.  The api
-    // version is printed for the same reason: since R-ENG-1a it is the other
+    // version is printed for the same reason: it is the other
     // half of the answer, and `extensions on` alone no longer implies 0..63.
     //
-    // `(extensions <on|off>,` STAYS THE HEAD OF THE PARENTHESIS.  This line is
-    // read from outside by the play-test harness (R-VER-27), which anchors on
+    // `(extensions <on|off>,` stays the head of the parenthesis.  This line is
+    // read from outside by the play-test harness, which anchors on
     // exactly that prefix; putting the new field first parsed as "extensions
     // off" on a server that had them on, and the battery then failed the
     // extensions check while passing the slot check it contradicts.  A
@@ -871,7 +871,7 @@ void G_Svcmd_Slots_f(void)
     // Anything the map declares for this ruleset but that resolution dropped --
     // the extension-only rows on a server without extensions, and any row a
     // collision disabled.  Reported rather than omitted: a silently absent
-    // stat is the failure mode R-OSP-7a is about.
+    // stat is the failure mode the composed bar is about.
     for (int i = 0; i < SID_COUNT; i++) {
         if (g_slot[i] >= 0 || slotdefs[i].slot[r] < 0)
             continue;
@@ -890,15 +890,15 @@ void G_Svcmd_Slots_f(void)
 
 /*
 =================
-G_Svcmd_Extras_f      `sv extras`, R-VER-33
+G_Svcmd_Extras_f      `sv extras`
 
-R-EXTRA-1..7 are seven features behind seven `#define`s in the 1999 module and
+The extras are seven features behind seven `#define`s in the 1999 module and
 seven cvars here, and six of the seven are invisible from outside the library:
 a log that is open, a lag pool that is empty, two entity classnames that a
 shipped map never uses, a visible weapon that looks like a skin, and an
 observer implementation chosen per ruleset.  `sv ruleset` exists for exactly
-this reason on the dispatch (R-VER-18) and `sv slots` on the stat map
-(R-VER-19); this is the same answer for the extras.
+this reason on the dispatch and `sv slots` on the stat map
+; this is the same answer for the extras.
 
 Every line is a MEASUREMENT rather than a restatement of the cvar: the log line
 says whether the file is open and what it is called, the trigger lines say
@@ -941,41 +941,40 @@ void G_Svcmd_Extras_f(void)
 
     gi.cprintf(NULL, PRINT_HIGH, "extras: ruleset %s\n",
                G_RulesetName(G_Ruleset()));
-    gi.cprintf(NULL, PRINT_HIGH, "  R-EXTRA-1 gamelog       g_gamelog \"%s\" %s%s%s writes %d\n",
+    gi.cprintf(NULL, PRINT_HIGH, "  extra 1 gamelog         g_gamelog \"%s\" %s%s%s writes %d\n",
                g_gamelog->string,
                Log_IsOpen() ? "open" : "closed",
                Log_IsOpen() ? " " : "",
                Log_IsOpen() ? Log_Path() : "",
                Log_Writes());
-    gi.cprintf(NULL, PRINT_HIGH, "  R-EXTRA-2 clientlag     g_clientlag %d pool %d lagged %d\n",
+    gi.cprintf(NULL, PRINT_HIGH, "  extra 2 clientlag       g_clientlag %d pool %d lagged %d\n",
                (int)g_clientlag->value, Lag_PoolBlocks(), lagged);
-    gi.cprintf(NULL, PRINT_HIGH, "  R-EXTRA-3 triggers      g_triggercounting %d trigger_counting %s, "
+    gi.cprintf(NULL, PRINT_HIGH, "  extra 3 triggers        g_triggercounting %d trigger_counting %s, "
                "g_triggerlog %d trigger_log %s\n",
                (int)g_triggercounting->value,
                G_SpawnFuncExists("trigger_counting") ? "registered" : "MISSING",
                (int)g_triggerlog->value,
                G_SpawnFuncExists("trigger_log") ? "registered" : "MISSING");
-    gi.cprintf(NULL, PRINT_HIGH, "  R-EXTRA-4 rotatingbutton g_rotatingbutton %d func_button_rotating %s\n",
+    gi.cprintf(NULL, PRINT_HIGH, "  extra 4 rotatingbutton  g_rotatingbutton %d func_button_rotating %s\n",
                (int)g_rotatingbutton->value,
                G_SpawnFuncExists("func_button_rotating") ? "registered" : "MISSING");
-    // R-EXTRA-5 has no cvar and says why: VWep is not a Gladiator patch in this
+    // VWep has no cvar, and why: it is not a Gladiator patch in this
     // tree, it is what id shipped from 3.20 on and what q2pro carries.  The
     // measurement is the data the feature IS -- `weapmodel` on the weapon rows,
     // which PutClientInServer turns into `s.modelindex2` and ChangeWeapon packs
     // into the top byte of `s.skinnum`.
-    gi.cprintf(NULL, PRINT_HIGH, "  R-EXTRA-5 vwep          always on, %d item(s) carry a weapmodel\n",
+    gi.cprintf(NULL, PRINT_HIGH, "  extra 5 vwep            always on, %d item(s) carry a weapmodel\n",
                weapmodels);
-    gi.cprintf(NULL, PRINT_HIGH, "  R-EXTRA-6 observer      %s\n", observer);
-    // R-EXTRA-7 is a regression entry rather than a feature; the verdict lives
-    // in doc/regression.md and this line says which one it is.
-    gi.cprintf(NULL, PRINT_HIGH, "  R-EXTRA-7 ztn2dm2 plat  not isolable from any tree here -- see doc/regression.md\n");
+    gi.cprintf(NULL, PRINT_HIGH, "  extra 6 observer        %s\n", observer);
+    // The last is a regression entry rather than a feature; this line says so.
+    gi.cprintf(NULL, PRINT_HIGH, "  extra 7 ztn2dm2 plat    not isolable from any tree here\n");
 }
 
 /*
 =================
-G_Svcmd_Census_f      `sv census <classname>`, R-VER-20
+G_Svcmd_Census_f      `sv census <classname>`
 
-R-VER-20 asks that at least one check WAIT for something and then look again --
+At least one check has to wait for something and then look again --
 "spawn a level, advance past a known think deadline, and assert the thing that
 think was supposed to do".  CTF's techs were the first, found by counting them
 two seconds late.  An item's respawn is the second and it is a better one,

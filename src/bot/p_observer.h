@@ -4,7 +4,7 @@
 // Function:    observer mode
 // Programmer:  Mr Elusive (MrElusive@demigod.demon.nl), 1998-01-12
 //
-// COLOSSEUM: R-EXTRA-6's `dm`/`sp`/`ctf` implementation.  `camera_t` itself is
+// COLOSSEUM: the `dm`/`sp`/`ctf` observer implementation.  `camera_t` itself is
 // in g_local.h, because it is a member of gclient_t and g_save.c has to see it
 // to describe it.
 //===========================================================================

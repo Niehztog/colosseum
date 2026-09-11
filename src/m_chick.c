@@ -489,29 +489,12 @@ static void ChickSlash(edict_t *self)
     fire_hit(self, aim, (10 + (Q_rand() % 6)), 100);
 }
 
-// *** THE SKIN IS THE SELECTOR, AND THE CONTENT LATCH HAS NO BUSINESS HERE. ***
-//
-// The Reckoning's heat-seeking chick is a SEPARATE ENTITY, not a variant of the
-// shared one: `monster_chick_heat` has its own spawn-table row, and
-// `SP_monster_chick_heat` is `SP_monster_chick` plus `s.skinnum = 3`.  Nothing
-// else on a chick ever writes a skin above 1 -- `chick_pain`'s is `= 1` -- so
-// `skinnum > 1` means "this is that entity" and cannot be true of id's chick.
-// That is the donor's own test, `port_xatrix:m_chick.c:437`, verbatim.
-//
-// It carried `content_flavour & CONTENT_XATRIX` as well, and that was wrong.
-// The latch is set in ED_CallSpawn from `G_LayerEnabled`, so it says whether the
-// SERVER has the layer on -- it is not a property of the entity.  Its job is to
-// choose between two donors' versions of a monster BOTH of them have; a
-// pack-exclusive entity is not that case.  The spawn path refuses nothing when a
-// layer is off, so `monster_gekk`, `monster_widow` and the rest keep working;
-// only the heat chick silently lost its weapon and threw plain rockets, which is
-// the silent-wrong-answer shape ED_CallSpawn's own comment was written against.
-//
-// NOT a defect, and not to be "fixed": The Reckoning left `chick_pain`'s
-// `s.skinnum = 1` alone, so a heat chick hurt below half health drops to skin 1
-// and fires rockets for the rest of its life.  That is the donor's behaviour --
-// the 2023 rerelease is the tree that changed it, to `|= 1` / `&= ~1` -- and
-// R-200 does not take that tree as a behaviour source.
+// The Reckoning's heat-seeking chick is a separate entity, not a variant:
+// SP_monster_chick_heat is SP_monster_chick plus s.skinnum = 3, and nothing
+// else on a chick sets a skin above 1, so the skin is the selector.  The
+// Reckoning left chick_pain's s.skinnum = 1 alone, so a heat chick hurt below
+// half health drops to skin 1 and fires plain rockets from then on -- that is
+// The Reckoning's own behaviour and is deliberate here.
 static void ChickFireProjectile(edict_t *self, vec3_t start, vec3_t dir, int speed)
 {
     if (self->s.skinnum > 1)
@@ -539,8 +522,8 @@ static void ChickRocket(edict_t *self)
     AngleVectors(self->s.angles, forward, right, NULL);
     G_ProjectSource(self->s.origin, monster_flash_offset[MZ2_CHICK_ROCKET_1], forward, right, start);
 
-    // Rogue replaces the direct base/Xatrix shot with blindfire, leading and
-    // trace retries. The projectile type still composes with the Xatrix layer.
+    // Rogue replaces the direct shot with blindfire, leading and trace retries.
+    // The projectile type is still chosen by skin, above.
     if (!(self->content_flavour & CONTENT_ROGUE)) {
         VectorCopy(self->enemy->s.origin, vec);
         vec[2] += self->enemy->viewheight;
@@ -910,21 +893,11 @@ static void chick_precache(void)
 }
 
 
-// ---------------------------------------------------------------------------
-// R-CORE-11: baseq2's duck-and-dodge for the chick, restored alongside Ground
-// Zero's rewrite so that BOTH ship and the spawn-time latch selects.
-//
-// Ground Zero does not add to this monster, it replaces its evasion: baseq2's
-// per-monster chick_dodge and chick_duck_* become the shared M_MonsterDodge with
-// generic monster_duck_* plus a sidestep.  Without this block, `rogue 0` still
-// got Ground Zero's AI.
-//
-// Reintroduced under a bq2_ prefix rather than by un-commenting the donor's dead
-// copy, so the two sets are distinct symbols and both are visible to genptr.py
-// -- the save_ptrs[] table is built by scanning for literal
-// `currentmove = &name` assignments, which is also why the gate below is an
-// if/else with two literal assignments rather than a ternary or a macro.
-// ---------------------------------------------------------------------------
+// baseq2's duck-and-dodge for the chick.  Ground Zero does not add to this
+// monster, it replaces the evasion with the shared M_MonsterDodge, so both sets
+// ship and the spawn-time latch below selects.  Kept under a bq2_ prefix so the
+// two sets are distinct symbols and genptr.py sees both -- save_ptrs[] is built
+// by scanning for literal `currentmove = &name` assignments.
 
 static void bq2_chick_duck_down(edict_t *self)
 {
@@ -980,9 +953,7 @@ void bq2_chick_dodge(edict_t *self, edict_t *attacker, float eta, trace_t *tr)
 */
 void SP_monster_chick(edict_t *self)
 {
-    // R-MODE-7 / R-CORE-8: the ruleset decides, not `deathmatch`.  The
-    // inherited test was right for baseq2 and wrong here, because `deathmatch`
-    // is 1 under ctf and R-MODE-7 promises monsters under ctf.
+    // deathmatch is 1 under ctf, which allows monsters: ask the ruleset.
     if (!G_MonstersAllowed()) {
         G_FreeEdict(self);
         return;
@@ -1007,14 +978,9 @@ void SP_monster_chick(edict_t *self)
     self->monsterinfo.walk = chick_walk;
     self->monsterinfo.run = chick_run;
     // pmm
-    // *** R-CORE-11's gate. ***  Both evasion sets ship; the latch selects at
-    // spawn.  content_flavour is latched in ED_CallSpawn, which runs BEFORE this
-    // function -- R-CORE-11 names monster_start as the latch point and that is
-    // too late, see doc/reconciliation.md R-31.
-    //
-    // An if/else with literal assignments, deliberately: genptr.py builds
-    // save_ptrs[] by scanning the source for `= &name`, so a ternary or a macro
-    // would hide one or both tables from the savegame pointer table.
+    // Both evasion sets ship; content_flavour is latched in ED_CallSpawn, which
+    // runs before this.  An if/else with literal assignments, deliberately: a
+    // ternary or a macro would hide a table from genptr.py's save_ptrs[] scan.
     if (self->content_flavour & CONTENT_ROGUE) {
         self->monsterinfo.dodge = M_MonsterDodge;
         self->monsterinfo.duck = chick_duck;

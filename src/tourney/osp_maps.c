@@ -17,12 +17,11 @@ along with this program; if not, write to the Free Software
 Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 */
-// OSP Tourney DM v2.75, from osp-tourney@1d8427e (doc/provenance.md).
+// OSP Tourney DM v2.75, from osp-tourney@1d8427e.
 // Donor-only: baseq2 has no counterpart, so it lives in src/tourney/ rather
-// than being merged into a spine file (R-CORE-7).  The reconstruction's
-// asm-matching address comments are stripped -- SPECS.md N1 makes those oracles
-// meaningless here, and they survive at the pin.
-// osp_maps.c -- <INVENTED FILENAME>. maps.txt: the map queue, its parser and
+// than being merged into a spine file.  The reconstruction's
+// asm-matching address comments are stripped.
+// osp_maps.c -- filename assigned by this tree.  maps.txt: the map queue, its parser and
 // the next-map picker.
 
 #include "g_local.h"
@@ -31,7 +30,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 map_t * map = NULL;
 unsigned    map_size = 0;
 
-// The queue cursor -- a file-static, <INVENTED NAME>.
+// The queue cursor -- a file-static; the name is reconstructed.
 static int      cur_map = 0;
 
 int selected_map = 0;
@@ -239,9 +238,8 @@ void OSP_loadMaps(void)
                 } else
                     // Not "ERROR": a server with no maps list is a normal configuration,
                     // not a fault -- OSP_EndLevel falls back to baseq2's rotation
-                    // (R-OSP-9).  It printed ERROR, which made R-VER-2's boot
-                    // matrix count a warning on every OSP row for a missing
-                    // optional file.
+                    //It printed ERROR, which counted a warning on every
+                    // OSP boot row for a missing optional file.
                     gi.dprintf("Colosseum: no map list at [%s]; the OSP "
                                "rotation falls back to sv_maplist\n", pathptr);
             }

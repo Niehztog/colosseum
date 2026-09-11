@@ -426,7 +426,7 @@ void BecomeExplosion1(edict_t *self)
     // CTF: flags and techs do not explode, they go home.  Reachable only under
     // ctf -- nothing else spawns an item_flag_team* or an IT_TECH item -- but
     // the ruleset test says so rather than leaving it to be inferred from the
-    // classname comparison below (R-MODE-5's comment-fenced inline test).
+    // classname comparison below.
     if (G_Ruleset() == RULESET_CTF) {
         if (strcmp(self->classname, "item_flag_team1") == 0) {
             CTFResetFlag(CTF_TEAM1); // this will free self!
@@ -438,8 +438,7 @@ void BecomeExplosion1(edict_t *self)
             CTFResetFlag(CTF_TEAM2); // this will free self!
             // Threewave prints CTF_TEAM1's name here, so a returning blue flag
             // announced itself as red -- shipped that way since 1998.  Kept in
-            // Phase 3 under §7 rule 2 (R-45) and fixed now that q2pro has fixed
-            // it: §7 rule 7 makes a Q2PRO fix cumulative.
+            // as the donor's own quirk, and fixed now that q2pro has fixed it.
             gi.bprintf(PRINT_HIGH, "The %s flag has returned!\n",
                        CTFTeamName(CTF_TEAM2));
             return;
@@ -607,7 +606,7 @@ void point_combat_touch(edict_t *self, edict_t *other, cplane_t *plane, csurface
 void SP_point_combat(edict_t *self)
 {
     // Monster pathing infrastructure: a combat point monsters are sent to. It
-    // belongs with the monsters, not with `deathmatch` (R-MODE-7).
+    // belongs with the monsters, not with `deathmatch`.
     if (!G_MonstersAllowed()) {
         G_FreeEdict(self);
         return;
@@ -2242,8 +2241,8 @@ Ground Zero's is toggleable by `targetname` and uses TE_TELEPORT_EFFECT,
 Threewave's requires a `target`, spawns a humming noise entity and routes the
 touch through its own old_teleporter_touch.
 
-Â§7 rule 3: two donors changing the same thing get a gate, and the gate is the
-ruleset.  Â§7 rule 4 gave each implementation its donor prefix; these two
+Two donors changing the same thing get a gate, and the gate is the ruleset.
+Each implementation takes its donor prefix; these two
 functions are what the spawn table points at.  The gate is one-sided and needs
 no key inspection, because `trigger_teleport` is not a baseq2 classname at all:
 outside ctf, Ground Zero's is the only implementation there is.

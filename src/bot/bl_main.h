@@ -18,12 +18,8 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 */
 // The Gladiator Bot SDK's headers, from osp-tourney@1d8427e -- which carries a
-// working Q2PRO port of the 1999 glue (SPECS.md sec 3).  The implementations
-// arrive with this header's phase (sec 9 Phase 6); Phase 5 took the
-// declarations alone so that R-OSP-5's "botglobals declared exactly once" could
-// be true before there was anything to declare it for.
-// The reconstruction's asm-matching address comments are stripped -- SPECS.md
-// N1 makes those oracles meaningless here, and they survive at the pin.
+// working Q2PRO port of the 1999 glue.  The reconstruction's asm-matching
+// address comments are stripped.
 // The SDK's own library interface.  The donor pulls it in from its g_local.h;
 // here it is included where it is needed, which keeps botlib.h off every
 // translation unit in the tree.
@@ -43,14 +39,14 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 // The SDK's own path bound, and it needs a name of its own.  The donor writes
 // `MAX_PATH` behind `#ifndef`, which collides with the Windows constant:
-// mingw's minwindef.h defines MAX_PATH as 260 UNCONDITIONALLY, and it is a
+// mingw's minwindef.h defines MAX_PATH as 260 unconditionally, and it is a
 // system header, so gcc suppresses the redefinition warning -Werror would
 // otherwise turn into an error.  The result compiles and diverges quietly --
 // every buffer declared after a `#include <windows.h>` in the same translation
 // unit is 260 bytes and every one before it is 144 -- and moving the include
 // above this header would change `bot_library_t.path`'s size in one translation
 // unit and not the others, which is a struct-layout mismatch rather than an
-// inconsistency.  R-90 is this collision caught the other way round.
+// inconsistency.
 #define BOT_MAX_PATH        144
 
 //first entity is the world, then the client entities follow
@@ -83,10 +79,10 @@ typedef struct bot_state_s
     bool active;                    //true if a bot is active for this client
     bool started;                   //true if the bot has started
     bot_library_t *library;         //used library by the bot
-    // R-140's two counters, and they are here rather than in a file-static
+    // The fire gate's two counters, and they are here rather than in a file-static
     // because this struct is already the per-client bot state and is already
     // reallocated per game.  `firecalls` is every frame the brain asked to
-    // shoot while its arena was NOT being fought; `firedrops` is how many of
+    // shoot while its arena was not being fought; `firedrops` is how many of
     // those the button gate took away.  `sv botinv` prints the pair: equal
     // means the gate is doing its whole job, and a gap is a shot that went out
     // during a countdown.
@@ -105,10 +101,10 @@ typedef struct bot_globals_s
     bot_library_t *firstbotlib; //first bot libary
     int nocldouble;                 //no double client movement frames
     // The donor guards the four below with `#ifdef BOT_DEBUG`, which is never
-    // defined anywhere in either tree -- so `botpause`, which R-BOT-24 requires,
-    // could not work.  They are unconditional here: sec 7 rule 6 keeps #ifdef
-    // out of the game tree, and a switch that cannot be compiled in is not a
-    // switch.  `nobotai` is what `sv botpause` toggles.
+    // defined anywhere in either tree -- so `botpause` could not work.  They
+    // are unconditional here: no #ifdef in the game tree, and a switch that
+    // cannot be compiled in is not a switch.  `nobotai` is what `sv botpause`
+    // toggles.
     int notest;                         //don't call the library test function
     int nobotinput;                 //true if bot input isn't processed
     int nobotai;                        //true if bots don't execute ai
@@ -132,7 +128,7 @@ void BotLibraryDump(void);
 void BotClientDump(void);
 void BotInventoryDump(void);
 bool BotStarted(edict_t *bot);
-//the default botlib filename for this platform and build (R-BOT-4)
+//the default botlib filename for this platform and build
 const char *BotDefaultLibrary(void);
 //
 void BotLib_BotLoadMap(char *mapname);
@@ -151,18 +147,18 @@ void BotLib_BotAI(edict_t *bot, float thinktime);
 void BotLib_BotConsoleMessage(edict_t *bot, int type, char *message);
 int  BotLib_Test(int parm0, char *parm1, vec3_t parm2, vec3_t parm3);
 
-// R-BOT-20's frame section, in one function so that the order the requirement
-// fixes cannot be re-arranged by an edit to G_RunFrame.
+// The bot frame section, in one function so that its fixed order cannot be
+// re-arranged by an edit to G_RunFrame.
 void BotRunFrame(void);
 
-// R-BOT-23's measurement.  The budget is half a 100 ms frame, in microseconds.
+// The frame measurement.  The budget is half a 100 ms frame, in microseconds.
 #define BOTPERF_BUDGET_US   50000
 void BotPerfReset(void);
 void BotPerfReport(void);
 
-// ---- R-BOT-29: the seventeen TOURNEY blocks, as ruleset-neutral accessors ---
+// ---- the seventeen TOURNEY blocks, as ruleset-neutral accessors -----------
 //
-// osp-tourney defines TOURNEY at g_local.h:16 -- LIVE, not `#if 0` -- and every
+// osp-tourney defines TOURNEY at g_local.h:16 -- live, not `#if 0` -- and every
 // bl_*.c includes g_local.h first, so the donor's own `//#define TOURNEY` lines
 // are inert text and all seventeen blocks are active library-wide.  Neither
 // state is acceptable here: on, ctf/arena lose `minimumplayers`, `botfile`
@@ -172,29 +168,28 @@ void BotPerfReport(void);
 // would resolve to tourney's globals in every ruleset.
 //
 // There is no BotTourneyMode() any more: `m_mode` is gone and the mode of play
-// IS the ruleset (R-OSP-12).  What the accessor existed to protect survives and
+// IS the ruleset.  What the accessor existed to protect survives and
 // is worth restating, because the flattening makes the wrong answer look more
 // natural than it did: the brain's `teamplay` libvar is `RULESET_TDM` ALONE.
 // `duel` is two teams of one, the brain has no ally, and telling it otherwise
 // gives both duellists an imaginary team-mate the moment they wear the same
-// model.  So do NOT reach for G_IsOspRuleset(), OSP_IsTeams() or
+// model.  So do not reach for G_IsOspRuleset(), OSP_IsTeams() or
 // G_TeamplayEnabled() at that call site -- all three are true under `duel`, and
-// all three are a different question (R-BOT-29).
+// all three are a different question.
 int  BotTourneyRunes(void);         // rune_stat, or 0
 bool BotTourneyHook(void);          // hook_enable, or false
 int  BotTourneyVotedIn(void);       // bots_votedin, or 0
-// The cvar names are per ruleset (R-OSP-11): the OSP four use tourney's own
+// The cvar names are per ruleset: the OSP four use tourney's own
 // `bots_minplayers` and `bots_botfile`, ctf and arena `minimumplayers` and
 // `botfile`.
 const char *BotMinPlayersCvar(void);
 const char *BotFileCvar(void);
 // The switch that replaces the flat count with a target read off the game is
-// ONE cvar, `botfill`, for every ruleset (R-RA-7, R-CTF-8, R-DM-1).  It was
-// three names on R-OSP-11's authority and that rule never covered it -- see the
-// comment on BotFillEnabled().
+// One cvar, `botfill`, for every ruleset.  It was three names, under a rule
+// that never covered it -- see the comment on BotFillEnabled().
 bool BotFillEnabled(void);
 // ...and the cvars themselves, obtained once with the RULESET's default.
-// R-COMPAT-6: osp_main.c registers `bots_minplayers` with a default of "4" and
+// Osp_main.c registers `bots_minplayers` with a default of "4" and
 // the SDK registers `minimumplayers` with "0", so a bot-layer call site that
 // spelled its own default would be a second registration of one name with two
 // values -- the exact collision `statsfile`/`statsname` was in 1.21.

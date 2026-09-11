@@ -1,5 +1,5 @@
 #!/bin/sh
-# smoke.sh -- R-VER-17, the smoke test, as a script rather than a paragraph.
+# smoke.sh -- the smoke test, as a script rather than a paragraph.
 #
 # Three runs against a stock q2proded on the native target:
 #   1. deathmatch  q2dm1, 0 entities inhibited
@@ -14,7 +14,7 @@
 #                  print `unknown pointer`, `bad index` or `type mismatch`
 #
 # Run 3 is the only end-to-end check on `save_ptrs[]`, which Colosseum
-# regenerates and thereby renumbers (doc/reconciliation.md R-1), and it has to
+# regenerates and thereby renumbers, and it has to
 # cross a process boundary to be one: a load in the process that saved would
 # match a wrong table against itself.
 #
@@ -56,7 +56,7 @@ bad()  { fails=$((fails+1)); printf '  [FAIL] %-40s %s\n' "$1" "$2"; }
 # to be judged on what the log said, so a server that printed everything it was
 # asked for and then died on the way out passed.  It did -- `load` segfaulted at
 # ShutdownGame on every savegame in the tree, twice over, and this script said
-# "smoke test passed" for as long as it existed (doc/reconciliation.md R-108).
+# "smoke test passed" for as long as it existed.
 # 139 is 128 + SIGSEGV; the shell prints the signal to ITS stderr, not to $log.
 serve() {
   log=$1 dm=$2 coop=$3 map=$4; shift 4
@@ -85,7 +85,7 @@ check_exit() {
 inhibited() { sed -n 's/^\([0-9]*\) entities inhibited.*/\1/p' "$1" | tail -1; }
 saveerrs()  { grep -cE 'unknown pointer|bad index|type mismatch' "$1"; }
 
-echo "R-VER-17 smoke test"
+echo "smoke test"
 
 # ---- 1. deathmatch
 serve "$DIR/dm.log" 1 0 q2dm1 status
@@ -161,7 +161,7 @@ if [ "$CONTROL" = 1 ]; then
   exit 0
 fi
 
-# The two counts must differ (R-VER-17 item 2), on the same map.
+# The two counts must differ, on the same map.
 [ "${b1dm_inh:-0}" != "${co_inh:-0}" ] || \
   bad "campaign/filter" "base1 inhibits the same count in both modes ($b1dm_inh)"
 

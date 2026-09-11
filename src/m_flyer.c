@@ -687,9 +687,7 @@ static void flyer_precache(void)
 */
 void SP_monster_flyer(edict_t *self)
 {
-    // R-MODE-7 / R-CORE-8: the ruleset decides, not `deathmatch`.  The
-    // inherited test was right for baseq2 and wrong here, because `deathmatch`
-    // is 1 under ctf and R-MODE-7 promises monsters under ctf.
+    // deathmatch is 1 under ctf, which allows monsters: ask the ruleset.
     if (!G_MonstersAllowed()) {
         G_FreeEdict(self);
         return;
@@ -743,7 +741,7 @@ void SP_monster_flyer(edict_t *self)
 // PMM - suicide fliers
 void SP_monster_kamikaze(edict_t *self)
 {
-    // R-MODE-7 / R-CORE-8: the ruleset decides, not `deathmatch` (see R-25).
+    // The ruleset decides, not `deathmatch`.
     if (!G_MonstersAllowed()) {
         G_FreeEdict(self);
         return;

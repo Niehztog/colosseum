@@ -1,0 +1,3 @@
+[submodule "vendor/gladiator-bot-restored"]
+	path = vendor/gladiator-bot-restored
+	url = https://github.com/Niehztog/gladiator-bot-restored.git

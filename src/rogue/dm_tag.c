@@ -34,7 +34,7 @@ edict_t     *tag_token;
 edict_t     *tag_owner;
 int         tag_count;
 
-// R-211.  `gamerules` is not the authority on its own.  R-203 gated the
+// `gamerules` is not the authority on its own.  The merge gated the
 // DMGame table on G_UsesRogueGameRules(), but Tag's token reaches the world
 // through the SPAWN TABLE and the ITEM LIST, neither of which goes through
 // that table -- so under an OSP ruleset with `gamerules 2` the token still
@@ -216,7 +216,7 @@ void Tag_DropToken(edict_t *ent, const gitem_t *item)
 
     // The item list's drop callback is public the same way the pickup is.
     // Unreachable once the pickup above refuses, and kept as the backstop
-    // that makes that true by construction rather than by argument (R-211).
+    // that makes that true by construction rather than by argument.
     if (!Tag_Active())
         return;
 

@@ -784,9 +784,9 @@ void monster_death_use(edict_t *self)
 
 static bool monster_start(edict_t *self)
 {
-    // R-MODE-7 / R-CORE-8.  This is the gate that actually decides: every
-    // SP_monster_* funnels through monster_start(), so converting only the
-    // per-monster checks would have left monsters freed under ctf regardless.
+    // This is the gate that actually decides: every SP_monster_* funnels
+    // through monster_start(), so converting only the per-monster checks would
+    // have left monsters freed under ctf regardless.
     if (!G_MonstersAllowed()) {
         G_FreeEdict(self);
         return false;
@@ -794,7 +794,7 @@ static bool monster_start(edict_t *self)
 
     // The content flavour is latched in ED_CallSpawn, before this runs and
     // before the SP_monster_* assignments -- see the comment there for why
-    // R-CORE-11's stated latch point (here) is too late to gate anything.
+    // This is too late a point to gate anything on the content flavour.
 
     if ((self->spawnflags & 4) && !(self->monsterinfo.aiflags & AI_GOOD_GUY)) {
         self->spawnflags &= ~4;

@@ -19,11 +19,11 @@ with this program; if not, write to the Free Software Foundation, Inc.,
 #include "g_local.h"
 #include "bot/p_observer.h"
 #include "arena/arena.h"
-// R-160: BeginIntermission closes every arena's round record, which is
+// BeginIntermission closes every arena's round record, which is
 // ra2stats.c's and not arena.h's.
 #include "arena/ra2stats.h"
 #include "tourney/p_menu.h"
-// R-OSP-9: the intermission arm asks the client census and clears the rune HUD.
+// The intermission arm asks the client census and clears the rune HUD.
 #include "tourney/osp_hooks.h"
 #include "bot/bl_main.h"
 #include "bot/p_botmenu.h"
@@ -31,7 +31,7 @@ with this program; if not, write to the Free Software Foundation, Inc.,
 /*
 ===============================================================================
 
-MENU OWNERSHIP AND THE OBSERVER QUESTION
+Menu ownership and the observer question
 
 Two small arbiters, here because p_hud.c is where the other claimants of the
 layout channel already live -- the scoreboard, the inventory and the help
@@ -40,7 +40,7 @@ computer -- and because neither belongs inside any one donor's engine.
 ===============================================================================
 */
 
-// R-MENU-2a/3.  One owner per client, and the open path closes the incumbent.
+// One owner per client, and the open path closes the incumbent.
 // Which engine that is is the owner field's business, not the caller's: an
 // engine does not know the others exist, so nothing but this function can close
 // a menu it did not open.
@@ -51,7 +51,7 @@ void G_MenuClose(edict_t *ent)
     if (!ent->client)
         return;
 
-    // The owner is cleared BEFORE the engine's own close runs, not after,
+    // The owner is cleared before the engine's own close runs, not after,
     // because an engine that draws into the statusbar has to put the real bar
     // back on the way out and DisplayMenu() decides which bar that is by asking
     // this field.  With the order the other way round it would redraw the menu
@@ -80,10 +80,10 @@ void G_MenuClose(edict_t *ent)
 // One undo for the layout channel.  Four menu engines and the SDK's loading
 // image all write into it and every one of them needs the same take-back; the
 // donors each open-coded it against their own idea of which statusbar to
-// repaint, which is doc/reconciliation.md R-87's defect in the small.
+// repaint, which is the same defect in the small.
 //
-// An empty layout is what stops the client drawing one.  It is NOT a statusbar
-// write: CS_STATUSBAR is the composed bar R-OSP-7a already put there and it has
+// An empty layout is what stops the client drawing one.  It is not a statusbar
+// write: CS_STATUSBAR is the composed bar already put there and it has
 // not moved -- only RA2's menu overwrites that, and ra_MenuClose is what puts
 // it back.
 void G_LayoutClear(edict_t *ent)
@@ -91,7 +91,7 @@ void G_LayoutClear(edict_t *ent)
     if (!ent->client)
         return;
     if (ent->flags & FL_BOT)
-        return;     // R-BOT-10: a bot has no network connection to unicast to
+        return;     // a bot has no network connection to unicast to
     gi.WriteByte(svc_layout);
     gi.WriteString("");
     gi.unicast(ent, true);
@@ -109,12 +109,12 @@ bool G_MenuActive(edict_t *ent)
 }
 
 // "Is this client asking for a scoreboard?" -- one question, two fields, for
-// the same reason G_IsObserver() exists (sec 7 rule 3).  baseq2, ctf and
-// tourney toggle `showscores`; RA2 deleted it and put a three-state
-// `scoremode` in its place -- 0 off, 1 the arena board, 2 the server-wide one
-// -- because it has two boards to cycle between and a bool cannot say which.
-// The merged gclient_t keeps both, so the sites that must know ask by name
-// rather than each picking a field and being right for one ruleset.
+// the same reason G_IsObserver() exists.  baseq2, ctf and tourney toggle
+// `showscores`; RA2 deleted it and put a three-state `scoremode` in its place
+// -- 0 off, 1 the arena board, 2 the server-wide one -- because it has two
+// boards to cycle between and a bool cannot say which.  The merged gclient_t
+// keeps both, so the sites that must know ask by name rather than each picking
+// a field and being right for one ruleset.
 bool G_ScoreboardUp(edict_t *ent)
 {
     if (!ent->client)
@@ -124,24 +124,23 @@ bool G_ScoreboardUp(edict_t *ent)
     return ent->client->showscores;
 }
 
-// R-CTF-5.  "Is this client watching rather than playing?" has two answers in
+// "Is this client watching rather than playing?" has two answers in
 // one library and thirteen call sites that must not have to know which.
 //
 // baseq2 has a `spectator` userinfo key, a password, a limit and a pers/resp
 // pair that ClientBeginServerFrame watches for a change.  Threewave has none of
 // that: it deleted both fields and expressed the same state as
 // `ctf_team == CTF_NOTEAM`, joined and left through the menu.  Both survive
-// (R-CORE-6's union, R-CORE-8's campaign), so the question is asked by name.
+// (the merged union, and the campaign), so the question is asked by name.
 bool G_IsObserver(edict_t *ent)
 {
     if (!ent->client)
         return false;
-    // R-EXTRA-6's observer is a fourth spelling, and it is the one that is a
-    // FLAG rather than a field.  Asked first and for every ruleset: it is only
-    // ever set under dm/sp/ctf, and asking it unconditionally means the thirteen
-    // sites that already call this predicate see the Gladiator observer without
-    // any of them being edited (R-CTF-5's "one predicate, three answers" is
-    // four now).
+    // The Gladiator observer is a fourth spelling, and it is the one that is a
+    // flag rather than a field.  Asked first and for every ruleset: it is only
+    // ever set under dm/sp/ctf, and asking it unconditionally means the
+    // thirteen sites that already call this predicate see it without any of
+    // them being edited.
     if (ent->flags & FL_OBSERVER)
         return true;
     if (G_Ruleset() == RULESET_CTF)
@@ -151,15 +150,15 @@ bool G_IsObserver(edict_t *ent)
     // so this predicate uses the arena's native state.
     if (G_Ruleset() == RULESET_ARENA)
         return ent->client->resp.fightstate == FIGHT_SPECTATING;
-    // ...and tourney's is a FIFTH spelling, which R-191 declined to add here and
-    // R-193 adds, because by then it was blocking six sites: `resp.spectator` is
-    // dead under the OSP four -- the donor deleted baseq2's spectator system --
-    // and "watching" is `resp.osp_entered != ENTERED_ENTERED`, which is also the
-    // donor's own test at every one of those sites.  Two callers diverge from
-    // the donor once this answers, and both carry an explicit arm rather than
-    // being left to it: ClientBeginDeathmatch announces an ARRIVING observer
-    // (the donor's OSP_playerAnnounce is unconditional there) and p_view.c keeps
-    // G_SetStats for one, because the donor has no G_SetSpectatorStats at all.
+    // ...and tourney's is a fifth spelling, added because it was blocking six
+    // sites: `resp.spectator` is dead under the OSP four -- the donor deleted
+    // baseq2's spectator system -- and "watching" is `resp.osp_entered !=
+    // ENTERED_ENTERED`, which is also the donor's own test at every one of
+    // those sites.  Two callers diverge from the donor once this answers, and
+    // both carry an explicit arm rather than being left to it:
+    // ClientBeginDeathmatch announces an ARRIVING observer (the donor's
+    // OSP_playerAnnounce is unconditional there) and p_view.c keeps G_SetStats
+    // for one, because the donor has no G_SetSpectatorStats at all.
     if (G_IsOspRuleset())
         return ent->client->resp.osp_entered != ENTERED_ENTERED;
     return ent->client->resp.spectator;
@@ -175,7 +174,7 @@ INTERMISSION
 
 void MoveClientToIntermission(edict_t *ent)
 {
-    // R-159.  The donor's first line here is `clear_menus(ent)`, and the merge
+    // The donor's first line here is `clear_menus(ent)`, and the merge
     // dropped it: an RA2 menu IS the client's statusbar (menu.c SendMenu
     // overwrites CS_STATUSBAR for the one client), so a menu left open is a
     // menu still on screen over the end-of-level board, with the real bar never
@@ -305,14 +304,13 @@ void BeginIntermission(edict_t *targ)
         }
     }
 
-    // R-OSP-9: NOTHING ELSE CAN END A TOURNEY INTERMISSION.  The only writer of
+    // Nothing else can end a tourney intermission.  The only writer of
     // `exitintermission` for a deathmatch ruleset is ClientThink, on a button
     // press from a connected client -- so a server that reaches its timelimit
     // with nobody on it (or with nobody but bots, which press nothing) stops
     // here and never changes map again, and OSP_exitLevel's "empty server, go
     // back to the default config" arm becomes unreachable with it.  The donor
-    // closes it in this function, and R-160 recorded the hole as baseq2's while
-    // missing that osp-tourney fixes it too.
+    // closes it in this function.
     if (G_IsOspRuleset() && connected_clients - botglobals.numbots <= 0) {
         level.exitintermission = 1;
         return;
@@ -361,7 +359,7 @@ void BeginIntermission(edict_t *targ)
     }
 
     if (G_Ruleset() == RULESET_ARENA) {
-        // R-160, first half.  Every arena's round record is closed HERE in the
+        // First half.  Every arena's round record is closed here in the
         // donor, and the merge left RA2_Stats_End reachable only from
         // arena_think's round boundaries -- so a round still being fought when
         // `timelimit` or `fraglimit` ended the level was never written out.
@@ -372,17 +370,22 @@ void BeginIntermission(edict_t *targ)
             arenas[i].stats = NULL;
         }
 
-        // R-160, second half.  NOTHING ELSE CAN END AN INTERMISSION.  The only
-        // other writer of `exitintermission` for a deathmatch ruleset is
-        // ClientThink, on a button press from a connected client -- so a server
-        // that reaches its timelimit with nobody on it stops here and never
-        // changes map again.  The donor closes it by asking whether it moved
-        // anybody.
+        // Second half.  A server that reaches its timelimit with NOBODY on it
+        // would otherwise stop here: the donor closes that by asking whether it
+        // moved anybody, and this is that question.
         //
-        // Arena only, matching the donor, and the hole is the same under dm and
-        // ctf: it is baseq2's, it is not RA2's to fix from inside a ruleset
-        // gate, and widening it would change what an empty dm server does.
-        // Recorded rather than taken (doc/reconciliation.md R-160).
+        // It used to be the whole of the answer, and the comment here used to
+        // say the remaining hole -- an intermission only a press can end -- was
+        // "the same under dm and ctf".  That was wrong about `dm`, which is
+        // tourney's RegularDM in this tree and so inside G_IsOspRuleset(); the
+        // guard above already returns for it.  R-RA-10 closed the rest for
+        // `arena` with tourney's own lazy timer, driven from G_RunFrame so that
+        // it does not need a client to run it, and this line is now only the
+        // EMPTY-server shortcut it always was -- reached before any timer has
+        // to tick, and worth keeping for that.
+        //
+        // `ctf` took the clock too (R-CTF-9), so nothing deathmatch is left on
+        // a press alone; `sp` is, and should be.
         if (!n)
             level.exitintermission = 1;
         else
@@ -411,9 +414,9 @@ void DeathmatchScoreboardMessage(edict_t *ent, edict_t *killer)
     char    *tag;
 
     // sort the clients by score.  `G_IsObserver()` rather than baseq2's own
-    // `resp.spectator` (R-193's widening): the Gladiator observer is a flag and
-    // is set under sp too, so the generic predicate is what keeps a watching
-    // client out of the rankings whichever spelling it arrived in.
+    // `resp.spectator`: the Gladiator observer is a flag and is set under sp
+    // too, so the generic predicate is what keeps a watching client out of the
+    // rankings whichever spelling it arrived in.
     //
     // WHO REACHES THIS BOARD IS A SHORT LIST: `sp` alone, meaning coop's
     // intermission and `score`.  Every deathmatch ruleset fills the
@@ -482,7 +485,7 @@ void DeathmatchScoreboardMessage(edict_t *ent, edict_t *killer)
             stringlength += j;
         }
 
-        // R-EXTRA-2, the v0.93 half: the scoreboard shows the SIMULATED ping
+        // The lag simulation's v0.93 half: the scoreboard shows the simulated ping
         // when it is worse than the real one, so a player who asked for lag
         // reads as lagged to everybody looking at the rankings.
         if (g_clientlag->value)
@@ -512,7 +515,7 @@ Note that it isn't that hard to overflow the 1400 byte message limit!
 ==================
 */
 // Non-static: CTF's admin menu and match code show the scoreboard too, and the
-// ruleset picks which message it carries (R-CORE-13).
+// ruleset picks which message it carries.
 void DeathmatchScoreboard(edict_t *ent)
 {
     G_ScoreboardMessage(ent, ent->enemy);
@@ -534,7 +537,7 @@ void Cmd_Score_f(edict_t *ent)
     ent->client->showinventory = false;
     ent->client->showhelp = false;
 
-    // R-MENU-3: the scoreboard and the menu are the same channel, so asking for
+    // The scoreboard and the menu are the same channel, so asking for
     // one closes the other -- EXCEPT under arena, where they are not.  Every
     // other menu engine here draws with svc_layout; RA2's draws by overwriting
     // CS_STATUSBAR for the one client (menu.c's SendMenu), so the board and the
@@ -566,7 +569,7 @@ void Cmd_Score_f(edict_t *ent)
         return;
     }
 
-    // R-OSP-1: THE SCOREBOARD CHANNEL SHOWS FIVE DIFFERENT PAGES under tourney,
+    // The scoreboard channel shows five different pages under tourney,
     // and `resp.osp_r24c` says which -- 0 the scoreboard, 1 the previous
     // match's, 2 the MOTD, 4 the match parameters, 8 the player card.  So
     // `score` only DISMISSES from the first two; from any other page it returns
@@ -816,7 +819,7 @@ void G_SetStats(edict_t *ent)
     //
     // timer 2 (pent)
     //
-    // R-OSP-7 clause 4's reference case: a baseq2 mechanic written by the shared
+    // The reference case for a shared slot: a baseq2 mechanic written by the shared
     // G_SetStats that needs two private slots in every ruleset, and that each
     // donor had to place differently (baseq2 18/19, RA2 26/27, tourney 29/30,
     // and CTF had nowhere at all).  It asks the slot map where its pair landed
@@ -852,14 +855,14 @@ void G_SetStats(edict_t *ent)
     //
     ent->client->ps.stats[STAT_LAYOUTS] = 0;
 
-    // THIS BIT IS WHAT MAKES A LAYOUT VISIBLE, and under arena the field that
-    // decides it is `scoremode`, not `showscores` (sec 7 rule 3, the same
-    // substitution p_view.c's redraw and Cmd_Score_f already make).  RA2's
-    // p_hud.c reads `scoremode` here.  Reading `showscores` instead meant
-    // Cmd_Score_f built the arena board, unicast it, and left the client with
-    // no reason to draw it: `score` did nothing at all for a living arena
-    // player, and appeared to work only while dead or in intermission, which
-    // are the two conditions in the same test.
+    // This bit is what makes a layout visible, and under arena the field that
+    // decides it is `scoremode`, not `showscores` (the same substitution
+    // p_view.c's redraw and Cmd_Score_f already make).  RA2's p_hud.c reads
+    // `scoremode` here.  Reading `showscores` instead meant Cmd_Score_f built
+    // the arena board, unicast it, and left the client with no reason to draw
+    // it: `score` did nothing at all for a living arena player, and appeared
+    // to work only while dead or in intermission, which are the two conditions
+    // in the same test.
     if (deathmatch->value) {
         if (ent->client->pers.health <= 0 || level.intermission_framenum
             || G_ScoreboardUp(ent))
@@ -902,7 +905,7 @@ void G_SetStats(edict_t *ent)
 
     // CTF's fourteen stats.  A gated tail rather than an ops row: everything
     // above this line is shared and only the last step differs, which is exactly
-    // the case R-MODE-5 says to gate inline rather than to hook.
+    // the case to gate inline rather than to hook.
     if (G_Ruleset() == RULESET_CTF)
         SetCTFStats(ent);
 }
@@ -947,7 +950,7 @@ void G_SetSpectatorStats(edict_t *ent)
     if (cl->showinventory && cl->pers.health > 0)
         cl->ps.stats[STAT_LAYOUTS] |= LAYOUTS_INVENTORY;
 
-    // *** A CTF CHASER'S NAME PLATE IS A LAYOUT, SO THE LAYOUT BIT IS ON. ***
+    // A CTF chaser's name plate is a layout, so the layout bit is on.
     //
     // Threewave has no chase element in its statusbar -- SID_CHASE is unmapped
     // under ctf for that reason -- and draws "Chasing <name>" as a unicast
@@ -964,7 +967,6 @@ void G_SetSpectatorStats(edict_t *ent)
     //
     // Tourney draws the same plate and does not need this: p_view.c sets the
     // bit itself when it copies a tracked player's stats to its watchers.
-    // doc/reconciliation.md R-176.
     if (G_Ruleset() == RULESET_CTF && cl->chase_target)
         cl->ps.stats[STAT_LAYOUTS] |= LAYOUTS_LAYOUT;
 

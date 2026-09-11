@@ -49,8 +49,8 @@ void UpdateChaseCam(edict_t *ent)
     ownerv[2] += targ->viewheight;
 
     VectorCopy(targ->client->v_angle, angles);
-    // *** R-OSP-1'S TWO CAMERAS, and everything below that reads `osp` is
-    // R-193. ***  Tourney has a chase camera with controls and an in-eyes mode,
+    // Tourney's two cameras, and everything below that reads `osp` is
+    // theirs.  Tourney has a chase camera with controls and an in-eyes mode,
     // and this function is the consumer the merge left behind: `movedir` carries
     // the free-look offsets ClientThink accumulated, `speed` the zoom, and the
     // two modes differ in the pitch they allow, in whether the camera is behind
@@ -70,15 +70,15 @@ void UpdateChaseCam(edict_t *ent)
         angles[PITCH] = (osp == ENTERED_INEYES ? 1 : 56);
 
     // The gate is written out rather than carried in `osp`, because
-    // `camera_pitch` is tourney's own cvar in a spine file and R-CORE-7 wants
-    // that legible at the use rather than three lines up (donorgate.py).
+    // `camera_pitch` is tourney's own cvar in a spine file, and that is worth
+    // being legible at the use rather than three lines up.
     if (G_IsOspRuleset()) {
         if (osp == ENTERED_CHASECAM) {
             ent->movedir[0] = camera_pitch->value;
             ent->movedir[1] = ent->client->osp_t018;
         } else {
             // In-eyes has no free-look and no zoom, and -12 puts the camera
-            // twelve units IN FRONT of the eye rather than behind the head.
+            // twelve units in front of the eye rather than behind the head.
             ent->movedir[0] = 0;
             ent->movedir[1] = 0;
             ent->speed = -12;
@@ -162,7 +162,7 @@ void UpdateChaseCam(edict_t *ent)
     // Under ctf the chased player's name is a unicast layout rather than a
     // statusbar element: CTF's bar has no slot 16 element and the slot is
     // unmapped for that ruleset (g_stats.h), which is the honest expression of
-    // "Threewave draws this differently" -- see doc/reconciliation.md R-43.
+    // "Threewave draws this differently".
     // Elsewhere STAT_CHASE and the bar's `stat_string 16` do the job and this
     // block would fight them for the layout channel.
     if ((G_Ruleset() == RULESET_CTF || G_IsOspRuleset()) &&
@@ -174,7 +174,7 @@ void UpdateChaseCam(edict_t *ent)
         ent->client->update_chase = false;
 
         // Tourney names the team and, in a live team match, the score --
-        // R-OSP-1's observer is meant to be able to follow a match, and
+        // tourney's observer is meant to be able to follow a match, and
         // "Chasing Bob" alone does not say which side Bob is on.  Its slot 16
         // is the crosshair-id line, not this one, so the two do not collide.
         if (G_IsOspRuleset() && G_Ruleset() == RULESET_TDM && sync_stat > 2)
@@ -207,7 +207,7 @@ void ChaseNext(edict_t *ent)
     if (!ent->client->chase_target)
         return;
 
-    // R-193: tourney starts every new target at the configured distance and
+    // Tourney starts every new target at the configured distance and
     // straight behind, so a zoom or a free-look does not follow the cursor from
     // the last player to the next one.  `osp_r000` is the count of clients
     // watching this one, which p_view.c reads to draw "N watching".
@@ -243,7 +243,7 @@ void ChasePrev(edict_t *ent)
     if (!ent->client->chase_target)
         return;
 
-    // R-193: tourney starts every new target at the configured distance and
+    // Tourney starts every new target at the configured distance and
     // straight behind, so a zoom or a free-look does not follow the cursor from
     // the last player to the next one.  `osp_r000` is the count of clients
     // watching this one, which p_view.c reads to draw "N watching".
@@ -273,7 +273,7 @@ void ChasePrev(edict_t *ent)
 
 // Threewave DELETES this and reaches the chase camera through CTFObserver
 // instead.  Kept, because dm and sp still enter it from the attack button and
-// R-CORE-8's rule -- a donor's deletion is not replayed -- applies to functions
+// the rule that a donor's deletion is not replayed applies to functions
 // as well as to files.
 void GetChaseTarget(edict_t *ent)
 {

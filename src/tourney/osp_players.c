@@ -17,16 +17,15 @@ along with this program; if not, write to the Free Software
 Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 */
-// OSP Tourney DM v2.75, from osp-tourney@1d8427e (doc/provenance.md).
+// OSP Tourney DM v2.75, from osp-tourney@1d8427e.
 // Donor-only: baseq2 has no counterpart, so it lives in src/tourney/ rather
-// than being merged into a spine file (R-CORE-7).  The reconstruction's
-// asm-matching address comments are stripped -- SPECS.md N1 makes those oracles
-// meaningless here, and they survive at the pin.
-// osp_players.c -- <INVENTED FILENAME>. The three scoreboard renderers and
+// than being merged into a spine file.  The reconstruction's
+// asm-matching address comments are stripped.
+// osp_players.c -- filename assigned by this tree.  The three scoreboard renderers and
 // the team-chat command.
 //
 // Four named functions plus four file-statics that have no symbol and whose
-// names here are therefore <INVENTED>: sayteam_location (id CTF's
+// names here are therefore reconstructed: sayteam_location (id CTF's
 // CTFSay_Team_Location), sayteam_armor (CTF's CTFSay_Team_Armor),
 // sayteam_sight (the mod's own, %n) and loc_findradius (CTF's, unchanged).
 //
@@ -40,7 +39,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 static edict_t *loc_findradius(edict_t *from, vec3_t org, float rad);
 
-// <INVENTED NAME>.  Counts the members of team `team`, used only by the
+// Name reconstructed.  Counts the members of team `team`, used only by the
 // scoreboard renderers' "# Players: %i" cell.  Deliberately written in
 // OSP_teamCount's exact shape -- the real PE link folds the two bodies onto
 // one address.
@@ -1067,7 +1066,7 @@ static void sayteam_armor(edict_t *who, char *buf)
         Q_strlcpy(buf, "no armor", OSP_SAYTEAM_BUF);
 }
 
-// <INVENTED NAMES> for three file-statics the ELF cannot see: gcc -O3
+// Names reconstructed for three file-statics the ELF cannot see: gcc -O3
 // inlines all three back into OSP_sayteam_cmd.  The VC6 image has them as
 // three separate functions.
 

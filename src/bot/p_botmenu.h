@@ -17,7 +17,7 @@ along with this program; if not, write to the Free Software
 Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 */
-// The Gladiator Bot menu tree (R-BOT-28), from gladiator-bot-restored@game.
+// The Gladiator Bot menu tree, from gladiator-bot-restored@game.
 //===========================================================================
 //
 // Name:         p_botmenu.h
@@ -35,7 +35,7 @@ void bot_MenuCreate(void);
 // free it; called from ShutdownGame, because the tree is TAG_GAME
 void bot_MenuDestroy(void);
 void bot_MenuForget(void);
-// close the bot menu for the given client.  G_MenuClose() calls THIS; nothing
+// close the bot menu for the given client.  G_MenuClose() calls this; nothing
 // here may call G_MenuClose(), or the arbiter and the engine recurse.
 void bot_MenuClose(edict_t *ent);
 // open the bot menu for the given client

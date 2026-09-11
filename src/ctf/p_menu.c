@@ -19,25 +19,25 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 */
 //
 // Threewave's `pmenu_t` engine, kept as its own engine rather than unified
-// (R-MENU-1, §7 rule 6's fourth exemption).  Three departures from the donor,
-// each required by a requirement rather than by taste:
+// -- one of four engines that ship side by side.  Three departures from the
+// donor, each required rather than a matter of taste:
 //
-//  1. THE BUILDER IS BOUNDED (R-MENU-5).  The donor writes into a 1400-byte
+//  1. The builder is bounded.  The donor writes into a 1400-byte
 //     `char string[1400]` with `sprintf(string + strlen(string), ...)` and no
 //     check at all -- 24 entries of 40 characters overflow it, and the overflow
 //     is a stack buffer in the middle of a function that then hands the result
-//     to gi.WriteString.  R-MENU-5 wants MAXSTATUSBAR respected with truncation
+//     to gi.WriteString.  MAXSTATUSBAR has to be respected, with truncation
 //     "on a whole item, never mid-token", so each entry is composed into its own
 //     scratch buffer and appended only if it fits whole.
 //
-//  2. ALLOCATION GOES THROUGH THE GAME IMPORT.  The donor uses libc
+//  2. Allocation goes through the game import.  The donor uses libc
 //     malloc/strdup/free, and never frees on disconnect or level change, so a
 //     client who quits with the join menu open leaks it.  gi.TagMalloc with
 //     TAG_LEVEL puts the memory under the engine's accounting and under
 //     SpawnEntities' FreeTags, and g_spawn.c clears every client's menu owner
 //     immediately after that FreeTags so the handle cannot dangle.
 //
-//  3. OWNERSHIP IS EXTERNAL (R-MENU-2a/3).  The donor tracks `inmenu` per
+//  3. Ownership is external.  The donor tracks `inmenu` per
 //     client inside this engine.  With four engines that is four answers to one
 //     question, so opening goes through G_MenuOpen() -- which closes whatever
 //     was open first, whichever engine owned it.
@@ -62,7 +62,7 @@ ctf_pmenuhnd_t *ctf_PMenu_Open(edict_t *ent, const ctf_pmenu_t *entries, int cur
     if (!ent->client)
         return NULL;
 
-    // R-MENU-3, and the reason the donor's "warning, ent already has a menu"
+    // And the reason the donor's "warning, ent already has a menu"
     // dprintf is gone: the incumbent is closed by the one open path, whichever
     // engine owned it, so having one open is normal rather than notable.
     G_MenuOpen(ent, MENU_CTF);
@@ -119,7 +119,7 @@ void ctf_PMenu_Close(edict_t *ent)
     ent->client->ctf_menu = NULL;
     ent->client->showscores = false;
 
-    // R-MENU-3.  g_ctf.c closes its own menus in eighteen places -- every menu
+    // G_ctf.c closes its own menus in eighteen places -- every menu
     // callback that does something and dismisses -- so the owner has to be
     // released here as well as in G_MenuClose.  Leaving it set would make
     // G_MenuActive() true with a NULL handle, which is a "warning: ent has no
@@ -139,7 +139,7 @@ void ctf_PMenu_UpdateEntry(ctf_pmenu_t *entry, char *text, int align, ctf_Select
     entry->SelectFunc = SelectFunc;
 }
 
-// R-MENU-5.  One whole item at a time; an item that does not fit is dropped and
+// One whole item at a time; an item that does not fit is dropped and
 // the caller is told once, rather than the buffer being run past its end.
 static bool menu_append(char *string, size_t size, size_t *len, const char *item)
 {
@@ -207,7 +207,7 @@ void ctf_PMenu_Do_Update(edict_t *ent)
 
     if (dropped) {
         gi.dprintf("Colosseum: CTF menu exceeded %d bytes; entries were "
-                   "dropped whole (R-MENU-5)\n", CTF_MENU_MAX);
+                   "dropped whole\n", CTF_MENU_MAX);
     }
 
     gi.WriteByte(svc_layout);

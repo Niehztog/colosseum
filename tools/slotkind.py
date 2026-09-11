@@ -7,7 +7,7 @@ A statusbar element declares what KIND of value a slot holds:
 Writing the wrong kind is a type error across a boundary with no compiler check,
 and a macro-name collision test cannot see it when the bar uses a bare number.
 
-TWO CHECKS, and the second one is what R-OSP-7 clause 7 and SPECS.md Phase 3
+TWO CHECKS, and the second one is what the kind column
 mean by "close slotkind.py's known gap".
 
   KIND      does the code write a slot as the kind the bar draws it?
@@ -22,16 +22,16 @@ on the name and not on the kind:
     collision whatever their kinds are;
   * a slot the *pristine* statusbar already draws by its shared.h name is not
     available through the map, even when both agree on the number -- a slot with
-    two owners is the ambiguity R-OSP-7a exists to remove;
+    two owners is the ambiguity the composed bar exists to remove;
   * a slot below 16 is never claimable, and a slot at or above MAX_STATS_OLD is
     only reachable for a client that negotiated the protocol extension
-    (clause 6, R-COMPAT-5).
+    when protocol extensions are not negotiated.
 
 TWO TREE SHAPES.  A donor ships `#define STAT_X N` plus a statusbar string
 literal; Colosseum ships g_stats.h's STATSLOT_MAP and g_stats.c's `sb_*`
-emitter (R-OSP-7a).  Both are audited, because the donor trees stay in the
+emitter.  Both are audited, because the donor trees stay in the
 repository as controls -- `q2pro/src/ctf` must keep failing on the slot-17
-double assignment (doc/regression.md), and a check that cannot fail is not a
+double assignment, and a check that cannot fail is not a
 check.  `--selftest` proves the map-shape checks can fail too, by mutating the
 real map and the real emitter in several ways and asserting each one is caught.  It
 runs in `make check`, so a control cannot rot separately from its check.
@@ -121,7 +121,7 @@ def index_vars(files, extra=None):
             # a[i].icon -> icon, teamskins_precachem[i] -> teamskins_precachem.
             #
             # Splitting on '[' as well as '.' and taking the last piece got the
-            # first two right and the third catastrophically wrong (R-172): it
+            # first two right and the third catastrophically wrong: it
             # learned the SUBSCRIPT, so an array of image indices in a loop --
             # `pics[i] = gi.imageindex(...)`, which is how RA2 caches its seven
             # team-skin icons -- taught the tool that `i` holds an image index.
@@ -203,10 +203,10 @@ def run_literal(lbl, files, out):
             where = ', '.join(f'{n} ({"/".join(sorted(written[slot][n]))})'
                               for n in names)
             problems.append(f'slot {slot} is double-assigned: {where} '
-                            f'-- the slot was not available (R-OSP-7)')
+                            f'-- the slot was not available')
         if slot < UNIVERSAL_TOP and slot not in baseq2_enum().values():
             problems.append(f'slot {slot} ({names[0]}) is inside the universal '
-                            f'range 0..{UNIVERSAL_TOP - 1} (R-OSP-7 clause 1)')
+                            f'range 0..{UNIVERSAL_TOP - 1}')
 
     out.append(f'{lbl:10} {len(kinds):2} bar slots typed (literal bars)  ->  '
                f'{len(problems)} problem(s)')
@@ -305,7 +305,7 @@ def compose_body(fns):
 
 
 # Which MAP COLUMN a ruleset's bar is checked against.  A column is a numbering
-# and the four OSP rulesets share one (R-OSP-12), so this is not the identity
+# and the four OSP rulesets share one, so this is not the identity
 # map it looks like it should be.  A ruleset missing here is a hard error rather
 # than a default, because the old code defaulted to `dm` and `dm` is no longer a
 # column at all -- a silent wrong answer is exactly what this tool exists to
@@ -400,20 +400,20 @@ def audit_map(lbl, files, out, header_text, impl_text, extra=None):
             if slot < UNIVERSAL_TOP:
                 problems.append(f'{sid} claims slot {slot} in `{rs}` -- slots '
                                 f'0..{UNIVERSAL_TOP - 1} are universal and '
-                                f'unclaimable (R-OSP-7 clause 1)')
+                                f'unclaimable')
             if slot in pristine:
                 problems.append(f'{sid} claims slot {slot} in `{rs}`, which the '
                                 f'pristine statusbar already draws as '
                                 f'{pristine[slot]} -- the slot was not '
-                                f'available (R-OSP-7 clause 7)')
+                                f'available')
             if slot >= MAX_STATS_NEW:
                 problems.append(f'{sid} claims slot {slot} in `{rs}`, beyond '
                                 f'MAX_STATS_NEW ({MAX_STATS_NEW}) '
-                                f'(R-OSP-7 clause 6)')
+                                f'')
             elif slot >= MAX_STATS_OLD:
                 notes.append(f'{sid} sits at slot {slot} in `{rs}`: extension '
                              f'only, dropped without protocol extensions '
-                             f'(clause 6, R-COMPAT-5)')
+                             f'(clause 6)')
 
     # No two logical stats on one slot within one ruleset.
     for rs in cols:
@@ -427,7 +427,7 @@ def audit_map(lbl, files, out, header_text, impl_text, extra=None):
             if slot in claimed:
                 problems.append(f'slot {slot} is claimed by both '
                                 f'{claimed[slot]} and {sid} in `{rs}` -- one '
-                                f'numbering per ruleset (R-OSP-7 clause 3)')
+                                f'numbering per ruleset')
             claimed[slot] = sid
 
     # The bar's op must match the kind the map declares.  Runtime checks this
@@ -437,7 +437,7 @@ def audit_map(lbl, files, out, header_text, impl_text, extra=None):
         if rs is None:
             problems.append(f'the statusbar switch has an arm for `{label}`, '
                             f'which names no map column -- add it to '
-                            f'RULESET_COLUMN (R-OSP-7 clause 3)')
+                            f'RULESET_COLUMN')
             continue
         for f in expand(fns, roots):
             for op, sid in fns[f]['drawn']:
@@ -448,24 +448,24 @@ def audit_map(lbl, files, out, header_text, impl_text, extra=None):
                 if want and want != rows[sid][0]:
                     problems.append(f'{f} draws {sid} with `{op}` but the map '
                                     f'declares it {rows[sid][0]} '
-                                    f'(R-OSP-7 clause 7)')
+                                    f'')
 
     # A LOGICAL ID USED AS A SLOT NUMBER.  Neither question above can see this
-    # one, and it is the failure R-OSP-7's whole shape exists to prevent: a
+    # one, and it is the failure the slot map exists to prevent: a
     # statslot_t is an ENUM, so `ps.stats[SID_OSP_RUNE_HASTE]` compiles silently
     # and indexes by the id's ordinal in STATSLOT_MAP instead of by the slot the
     # active ruleset assigned it.  The kind check cannot fire -- no kind is
     # named -- and the availability check cannot fire either, because the map
     # itself is correct; only the access bypasses it.
     #
-    # Measured on this tree 2026-08-27: fourteen sites in the tourney rune code
+    # Measured on this tree: fourteen sites in the tourney rune code
     # read ordinals 28..32 where the map had put the runes at 22..26.  Ordinals
     # 29 and 30 are tourney's OWN second-powerup-timer pair, so holding a pent
     # read as holding the STRENGTH and HASTE runes -- doubled damage and haste
     # fire rate from an invulnerability -- while resist, regen and vampire, whose
     # ordinals landed on unassigned slots, could not fire at all.  Ordinal 32
     # was additionally out of bounds on a 32-slot player_state_t, which is how
-    # this was found: -Warray-bounds at -O2 under the API=old build (R-ENG-1a).
+    # this was found: -Warray-bounds at -O2 under the API=old build.
     # Nothing at the shipped setting had reported it in five phases.
     #
     # G_Stat/G_GetStat/G_SetStat are the only legitimate readers of the map, so
@@ -475,7 +475,7 @@ def audit_map(lbl, files, out, header_text, impl_text, extra=None):
         for m in sid_index.finditer(t):
             problems.append(f'{name} indexes stats[] with the logical id '
                             f'{m.group(1)} rather than its resolved slot -- '
-                            f'use G_GetStat/G_SetStat (R-OSP-7 clause 4)')
+                            f'use G_GetStat/G_SetStat')
 
     # Tourney's statusbar numbering is private to its ruleset column, so a
     # literal slot bypasses the same map as a logical id used as an index.
@@ -492,12 +492,12 @@ def audit_map(lbl, files, out, header_text, impl_text, extra=None):
         for m in numeric_index.finditer(t):
             problems.append(f'{name} indexes stats[] with bare slot '
                             f'{m.group(1)} rather than a logical id -- '
-                            f'use G_GetStat/G_SetStat (R-OSP-7 clause 4)')
+                            f'use G_GetStat/G_SetStat')
 
     # ...AND THE MIRROR IMAGE: a slot number where an id belongs.  The accessors
     # take a statslot_t, which is an enum and therefore accepts any int, so
     # `G_SetStat(ent, ent->item->quantity, 1)` compiles and resolves whatever
-    # logical id happens to share that ordinal.  That is the other half of R-132:
+    # logical id happens to share that ordinal.  That is the other half:
     # the rune items carried the donor's literal 22 in `quantity` while every
     # consumer had been renamed to `SID_OSP_RUNE_RESIST` (28), so the pickup set
     # statslot_t 22 -- SID_RA_ID_VIEW, unmapped under tourney -- and granted
@@ -532,7 +532,7 @@ def audit_map(lbl, files, out, header_text, impl_text, extra=None):
                 continue
             notes.append(f'{name} passes the computed id `{arg}` to an accessor: '
                          f'correct only if it holds a SID_, and its kind cannot '
-                         f'be checked here (R-OSP-7 clause 4)')
+                         f'be checked here')
 
     # The other half of the join: `quantity` is an id, so it must be spelled as
     # one.  Only for items that actually use it that way -- IT_RUNE is the flag
@@ -555,7 +555,7 @@ def audit_map(lbl, files, out, header_text, impl_text, extra=None):
                 problems.append(
                     f'{name}: {cls.group(1) if cls else "an IT_RUNE item"} sets '
                     f'.quantity = {val}, but an accessor reads item->quantity as '
-                    f'a statslot_t -- it must be a SID_ name (R-OSP-7 clause 4)')
+                    f'a statslot_t -- it must be a SID_ name')
 
     # And the writers must agree with the map, which is the original kind check
     # re-aimed at G_SetStat.
@@ -581,7 +581,7 @@ def audit_map(lbl, files, out, header_text, impl_text, extra=None):
     missing = [c for c in cols if c not in covered and 'default' not in bars]
     for m in missing:
         notes.append(f'ruleset `{m}` has no bar of its own; it inherits the '
-                     f'default (R-MODE-6)')
+                     f'default')
 
     out.append(f'{lbl:10} {len(rows):2} mapped stats x {len(cols)} ruleset(s), '
                f'{len(pristine)} pristine slot(s)  ->  {len(problems)} problem(s)')
@@ -607,7 +607,7 @@ def run(lbl, d):
 
 # --------------------------------------------------------------- self-test
 #
-# R-VER-9 clause 2: a check that has never failed is not trusted.  These mutate
+# A check that has never failed is not trusted.  These mutate
 # the real map and the real emitter and assert the audit notices.  They run in
 # `make check`, so the controls cannot rot separately from the check.
 
@@ -661,7 +661,7 @@ SELFTESTS = [
      (None, 'void ctl(edict_t *ent) { '
             'ent->client->ps.stats[27] = OSP_CS(9); }'),
      'indexes stats[] with bare slot 27'),
-    # R-132's other half, as the join it actually is: the accessor reads
+    # The other half, as the join it actually is: the accessor reads
     # item->quantity as an id, so an IT_RUNE item that sets quantity to a NUMBER
     # is the defect.  The control supplies the item, because the real accessor
     # call is already in the tree -- which is the point: this control fails only
@@ -706,7 +706,7 @@ def selftest(tree):
 
 
 if __name__ == '__main__':
-    # R-TOOL-1: was a hardcoded list of six /mnt/c donor trees.  Now takes
+    # Was a hardcoded list of six /mnt/c donor trees.  Now takes
     # label=path pairs, the same CLI shape keycontract.py already had, and
     # defaults to this repo's own tree.
     args = sys.argv[1:]

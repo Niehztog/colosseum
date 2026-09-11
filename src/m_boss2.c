@@ -428,7 +428,7 @@ const mmove_t boss2_move_attack_rocket = {FRAME_attack20, FRAME_attack40, boss2_
 // `bq2_infantry_*`) already use it.  Ground Zero's own versions keep the
 // unprefixed names above: it raised walk/run from 8 to 10 and gave the machine
 // gun and rocket frames different distances, so both sets have to ship and
-// `content_flavour` selects (R-CORE-11).
+// `content_flavour` selects.
 #define BQ2_BOSS2_WALK_FRAME { ai_walk, 8, NULL }
 #define BQ2_BOSS2_RUN_FRAME { ai_run, 8, NULL }
 #define BQ2_BOSS2_CHARGE_FRAME { ai_charge, 1, NULL }
@@ -776,9 +776,7 @@ static void boss2_precache(void)
 */
 void SP_monster_boss2(edict_t *self)
 {
-    // R-MODE-7 / R-CORE-8: the ruleset decides, not `deathmatch`.  The
-    // inherited test was right for baseq2 and wrong here, because `deathmatch`
-    // is 1 under ctf and R-MODE-7 promises monsters under ctf.
+    // deathmatch is 1 under ctf, which allows monsters: ask the ruleset.
     if (!G_MonstersAllowed()) {
         G_FreeEdict(self);
         return;

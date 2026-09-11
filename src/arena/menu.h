@@ -17,11 +17,10 @@ along with this program; if not, write to the Free Software
 Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 */
-// Rocket Arena 2 v2.25, from rocketarena2-public@d20e1ce (doc/provenance.md).
+// Rocket Arena 2 v2.25, from rocketarena2-public@d20e1ce.
 // Donor-only: baseq2 has no counterpart, so it lives in src/arena/ rather than
-// being merged into a spine file (R-CORE-7).  The reconstruction's asm-matching
-// address comments are stripped -- SPECS.md N1 makes those oracles meaningless
-// here, and they survive at the pin.
+// being merged into a spine file.  The reconstruction's asm-matching
+// address comments are stripped.
 #ifndef _MENU_H
 #define _MENU_H
 
@@ -41,7 +40,7 @@ typedef struct {
     // menuChangeMap and Cmd_admin_f.  Nothing recorded how big it was, so each
     // of those was an unbounded write into a TAG_LEVEL block sized by an
     // unrelated string -- a map name out of arena.cfg being the reachable one
-    // (R-SEC-1).  This is that size.
+    //This is that size.
     size_t          valuesize;
     int             num;
     menuselect_t    select;
@@ -69,7 +68,7 @@ void        SendStatusBar(edict_t *ent, const char *string, bool transmit);
 void        DisplayMenu(edict_t *ent);
 qmenu_t     *CreateQMenu(edict_t *ent, char *title);
 // `text` and `value` are const: both are COPIED into TAG_LEVEL storage and
-// never written through, and R-182 passes a row label out of a
+// never written through, and a caller passes a row label out of a
 // `const ra_pack_weapon_t []`.  Every existing caller still compiles --
 // char * converts to const char * on its own.
 qmenu_t     *AddMenuItem(qmenu_t *menu, const char *text, const char *value, int num, menuselect_t select);
@@ -78,7 +77,7 @@ void        MenuNext(edict_t *ent);
 void        MenuPrev(edict_t *ent);
 void        UseMenu(edict_t *ent, int arg);
 bool    MenuThink(edict_t *ent);
-// MENU_ARENA's row in G_MenuClose()'s switch (R-MENU-2a).
+// MENU_ARENA's row in G_MenuClose()'s switch.
 void        ra_MenuClose(edict_t *ent);
 // ...and the DESTROY that row deliberately is not.  See close_menus() in
 // menu.c: under arena a close is a hide, so the one caller that is about to

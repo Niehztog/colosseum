@@ -373,9 +373,7 @@ void turret_driver_link(edict_t *self)
 
 void SP_turret_driver(edict_t *self)
 {
-    // R-MODE-7 / R-CORE-8: the ruleset decides, not `deathmatch`.  The
-    // inherited test was right for baseq2 and wrong here, because `deathmatch`
-    // is 1 under ctf and R-MODE-7 promises monsters under ctf.
+    // deathmatch is 1 under ctf, which allows monsters: ask the ruleset.
     if (!G_MonstersAllowed()) {
         G_FreeEdict(self);
         return;
@@ -507,10 +505,9 @@ void turret_brain_link(edict_t *self)
     // guarded sites used to.  Same remedy as the fix used at turret_driver_link
     // -- free the brain and give up, since it has nothing to drive.
     //
-    // Found while discharging R-VER-10 for the CTF import, which is what that
-    // check is for: the commit is marked *re-apply* for ctf in
-    // doc/replay-coverage.md, and re-applying it meant looking at every call
-    // site rather than at the two the diff named.
+    // Found while re-applying an upstream fix for the CTF import: re-applying
+    // it meant looking at every call site rather than at the two the diff
+    // named.
     self->target_ent = G_PickTarget(self->target);
     if (!self->target_ent) {
         gi.dprintf("%s at %s has no target\n", self->classname, vtos(self->s.origin));

@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
-"""A `.c` may not declare `extern` for something another `.c` defines (R-SEC-8).
+"""A `.c` may not declare `extern` for something another `.c` defines.
 
-WHY.  R-SEC-8 names the defect and the reason: RA2's port retyped four
+WHY.  The defect and the reason: RA2's port retyped four
 `qboolean[7]` arrays to `bool[7]`, and another translation unit still declared
 them `extern int []`.  Both files compiled.  Both linked.  Every map load wrote
 21 bytes past the end of each array, and nothing -- not the compiler, not the
 linker, not a review -- could see it, because the two declarations never meet.
 `extern int botglobals;` in the tourney port is a fourth instance of the same
-shape (R-OSP-5).
+shape.
 
 A declaration in a HEADER cannot drift like that: the file that defines the
 object includes the same header, so the compiler checks the two against each
@@ -317,7 +317,7 @@ def main():
     hits = scan(tree)
     for path, line, name in hits:
         print('!! %s:%d: extern %s -- declare it in a header the defining file '
-              'includes (R-SEC-8)' % (path, line, name))
+              'includes' % (path, line, name))
     sigs = scan_signatures(tree)
     for path, line, name, got, want, where in sigs:
         print('!! %s:%d: %s disagrees with its definition in %s\n'

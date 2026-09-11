@@ -264,7 +264,7 @@ static void InfantryMachineGun(edict_t *self)
     if (!self->enemy || !self->enemy->inuse)    //PGM
         return;                                 //PGM
 
-    // *** WHICH ANIMATION IS RUNNING, not which frame number. ***
+    // Which animation is running, not which frame number.
     //
     // Three donors give the infantry three different fire frames, because each
     // reordered the attack animation: baseq2 FRAME_attak111, The Reckoning
@@ -440,7 +440,7 @@ const mmove_t infantry_move_duck = {FRAME_duck01, FRAME_duck05, infantry_frames_
 // PMM - dodge code moved below so I can see the attack frames
 
 // baseq2's attack timing helper.  Ground Zero's attack frame table does not
-// call it, and R-CORE-11 says both tables ship and the gate selects -- so this
+// call it, and both tables ship with the gate selecting -- so this
 // is kept for that gating rather than deleted, and tagged meanwhile.
 static q_unused void infantry_set_firetime(edict_t *self)
 {
@@ -453,7 +453,7 @@ static void infantry_cock_gun(edict_t *self)
     gi.sound(self, CHAN_WEAPON, sound_weapon_cock, 1, ATTN_NORM, 0);
 }
 
-// baseq2's, which is the same sound AND the hold timer -- Ground Zero split the
+// baseq2's, which is the same sound and the hold timer -- Ground Zero split the
 // two, moving the timer into infantry_fire_prep at an earlier frame and leaving
 // the sound behind.  The baseq2 sequence has no fire_prep, so pointing its table
 // at Ground Zero's sound-only version left `pause_framenum` at whatever the
@@ -535,7 +535,7 @@ static const mframe_t infantry_frames_attack1[] = {
 };
 const mmove_t infantry_move_attack1 = {FRAME_attak101, FRAME_attak115, infantry_frames_attack1, infantry_run};
 
-// R-CORE-11: baseq2's infantry_move_attack1, kept alongside Ground Zero's.
+// Baseq2's infantry_move_attack1, kept alongside Ground Zero's.
 // Ground Zero adds infantry_fire_prep and moves the fire frame, changing the
 // attack's start and timing.
 static const mframe_t bq2_infantry_frames_attack1[] = {
@@ -590,8 +590,8 @@ void infantry_attack(edict_t *self)
     if (range(self, self->enemy) == RANGE_MELEE)
         self->monsterinfo.currentmove = &infantry_move_attack2;
     else {
-        // R-CORE-11: all three sequences ship; the latch selects (if/else with
-        // literal assignments so genptr.py sees both -- R-CORE-11b).
+        // All three sequences ship; the latch selects (if/else with
+        // literal assignments so genptr.py sees both).
         if (self->content_flavour & CONTENT_ROGUE)
             self->monsterinfo.currentmove = &infantry_move_attack1;
         else if (self->content_flavour & CONTENT_XATRIX)
@@ -846,8 +846,8 @@ static void infantry_precache(void)
 
 
 // ---------------------------------------------------------------------------
-// R-CORE-11: baseq2's duck-and-dodge for the infantry, restored alongside Ground
-// Zero's rewrite so that BOTH ship and the spawn-time latch selects.
+// Baseq2's duck-and-dodge for the infantry, restored alongside Ground
+// Zero's rewrite so that both ship and the spawn-time latch selects.
 //
 // Ground Zero does not add to this monster, it replaces its evasion: baseq2's
 // per-monster infantry_dodge and infantry_duck_* become the shared M_MonsterDodge with
@@ -913,9 +913,7 @@ void bq2_infantry_dodge(edict_t *self, edict_t *attacker, float eta, trace_t *tr
 */
 void SP_monster_infantry(edict_t *self)
 {
-    // R-MODE-7 / R-CORE-8: the ruleset decides, not `deathmatch`.  The
-    // inherited test was right for baseq2 and wrong here, because `deathmatch`
-    // is 1 under ctf and R-MODE-7 promises monsters under ctf.
+    // deathmatch is 1 under ctf, which allows monsters: ask the ruleset.
     if (!G_MonstersAllowed()) {
         G_FreeEdict(self);
         return;
@@ -940,10 +938,8 @@ void SP_monster_infantry(edict_t *self)
     self->monsterinfo.walk = infantry_walk;
     self->monsterinfo.run = infantry_run;
     // pmm
-    // *** R-CORE-11's gate. ***  Both evasion sets ship; the latch selects at
-    // spawn.  content_flavour is latched in ED_CallSpawn, which runs BEFORE this
-    // function -- R-CORE-11 names monster_start as the latch point and that is
-    // too late, see doc/reconciliation.md R-31.
+    // Both evasion sets ship; the latch selects at spawn.  content_flavour is
+    // latched in ED_CallSpawn, which runs before this function.
     //
     // An if/else with literal assignments, deliberately: genptr.py builds
     // save_ptrs[] by scanning the source for `= &name`, so a ternary or a macro

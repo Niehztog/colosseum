@@ -17,26 +17,23 @@ along with this program; if not, write to the Free Software
 Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 */
-// Rocket Arena 2 v2.25, from rocketarena2-public@d20e1ce (doc/provenance.md).
-// Donor-only: baseq2 has no counterpart, so it lives in src/arena/ rather than
-// being merged into a spine file (R-CORE-7).  The reconstruction's asm-matching
-// address comments are stripped -- SPECS.md N1 makes those oracles meaningless
-// here, and they survive at the pin.
+// Rocket Arena 2 v2.25, from rocketarena2-public@d20e1ce.  RA2 has no baseq2
+// counterpart, so it lives in src/arena/ rather than being merged into a spine
+// file.  The reconstruction's asm-matching address comments are stripped.
 #include "g_local.h"
 #include "arena/arena.h"
 #include "ctf/g_ctf.h"
 #include "arena/ra2stats.h"
-// R-RA-7's switch is the bot layer's now: one `botfill` for every ruleset, so
-// the answer to "is the fill on" comes from where the fill lives.
+// One `botfill` for every ruleset, so the answer to "is the fill on" comes from
+// where the fill lives.
 #include "bot/bl_main.h"
-// R-RA-8: BotDestroy(), for the bot an arena has voted out that nowhere else
-// will take.  osp_cmds.c reaches the bot layer from a ruleset file the same way.
+// BotDestroy(), for the bot an arena has voted out that nowhere else will take.
 #include "bot/bl_spawn.h"
 
-// R-OSP-5: no local `extern` of a donor object.  arena.h already declares
+// No local `extern` of an arena object: arena.h already declares
 // `votetries_setting`, and a second declaration in a .c file is the shape that
-// let the donor's `extern int botglobals;` resolve a four-byte int over the
-// first member of a struct.  Found by donorgate.py's stray-extern pass.
+// let RA2's `extern int botglobals;` resolve a four-byte int over the first
+// member of a struct.
 bool    allow_grapple;
 bool    broken = false;
 
@@ -196,7 +193,7 @@ one.
 
 A person does not need to be told: the countdown is on their HUD and they can
 hear it.  The brain has no concept of a round, sees an opponent standing five
-feet away, and opens fire -- which is R-140 and what this answers.
+feet away, and opens fire -- which is what this answers.
 
 Arena 0 is the lobby: nothing in it can be damaged, so the answer there is no.
 A context outside 1..num_arenas is not RA2's state at all and fails open.
@@ -221,53 +218,48 @@ bool RA_RoundFighting(edict_t *ent)
 ==================
 RA_HoldFire
 
-Should this client's ATTACK be taken away right now?  R-149's open half: a
-PERSON standing in a countdown, who could empty a magazine into an opponent that
-cannot be hurt -- spending ammo `give_ammo` hands out once a round.
+Should this client's ATTACK be taken away right now?  A person standing in a
+countdown could empty a magazine into an opponent that cannot be hurt --
+spending ammo `give_ammo` hands out once a round.
 
-*The Gladiator donor's own answer cannot be taken verbatim, and saying why is
-the whole design.*  `gladq2_src/p_client.c` guards both `Think_Weapon` call
-sites with `!(ra->value && ent->takedamage == DAMAGE_NO)`, and one of those two
-is `ClientBeginServerFrame`'s, which runs EVERY frame and is the weapon state
-machine's heartbeat: `Use_Weapon` sets `newweapon`, `Weapon_Generic` walks
-WEAPON_DROPPING down to `ChangeWeapon`, and RA2's `fastswitch` only skips the
-raise animation rather than moving the switch off that path.  So the donor's
-clause freezes weapon SELECTION for the length of the countdown -- and choosing
-a weapon during the countdown is not incidental to Rocket Arena, it is how a
-round is prepared.
+Gladiator's answer cannot be taken verbatim.  Its p_client.c guards both
+`Think_Weapon` call sites with `!(ra->value && ent->takedamage == DAMAGE_NO)`,
+and one of those two is `ClientBeginServerFrame`'s, which runs every frame and
+is the weapon state machine's heartbeat: `Use_Weapon` sets `newweapon`,
+`Weapon_Generic` walks WEAPON_DROPPING down to `ChangeWeapon`, and RA2's
+`fastswitch` only skips the raise animation rather than moving the switch off
+that path.  So that clause freezes weapon selection for the length of the
+countdown -- and choosing a weapon during the countdown is not incidental to
+Rocket Arena, it is how a round is prepared.
 
-*Corrected in R-195.1: ROCKET ARENA HAS A GATE TOO, and it is this one's
-design rather than the Gladiator SDK's.*  What stood here -- that RA2 gates
-neither site, so a person can pre-fire a countdown in 1999's mod as well -- is
-true of its two `Think_Weapon` calls and false of the mod: RA2 adds
-`ent->takedamage && arenas[...].state == ASTATE_FIGHTING` inside four
-`p_weapon.c` fire arms (`Weapon_Generic` 417, `Weapon_HyperBlaster_Fire` 818,
-`Machinegun_Fire` 897, `Chaingun_Fire` 997), at the pin `d20e1ce` as well as
-at the bundle tip.  So the donor gates the FIRING, which is what this gates,
-one level up.
+Rocket Arena has a gate of its own, one level down: RA2 adds `ent->takedamage
+&& arenas[...].state == ASTATE_FIGHTING` inside four `p_weapon.c` fire arms
+(`Weapon_Generic` 417, `Weapon_HyperBlaster_Fire` 818, `Machinegun_Fire` 897,
+`Chaingun_Fire` 997), at the pin `d20e1ce` as well as at the bundle tip.  So
+RA2 gates the firing, which is what this gates, one level up.
 
-Taking its four verbatim would have been a REGRESSION here: this tree has NINE
-sites where a press becomes a shot, RA2's four cover four of them, and the
-five it leaves -- `Throw_Generic` (the hand grenade and the tesla), the Trap,
-the chainfist, the ETF rifle and the plasma beam -- are every one reachable
-under `arena`, three by an R-182 grant bit and two by the ammunition that is
-also the weapon.  The one thing the donor does that this does not is QUEUE the
-press: its clear of `latched_buttons` sits inside the gated arm, so a tap
-during a countdown fires on the bell.  R-195.1 records why that is not
-followed.
+Taking its four verbatim would have been a regression here: this tree has nine
+sites where a press becomes a shot, RA2's four cover four of them, and the five
+it leaves -- `Throw_Generic` (the hand grenade and the tesla), the Trap, the
+chainfist, the ETF rifle and the plasma beam -- are every one reachable under
+`arena`, three by a pack grant bit and two by the ammunition that is also the
+weapon.  The one thing RA2 does that this does not is queue the press: its
+clear of `latched_buttons` sits inside the gated arm, so a tap during a
+countdown fires on the bell.
 
-So the think keeps running and the BUTTON is what goes, which is exactly what
-R-140 does on the other side of the seam for bots.  Every weaponthink in the
-merged tree -- baseq2's, the mission packs' and Threewave's -- reads
-`client->buttons` or `client->latched_buttons`, so clearing the bit at the latch
-reaches all of them without a per-weapon gate.
+So the think keeps running and the button is what goes, which is what the bot
+side of the seam does too.  Every weaponthink in the merged tree -- baseq2's,
+the mission packs' and Threewave's -- reads `client->buttons` or
+`client->latched_buttons`, so clearing the bit at the latch reaches all of them
+without a per-weapon gate.
 
-Two exemptions, and both are somebody else's key.  An OBSERVER's ATTACK is what
-cycles RA2's four camera modes (R-RA-4); R-143 is what already stops that press
-reaching a weapon, and taking the button away here would take the camera with
-it.  And the GRAPPLE is fired with the same button and is movement rather than
-damage, so a player holding one keeps it -- otherwise `allow_grapple` would lose
-its hook for the whole countdown.  R-140 makes the same exemption, for the same
+Two exemptions, and both are somebody else's key.  An observer's ATTACK is what
+cycles RA2's four camera modes, and that press is already stopped from reaching
+a weapon; taking the button away here would take the camera with it.  And the
+grapple is fired with the same button and is movement rather than damage, so a
+player holding one keeps it -- otherwise `allow_grapple` would lose its hook
+for the whole countdown.  The bot gate makes the same exemption, for the same
+reason.
 reason.
 ==================
 */
@@ -291,10 +283,10 @@ bool RA_HoldFire(edict_t *ent)
 ==================
 give_pack_ammo
 
-One of R-182's five mission-pack ammunition grants, gated on the layer it
+One of the five mission-pack ammunition grants, gated on the layer it
 belongs to.
 
-WHY THE GATE, when the three ordinary ammunitions could have done without one.
+Why the gate, when the three ordinary ammunitions could have done without one.
 `ammo_tesla` and `ammo_trap` are the WEAPON as well as the ammunition -- the
 donor treats `ammo_grenades` the same way, which is why neither has a `weapons:`
 bit -- so a count of them is not a number on a HUD, it is an item in the weapon
@@ -303,7 +295,7 @@ Zero) and five Traps (Reckoning), including a server running NEITHER pack, and
 `weapnext` walked through both.  Measured in a play test on `xatrix 1`, on
 `rogue 1` and with both off; all three gave both.
 
-ZERO RATHER THAN SKIP.  The inventory is carried across a round -- give_ammo is
+Zero rather than skip.  The inventory is carried across a round -- give_ammo is
 an assignment, not an addition -- so a layer that is off has to take the item
 away rather than merely decline to add one.
 ==================
@@ -327,7 +319,7 @@ RA_ArenaGrantsMask
 The weapon bits an arena actually hands out: its stored mask, minus every pack
 weapon whose content layer is off.
 
-ONE function because the difference between the stored mask and the honoured one
+one function because the difference between the stored mask and the honoured one
 is a fact two callers need -- give_ammo(), which must not grant a Ground Zero
 weapon on a server with no Ground Zero, and `sv arenadump`, whose whole job is to
 report what an arena grants.  A diagnostic that recomputed it could be right
@@ -357,10 +349,10 @@ void give_ammo(edict_t *e)
 {
     const gitem_t   *w[RA_NUM_WEAPON_BITS];
     arena_t     *arena = &arenas[e->client->resp.context];
-    //    0  2  3  4  5   6    9   8   7   -- and then R-182's six
+    //    0  2  3  4  5   6    9   8   7   -- and then the pack's six
     int         weapon_vals_x[RA_NUM_WEAPON_BITS] = {
         256, 1, 2, 4, 8, 16, 128, 64, 32,
-        // R-182's six, and NOT in bit order: the index is the preference and
+        // The pack six, and not in bit order: the index is the preference and
         // the bit is a parallel value, which is a separation the donor's own
         // nine already use (w[6] is the railgun at bit 128, w[8] the rocket
         // launcher at bit 32).  Ordering these by bit made the CHAINFIST -- a
@@ -392,7 +384,7 @@ void give_ammo(edict_t *e)
     w[6] = FindItemByClassname("weapon_railgun");
     w[7] = FindItemByClassname("weapon_hyperblaster");
     w[8] = FindItemByClassname("weapon_rocketlauncher");
-    // R-182's six, in ASCENDING PREFERENCE -- see weapon_vals_x above.
+    // The pack six, in ascending preference -- see weapon_vals_x above.
     w[9]  = FindItemByClassname("weapon_chainfist");
     w[10] = FindItemByClassname("weapon_boomer");
     w[11] = FindItemByClassname("weapon_proxlauncher");
@@ -404,11 +396,11 @@ void give_ammo(edict_t *e)
 
     allowed = RA_ArenaGrantsMask(e->client->resp.context);
 
-    // TWO PASSES, AND THE ORDER IS THE POINT.  `rl` is the weapon a player
-    // spawns holding and it is the FIRST enabled one this loop meets, so the
+    // Two passes, and the order is the point.  `rl` is the weapon a player
+    // spawns holding and it is the first enabled one this loop meets, so the
     // donor's descending 8..0 encodes a preference: rocket launcher, then
     // hyperblaster, railgun, grenade launcher, chaingun, machinegun, super
-    // shotgun, shotgun, BFG.  R-182's six are walked afterwards rather than
+    // shotgun, shotgun, BFG.  The pack six are walked afterwards rather than
     // appended to that descent, so one of them becomes the spawn weapon only in
     // an arena that grants no baseq2 weapon at all -- otherwise adding a
     // chainfist to an arena would have made it the thing you spawn holding.
@@ -458,7 +450,7 @@ void give_ammo(edict_t *e)
     if ((it = FindItemByClassname("ammo_grenades"))) e->client->pers.inventory[ITEM_INDEX(it)] = arena->grenades;
     if ((it = FindItemByClassname("ammo_rockets"))) e->client->pers.inventory[ITEM_INDEX(it)] = arena->rockets;
     if ((it = FindItemByClassname("ammo_cells"))) e->client->pers.inventory[ITEM_INDEX(it)] = arena->cells;
-    // R-182's five, each behind its own layer -- see give_pack_ammo above.
+    // The pack five, each behind its own layer -- see give_pack_ammo above.
     give_pack_ammo(e, "ammo_magslug",    LAYER_XATRIX, arena->magslug);
     give_pack_ammo(e, "ammo_trap",       LAYER_XATRIX, arena->trap);
     give_pack_ammo(e, "ammo_flechettes", LAYER_ROGUE,  arena->flechettes);
@@ -516,11 +508,11 @@ team_t *add_to_team(edict_t *ent, char *teamname)
         if (!teams[i].it)
             break;
 
-    // R-SEC-2's kept-bug list, entry 4: the donor has no `i == MAX_TEAMS`
-    // guard after this scan, so a full teams[] falls out with i == MAX_TEAMS
-    // and `teams[i].it = t` twelve lines down writes one past the end of a
-    // 256-entry array.  Unreachable while every team is created by a human
-    // typing a name; Phase 7 creates one per bot.
+    // A kept bug, guarded: RA2 has no `i == MAX_TEAMS` guard after this scan,
+    // so a full teams[] falls out with i == MAX_TEAMS and `teams[i].it = t`
+    // twelve lines down writes one past the end of a 256-entry array.
+    // Unreachable while every team is created by a human typing a name, and
+    // reachable once one is created per bot.
     if (i == MAX_TEAMS) {
         gi.dprintf("add_to_team: all %d team slots are in use\n", MAX_TEAMS);
         return NULL;
@@ -564,11 +556,11 @@ team_t *add_to_team(edict_t *ent, char *teamname)
 // call that case, and a rejected name is freed by its caller.
 //
 // Factored out of menuNewTeam, which is also the only reason its bound is now
-// checked.  The donor uniquifies by appending "!" and restarting the scan, into
-// a 100-byte buffer, with no test that anything still fits: 256 teams named
-// alike append 256 characters.  Unreachable while a human has to type each
-// collision in by hand; Phase 7 makes team creation automatic and per bot, so
-// it stops being unreachable.  A counted suffix cannot grow without bound.
+// checked.  RA2 uniquifies by appending "!" and restarting the scan, into a
+// 100-byte buffer, with no test that anything still fits: 256 teams named alike
+// append 256 characters.  Unreachable while a human has to type each collision
+// in by hand, and reachable once team creation is automatic and per bot.  A
+// counted suffix cannot grow without bound.
 char *RA_NewTeamName(edict_t *ent)
 {
     char *name = gi.TagMalloc(ARENA_TEAMNAME_SIZE, TAG_LEVEL);
@@ -596,34 +588,34 @@ char *RA_NewTeamName(edict_t *ent)
     return NULL;
 }
 
-// R-ARENA-2 and R-RA-4's fifteenth row, "new bots initialised into the selected
-// arena's queue".  Both of the steps a human takes through the menus -- pick a
-// team, pick an arena -- are taken here instead, because a bot has no menu:
-// without this a bot connects, lands in arena 0 as a noclip observer with the
-// team list open, and stays there for the whole level.  That is what it did.
+// New bots are initialised into the selected arena's queue.  Both of the steps
+// a human takes through the menus -- pick a team, pick an arena -- are taken
+// here instead, because a bot has no menu: without this a bot connects, lands
+// in arena 0 as a noclip observer with the team list open, and stays there for
+// the whole level.  That is what it did.
 //
 // The arena is the `arena` userinfo key BotAddDeathmatch wrote from the `arena`
-// cvar.  BotCreate also copies it into resp.context, and that copy is DEAD --
+// cvar.  BotCreate also copies it into resp.context, and that copy is dead --
 // ClientBeginDeathmatch calls InitClientResp, which memsets resp before
 // PutClientInServer ever reads it.  The userinfo is the only carrier that
-// survives, which is the same thing R-CTF-4 found about `ctfteam`.
+// survives, as it is for `ctfteam`.
 //
 // Called after placement rather than during it, from ClientBeginDeathmatch,
 // because that is where a human's menu click lands: the bot is already a placed
-// observer in arena 0, and this moves it exactly once, through the donor's own
+// observer in arena 0, and this moves it exactly once, through RA2's own
 // SendTeamToArena.  Doing it inside init_player() would mean either placing
-// twice or open-coding SendTeamToArena's tail minus the move (R-87's shape).
-// R-131: WHICH ARENA A NEW BOT JOINS.
+// twice or open-coding SendTeamToArena's tail minus the move.
+// Which arena a new bot joins.
 //
 // 1999's answer is the `arena` cvar, default 1, clamped to 1..num_arenas --
-// `gladq2_src/bl_spawn.c` copies it into the bot's userinfo and this tree does
+// Gladiator's bl_spawn.c copies it into the bot's userinfo and this tree does
 // the same, faithfully.  It is right for a deathmatch map, which has exactly
 // one arena, and useless on a real RA2 map: there a person is wherever they
-// picked, the PICKUP arena is wherever `arena.cfg` says -- on `ra2map6` it is
+// picked, the pickup arena is wherever `arena.cfg` says -- on `ra2map6` it is
 // 8 -- and every bot goes to arena 1, so nobody meets anybody and no round
 // starts anywhere.  Measured: four bots in arena 1, one person in arena 8.
 //
-// So **0 becomes "follow the people"**: the lowest-numbered arena with a human
+// So 0 becomes "follow the people": the lowest-numbered arena with a human on
 // on a team, then the lowest-numbered pickup arena, then 1.  Zero is free to
 // mean that because 1999 clamped it to 1 and it therefore meant nothing, and a
 // server that sets 1..N still gets 1999's behaviour exactly.  The choice is made
@@ -632,13 +624,13 @@ char *RA_NewTeamName(edict_t *ent)
 // is still too early for the first bot `minimumplayers` adds.  See
 // RA_BotFollowPeople() below.
 
-// The lowest-numbered arena a PERSON is on a team in, or 0 if there is none.
+// The lowest-numbered arena a person is on a team in, or 0 if there is none.
 // Split out of RA_AutoArena because RA_BotFollowPeople asks the same question
 // and must be able to tell "arena 1, because somebody is in it" from "arena 1,
-// because there was nobody to follow" -- which is the whole of R-131's second
+// because there was nobody to follow".
 // half.
 //
-// `botsonly` narrows it to the people BOTS MAY JOIN (R-RA-8), which is the
+// `botsonly` narrows it to the people bots may join, which is the
 // question every caller here actually has: an arena that has voted bots out is
 // not an answer to "where should the bots be", and answering it anyway sends
 // every bot to a door RA_BotArenaOpen then refuses.  Both forms are wanted, and
@@ -672,7 +664,7 @@ static int RA_HumanArena(bool botsonly)
 }
 
 // Does this arena have a person on a team in it?  Asked of the arena a bot is
-// ALREADY in, so that a bot playing with somebody is never taken away from
+// Already in, so that a bot playing with somebody is never taken away from
 // them, however the numbering falls.
 static bool RA_ArenaHasHuman(int arenanum)
 {
@@ -709,10 +701,9 @@ static bool RA_ArenaHasHuman(int arenanum)
 // EMPTY team is skipped as well -- check_teams() frees those, and pairing with
 // one would be pairing with nobody.
 //
-// Gated on `botfill` with the rest of R-RA-7, so that OFF means off: with a
-// flat `minimumplayers` the four bots it adds to a 2v2 arena were four teams of
-// one, two fighting and two queued, and that is what a server which asked for
-// nothing keeps.
+// Gated on `botfill` so that off means off: with a flat `minimumplayers` the
+// four bots it adds to a 2v2 arena were four teams of one, two fighting and
+// two queued, and that is what a server which asked for nothing keeps.
 static team_t *RA_BotTeamWithRoom(int arenanum)
 {
     qmenu_t *mnode;
@@ -771,7 +762,7 @@ static bool RA_BotArenaOpen(int arenanum)
     if (arenas[arenanum].locked)
         return false;
 
-    // R-RA-8: an arena that has voted bots out is shut to them for the same
+    // An arena that has voted bots out is shut to them for the same
     // reason a locked one is shut to everybody -- and asked here, so that
     // RA_BotFollowPeople never walks a bot up to a door that will not open.
     if (!arenas[arenanum].bots)
@@ -819,7 +810,7 @@ static int RA_AutoArena(void)
 {
     int     i, human;
 
-    // R-RA-8 qualifies every answer below with the arena's own `bots` switch,
+    // Every answer below is qualified by the arena's own `bots` switch,
     // and 0 -- "nowhere the bots should be" -- becomes a possible answer where
     // it never used to be.  Both callers handle it: RA_BotFillArena hands it to
     // CheckMinimumPlayers as "this ruleset declines", and RA_BotJoinArena
@@ -828,16 +819,16 @@ static int RA_AutoArena(void)
     if (human)
         return human;
 
-    // FOLLOWING THE PEOPLE MEANS FOLLOWING THE PEOPLE, AND SOMETIMES THAT IS
+    // Following the people means following the people, and sometimes that is
     // NOWHERE.  If there are people on this map and every arena they are in has
     // voted bots out, the honest answer is 0 -- not "some other arena, then".
     //
-    // The first draft of R-RA-8 fell through to the search below in this case,
+    // An earlier draft fell through to the search below in this case,
     // and it was wrong in a way worth recording: the fill would pick an EMPTY
     // arena nobody had asked about and populate it to capacity, so voting the
     // bots out of the arena you are standing in moved eight of them next door
     // to play each other for the rest of the map.  `botfill` under `arena`
-    // exists to give the PEOPLE opponents (R-131); an arena with nobody in it
+    // exists to give the people opponents; an arena with nobody in it
     // has nobody to give them to.
     if (RA_HumanArena(false))
         return 0;
@@ -879,7 +870,7 @@ void RA_BotJoinArena(edict_t *ent)
     if (arenanum < 1 || arenanum > num_arenas)
         arenanum = RA_AutoArena();
 
-    // R-RA-8.  RA_AutoArena can now answer 0 -- nowhere takes bots -- and an
+    // RA_AutoArena can now answer 0 -- nowhere takes bots -- and an
     // explicit `arena N` can name an arena that has voted them out since the
     // cvar was set.  Both leave the bot an observer in arena 0, which is what
     // a locked arena below already does with one, and the fill stops counting
@@ -917,7 +908,7 @@ void RA_BotJoinArena(edict_t *ent)
     // bot is a whole team.  add_to_team leaves it in arena 0's waiting queue;
     // SendTeamToArena is what moves it, and is asked for the observer form so
     // the bot waits its turn instead of being dropped into a running round
-    // (R-ARENA-3: bots are noclip observers, never parked in a waiting room).
+    // (bots are noclip observers, never parked in a waiting room).
     if (arenas[arenanum].locked) {
         gi.dprintf("%s: arena %d is locked, staying in arena 0\n",
                    ent->client->pers.netname, arenanum);
@@ -926,7 +917,7 @@ void RA_BotJoinArena(edict_t *ent)
 
     // Pair up before inventing a team, where the arena asks for more than one
     // player a side.  This is menuAddtoTeam's shape and the pickup arm's three
-    // lines above: the team is ALREADY in the arena's queue, so only the bot is
+    // lines above: the team is already in the arena's queue, so only the bot is
     // placed and the team is left where it stands -- calling SendTeamToArena
     // again would re-place and re-announce every member it already has.
     t = RA_BotTeamWithRoom(arenanum);
@@ -960,10 +951,10 @@ void RA_BotJoinArena(edict_t *ent)
     SendTeamToArena(&teams[t->teamnum], arenanum, true, true);
 }
 
-// R-131's SECOND HALF: FOLLOWING THE PEOPLE IS A STANDING RULE, NOT A ONE-OFF.
+// Following the people is a standing rule, not a one-off.
 //
-// 1.28 made `arena 0` mean "the lowest-numbered arena with a human on a team",
-// and resolved it at the bot's join.  That is the right answer asked at the
+// `arena 0` means "the lowest-numbered arena with a human on a team", and it
+// used to be resolved at the bot's join.  That is the right answer asked at the
 // wrong moment.  `minimumplayers` adds its first bot at level.framenum 32 --
 // 3.2 seconds after the map spawns -- and a person who typed `map` is still
 // loading, or reading the motd, or looking at the team list then.  So
@@ -982,7 +973,7 @@ void RA_BotJoinArena(edict_t *ent)
 // So the question is re-asked while it can still be acted on.  A bot is moved
 // only when all four of these hold, which is what keeps it from oscillating:
 //
-//   * the bot did not have an arena chosen for it -- `arena` 1..N is 1999's
+//   * nobody is on a team in the arena the bot is in, so it is never taken away
 //     literal request and is never second-guessed, only `arena 0` is ours;
 //   * somebody is on a team somewhere, so there is a real answer to follow;
 //   * NOBODY is on a team in the arena the bot is in, so it is never taken away
@@ -993,15 +984,15 @@ void RA_BotJoinArena(edict_t *ent)
 // The target is RA_HumanArena()'s single lowest-numbered answer, so every bot
 // that moves moves to the same place and the condition is false for all of them
 // afterwards.  A bot in the middle of a round is moved too, by the same path a
-// disconnecting player takes (remove_from_team, R-107) -- otherwise two bots
-// stranded on opposite sides of an empty arena would hold each other there for
-// a nine-round match while a person waited alone.
+// disconnecting player takes (remove_from_team) -- otherwise two bots stranded
+// on opposite sides of an empty arena would hold each other there for a
+// nine-round match while a person waited alone.
 //
 // The four are a predicate of their own rather than four `continue`s in the
 // loop, because RA_ArenaPlayers() asks the same question for a different reason
 // and the two must not be able to disagree: a bot this returns true for is a
-// bot that is ABOUT TO BE in `target`, and R-RA-7's fill has to count it as
-// already there or it adds a replacement for a bot that has not moved yet.  The
+// bot that is about to be in `target`, and the fill has to count it as already
+// there or it adds a replacement for a bot that has not moved yet.  The
 // target-is-open test stays in the caller -- that is one question about the
 // arena, not one per bot.
 static bool RA_BotBoundFor(edict_t *e, int target)
@@ -1033,7 +1024,7 @@ static void RA_BotFollowPeople(void)
     if (level.framenum & 31)
         return;
 
-    // R-RA-8: an arena that refuses bots is not a place to follow people TO.
+    // An arena that refuses bots is not a place to follow people to.
     // RA_BotArenaOpen below would refuse it anyway, but then no bot moves
     // anywhere -- this way the search passes over it and finds the next arena
     // with people in it that will have them.
@@ -1075,7 +1066,7 @@ static int RA_BotWouldJoin(edict_t *e)
     return arenas[n].bots ? n : 0;
 }
 
-// R-RA-8: THE BOTS THAT WERE ALREADY THERE WHEN THE VOTE PASSED.
+// The bots that were already there when the vote passed.
 //
 // Every other half of this feature is a refusal -- RA_BotFillArena will not
 // select the arena, RA_BotArenaOpen will not admit a bot to it, RA_BotJoinArena
@@ -1088,7 +1079,7 @@ static int RA_BotWouldJoin(edict_t *e)
 // arena RA_BotFillArena selected, and this arena is precisely the one it has
 // just stopped selecting.
 //
-// THEY ARE REMOVED, NOT MOVED SOMEWHERE ELSE, and R-RA-9 is the reason it can
+// They are removed, not moved somewhere else, and the scheduler is the reason
 // be that simple.  An earlier draft offered each one a seat in another arena
 // first and deleted only the ones nobody would take, on the argument that "the
 // vote was about our arena, not about this server".  That argument assumes
@@ -1098,7 +1089,7 @@ static int RA_BotWouldJoin(edict_t *e)
 // game that is already the size it asked to be overfills it, and the surplus
 // arm then removes the same bots a tick or two later, somewhere the people who
 // voted cannot see it happening.  So the fill decides where bots are wanted,
-// and this only decides that they are not wanted HERE.
+// and this only decides that they are not wanted here.
 //
 // Which also disposes of the case that made the earlier draft look necessary.
 // A bot left standing in arena 0 is a connected client holding a slot a person
@@ -1134,7 +1125,7 @@ static void RA_BotsVotedOut(void)
         // wanted for the line that says what became of it.
         Q_strlcpy(name, e->client->pers.netname, sizeof(name));
 
-        // THE BOT THAT WAS STILL BEING BUILT WHEN THE VOTE PASSED, which the
+        // The bot that was still being built when the vote passed, which the
         // team-based test below cannot see: it has no team yet, and no arena.
         //
         // Its ClientBegin is deferred until the library reports the bot
@@ -1214,17 +1205,17 @@ void remove_from_team(edict_t *ent)
     ent->client->resp.teamnum = -1;
 }
 
-// *** "FARTHEST FROM ANY PLAYER" IS A MINIMUM, AND WHICH PLAYERS IT IS TAKEN
-// OVER IS THREE SEPARATE DECISIONS. ***
+// "Farthest from any player" is a minimum, and which players it is taken over
+// is three separate decisions.
 //
-// R-77 answered one of them in 1.18 -- an arena observer is alive, noclipping
-// and parked on a spawn point, so counting it chooses spawns by where the
-// audience stood -- and answered it inside `PlayersRangeFromSpot`, which the
-// shared deathmatch selectors also use.  RA2 upstream reached the same finding
-// later (`rocketarena2@6b8d058`) and answered all three at once.  The other two
-// are still open here, and both are cheap:
+// One of them: an arena observer is alive, noclipping and parked on a spawn
+// point, so counting it chooses spawns by where the audience stood.  That is
+// answered inside `PlayersRangeFromSpot`, which the shared deathmatch
+// selectors also use.  RA2 upstream reached the same finding later
+// (`rocketarena2@6b8d058`) and answered all three at once.  The other two are
+// still open here, and both are cheap:
 //
-//   * the scan covers every client on the SERVER, so a fight in another arena
+//   * the scan covers every client on the server, so a fight in another arena
 //     skews the pick.  Distance makes that rare rather than impossible -- two
 //     arenas can be neighbours in one BSP -- and "rare" is not a property worth
 //     relying on;
@@ -1233,7 +1224,9 @@ void remove_from_team(edict_t *ent)
 //     right now, which is the observer spot it is about to leave.
 //
 // So the arena selectors ask their own question instead of the shared one.
-// `PlayersRangeFromSpot` keeps R-77's arm because `PutClientInServer` still
+// `PlayersRangeFromSpot` keeps the observer arm because `PutClientInServer`
+// still reaches the shared deathmatch selectors under `arena`, before this
+// file's placement runs.
 // reaches the shared deathmatch selectors under `arena`, before this file's
 // placement runs.
 static bool ArenaLiveBody(edict_t *e, edict_t *ignore)
@@ -1260,11 +1253,12 @@ static bool ArenaFighter(edict_t *e, int arenanum, edict_t *ignore)
     return true;
 }
 
-// Distance from `spot` to the nearest client that counts: with `fighters_only`,
-// the ones fighting in this arena; otherwise every live body on the server.
-// False means it counted nobody, which is the caller's cue that this measure has
-// nothing to say about this spot.
-static bool ArenaRangeFromSpot(edict_t *spot, int arenanum, edict_t *ignore,
+// Distance from `place` -- where a body put on this candidate actually STANDS,
+// see ArenaSpawnLanding -- to the nearest client that counts: with
+// `fighters_only`, the ones fighting in this arena; otherwise every live body on
+// the server.  False means it counted nobody, which is the caller's cue that
+// this measure has nothing to say about this spot.
+static bool ArenaRangeFromSpot(const vec3_t place, int arenanum, edict_t *ignore,
                                bool fighters_only, float *range)
 {
     edict_t *player;
@@ -1282,7 +1276,7 @@ static bool ArenaRangeFromSpot(edict_t *spot, int arenanum, edict_t *ignore,
         } else if (!ArenaLiveBody(player, ignore))
             continue;
 
-        VectorSubtract(spot->s.origin, player->s.origin, v);
+        VectorSubtract(place, player->s.origin, v);
         dist = VectorLength(v);
 
         if (!found || dist < *range) {
@@ -1294,54 +1288,135 @@ static bool ArenaRangeFromSpot(edict_t *spot, int arenanum, edict_t *ignore,
     return found;
 }
 
-// The distance to the nearest player FIGHTING IN THIS ARENA -- and where nobody
+// The distance to the nearest player fighting in this arena -- and where nobody
 // is fighting here, to the nearest live body anywhere.
 //
-// R-146: THAT FALLBACK IS NOT OPTIONAL, and the note that used to stand here
-// said the opposite -- that returning 0 with nobody to measure against was
-// deliberate, because it drops the caller through to the random selector and so
-// keeps a roomful of arriving observers off one spot.  It does the reverse.
-// Zero scores every spot below SelectFarthestArenaSpawnPoint's floor of 50, so
-// the caller falls through to SelectRandomArenaSpawnPoint, and random spots
-// COLLIDE.  In the staging area that is not an edge case but the norm:
-// everybody there is FIGHT_SPECTATING, so the fighter pass counts nobody every
-// single time and every arrival is placed at random.
+// That fallback is not optional.  Zero scores every spot below
+// SelectFarthestArenaSpawnPoint's floor of 50, so the caller falls through to
+// SelectRandomArenaSpawnPoint, and random spots collide.  In the staging area
+// that is not an edge case but the norm: everybody there is FIGHT_SPECTATING,
+// so the fighter pass counts nobody every single time and every arrival is
+// placed at random.
 //
 // Two arrivals on one spot is not cosmetic.  An observer in OMODE_NORMAL is
 // SOLID_BBOX on MOVETYPE_WALK, and RA2's own separators both decline: KillBox
 // returns early for a FIGHT_SPECTATING client and check_telefrag skips one, so
 // once two of them are inside each other nothing in the mod ever pulls them
-// apart -- which is R-135's "siamese twins" reached by the other road.  The
-// spawn picker was the only thing keeping them out of each other, which is what
-// the donor's PlayersRangeFromSpot did by measuring against every live client.
+// apart.  The spawn picker was the only thing keeping them out of each other,
+// which is what RA2's PlayersRangeFromSpot did by measuring against every live
+// client.
 //
 // The score remains fighter-first: an observer must not make a candidate rank
 // farther from the fight.  Candidate safety is a separate question, answered
 // below without changing this measure.  Taken from `rocketarena2@811af42`.
-static float ArenaFightersRangeFromSpot(edict_t *spot, int arenanum, edict_t *ignore)
+static float ArenaFightersRangeFromSpot(const vec3_t place, int arenanum,
+                                       edict_t *ignore)
 {
     float   range = 0;
 
-    if (ArenaRangeFromSpot(spot, arenanum, ignore, true, &range))
+    if (ArenaRangeFromSpot(place, arenanum, ignore, true, &range))
         return range;
 
-    ArenaRangeFromSpot(spot, arenanum, ignore, false, &range);
+    ArenaRangeFromSpot(place, arenanum, ignore, false, &range);
 
     return range;
 }
 
 #define ARENA_SPAWN_CLEARANCE 50.0f
 
+// A spawn entity is not where a body put on it stands, and every question this
+// file asks about a candidate is a question about where it stands.
+//
+// move_to_arena clips a placement to the floor -- it traces the player box from
+// 16 above the entity down to 64 below it -- so the drop from the entity to the
+// body can be most of that 64, and a mapper has no reason to keep it small.
+// Measured on `ra2map26` arena 1: five of its six pads put a body 24 units
+// below their own origin and the sixth, at (1024 544 240), puts one at z=184 --
+// 56 units, past ARENA_SPAWN_CLEARANCE.  A pad measured from its entity
+// therefore reported itself clear while a fighter stood on it, and the next
+// arrival on that side was sent to the same pad; on that one pad of that one
+// arena, every round.  So the landing point is computed once per candidate and
+// everything downstream is measured from it.
+//
+// The trace is the placement's own, `ent` and mask included, which is what
+// makes the answer the same answer -- and its `ent` is the second half of the
+// fix, because a body already in the column is what it reports.  Callers keep
+// the trace rather than only the point (see move_to_arena).
+//
+// Provenance, because it explains how a correct measure became a wrong one.
+// 1999 (`v_ra2`) places a body at `dest->s.origin` with `[2] += 10` and no
+// trace at all -- its own `mins`/`maxs` are declared and never used -- so the
+// entity was where the body stood, and `SelectFarthestArenaSpawnPoint`'s
+// `bestdistance = 50` over `PlayersRangeFromSpot(spot)` meant what it said.
+// The floor clip below is `port_ra2`'s addition, comment and all, and it left
+// that selector measuring from the entity; the occupancy predicate was then
+// built on the same measure, which carried the mismatch onto the pickup path.
+// Neither step was wrong on its own.
+static trace_t ArenaSpawnLanding(edict_t *spot, edict_t *ent, vec3_t place)
+{
+    vec3_t      mins = {-16, -16, -24};
+    vec3_t      maxs = {16, 16, 32};
+    vec3_t      from, to;
+    trace_t     tr;
+
+    VectorCopy(spot->s.origin, from);
+    from[2] += 16;
+    VectorCopy(spot->s.origin, to);
+    to[2] -= 64;
+
+    tr = gi.trace(from, mins, maxs, to, ent, MASK_PLAYERSOLID);
+
+    if (!tr.allsolid && !tr.startsolid) {
+        VectorCopy(tr.endpos, place);
+    } else {
+        VectorCopy(spot->s.origin, place);
+        place[2] += 10;
+    }
+
+    return tr;
+}
+
 // A live, collidable body already standing on this arena's pad is not a safe
 // placement target.  This is deliberately separate from the fighter-only
 // score: observers do not affect which clear pad ranks farthest from a fight,
 // but they do reserve the pad they physically occupy.  An id map has one
 // arena, so its untagged bodies all belong to the requested arena.
-static bool ArenaSpawnSpotClear(edict_t *spot, int arenanum, edict_t *ignore)
+//
+// `place` is written for the caller: the landing point costs a trace and both
+// the clearance below and the caller's fighter distance are measured from it.
+//
+// Two tests, and the column one is the load-bearing half.  A radius around the
+// landing point cannot see a body directly underneath it -- the landing trace
+// stops on that body, so the point it reports is one box-height above it and
+// reads as 56 clear units.  What the trace hit is the exact answer to "would
+// this put me in somebody", so it is asked first, and the radius stays for the
+// body standing beside the pad, which no trace down the column can see.
+//
+// One case the pair answers by assumption rather than by measurement: where the
+// trace starts solid it can report nothing about the column, and the landing
+// point is then the placement's own `entity + 10` guess -- a point in the air.
+// `ra2map26` arena 1 has such a pad at (-1024 480 240): a body placed there is
+// at z=250 for as long as it takes to fall to 184, so a radius around 250 would
+// call the pad clear once its occupant had dropped.  It is sound because every
+// fighter placement in a round happens in one frame -- SendTeamToArena is
+// called from fill_arena and from the next-round loop and nothing else places a
+// fighter -- so the occupant of such a pad has not fallen yet when the next
+// candidate is measured.  A placement path that ran a frame later would need
+// the trace's whole extent as an envelope.
+static bool ArenaSpawnSpotClear(edict_t *spot, int arenanum, edict_t *ignore,
+                                vec3_t place)
 {
     edict_t *player;
     vec3_t  v;
     int     n;
+    trace_t tr;
+
+    tr = ArenaSpawnLanding(spot, ignore, place);
+
+    if (tr.ent && tr.ent->client && ArenaLiveBody(tr.ent, ignore) &&
+        tr.ent->solid != SOLID_NOT &&
+        (tr.ent->client->resp.context == arenanum || idmap != false))
+        return false;
 
     for (n = 0; n < game.maxclients; n++) {
         player = &g_edicts[n + 1];
@@ -1352,7 +1427,7 @@ static bool ArenaSpawnSpotClear(edict_t *spot, int arenanum, edict_t *ignore)
         if (player->client->resp.context != arenanum && idmap == false)
             continue;
 
-        VectorSubtract(spot->s.origin, player->s.origin, v);
+        VectorSubtract(place, player->s.origin, v);
         if (VectorLength(v) <= ARENA_SPAWN_CLEARANCE)
             return false;
     }
@@ -1366,7 +1441,7 @@ static bool ArenaSpawnSpotClear(edict_t *spot, int arenanum, edict_t *ignore)
 // own index every time it stepped over a spot belonging to another arena.  That
 // loop dereferences whatever G_Find returns without testing it, so an index it
 // cannot satisfy walks off the end of the list and reads `spot->arena` through
-// NULL.  `side == 1` on an arena with ONE spawn point asks for index 1 of one
+// NULL.  `side == 1` on an arena with one spawn point asks for index 1 of one
 // (see the clamp below), which is exactly that -- a server-killing fault, from
 // arena.cfg alone, on any arena with `pickup: 1` and a single
 // info_player_deathmatch.
@@ -1387,8 +1462,8 @@ static edict_t *ArenaSpawnSpot(char *classn, int arenanum, int n)
 // How many of `classn` belong to this arena.  Lifted out of
 // SelectRandomArenaSpawnPoint, which opened with exactly this walk, so that
 // RA_BotFillTarget() can ask the same question of the same entities: the
-// `idmap == false` clause is what makes a stock deathmatch map -- one arena, no
-// `arena` key on anything -- count every spawn point it has for that arena.
+// `idmap == false` clause is what makes a stock deathmatch map -- one arena,
+// no `arena` key on anything -- count every spawn point it has for that arena.
 static int ArenaSpawnCount(char *classn, int arenanum)
 {
     edict_t *spot = NULL;
@@ -1402,15 +1477,14 @@ static int ArenaSpawnCount(char *classn, int arenanum)
 
     return count;
 }
-
-// *** A PICKUP ARENA PUTS ITS TWO SIDES ON ALTERNATE SPAWN POINTS AND PICKS
-// AMONG THEM AT RANDOM, WHICH IS A BIRTHDAY PROBLEM. ***
+// A pickup arena puts its two sides on alternate spawn points and picks among
+// them at random, which is a birthday problem.
 //
 // `ra2map9` arena 2 has twelve spawn points, so a side draws from six; three
 // bots on that side collide 44% of the time, and RA2's whole answer to a
 // collision is KillBox -- which during a countdown cannot telefrag, because an
 // arena fighter is `takedamage DAMAGE_NO` until ASTATE_FIGHTING, and whose
-// push-apart pushes BOTH bodies along the SAME vector (see g_utils.c).  So two
+// push-apart pushes both bodies along the same vector (see g_utils.c).  So two
 // players who draw the same point stay standing inside each other, which is
 // what a play test reported: "both enemy bots spawned at exactly the same spawn
 // point, they did not telefrag or push away each other, their bodies overlapped
@@ -1429,6 +1503,7 @@ static int ArenaSpawnCount(char *classn, int arenanum)
 edict_t *SelectRandomArenaSpawnPoint(char *classn, int arenanum, int side, edict_t *ignore)
 {
     edict_t     *spot, *first = NULL, *clear = NULL;
+    vec3_t      place;
     int         count;
     int         selection, step, i;
 
@@ -1460,11 +1535,11 @@ edict_t *SelectRandomArenaSpawnPoint(char *classn, int arenanum, int side, edict
             continue;
         if (!first)
             first = spot;
-        if (!ArenaSpawnSpotClear(spot, arenanum, ignore))
+        if (!ArenaSpawnSpotClear(spot, arenanum, ignore, place))
             continue;
         if (!clear)
             clear = spot;
-        if (ArenaFightersRangeFromSpot(spot, arenanum, ignore) > ARENA_SPAWN_CLEARANCE)
+        if (ArenaFightersRangeFromSpot(place, arenanum, ignore) > ARENA_SPAWN_CLEARANCE)
             return spot;
     }
 
@@ -1476,6 +1551,7 @@ edict_t *SelectFarthestArenaSpawnPoint(char *classn, int arenanum, edict_t *igno
     edict_t     *bestspot;
     float       bestdistance, bestplayerdistance;
     edict_t     *spot;
+    vec3_t      place;
 
     spot = NULL;
     bestspot = NULL;
@@ -1483,8 +1559,8 @@ edict_t *SelectFarthestArenaSpawnPoint(char *classn, int arenanum, edict_t *igno
     while ((spot = G_Find(spot, FOFS(classname), classn)) != NULL) {
         //gi.bprintf (PRINT_HIGH,"arena %d spot %d\n", arenanum, spot->arena);
         if (spot->arena != arenanum && idmap == false) continue;
-        if (!ArenaSpawnSpotClear(spot, arenanum, ignore)) continue;
-        bestplayerdistance = ArenaFightersRangeFromSpot(spot, arenanum, ignore);
+        if (!ArenaSpawnSpotClear(spot, arenanum, ignore, place)) continue;
+        bestplayerdistance = ArenaFightersRangeFromSpot(place, arenanum, ignore);
 
         if (bestplayerdistance > bestdistance) {
             bestspot = spot;
@@ -1503,7 +1579,7 @@ edict_t *SelectFarthestArenaSpawnPoint(char *classn, int arenanum, edict_t *igno
 
 /*
 =================
-`botfill` -- THE BOT COUNT FOLLOWS THE ARENA, NOT THE SERVER
+`botfill` -- the bot count follows the arena, not the server
 
 `minimumplayers` is one number for the whole server, and under every other
 ruleset that is the right shape: one map, one game, one roster.  Rocket Arena
@@ -1526,7 +1602,7 @@ because the mod keeps it in two places:
     carrying this arena's number, which the two sides take ALTERNATELY
     (SelectRandomArenaSpawnPoint), so the arena seats two out of every pair.
 
-Counting spawn points would be WRONG for the first kind, and that is worth
+Counting spawn points would be wrong for the first kind, and that is worth
 writing down because it is the obvious thing to try.  RA2's mappers used spawn
 points for variety, not capacity: `ra2map8` arena 3 has thirteen of them and is
 declared 1v1, and only 55 of 141 non-pickup arenas have as many spawn points as
@@ -1538,7 +1614,7 @@ check_teams then deletes.
 `botcfg/bots.cfg`.
 =================
 */
-static int RA_NeediestArena(int *gapout);    // R-RA-9, defined just below
+static int RA_NeediestArena(int *gapout);    // defined just below
 
 int RA_BotFillArena(void)
 {
@@ -1549,7 +1625,7 @@ int RA_BotFillArena(void)
     if (num_arenas <= 0)
         return 0;
 
-    // THE ARENA THIS COUNTS MUST BE THE ARENA THE BOTS ARE SENT TO, and there
+    // The arena this counts must be the arena the bots are sent to, and there
     // are two answers to that, not one.  `bl_spawn.c` writes the `arena` cvar
     // into a new bot's userinfo and RA_BotJoinArena obeys it, so 1..N is where
     // the bots actually go -- and a fill that counted somewhere else would find
@@ -1557,26 +1633,26 @@ int RA_BotFillArena(void)
     // ran out.  Only 0, the absence of a request, is resolved by following the
     // people, and through RA_AutoArena rather than a second copy of it.
     //
-    // R-RA-8: AND IT MUST BE AN ARENA THAT STILL TAKES THEM.  `bots` is the
-    // arena's own switch -- `arena.cfg`'s `bots` key, and the "Allow Bots" row
-    // the people in it can vote on -- so an explicit `arena N` pointed at an
-    // arena that has turned bots off resolves to "nowhere" rather than being
-    // obeyed over the top of it.  0 is the answer CheckMinimumPlayers reads as
-    // "this ruleset declines", which is why it may be returned here at all.
-    // R-RA-9: THE DEFAULT IS 0, "no arena named".  It was "1", which this test
-    // cannot tell apart from an operator who meant arena 1 -- so a server that
-    // did not exec configs/arena.cfg pinned the whole fill to arena 1 and got
-    // neither the scheduler below nor R-131's follow-the-people, while a server
-    // that did exec it got both.  One of those two was the intended behaviour
-    // and it was not the one you got by saying nothing.  All four readers of
-    // this cvar default to "0" together: whichever runs first is the one that
-    // creates it, so a single "1" left anywhere would decide for all of them.
+    // And it must be an arena that still takes them.  `bots` is the arena's own
+    // switch -- `arena.cfg`'s `bots` key, and the "Allow Bots" row the people
+    // in it can vote on -- so an explicit `arena N` pointed at an arena that
+    // has turned bots off resolves to "nowhere" rather than being obeyed over
+    // the top of it.  0 is the answer CheckMinimumPlayers reads as "this
+    // ruleset declines", which is why it may be returned here at all.
+    //
+    // The default is 0, "no arena named".  It was "1", which this test cannot
+    // tell apart from an operator who meant arena 1 -- so a server that did not
+    // exec configs/arena.cfg pinned the whole fill to arena 1 and got neither
+    // the scheduler below nor follow-the-people, while a server that did exec
+    // it got both.  All four readers of this cvar default to "0" together:
+    // whichever runs first is the one that creates it, so a single "1" left
+    // anywhere would decide for all of them.
     n = (int)gi.cvar("arena", "0", 0)->value;
     if (n >= 1 && n <= num_arenas)
         return arenas[n].bots ? n : 0;
 
-    // R-RA-9: OTHERWISE, THE ARENA FURTHEST FROM ITS OWN TARGET.  See
-    // RA_NeediestArena() -- one arena a tick, but not the SAME arena every
+    // Otherwise, the arena furthest from its own target.  See
+    // RA_NeediestArena() -- one arena a tick, but not the same arena every
     // tick, which is what "botfill fills the arenas" has to mean on a map that
     // has more than one of them.
     n = RA_NeediestArena(NULL);
@@ -1587,12 +1663,12 @@ int RA_BotFillArena(void)
     return RA_AutoArena();
 }
 
-// R-RA-9: WHICH ARENA THE FILL SHOULD WORK THIS TICK.
+// Which arena the fill should work this tick.
 //
-// R-RA-7 gave the fill one arena and one census, and asked RA_AutoArena for the
-// number: "the arena the people are in".  On a one-arena map that is the whole
-// truth, and RA2's own maps have up to 32.  With two crowded arenas the fill
-// sized itself to the LOWEST-numbered one, filled it, and then sat at its
+// The fill used to have one arena and one census, and asked RA_AutoArena for
+// the number: "the arena the people are in".  On a one-arena map that is the
+// whole truth, and RA2's own maps have up to 32.  With two crowded arenas the
+// fill sized itself to the lowest-numbered one, filled it, and then sat at its
 // target with nothing left to say -- the second arena never saw a bot, however
 // short-handed it was, because the question "which arena" had an answer that
 // never changed.
@@ -1603,23 +1679,23 @@ int RA_BotFillArena(void)
 // to its own target, one bot at a time, off the machinery that already existed
 // for one.
 //
-// AN ARENA WITH NOBODY IN IT WANTS NO BOTS, and that is the whole of "the bots
+// An arena with nobody in it wants no bots, and that is the whole of "the bots
 // follow the people" expressed as a number rather than as a migration.  An
 // empty arena's target is 0, so the bots left standing in one a person has just
-// walked out of are a SURPLUS and the removal arm takes them, one a tick, while
+// walked out of are a surplus and the removal arm takes them, one a tick, while
 // the arena that person walked into shows a deficit and the add arm fills it.
 // Nothing has to move a bot from one arena to another: both halves fall out of
 // asking every arena the same question.  It is also why filling empty arenas is
 // not a policy that has to be forbidden -- an empty arena simply never wants
 // anybody, so `maxclients` and the roster are spent only where people are.
 //
-// SURPLUSES ARE TAKEN BEFORE DEFICITS ARE FILLED, which is the opposite of the
-// first draft and the difference between converging and deadlocking.  The bots
-// standing in the arena everyone just left are holding the very client slots
-// the arena they left for needs; preferring the deficit asks for a slot that
-// only the surplus can release, and on a full server neither side ever moves.
+// Surpluses are taken before deficits are filled, which is the difference
+// between converging and deadlocking.  The bots standing in the arena everyone
+// just left are holding the very client slots the arena they left for needs;
+// preferring the deficit asks for a slot that only the surplus can release, and
+// on a full server neither side ever moves.
 //
-// ...but only a surplus something can be DONE about.  Four people in a 1v1
+// ...but only a surplus something can be done about.  Four people in a 1v1
 // arena are permanently over its target with no bot to remove, and a candidate
 // that cannot be acted on would be re-selected every tick and starve every
 // other arena of the fill.  So the surplus arm asks for a bot to take.
@@ -1637,7 +1713,7 @@ static int RA_NeediestArena(int *gapout)
 
     for (i = 1; i <= num_arenas; i++) {
         // An arena that has voted bots out is RA_BotsVotedOut's to empty, not
-        // this one's: it wants no bots AND will not have the fill add any, so
+        // this one's: it wants no bots and will not have the fill add any, so
         // selecting it here would only spend the tick.
         if (!arenas[i].bots)
             continue;
@@ -1668,22 +1744,22 @@ static int RA_NeediestArena(int *gapout)
     return spare ? spare : best;
 }
 
-// R-RA-9: ...AND WHICH ARENA THE BOT IT IS ABOUT TO ADD MUST BE TOLD TO JOIN.
+// ...and which arena the bot it is about to add must be told to join.
 //
 // `bl_spawn.c` writes an `arena` userinfo key at bot creation and
 // RA_BotJoinArena obeys it.  While the fill only ever worked one arena, 0 --
 // "follow the people" -- was a good enough instruction, because following the
 // people and being sent to the fill's arena were the same journey.  Under a
-// scheduler they are not: RA_AutoArena resolves 0 to the LOWEST-numbered
+// scheduler they are not: RA_AutoArena resolves 0 to the lowest-numbered
 // populated arena, so every bot the fill added for arena 5 would walk into
 // arena 1 instead and the scheduler would ask for another one next tick,
 // forever.
 //
 // 0 is still returned where it is still right, and that is not a detail: a
-// STAGING bot -- added before anybody had joined -- must keep it, because
-// RA_BotFollowPeople only moves bots that have it (RA_BotFollowsPeople), and
-// moving those is the whole of R-131.  Pinning a staging bot to the arena it
-// was parked in would strand it there for the level.
+// staging bot -- added before anybody had joined -- must keep it, because
+// RA_BotFollowPeople only moves bots that have it (RA_BotFollowsPeople).
+// Pinning a staging bot to the arena it was parked in would strand it there for
+// the level.
 //
 // Parameter:               -
 // Returns:                 the arena to pin the next filled bot to, or 0
@@ -1701,7 +1777,7 @@ int RA_BotFillDestination(void)
     if (!RA_HumanArena(false))
         return 0;
 
-    // A NEW BOT ONLY EVER BELONGS IN AN ARENA THAT IS SHORT.  RA_NeediestArena
+    // A new bot only ever belongs in an arena that is short.  RA_NeediestArena
     // answers for both arms of the fill and takes surpluses first, so it can
     // name an arena that has too many -- which is the right answer for the arm
     // that removes one and the wrong one for this.  CheckMinimumPlayers does
@@ -1715,28 +1791,26 @@ int RA_BotFillDestination(void)
     return n;
 }
 
-// THE ARENA'S OWN NUMBER, unclamped.  The ceilings -- two sides make a round,
+// The arena's own number, unclamped.  The ceilings -- two sides make a round,
 // the roster, `game.maxclients` -- are BotFillTarget()'s, in bl_spawn.c, and
 // they used to be here as well: the same three lines over a second
-// `botfill_ceiling` private to this file.  Two copies of one concept is what
-// sec 7 rule 6 forbids, and the unification of the three `*_botfill` cvars is
-// what made keeping them apart indefensible.
+// `botfill_ceiling` private to this file.
 int RA_BotFillTarget(int arenanum)
 {
     if (arenanum < 1 || arenanum > num_arenas)
         return 0;
 
-    // R-RA-9: AND AN ARENA WITH NOBODY IN IT WANTS NONE, which belongs HERE and
-    // not in the scheduler that first needed it.  This is the number
+    // An arena with nobody in it wants none, and that belongs here and not in
+    // the scheduler that first needed it.  This is the number
     // CheckMinimumPlayers compares its census against, so a rule the scheduler
     // applied privately was a rule the two of them disagreed about: the
     // scheduler scored the arena a person had just left as a surplus and
     // selected it, CheckMinimumPlayers then asked this function, got the
-    // arena's CAPACITY back, and concluded it was short.  Measured: an arena
+    // arena's capacity back, and concluded it was short.  Measured: an arena
     // everybody had left sat at two bots for as long as the map ran, selected
     // every tick and neither filled nor drained.
     //
-    // `botfill` exists to give PEOPLE opponents.  An arena's capacity is what
+    // `botfill` exists to give people opponents.  An arena's capacity is what
     // it can seat; what it wants is that number only while somebody is in it.
     if (!RA_ArenaHasHuman(arenanum))
         return 0;
@@ -1747,10 +1821,10 @@ int RA_BotFillTarget(int arenanum)
     return arenas[arenanum].numteams * arenas[arenanum].playersperteam;
 }
 
-// Is this a PICKUP arena -- one whose size comes from the map rather than from
+// Is this a pickup arena -- one whose size comes from the map rather than from
 // `arena.cfg`?  `sv ruleset` says which of the two answered, and reaching into
-// `arenas[]` from the bot layer to find out would put a donor's struct in a
-// shared file for one boolean (R-VER-25).
+// `arenas[]` from the bot layer to find out would put an arena struct in a
+// shared file for one boolean.
 bool RA_ArenaIsPickup(int arenanum)
 {
     if (arenanum < 1 || arenanum > num_arenas)
@@ -1764,12 +1838,12 @@ bool RA_ArenaIsPickup(int arenanum)
 //
 // Plus the bots RA_BotFollowPeople is about to bring here, which is not a
 // refinement but the reason this is a function.  CheckMinimumPlayers runs from
-// G_RunFrame BEFORE G_CheckRules, and both gate on `level.framenum & 31`, so on
+// G_RunFrame before G_CheckRules, and both gate on `level.framenum & 31`, so on
 // a fill tick the bots in transit have not moved yet.  Counted where they
 // stand, the arena looks emptier than it is about to be, the fill adds
 // replacements for bots that are already on their way, and the removal arm
 // throws those out 32 frames later -- an add/remove oscillation at every level
-// start, which is the shape R-134 already had to fix once.
+// start.
 int RA_ArenaPlayers(int arenanum, int *bots)
 {
     edict_t *e;
@@ -2000,19 +2074,11 @@ void SetObserverMode(edict_t *ent)
 {
     int     i;
 
-    // R-ARENA-3's invariant, stated where the mode becomes real rather than at
-    // each place that picks one: A BOT IS A FREE-FLYING OBSERVER AND NOTHING
-    // ELSE.  The two camera modes exist to be looked at, and a bot has no
-    // screen: it would spend the round flying a camera nobody watches, and
-    // R-140's fire gate is the only other thing that would notice.  The
-    // sharper reason this guard was written no longer holds and is recorded
-    // rather than repeated -- ClientThink used to put a track_target client on
-    // PM_FREEZE, which is what the brain's BotIntermission() tests for, so a
-    // bot handed a camera decided the level had ended and said its end-of-level
-    // line every frame.  R-145 restored the donor's PM_GIB there, so that
-    // particular consequence is gone; the guard stays because the first reason
-    // was always the real one.  `arena.cfg`'s `competition: 1` reaches this the
-    // same way the observer key does, so it belongs here and not only at the
+    // A bot is a free-flying observer and nothing else.  The two camera modes
+    // exist to be looked at, and a bot has no screen: it would spend the round
+    // flying a camera nobody watches, and the fire gate is the only other thing
+    // that would notice.  `arena.cfg`'s `competition: 1` reaches this the same
+    // way the observer key does, so the guard belongs here and not only at the
     // input.
     if ((ent->flags & FL_BOT) &&
         (ent->client->resp.omode == OMODE_TRACKCAM ||
@@ -2028,7 +2094,7 @@ void SetObserverMode(edict_t *ent)
         ent->client->resp.track_target = NULL;
         ent->s.modelindex = 255;
         ent->client->ps.pmove.pm_flags &= ~PMF_NO_PREDICTION;
-        // THE ID ROW OUTLIVES THE CAMERA THAT WROTE IT.  CTFSetIDView is
+        // The id row outlives the camera that wrote it.  CTFSetIDView is
         // reached from track_SetStats and from nowhere else, so it runs only
         // while a camera is running: an observer who tracked somebody and then
         // pressed ATTACK back to a mode with no subject kept that name pinned
@@ -2098,7 +2164,6 @@ void move_to_arena(edict_t *ent, int arenanum, int mode)
     int         i;
     vec3_t      mins = {-16, -16, -24};
     vec3_t      maxs = {16, 16, 32};
-    vec3_t      temp, temp2;
     trace_t     tr;
 
     if (ent->client->resp.isbot) {
@@ -2145,21 +2210,42 @@ void move_to_arena(edict_t *ent, int arenanum, int mode)
 
     gi.unlinkentity(ent);
 
+    // A body entering the world needs a body.  `ent->mins`/`maxs` hold whatever
+    // the client's last Pmove left there, and an arena observer's Pmove leaves
+    // nothing: the pair is written in PM_CheckDuck, which the spectator and
+    // freeze paths return before reaching, so `pm.mins`/`maxs` come back as the
+    // zeros ClientThink's own memset put there and ClientThink copies them into
+    // the edict.  Every fighter SendTeamToArena places has just come off one of
+    // those paths, so the box was empty for the whole of the placement, and
+    // that cost two things:
+    //
+    //   * KillBox below traces `ent->mins`/`maxs` -- a point at the origin,
+    //     which misses a body the arriving fighter is standing inside, so
+    //     neither the push nor the telefrag ever fired and `spawn_recheck` was
+    //     left at the zero KillBox clears it to;
+    //   * a body already on the pad is clipped through the same pair, so it was
+    //     a point-sized obstacle: the floor trace stopped the arriving box 24
+    //     units above its origin instead of on top of it, which is inside it
+    //     once the first PM_NORMAL frame restores both boxes.  Measured on
+    //     `ra2map26`: two fighters at (1024 544 184) and (1024 544 208), boxes
+    //     overlapping by 32 units, each one's Pmove allsolid in the other, and
+    //     nothing in the mod able to separate them.
+    //
+    // PutClientInServer sets the same pair before its own floor trace for
+    // exactly this reason; the round-start path has no PutClientInServer in it.
+    // The next Pmove overwrites both, standing or ducked, so this only has to
+    // hold for the placement.
+    VectorCopy(mins, ent->mins);
+    VectorCopy(maxs, ent->maxs);
+
     // try to properly clip to the floor / spawn.  Q2PRO added this to
     // PutClientInServer(); in Rocket Arena the arena spot, not the spawn
-    // point, is where the player actually lands, so it belongs here.
-    VectorCopy(dest->s.origin, temp);
-    VectorCopy(dest->s.origin, temp2);
-    temp[2] -= 64;
-    temp2[2] += 16;
-    tr = gi.trace(temp2, mins, maxs, temp, ent, MASK_PLAYERSOLID);
-    if (!tr.allsolid && !tr.startsolid) {
-        VectorCopy(tr.endpos, ent->s.origin);
+    // point, is where the player actually lands, so it belongs here -- and it
+    // is ArenaSpawnLanding's trace, because the selector has to be able to ask
+    // the same question about a candidate that this answers about the choice.
+    tr = ArenaSpawnLanding(dest, ent, ent->s.origin);
+    if (!tr.allsolid && !tr.startsolid)
         ent->groundentity = tr.ent;
-    } else {
-        VectorCopy(dest->s.origin, ent->s.origin);
-        ent->s.origin[2] += 10;
-    }
     VectorCopy(ent->s.origin, ent->s.old_origin);
 
     // clear the velocity and hold them in place briefly
@@ -2184,6 +2270,19 @@ void move_to_arena(edict_t *ent, int arenanum, int mode)
     // telefrag avoidance at destination
     if (!KillBox(ent)) {
     }
+
+    // Landing on somebody is not an overlap yet, which is why it has to be
+    // watched.  When every point on this side is taken the selector returns one
+    // of them anyway -- RA2's stated fallback, "no choice to turn one into a
+    // telefrag meltdown" -- and the landing trace then stops the arriving body
+    // on the occupant: two boxes that touch, which KillBox reads as clear
+    // because touching is not overlapping, and which one Pmove later can be two
+    // boxes that overlap.  check_telefrag() is the thing that would separate
+    // them and it only examines a client whose `spawn_recheck` is set, so the
+    // pair is handed to it here.  After KillBox, which clears the field on
+    // entry.
+    if (mode == 0 && tr.ent && tr.ent->client)
+        ent->client->resp.spawn_recheck = level.framenum + 0.5f / FRAMETIME;
 
     if (mode) {
         if (arenas[arenanum].active && ent->client->resp.omode == OMODE_NORMAL)
@@ -2516,8 +2615,8 @@ void init_player(edict_t *ent)
     ent->client->resp.teamnum = -1;
 
     // A bot gets neither: the motd is a message and the team list is a menu,
-    // and R-MENU-4's second half says a bot is never sent a layout.  Its two
-    // clicks are made for it in RA_BotJoinArena, after placement.
+    // and a bot is never sent a layout.  Its two clicks are made for it in
+    // RA_BotJoinArena, after placement.
     if (!(ent->flags & FL_BOT)) {
         if (ent->client->pers.showmotd)
             motd_menu(ent);
@@ -2633,7 +2732,7 @@ void show_countdown(int countdown, int arenanum)
 RA_TeamOf
 
 The team a client is on, or NULL -- one named question, because "on a team" is
-TWO facts and the sites that read it kept only one of them.
+two facts and the sites that read it kept only one of them.
 
 `resp.teamnum` is -1 for a client that has joined none, which is where
 `teams[-1]` came from in Pickup_ScoreboardMessage; and a slot can be NULL for a
@@ -2685,12 +2784,12 @@ bool check_for_teams(int arenanum)
     return false;
 }
 
-// R-RA-5's `ra_botcycle`, and it is the half RA2 does NOT have, because RA2
-// has no bots: "no bot hogs the arena while a person waits".
+// `ra_botcycle`, the half RA2 does not have, because RA2 has no bots: "no bot
+// hogs the arena while a person waits".
 //
 // Gladiator's own arena spells it as RA2_GetLongestWaitingHuman() -- pick the
 // human who has been waiting longest, then everyone on their team, then fill
-// the other side from the queue.  RA2's queue already IS "longest waiting"
+// the other side from the queue.  RA2's queue already is "longest waiting"
 // (fill_arena pops the front and fight_done appends the losers), so the same
 // rule here is: take the first waiting team that has a person on it, and fall
 // back to the front of the queue when none does.  A server of only bots is
@@ -2733,11 +2832,11 @@ int fill_arena(int arenanum)
     arenas[arenanum].sidepick = rand() % 2;
 
     for (count = 0; count < arenas[arenanum].numteams; count++) {
-        // Only the FIRST side is picked for a person: the donor's own shape,
-        // where RA2_StartMatch asks for the longest-waiting human once and
-        // then takes the longest-waiting anyone for the other side.  Doing it
-        // for every side would empty the arena of bots and there would be
-        // nothing to play against.
+        // Only the first side is picked for a person: RA2's own shape, where
+        // RA2_StartMatch asks for the longest-waiting human once and then takes
+        // the longest-waiting anyone for the other side.  Doing it for every
+        // side would empty the arena of bots and there would be nothing to play
+        // against.
         popped = pop_next_team(arenanum,
                                count == 0 && ra_botcycle && ra_botcycle->value);
 
@@ -2855,14 +2954,13 @@ CTFSetIDView
 The name of whoever the tracking camera -- or, failing that, the crosshair -- is
 on, for the `stat_string` row at the bottom of an observer's bar.
 
-THE CONFIGSTRING IS `general`, NOT `playerskins`, and that is the whole defect
-this used to have.  `stat_string` draws a configstring VERBATIM, and
-`playerskins + n` is "name\model/skin" -- ClientUserinfoChanged and
-setteamskin() both write it in exactly that form -- so the row read
-"Sarge\male/red" instead of "Sarge".  Threewave's own id view answers this by
-keeping the bare name in a configstring of its own (R-CTF-6, and the comment on
-the write in p_client.c); RA2 reached for the one it already had.  The write is
-now made under arena too, so the base moves here and nothing else changes.
+The configstring is `general`, not `playerskins`.  `stat_string` draws a
+configstring verbatim, and `playerskins + n` is "name\model/skin" --
+ClientUserinfoChanged and setteamskin() both write it in exactly that form -- so
+the row read "Sarge\male/red" instead of "Sarge".  Threewave's own id view
+answers this by keeping the bare name in a configstring of its own; RA2 reached
+for the one it already had.  The write is now made under arena too, so the base
+moves here and nothing else changes.
 ==================
 */
 void CTFSetIDView(edict_t *ent)
@@ -2909,12 +3007,11 @@ void UpdateStatusBars(int arenanum)
     tnode = &arenas[arenanum].activeteams;
     numteams = -1;
     while (tnode->next) {
-        // R-SEC-4: `numteams` is the index about to be WRITTEN, so the guard is
-        // the last valid index and not the count.  The donor tested against the
-        // count, so a third active team wrote teamname[2], membercount[2] and
-        // two rows of names[2][]/health[2][] one past three stack arrays -- and
-        // the member guard three lines down has the right shape to compare it
-        // against.
+        // `numteams` is the index about to be written, so the guard is the last
+        // valid index and not the count.  RA2 tested against the count, so a
+        // third active team wrote teamname[2], membercount[2] and two rows of
+        // names[2][]/health[2][] one past three stack arrays -- and the member
+        // guard three lines down has the right shape to compare it against.
         if (numteams >= MAX_STATUS_TEAMS - 1)
             break;
         numteams++;
@@ -2942,15 +3039,15 @@ void UpdateStatusBars(int arenanum)
 
     y = 40;
 
-    // THE SLOT NUMBERS ARE RESOLVED, NOT SPELLED.  This function composes a bar
-    // of its own rather than going through G_Statusbar(), and the donor wrote
-    // `num 2 19` and `stat_string 20` as literals -- the two numbers arena's
-    // column of STATSLOT_MAP happens to give SID_RA_LINEPOSITION and
-    // SID_RA_ID_VIEW.  The writes a few lines below go through G_SetStat, which
-    // reads that map, so a literal here is a second copy of a number only one
-    // of the two would notice changing; and G_InitStats() may DROP a slot the
-    // running configuration cannot reach, which a literal cannot express at all
-    // (R-OSP-7, R-COMPAT-5).  Ask the map, and omit the row it has no slot for.
+    // The slot numbers are resolved, not spelled.  This function composes a bar
+    // of its own rather than going through G_Statusbar(), and RA2 wrote `num 2
+    // 19` and `stat_string 20` as literals -- the two numbers arena's column of
+    // STATSLOT_MAP happens to give SID_RA_LINEPOSITION and SID_RA_ID_VIEW.  The
+    // writes a few lines below go through G_SetStat, which reads that map, so a
+    // literal here is a second copy of a number only one of the two would
+    // notice changing; and G_InitStats() may drop a slot the running
+    // configuration cannot reach, which a literal cannot express at all.  Ask
+    // the map, and omit the row it has no slot for.
     linepos = G_Stat(SID_RA_LINEPOSITION);
     idview  = G_Stat(SID_RA_ID_VIEW);
 
@@ -3304,13 +3401,13 @@ void arena_think(int arenanum)
                 ((team_t *)((qmenu_t *)popped->it)->it)->fighting = false;
                 tnode = &arenas[arenanum].activeteams;
 
-                // R-RA-5's `ra_playercycle`, and RA2 already implements the
-                // behaviour: "winners kept between matches" IS the winning
-                // team going to the FRONT of the waiting queue, because
-                // fill_arena pops from the front.  What was missing is the
-                // cvar, so a server could not turn it off -- with
-                // `ra_playercycle 0` a winning team queues like everybody
-                // else and the arena rotates strictly by arrival.
+                // `ra_playercycle`, and RA2 already implements the behaviour:
+                // "winners kept between matches" is the winning team going to
+                // the front of the waiting queue, because fill_arena pops from
+                // the front.  What was missing is the cvar, so a server could
+                // not turn it off -- with `ra_playercycle 0` a winning team
+                // queues like everybody else and the arena rotates strictly by
+                // arrival.
                 if ((((team_t *)((qmenu_t *)popped->it)->it)->teamnum == winner || winner == -1)
                     && (!ra_playercycle || ra_playercycle->value))
                     add_to_front_queue(popped, &arenas[arenanum].waitingteams);
@@ -3359,23 +3456,18 @@ void arena_init(edict_t *wsent)
     memset(teams, 0, MAX_TEAMS * sizeof(qmenu_t));
     memset(arenas, 0, sizeof(arenas));
 
-    // A NON-NEGATIVE `resp.teamnum` MUST INDEX A LIVE TEAM, and the line above
+    // A non-negative `resp.teamnum` must index a live team, and the line above
     // is where that would stop being true if nothing had already seen to it.
-    // R-KEY-5 puts the clear where the ARRAY IS DROPPED rather than where the
-    // replacement is made, so it is in g_spawn.c's loop at the
-    // gi.FreeTags(TAG_LEVEL) -- beside the four menu handles that are the same
-    // contract -- and not here.  The read side is RA_TeamOf(), which asks both
-    // halves of the question.  See that loop, and doc/reconciliation.md R-186.
+    // The clear goes where the array is dropped rather than where the
+    // replacement is made -- g_spawn.c's loop at the gi.FreeTags(TAG_LEVEL),
+    // beside the four menu handles that are the same contract -- and not here.
+    // The read side is RA_TeamOf(), which asks both halves of the question.
 
     admincode = gi.cvar("admincode", "0", 0);
-    // R-RA-5's two, defaulting on, which is RA2's own unconditional behaviour.
-    // p_botmenu.c obtains both with the same default and toggles them, which is
-    // what R-BOT-28's arena menu page is for; the default agreeing is what
-    // R-COMPAT-6 asks of a name obtained in two translation units.
+    // RA2's two, defaulting on, which is RA2's own unconditional behaviour.
+    // p_botmenu.c obtains both with the same default and toggles them.
     ra_playercycle = gi.cvar("ra_playercycle", "1", 0);
     ra_botcycle = gi.cvar("ra_botcycle", "1", 0);
-    // R-RA-7, and OFF by default: `minimumplayers` is what a server that says
-    // nothing gets, exactly as it always has.
 
     num_arenas = wsent->arena;  //worldspawn arena flag is # of arenas
     if (num_arenas < 0 || num_arenas > MAX_ARENAS) {
@@ -3444,8 +3536,8 @@ void arena_init(edict_t *wsent)
     load_motd();
 }
 
-// Prefixed per sec 7 rule 4 and reached from g_misc.c's per-ruleset dispatcher,
-// which already chose between Threewave's and Ground Zero's (R-44).
+// Prefixed and reached from g_misc.c's per-ruleset dispatcher, which already
+// chose between Threewave's and Ground Zero's.
 void ra_SP_trigger_teleport(edict_t *ent)
 {
     ent->touch = teleporter_touch;
@@ -3465,40 +3557,40 @@ void ra_SP_func_illusionary(edict_t *ent)
     gi.linkentity(ent);
 }
 
-// RA2's SP_info_teleport_destination was here and was an EMPTY body -- the
+// RA2's SP_info_teleport_destination was here and was an empty body -- the
 // classname has to exist so ED_CallSpawn does not reject the entity, and RA2
 // needs nothing else from it.  g_misc.c already owns that classname and
-// dispatches it per ruleset (R-44), so an empty stub here is a link collision
-// rather than a feature; the arena arm is a row in that dispatcher.
+// dispatches it per ruleset, so an empty stub here is a link collision rather
+// than a feature; the arena arm is a row in that dispatcher.
 
 // RA2's grapple was here -- 280 lines, CTFPlayerResetGrapple through
-// CTFWeapon_Grapple, function for function the same set Threewave ships.  That
-// is the measurement R-50 made and sec 7 rule 6's resolution: ONE grapple, and
-// it is src/ctf/g_ctf.c's.  RA2's is a fork of it, not a rival design, so this
-// is a deletion rather than a choice between two implementations.  What RA2
-// tunes on top of it -- `allow_grapple` -- is a parameter on that code.
+// CTFWeapon_Grapple, function for function the same set Threewave ships.  One
+// grapple ships, and it is src/ctf/g_ctf.c's.  RA2's is a fork of it, not a
+// rival design, so this is a deletion rather than a choice between two
+// implementations.  What RA2 tunes on top of it -- `allow_grapple` -- is a
+// parameter on that code.
 
 
 /*
 ==================
 RA_Obituary
 
-RA2's side of a death: the round statistics, the SCORE, and the announcer.  The
-obituary TEXT stays baseq2's (merged with Threewave's and both mission packs');
-RA2's copy of it is a stale fork of id's with sounds bolted on, which sec 7 rule
-1 decides -- so this is the part that is RA2's feature and nothing else.
+RA2's side of a death: the round statistics, the score, and the announcer.  The
+obituary text stays baseq2's (merged with Threewave's and both mission packs');
+RA2's copy of it is a stale fork of id's with sounds bolted on -- so this is the
+part that is RA2's feature and nothing else.
 
-*THE SCORE IS ALL OF IT, and that is R-158.*  This used to take only the suicide
-half and leave the rest to the baseq2 obituary underneath, which double-counted
-every one of them: `ClientObituary` calls this first and then reaches its own
-`resp.score--` on the very same paths, so a fall, a lava bath, a drowning, a
-trigger_hurt or a self-rocket cost TWO frags where 1999 costs one.  The kill
-half was worse than double-counted, it was wrong: baseq2 keys the team-kill
-penalty on `MOD_FRIENDLY_FIRE`, which `T_Damage` only raises when `dmflags`
-carries the team bits, and arena never sets them -- so a team kill scored +1.
-And `scorebydamage` suppresses frag scoring altogether in the donor, because
-there the number is `damagedealt / 100` and g_combat.c owns it; baseq2 knows
-nothing about that and kept adding to it.
+The score is all of it.  This used to take only the suicide half and leave the
+rest to the baseq2 obituary underneath, which double-counted every one of them:
+`ClientObituary` calls this first and then reaches its own `resp.score--` on the
+very same paths, so a fall, a lava bath, a drowning, a trigger_hurt or a
+self-rocket cost two frags where 1999 costs one.  The kill half was worse than
+double-counted, it was wrong: baseq2 keys the team-kill penalty on
+MOD_FRIENDLY_FIRE, which `T_Damage` only raises when `dmflags` carries the team
+bits, and arena never sets them -- so a team kill scored +1.  And
+`scorebydamage` suppresses frag scoring altogether in RA2, because there the
+number is `damagedealt / 100` and g_combat.c owns it; baseq2 knows nothing about
+that and kept adding to it.
 
 So the arithmetic lives here, once, in the donor's own shape, and the three
 baseq2 sites are gated off under arena (p_client.c).
@@ -3541,13 +3633,13 @@ void RA_Obituary(edict_t *self, edict_t *inflictor, edict_t *attacker)
             RA2_Stats_Add(arenas[ctx].stats, self - g_edicts, RA2_STAT_SCORE, -1);
         }
 
-        // The donor counts this one differently in the two arms this branch
-        // merges, and the asymmetry is deliberate rather than an oversight: a
-        // real self-kill (`attacker == self`) is a suicide however the arena
-        // scores, but a death with no attacker at all -- a fall, lava, a
-        // trigger_hurt -- is counted only when the arena scores by frags.  Both
-        // arms of ClientObituary are a byte-exact match against the 1999
-        // binary, so this is what the statsfile is supposed to say.
+        // RA2 counts this one differently in the two arms this branch merges,
+        // and the asymmetry is deliberate rather than an oversight: a real
+        // self-kill (`attacker == self`) is a suicide however the arena scores,
+        // but a death with no attacker at all -- a fall, lava, a trigger_hurt --
+        // is counted only when the arena scores by frags.  Both arms of
+        // ClientObituary are a byte-exact match against the 1999 binary, so this
+        // is what the statsfile is supposed to say.
         if (attacker == self || !arenas[ctx].scorebydamage)
             RA2_Stats_Add(arenas[ctx].stats, self - g_edicts, RA2_STAT_SUICIDES, 1);
         return;
@@ -3572,12 +3664,12 @@ void RA_Obituary(edict_t *self, edict_t *inflictor, edict_t *attacker)
     // were declared in ra2stats.h and incremented nowhere, so the breakdown in
     // every round record was a column of zeroes.
     //
-    // RA2 buckets them by the INFLICTOR'S MODEL -- grenade, rocket, then the
+    // RA2 buckets them by the inflictor's model -- grenade, rocket, then the
     // attacker's held weapon for the rail -- which cannot see the forty-odd
     // means of death this merged tree has, and which mis-files a held grenade
     // as whatever the shooter happened to be carrying.  `meansOfDeath` is the
-    // same question asked by name (sec 7 rule 3), and is what the obituary text
-    // above already switches on.
+    // same question asked by name, and is what the obituary text above already
+    // switches on.
     switch (mod) {
     case MOD_GRENADE:
     case MOD_G_SPLASH:
@@ -3625,9 +3717,9 @@ frames ago while last frame's did not; ten of those inside five seconds marks
 the client.  Impulses 161..179 are the cooperating-bot handshake, which marks it
 honestly instead.
 
-Kept as the donor has it and NOT acted on here -- `resp.isbot` is only read by
-RA2's own reporting.  Whether a heuristic like this should be enabled by default
-on a public server is R-SEC's question in Phase 8, not this merge's.
+Kept as RA2 has it and not acted on here -- `resp.isbot` is only read by RA2's
+own reporting.  Whether a heuristic like this should be enabled by default on a
+public server is a separate question.
 ==================
 */
 void RA_ZBotSample(edict_t *ent, usercmd_t *ucmd)
@@ -3664,11 +3756,11 @@ RA_HookThink
 
 RA2's offhand grapple, once per client command.  The HOOK is Threewave's -- sec
 7 rule 6 chose one implementation and deleted RA2's fork of it -- but the two
-conditions RA2 puts on firing it are RA2's, and R-164 is that they had gone
+conditions RA2 puts on firing it are RA2's, and they had gone
 missing with the fork.
 
 `grap_on` latched `ctf_hookstate` and the shared CTFHookThink() did the rest,
-whose gate is `ctf_hook`: a cvar CTFInit registers "1" for EVERY ruleset,
+whose gate is `ctf_hook`: a cvar CTFInit registers "1" for every ruleset,
 because Threewave's flag and tech paths are reached from shared code.  So under
 arena the offhand hook was on unconditionally -- in an arena whose `arena.cfg`
 says `grapple: 0` (which the shipped file does), during a countdown, and for an
@@ -3680,8 +3772,8 @@ The donor's two conditions are `allow_grapple` -- arena.cfg's `grapple:` key --
 and FIGHT_ALIVE, which under arena is not the same question as "not an
 observer": FIGHT_DEAD is a third state and a corpse must not grapple.
 
-One thing is deliberately NOT the donor's.  RA2 refires while the button is held
-and the hook is not out; this keeps R-CTF-3's FIRED bit, so a press is one
+One thing is deliberately not the donor's.  RA2 refires while the button is held
+and the hook is not out; this keeps the FIRED bit, so a press is one
 grapple, which is what `hookon` already means everywhere else in this tree.
 ==================
 */
@@ -3731,12 +3823,11 @@ RA_Precache
 RA2's own worldspawn precache, and the whole of it is the team-skin icon table
 that RA_SkinIcon() matches against.
 
-*R-161: THE TABLE WAS NEVER FILLED.*  The four arrays are declared at the top of
-this file, read below, and were written nowhere -- the donor fills them in
-SP_worldspawn and the merge dropped the loop.  All four were therefore zero,
-`gi.imageindex` never returns zero for a non-empty name, the match below could
-not succeed, and RA_SkinIcon was an unconditional `return level.pic_health`:
-RA2's team colour in the health-icon slot has never once appeared.
+The table was never filled.  The four arrays are declared at the top of this
+file, read below, and were written nowhere -- RA2 fills them in SP_worldspawn
+and the merge dropped the loop.  All four were therefore zero, `gi.imageindex`
+never returns zero for a non-empty name, the match below could not succeed, and
+RA_SkinIcon was an unconditional `return level.pic_health`.
 
 Filling it also does what its name says.  These are the only images the mod
 needs that no entity in the map asks for, so without this the first player to
@@ -3759,10 +3850,10 @@ void RA_Precache(void)
 ==================
 RA_SkinIcon
 
-R-OSP-7's table records slot 0 as "also STAT_SKIN_ICON": RA2 draws the player's
-team skin where baseq2 draws the health icon.  Same slot, same `pic 0` in the
-bar, different writer -- so this is a value, not a second slot.  Falls back to
-the health icon for a skin that is not one of the seven team skins.
+RA2 draws the player's team skin where baseq2 draws the health icon: same slot,
+same `pic 0` in the bar, different writer -- so this is a value, not a second
+slot.  Falls back to the health icon for a skin that is not one of the seven
+team skins.
 ==================
 */
 int RA_SkinIcon(edict_t *ent)
@@ -3834,8 +3925,8 @@ void RA_SetQueueStats(edict_t *ent)
 // RA2's three scoreboard layouts and the chooser that picks between them.  They
 // live here rather than in p_hud.c for the reason Threewave's CTFScoreboard
 // does: a ruleset's scoreboard is that ruleset's, and the dispatch already has
-// a ScoreboardMessage row for exactly this (R-MODE-5).  RA2 wrote them in its
-// own p_hud.c, where they would have had to be gated three times over.
+// a ScoreboardMessage row for exactly this.  RA2 wrote them in its own p_hud.c,
+// where they would have had to be gated three times over.
 
 /*
 ==================
@@ -4109,10 +4200,9 @@ void Pickup_ScoreboardMessage(edict_t *ent)
             continue;
         // A client in a pickup arena is on one of its two teams by
         // construction -- AddtoArena refuses the arena to anyone who is not --
-        // so the donor indexed `teams[]` here with no test at all, and
-        // `resp.teamnum` is -1 for a client that is on no team: teams[-1],
-        // read as a team_t *, dereferenced.  RA_TeamOf answers both halves,
-        // and a client with no team belongs to neither side.
+        // so RA2 indexed `teams[]` here with no test at all, and `resp.teamnum`
+        // is -1 for a client on no team: teams[-1] read as a team_t *, and
+        // dereferenced.  RA_TeamOf answers both halves.
         t = RA_TeamOf(cl_ent);
         if (!t || t->side)
             continue;
@@ -4260,12 +4350,11 @@ void RA_ScoreboardMessage(edict_t *ent, edict_t *killer)
 =================
 RA_EndLevel
 
-R-OSP-9.  RA2 has its own map rotation (`maploop.c`) and baseq2 has `sv_maplist`
-inside EndDMLevel; the double-rotation bug is what happens when both are live,
-and the port that put `get_next_map()` into EndDMLevel had exactly that.  Here
-it is the arena ruleset's EndLevel row, so only one rotation can run and which
-one is a property of the ruleset rather than of call order (sec 7 rule 6's third
-exemption, R-MODE-5's EndLevel hook).
+RA2 has its own map rotation (`maploop.c`) and baseq2 has `sv_maplist` inside
+EndDMLevel; running both is the double-rotation bug, which the port that put
+get_next_map() into EndDMLevel had.  Here it is the arena ruleset's EndLevel
+row, so only one rotation can run, and which one is a property of the ruleset
+rather than of call order.
 
 **DF_SAME_LEVEL OUTRANKS THE LOOP, and the split is why that has to be said
 here.**  The donor asks the dmflag FIRST and returns on it: `port_ra2:g_main.c`'s
@@ -4303,45 +4392,40 @@ void RA_EndLevel(void)
 =================
 RA_CheckRules
 
-R-RA-3's row.  The seven-state round machine is the arena ruleset's match rule,
-so it is reached through the dispatch rather than bolted onto G_RunFrame beside
-CheckDMRules -- which is where RA2's own port called it, and which left two
-match-rule systems with no statement of how they compose.
+The seven-state round machine is the arena ruleset's match rule, so it is
+reached through the dispatch rather than bolted onto G_RunFrame beside
+CheckDMRules -- which is where RA2's own port called it, leaving two match-rule
+systems with no statement of how they compose.
 
-They DO compose, and the statement is here: `arena_think` runs a **round**
-inside one arena, `CheckDMRules` ends the **level**.  RA2 keeps `timelimit` and
-`fraglimit` working at level scope and so does this; what changes is that both
-now happen on one row rather than at two call sites in G_RunFrame.  The order
-between them is not this row's to pick -- it is the donor's, and it is kept
-(see below).
+They do compose: `arena_think` runs a round inside one arena, `CheckDMRules`
+ends the level.  `timelimit` and `fraglimit` keep working at level scope as they
+do in RA2; what changes is that both now happen on one row.  The order between
+them is RA2's and is kept -- see below.
 
 `multi_arena_think` walks one arena per frame -- `level.framenum % (num_arenas *
 2)` -- so a server with 32 arenas costs one arena's think per frame rather than
 32.  `num_arenas` is at least 1 after arena_init(), which is what makes that
 modulo safe; the guard says so rather than trusting it, because a divide by zero
-here is a server-killing fault in the frame loop.
+in the frame loop kills the server.
 =================
 */
 void RA_CheckRules(void)
 {
-    // Level scope FIRST, and that is the donor's own order -- CheckDMRules()
-    // ahead of multi_arena_think(), in a G_RunFrame that matches the 1999
-    // binary byte for byte.  It matters on exactly one frame -- the one
-    // where `timelimit` or `fraglimit` trips -- because BeginIntermission sets
-    // `level.intermission_framenum` and multi_arena_think returns on it.  With
-    // the arena thinking first, that last tick could centerprint "X has won the
-    // round!" or restart a countdown on the frame the map ends, and a tick that
-    // landed on ASTATE_NEXTROUND wrote a round record and bumped the round --
-    // so BeginIntermission's RA2_Stats_End then wrote a second record for a
-    // round nobody played.
+    // Level scope first, which is RA2's own order -- CheckDMRules() ahead of
+    // multi_arena_think().  It matters on the one frame where `timelimit` or
+    // `fraglimit` trips, because BeginIntermission sets
+    // level.intermission_framenum and multi_arena_think returns on it.  With
+    // the arena thinking first, that last tick could centerprint a round win
+    // or restart a countdown on the frame the map ends, and a tick landing on
+    // ASTATE_NEXTROUND wrote a round record that RA2_Stats_End then
+    // duplicated.
     CheckDMRules();
 
     if (num_arenas > 0) {
         multi_arena_think();
-        // R-RA-8 before R-131: a bot standing in an arena that has switched
-        // bots off is not a bot that should be considered for following the
-        // people anywhere, and both sweeps end in the same two calls, so the
-        // eviction gets the first word rather than undoing a move just made.
+        // Eviction first: a bot standing in an arena that has switched bots off
+        // is not a candidate for following the people anywhere, and both sweeps
+        // end in the same two calls, so this avoids undoing a move just made.
         RA_BotsVotedOut();
         RA_BotFollowPeople();
     }
@@ -4355,7 +4439,7 @@ const ruleset_ops_t ops_arena = {
     // BeginIntermission, SelectSpawnPoint and ClientPlaced are still dm's:
     // arena does its own placement inside init_player()/reinit_player(), which
     // PutClientInServer calls before the shared spawn path runs, so there is
-    // nothing for those rows to do.  R-MODE-6 makes a NULL row inherit.
+    // nothing for those rows to do.  A NULL row inherits.
 };
 
 /*
@@ -4363,16 +4447,15 @@ const ruleset_ops_t ops_arena = {
 G_Svcmd_ArenaDump_f
 
 `sv arenadump` -- one line per connected client under `arena`, naming the four
-facts no other channel carries together: which ARENA it is in, which TEAM it is
+facts no other channel carries together: which arena it is in, which team it is
 on and whether that team is fighting, the round-machine state of that arena, and
 the three edict fields the round's placement writes -- `solid`, `takedamage` and
 the origin it was placed at.
 
-It exists because three defects in one play test were invisible to every other
-instrument.  A client's own HUD reports its arena; the scoreboard reports its
-team; `sv ruleset` counts bots per arena.  None of them can say that two clients
-are at the SAME origin with `solid` SOLID_BBOX on both -- which is a wedged
-telefrag -- or that a bot is on a team in an arena the people are not in.
+A client's own HUD reports its arena and the scoreboard reports its team, but
+neither can say that two clients are at the same origin with `solid` SOLID_BBOX
+on both -- a wedged telefrag -- or that a bot is on a team in an arena the
+people are not in.
 =================
 */
 void G_Svcmd_ArenaDump_f(void)
@@ -4392,9 +4475,8 @@ void G_Svcmd_ArenaDump_f(void)
     gi.cprintf(NULL, PRINT_HIGH, "\n");
 
     for (i = 1; i <= num_arenas; i++) {
-        // `want` and `here` are printed for EVERY arena and not only the one
-        // the fill is aimed at: the point of the row is that the number is the
-        // arena's own, so a reader can see all of them differ (R-RA-7).
+        // `want` and `here` are printed for every arena and not only the one the
+        // fill is aimed at, so a reader can see that all of them differ.
         gi.cprintf(NULL, PRINT_HIGH,
                    "arena %-2d     %-12s pickup=%d round=%d/%d "
                    "waiting=%d active=%d sidepick=%d ppt=%d "
@@ -4411,18 +4493,13 @@ void G_Svcmd_ArenaDump_f(void)
                    // way to see the value in force is to be hit by something.
                    arenas[i].armorprotect, arenas[i].healthprotect);
 
-        // THE LOADOUT, WHICH NOTHING ELSE COULD SAY.  R-182 recorded that the
-        // whole feature is `sv`-invisible and had to be measured with a probe
-        // compiled into give_ammo(); two of its defects then shipped -- pack
-        // weapons that no arena ever granted, and Teslas and Traps handed out
-        // by servers running neither pack -- and both are exactly what one
-        // line here reports.
+        // The loadout, which nothing else reports: pack weapons that no arena
+        // granted, and Teslas and Traps handed out by servers running neither
+        // pack, are both invisible to `sv` without this line.
         //
-        // `mask` is what arena.cfg and the settings menu STORE; `grants` is
-        // what give_ammo() honours, which differs by every pack weapon whose
-        // content layer is off (the bit is carried, not cleared -- see
-        // give_ammo).  Printing both is the point: equal means the layers agree
-        // with the config, and a difference names which weapon the layer took.
+        // `mask` is what arena.cfg and the settings menu store; `grants` is what
+        // give_ammo() honours, which differs by every pack weapon whose content
+        // layer is off (the bit is carried, not cleared -- see give_ammo).
         gi.cprintf(NULL, PRINT_HIGH,
                    "  loadout    mask=%#06x grants=%#06x pack:", arenas[i].weapons,
                    RA_ArenaGrantsMask(i));
@@ -4471,9 +4548,8 @@ void G_Svcmd_ArenaDump_f(void)
                    e->s.origin[0], e->s.origin[1], e->s.origin[2]);
     }
 
-    // Two clients whose bounding boxes overlap is the state a wedged telefrag
-    // leaves behind, and it is worth naming rather than leaving to be read off
-    // the coordinates above.
+    // Two clients whose bounding boxes overlap is what a wedged telefrag leaves
+    // behind, so name it rather than leaving it to be read off the coordinates.
     for (i = 0; i < game.maxclients; i++) {
         edict_t *a = &g_edicts[i + 1];
 

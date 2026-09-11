@@ -1,6 +1,6 @@
 # Vendored provenance must round-trip byte-for-byte.
 #
-# R-PROV-2a verified the harness archive byte-identical by recursive md5, and the
+# The harness archive was verified byte-identical by recursive md5, and the
 # rr-cache is content-addressed by conflict hash -- git normalising CRLF to LF in
 # a preimage would silently stop the cache matching. The OSP config inputs are
 # CRLF as shipped in 1999 and are an input to mkosp.py. So: no text conversion,
@@ -9,21 +9,17 @@ vendor/** -text -diff
 vendor/**/*.bundle binary
 
 # The engine headers and game sources are vendored verbatim from q2pro
-# (R-CORE-9, R-CORE-5) and must stay byte-identical to the pin.
+# and must stay byte-identical to the pin.
 inc/** -text
 src/** -text
 
-# The shipped gamedir set (D6).  `botcfg/bots.cfg` is the 1999 roster copied
-# from gladiator-bot-restored/assets and is CRLF as it shipped; the parser does
-# not care, but a provenance copy that git rewrites is no longer a copy.
-# `arena.cfg` is Rocket Arena 2's own arena-definition file on the same terms
-# (SPECS 1.27, doc/reconciliation.md R-129) -- 1028 lines, CRLF as it shipped.
+# The shipped gamedir set.  `arena.cfg` is Rocket Arena 2's own
+# arena-definition file -- 1028 lines, CRLF as it shipped.  The parser does not
+# care, but a donor's file that git rewrites is no longer a copy of it.
 #
-# This rule stops GIT rewriting it; it cannot stop an EDITOR.  `cdb9df2`
-# rewrote the whole file to add the mission-pack weapon names and wrote LF,
-# and the loss went unnoticed for three commits because nothing checks and
+# This rule stops GIT rewriting it; it cannot stop an EDITOR.  A whole-file
+# rewrite that writes LF loses the property silently, because nothing checks and
 # nothing breaks -- the parser's `fscanf("%s")` takes CR as whitespace.
 # Restored to CRLF, and recorded so that "it is protected" is not read as
 # "it cannot be lost".
-colosseum/botcfg/bots.cfg -text
 colosseum/arena.cfg -text

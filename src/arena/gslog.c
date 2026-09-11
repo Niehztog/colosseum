@@ -17,11 +17,10 @@ along with this program; if not, write to the Free Software
 Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 */
-// Rocket Arena 2 v2.25, from rocketarena2-public@d20e1ce (doc/provenance.md).
+// Rocket Arena 2 v2.25, from rocketarena2-public@d20e1ce.
 // Donor-only: baseq2 has no counterpart, so it lives in src/arena/ rather than
-// being merged into a spine file (R-CORE-7).  The reconstruction's asm-matching
-// address comments are stripped -- SPECS.md N1 makes those oracles meaningless
-// here, and they survive at the pin.
+// being merged into a spine file.  The reconstruction's asm-matching
+// address comments are stripped.
 #include "g_local.h"
 
 
@@ -33,7 +32,7 @@ netlog, and why there is no socket here
 
 RA2 forwarded every kill, connect and disconnect line to a remote host over UDP
 -- `netlog <host:port>`, one datagram per event, through its own copies of
-gethostbyname/socket/connect/send.  R-SEC-7 allows the game library exactly one
+gethostbyname/socket/connect/send.  The game library is allowed exactly one
 outbound process and no outbound network at all, so the forwarding is gone: the
 seven net_* helpers, GSSendLine, the winsock startup pair and net_compat.h with
 them.  Three things went with it that were worth losing on their own terms --
@@ -43,8 +42,8 @@ the operator's log host into a dead server.
 
 The LOCAL log is untouched: `logfile 2` still writes every line to
 `<gamedir>/<logname>`, which is what every RA2 log parser reads anyway.  The
-`netlog` cvar itself stays registered (R-COMPAT-3: a legacy name keeps
-resolving) and InitGame says once that setting it does nothing.
+`netlog` cvar itself stays registered so a legacy name keeps resolving, and
+InitGame says once that setting it does nothing.
 =================
 */
 
@@ -139,7 +138,7 @@ by listing three classnames inline, and names the weapon in the suicide record
 only for those three -- so a suicide with anything else is logged with an empty
 weapon field.
 
-R-183: the mission packs bring five more weapons that can do it, and the list had
+The mission packs bring five more weapons that can do it, and the list had
 none of them, so a Phalanx or Prox Launcher suicide went into the round log
 unattributed.  Named here rather than inline because the answer is a property of
 the weapon and the caller already has three ways to reach the same record.
@@ -148,7 +147,7 @@ The TRAP and the TESLA are here although they are thrown rather than fired: both
 damage whatever is nearby including the thrower, which is the only thing this
 predicate is asking, and both carry IT_WEAPON so both can be `pers.weapon`.
 
-THE A-M BOMB IS NOT, and checking why is what removed it: `ammo_nuke` is
+The A-M bomb is not, and checking why is what removed it: `ammo_nuke` is
 IT_POWERUP in the itemlist, with no IT_WEAPON bit, so it is a use-item and never
 becomes `pers.weapon`.  A row for it would have read plausibly and matched
 nothing -- the same dead-branch shape as item 5's `ionrippergun`, arrived at from
@@ -161,9 +160,9 @@ static bool splash_weapon(const char *classname)
         "weapon_grenadelauncher",   // RA2's three
         "weapon_rocketlauncher",
         "weapon_bfg",
-        "weapon_phalanx",           // R-183: Xatrix
+        "weapon_phalanx",           // Xatrix
         "ammo_trap",
-        "weapon_proxlauncher",      // R-183: Ground Zero
+        "weapon_proxlauncher",      // Ground Zero
         "ammo_tesla",
     };
     int i;

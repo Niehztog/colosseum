@@ -17,12 +17,11 @@ along with this program; if not, write to the Free Software
 Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 */
-// OSP Tourney DM v2.75, from osp-tourney@1d8427e (doc/provenance.md).
+// OSP Tourney DM v2.75, from osp-tourney@1d8427e.
 // Donor-only: baseq2 has no counterpart, so it lives in src/tourney/ rather
-// than being merged into a spine file (R-CORE-7).  The reconstruction's
-// asm-matching address comments are stripped -- SPECS.md N1 makes those oracles
-// meaningless here, and they survive at the pin.
-// osp_menus.c -- <INVENTED FILENAME>. The mod's pop-up menu callbacks.
+// than being merged into a spine file.  The reconstruction's asm-matching
+// address comments are stripped.  osp_menus.c -- filename assigned by this
+// tree.  The mod's pop-up menu callbacks.
 //
 // Thirteen osp_pmenu_t tables (id CTF's p_menu.c engine) and the callbacks behind
 // their entries: an opener per menu, an `OSP_update*Menu` per menu that
@@ -39,7 +38,7 @@ void OSP_menuVotePercent(char *pct, size_t pctsize, char *out, size_t outsize);
 #include "tourney/osp_stats.h"
 #include "bot/bl_main.h"
 #include "bot/bl_botcfg.h"
-// The two bot entry points, until Phase 6 -- see src/tourney/osp_botseam.c.
+// The two bot entry points.
 void BotServerCommand(char *str, ...);
 void BotDestroy(edict_t *bot);
 
@@ -306,7 +305,7 @@ char    voted_botname[32];
 
 // The menu text the update functions build.  Every *_Menu table entry's `text`
 // is just a pointer, so the builders sprintf into file statics and point the
-// entries at them.  <INVENTED NAMES>.
+// entries at them.  Names reconstructed.
 static char pm_line1[32];
 static char pm_line2[32];
 static char pm_pct[32];
@@ -382,10 +381,10 @@ static char admin_title[32];
 // A SECOND 32-byte line static here, and nothing in the image references it:
 // real's .bss gives this position 64 bytes where one line needs 32, and the
 // next TU's block starts exactly 0x40 on.  Only its existence and size are
-// evidence -- the name is <INVENTED>.
+// evidence -- the name is reconstructed.
 static q_unused char admin_unused_line[32];
 
-// <INVENTED NAMES>: the three ints the AdminMain_Menu select entries carry,
+// Names reconstructed: the three ints the AdminMain_Menu select entries carry,
 // dereferenced into resp.osp_r238.
 static int  admin_mode_map = 1;
 static int  admin_mode_ban = 2;
@@ -395,15 +394,15 @@ static int  admin_mode_kick = 4;
 ================
 OSP_refereeOnly
 
-THE MENU ROUTE INTO THE ADMIN TREE HAD NO CHECK OF ITS OWN.
+The menu route into the admin tree had no check of its own.
 
 The text route does: osp_clientcmd.c gates `r_kick`, `r_ban`, `r_map` and the
 rest behind `else if (ent->osp_e39c)`, so a player who types them is refused by
 the dispatcher before the command function is reached -- which is why
 OSP_rban_cmd and friends never needed a check inside them.  The menu route
-reached the SAME functions and was gated by one thing only: whether
+reached the same functions and was gated by one thing only: whether
 OSP_updateTeamMenu/OSP_updateDMMenu had left a SelectFunc on the "*Admin Menu"
-row.  That is a field in a file-scope table, written from THIS client's
+row.  That is a field in a file-scope table, written from this client's
 `osp_e39c` and read by every client, which is the bug p_menu.c departure 2 is
 about; before the per-client copy, a referee opening their menu handed the row
 to anyone else who had one open and then moved the cursor.
@@ -478,7 +477,7 @@ void OSP_adminSelectMenu(edict_t *ent, osp_pmenu_t *p)
     if (!OSP_refereeOnly(ent))
         return;
 
-    // READ THE ARG BEFORE THE CLOSE.  `p` points into this client's private
+    // Read the arg before the close.  `p` points into this client's private
     // copy of the rows, and osp_PMenu_Close() frees that copy -- so the
     // donor's order, close and then dereference, became a read of released
     // memory the moment the entries stopped being the global table
@@ -920,16 +919,16 @@ int OSP_updateDMMenu(edict_t *ent)
         Q_snprintf(dm_play_line, sizeof(dm_play_line), "*Enter the Game");
     RegDM_Menu[4].text = dm_play_line;
 
-    // THE `else` IS NOT COSMETIC.  These tables are file-scope globals and the
+    // THE `else` is not cosmetic.  These tables are file-scope globals and the
     // builders restage them per client, so a branch that only ever CLEARS a
     // SelectFunc is a one-way latch: the donor's version of this test has no
     // else, and `RegDM_Menu[4]` -- "Enter the Game" -- is assigned nowhere
     // else in the mod, so its only non-NULL value is the initialiser above.
     // One referee opening the DM menu, or anyone opening it during a match
-    // with late joining locked, killed that row for EVERY client; and because
+    // with late joining locked, killed that row for every client; and because
     // the table has static storage duration and nothing re-initialises it, the
     // row stayed dead across map changes for the life of the loaded library.
-    // Deep-copying the rows per client (R-MENU-3, p_menu.c departure 2) does
+    // Deep-copying the rows per client (see p_menu.c, departure 2) does
     // not reach this: what is latched is the template every copy is taken
     // from.
     if (ent->osp_e39c == 1 ||
@@ -2136,7 +2135,7 @@ int OSP_updateAdminSelectMenu(edict_t *ent)
             Q_snprintf(as_choice, sizeof(as_choice), "%s",
                     game.clients[ent->client->resp.osp_r290].pers.netname);
             Q_snprintf(as_addr, sizeof(as_addr), "[ %s ]",
-                    g_edicts[ent->client->resp.osp_r290 + 1].osp_e37c);
+                    game.clients[ent->client->resp.osp_r290].pers.address);
             Q_strlcpy(as_action, "*KICK selected player", sizeof(as_action));
             AdminSelect_Menu[11].SelectFunc = OSP_playerAdminChoose;
         }
@@ -2154,7 +2153,7 @@ int OSP_updateAdminSelectMenu(edict_t *ent)
             Q_snprintf(as_choice, sizeof(as_choice), "%s",
                     game.clients[ent->client->resp.osp_r290].pers.netname);
             Q_snprintf(as_addr, sizeof(as_addr), "[ %s ]",
-                    g_edicts[ent->client->resp.osp_r290 + 1].osp_e37c);
+                    game.clients[ent->client->resp.osp_r290].pers.address);
             Q_strlcpy(as_action, "*BAN selected player", sizeof(as_action));
             AdminSelect_Menu[11].SelectFunc = OSP_playerAdminChoose;
         }
@@ -2278,7 +2277,7 @@ void OSP_mapAdminChoose(edict_t *ent, osp_pmenu_t *p)
         sl_SoftGameEnd(&gi, level);
         OSP_Stats_MatchEnd("referee map change");
         manual_map = 1;
-        EndDMLevel();
+        G_EndLevel();
         return;
     }
 
@@ -2312,11 +2311,10 @@ void OSP_playerAdminChoose(edict_t *ent, osp_pmenu_t *p)
                        target->client->pers.netname);
 
             if (server_log) {
-                OSP_getPlayerAddr(target);
                 OSP_logAdminLog("Referee_Kick: %s -> %s [%s]",
                                 ent->client->pers.netname,
                                 target->client->pers.netname,
-                                target->osp_e37c);
+                                target->client->pers.address);
             }
 
             if (target->flags & FL_BOT) {

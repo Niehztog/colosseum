@@ -17,11 +17,10 @@ along with this program; if not, write to the Free Software
 Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 */
-// Rocket Arena 2 v2.25, from rocketarena2-public@d20e1ce (doc/provenance.md).
+// Rocket Arena 2 v2.25, from rocketarena2-public@d20e1ce.
 // Donor-only: baseq2 has no counterpart, so it lives in src/arena/ rather than
-// being merged into a spine file (R-CORE-7).  The reconstruction's asm-matching
-// address comments are stripped -- SPECS.md N1 makes those oracles meaningless
-// here, and they survive at the pin.
+// being merged into a spine file.  The reconstruction's asm-matching
+// address comments are stripped.
 // ra2stats.h -- local round statistics log
 //
 // Replaces the GameSpy `gstats` SDK that shipped with RA2 v2.25.  That
@@ -37,8 +36,11 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 //
 // Controlled by two cvars, mirroring RA2's own logfile/logname pair:
 //
-//   statsfile   0 = off, 1 = on (default 1)
-//   statsname   file name inside the game directory (default ra2stats.jsonl)
+//   statsfile   0 = off, 1 = on (default 1).  Registered by G_InitRuleset()
+//               and read as `g_statsfile`, because tourney names the pair too
+//               and means the same thing by it (R-COMPAT-6)
+//   statsname   file name under <homedir-or-basedir>/<gamedir>; ra2stats.jsonl
+//               is the default the resolver picks under `arena`
 //
 // gslog.c's StdLog is unaffected -- it logs individual kills and connects
 // across the whole server, where this logs a per-arena, per-round summary.

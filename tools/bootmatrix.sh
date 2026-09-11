@@ -1,5 +1,5 @@
 #!/bin/sh
-# bootmatrix.sh -- R-VER-2's boot matrix, run rather than remembered.
+# bootmatrix.sh -- the boot matrix, run rather than remembered.
 #
 # Every g_ruleset x xatrix x rogue combination (7 x 2 x 2 = 28) starts, loads a
 # map the ruleset can hold, runs past 100 frames, and is asked `sv ruleset`.  A
@@ -8,7 +8,7 @@
 #
 # It had been run by hand once per phase, which is how a matrix stops being run.
 #
-# `--control` is the positive control this check ships with (SPECS.md sec 0): two
+# `--control` is the positive control this check ships with: two
 # boots whose verdicts MUST be failures, so that a row reading "ok" means the
 # comparison ran rather than that the comparison is gone.
 #
@@ -75,7 +75,7 @@ run_row() {
   # a crash BEFORE the census; a crash after it -- at ShutdownGame, say -- left
   # every field above correct.  That is not hypothetical: it is what a savegame
   # load did in every configuration while three scripts said ok
-  # (doc/reconciliation.md R-108).
+  # pool.
   if [ "$rc" != 0 ]; then
     if [ "$rc" -gt 128 ] 2>/dev/null; then
       verdict="died on signal $((rc - 128))"
@@ -92,7 +92,7 @@ pass=0; fail=0
 
 if [ "$CONTROL" = 1 ]; then
   printf '%-9s %-7s %-6s %-9s %-7s %s\n' ruleset xatrix rogue map frames verdict
-  # 1. an unknown ruleset falls back to dm (R-MODE-1), so comparing against the
+  # 1. an unknown ruleset falls back to dm, so comparing against the
   #    NAME ASKED FOR must fail.  If this reads ok, the ruleset comparison is
   #    not happening.
   run_row banana 0 0 q2dm1 1 0 banana "xatrix=0 rogue=0" && fail=$((fail+1)) || pass=$((pass+1))

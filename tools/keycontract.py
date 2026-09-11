@@ -21,8 +21,8 @@ def strip_comments(t):
     return re.sub(r'//[^\n]*', '', t)
 
 # ---------- STAT_* macro values ----------
-# R-TOOL-1: was a hardcoded /mnt/c WSL path.  The engine's STAT_ enum now comes
-# from the headers this repo vendors verbatim per R-CORE-9, so the audit reads
+# Was a hardcoded /mnt/c WSL path.  The engine's STAT_ enum now comes
+# from the headers this repo vendors verbatim, so the audit reads
 # the same shared.h the build compiles against.
 _REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 BASEQ2_ENUM = os.environ.get('BASEQ2_ENUM',

@@ -17,18 +17,18 @@ along with this program; if not, write to the Free Software
 Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 */
-// bots.cfg, from osp-tourney@1d8427e (SPECS.md sec 5.4.6, R-BOT-26).
+// bots.cfg, from osp-tourney@1d8427e.
 //
-// WHAT CHANGED, AND WHY IT HAD TO.  The donor reads its config files with
+// What changed, and why it had to.  The donor reads its config files with
 // fopen/fgetc and enumerates bots/*.cfg with glob() on ELF and _findfirst() on
 // Win32.  Both go straight to the operating system, so neither can see a file
 // inside a .pak or .pkz, neither respects the engine's search path, and the
 // path they build starts at the process's working directory -- which for a
-// server started from anywhere but its own gamedir is the wrong place.  R-BOT-8
-// already says the paths come from FILESYSTEM_API_V1 where the cvars cannot
-// give them; this reads the files through the same door.  The GRAMMAR is
-// unchanged -- R-BOT-26 says "parsed as in v0.92" and it is, character for
-// character; only the source of the characters moved.
+// server started from anywhere but its own gamedir is the wrong place.  The
+// paths come from FILESYSTEM_API_V1 where the cvars cannot give them, and this
+// reads the files through the same door.  The grammar is unchanged -- parsed
+// as in v0.92, character for character; only the source of the characters
+// moved.
 //===========================================================================
 //
 // Name:                bl_botcfg.c
@@ -333,9 +333,9 @@ bot_t *FindBotWithName(const char *name)
     return NULL;
 } //end of the function FindBotWithName
 //========================================================================
-// R-BOT-26: picks up an edit to the `botfile`/`bots_botfile` cvar without a
-// restart.  R-BOT-29's blocks 1 and 2 of seventeen are the cvar NAME, which
-// stays per ruleset (R-OSP-11).
+// Picks up an edit to the `botfile`/`bots_botfile` cvar without a
+// restart.  Blocks 1 and 2 of seventeen are the cvar name, which
+// stays per ruleset.
 //
 // Parameter:               -
 // Returns:                 -
@@ -353,10 +353,10 @@ void CheckForNewBotFile(void)
     } //end if
 } //end of the function CheckForNewBotFile
 //========================================================================
-// R-BOT-26: returns success.
+// Returns success.
 //
-// THE DONOR'S SEARCH, KEPT AS IT IS.  Three of the identifiers here are the
-// reconstruction's inventions (R-BOT-30) and two of them look like bugs:
+// The donor's search, kept as it is.  Three of the identifiers here are the
+// reconstruction's inventions and two of them look like bugs:
 // `numbots` is doubled and then used as the loop's countdown, so the walk can
 // go round the list twice, and `choice` counts down alongside it.  It is a
 // random pick that skips bots already in the game and gives up after two laps.
@@ -381,7 +381,7 @@ int AddRandomBot(edict_t *ent)
     {
         // Two reasons reach here and they deserve different words: `sp` never
         // accepts bots (N6), and any other ruleset with `bots 0` has an
-        // operator who turned them off (R-96).  `sv ruleset` prints both.
+        // operator who turned them off.  `sv ruleset` prints both.
         const char *why = G_Ruleset() == RULESET_SP
             ? "ruleset 'sp' does not accept bots"
             : "bots are switched off on this server ('bots 0')";
@@ -426,7 +426,7 @@ int AddRandomBot(edict_t *ent)
     // BotServerCommand call.
     if (nbots > 0 && bot)
     {
-        // R-BOT-29, block 8 of seventeen: when the walk ran out of laps without
+        // Block 8 of seventeen: when the walk ran out of laps without
         // settling, tourney re-picks at random instead of taking whatever the
         // cursor landed on.  Only under tourney -- it changes which bot joins.
         if (G_IsOspRuleset() && numbots <= 0)

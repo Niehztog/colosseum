@@ -17,17 +17,16 @@ along with this program; if not, write to the Free Software
 Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 */
-// OSP Tourney DM v2.75, from osp-tourney@1d8427e (doc/provenance.md).
+// OSP Tourney DM v2.75, from osp-tourney@1d8427e.
 // Donor-only: baseq2 has no counterpart, so it lives in src/tourney/ rather
-// than being merged into a spine file (R-CORE-7).  The reconstruction's
-// asm-matching address comments are stripped -- SPECS.md N1 makes those oracles
-// meaningless here, and they survive at the pin.
-// osp_runes.c -- <INVENTED FILENAME>. The five Lithium-style runes.
+// than being merged into a spine file.  The reconstruction's asm-matching
+// address comments are stripped.  osp_runes.c -- filename assigned by this
+// tree.  The five Lithium-style runes.
 //
 // Resist / Strength / Haste / Regeneration / Vampire, held one at a time and
 // carried in the `SID_OSP_RUNE_*` stats (tourney slots 22..26) so the client HUD
 // can draw them -- reached through G_SetStat/G_GetStat, never by indexing
-// `ps.stats[]` with the id, which is R-132.  `r_count[]` tracks how many of each
+// `ps.stats[]` with the id.  `r_count[]` tracks how many of each
 // are loose in the world and `rune_spawnpoint[]` is the pool of places one may
 // reappear.
 
@@ -45,7 +44,7 @@ int r_count[5];
 // five ids are five CONSECUTIVE values in that order.  Nothing in STATSLOT_MAP's
 // shape enforces that -- the ordinals come from the order rows happen to be
 // written in, so inserting a row between two runes, or reordering them, would
-// silently turn this subtraction into an out-of-bounds index the way R-132's
+// silently turn this subtraction into an out-of-bounds index, as an earlier
 // mismatch did.  Asserted rather than commented, because the failure is a
 // negative array index and the compiler will otherwise emit it happily.
 _Static_assert(SID_OSP_RUNE_STRENGTH == SID_OSP_RUNE_RESIST + 1 &&
@@ -66,7 +65,7 @@ static char *runenames[] = {
 };
 
 // Defined at the very end of the file, so it needs a forward declaration
-// here.  Name <INVENTED>.
+// here.  Name reconstructed.
 void OSP_runeSpawnThink(edict_t *self);
 
 /*
@@ -133,7 +132,7 @@ bool OSP_Pickup_Rune(edict_t *ent, edict_t *other)
 
 /*
 ==============
-OSP_randomRuneSpot     <INVENTED NAME>
+OSP_randomRuneSpot     (name reconstructed)
 
 Returns a random entry of the rune spawn pool, or NULL when it is empty.
 `static` in the original, and inlined at all three of its call sites, which is
@@ -698,7 +697,7 @@ void OSP_runeSpawnThink(edict_t *self)
 // and `osp_t074..osp_t084` are the five per-rune flash timers the apply
 // functions above stamp.  Putting the branch in p_view.c would have put five
 // offset-named members of `client_respawn_t` into a shared file for no gain --
-// R-MODE-5's rule is one gate per concept, and this is that gate.
+// One gate per concept, and this is that gate.
 //
 // The colours are the donor's, and a tourney player reads them across a room:
 //   blue          resistance      red           strength

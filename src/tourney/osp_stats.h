@@ -17,12 +17,11 @@ along with this program; if not, write to the Free Software
 Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 */
-// OSP Tourney DM v2.75, from osp-tourney@1d8427e (doc/provenance.md).
+// OSP Tourney DM v2.75, from osp-tourney@1d8427e.
 // Donor-only: baseq2 has no counterpart, so it lives in src/tourney/ rather
-// than being merged into a spine file (R-CORE-7).  The reconstruction's
-// asm-matching address comments are stripped -- SPECS.md N1 makes those oracles
-// meaningless here, and they survive at the pin.
-// osp_stats.h -- the local game-event / statistics log.
+// than being merged into a spine file.  The reconstruction's asm-matching
+// address comments are stripped.  osp_stats.h -- the local game-event /
+// statistics log.
 //
 // Replaces the NetGames USA logging stack that shipped with tourney v2.75:
 // `nglog.c` (the ngLog / ngWorldStats file writer), `ngmark.c` (the
@@ -40,9 +39,10 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 //
 // Controlled by four cvars:
 //
-//   statsfile           0 = off, 1 = on (default 1)
-//   statsname           file name under <basedir>/<gamedir>
-//                       (default osptourney.jsonl)
+//   statsfile           0 = off, 1 = on (default 1).  Registered by
+//                       G_InitRuleset(), read as `g_statsfile`
+//   statsname           file name under <homedir-or-basedir>/<gamedir>;
+//                       osptourney.jsonl under every ruleset but `arena`
 //   stats_logchat       log chat lines (default 0)
 //   stats_logallpickups log every item pickup, not just the powerful ones
 //                       (default 0)
@@ -56,8 +56,11 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 #define OSP_STATS_VERSION   1
 
-extern  cvar_t  *statsfile;
-extern  cvar_t  *statsname;
+// `statsfile` and `statsname` are NOT declared here: both donors named them
+// and meant the same thing by them, so they are registered once, in
+// G_InitRuleset(), and read through `g_statsfile`/`g_statsname` in
+// g_local.h (R-COMPAT-6).  The two below are tourney's own and collide
+// with nothing.
 extern  cvar_t  *stats_logchat;
 extern  cvar_t  *stats_logallpickups;
 

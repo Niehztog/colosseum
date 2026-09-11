@@ -17,12 +17,11 @@ along with this program; if not, write to the Free Software
 Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 */
-// OSP Tourney DM v2.75, from osp-tourney@1d8427e (doc/provenance.md).
+// OSP Tourney DM v2.75, from osp-tourney@1d8427e.
 // Donor-only: baseq2 has no counterpart, so it lives in src/tourney/ rather
-// than being merged into a spine file (R-CORE-7).  The reconstruction's
-// asm-matching address comments are stripped -- SPECS.md N1 makes those oracles
-// meaningless here, and they survive at the pin.
-// osp_observe.c -- <INVENTED FILENAME>. The chasecam / observer entry points.
+// than being merged into a spine file.  The reconstruction's asm-matching
+// address comments are stripped.  osp_observe.c -- filename assigned by this
+// tree.  The chasecam / observer entry points.
 //
 // OSP_ChaseCam, OSP_startObserve and OSP_removeChaseCam.  They share the
 // join/leave sequence with p_camera.c's CameraCmd almost line for line.
@@ -358,7 +357,7 @@ void OSP_removeChaseCam(edict_t *ent)
 =================
 OSP_clientPolice
 
-R-OSP-4's three enforcement rules, run once per client per frame from
+Tourney's three enforcement rules, run once per client per frame from
 ClientThink after the pmove -- so the position the inactivity rule compares is
 the one the frame ended on.  True means the client is GONE (disconnected, or
 moved to observer) and the caller must not touch it again.
@@ -373,7 +372,7 @@ All three were registered as cvars and read by nobody, so `client_minping`,
     bound is configured or the client is a bot.
   * INACTIVITY is a TEAM-MATCH warmup rule: a player who is not moving is
     holding up a match everybody else is waiting to start, so they are moved to
-    observer rather than kicked.  Six seconds per check, and the position AND
+    observer rather than kicked.  Six seconds per check, and the position and
     the view angles both have to be unchanged -- looking around counts as
     being there.
   * FRAMERATE is not enforced by kicking but by stuffing `cl_maxfps`, once and
@@ -471,7 +470,7 @@ bool OSP_clientPolice(edict_t *ent, usercmd_t *ucmd)
 =================
 OSP_clientThink
 
-Tourney's arms of ClientThink, in one call (R-OSP-1, R-EXTRA-6).  True means the
+Tourney's arms of ClientThink, in one call.  True means the
 frame is CONSUMED: the client is on a camera or has just been moved to one, and
 neither the spine's pmove nor its chase-cam code may also run.
 

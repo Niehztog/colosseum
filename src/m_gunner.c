@@ -486,7 +486,7 @@ static void GunnerGrenade(edict_t *self)
     // uninitialised and assigns it only under AI_MANUAL_STEERING, then reads it
     // below -- so with manual steering off it reads an indeterminate value.
     // That is undefined behaviour, which means there is no shipped behaviour to
-    // preserve (unlike doc/reconciliation.md R-22 and R-30, where the original
+    // preserve (unlike the other two such sites, where the original
     // did something well-defined but wrong).  The intent is unambiguous from the
     // one assignment: blindfire only when manually steered.
     bool blindfire = false;
@@ -658,7 +658,7 @@ static const mframe_t gunner_frames_attack_grenade[] = {
 };
 const mmove_t gunner_move_attack_grenade = {FRAME_attak101, FRAME_attak121, gunner_frames_attack_grenade, gunner_run};
 
-// R-CORE-11: baseq2's gunner_move_attack_grenade, kept alongside Ground Zero's.
+// Baseq2's gunner_move_attack_grenade, kept alongside Ground Zero's.
 // Ground Zero adds gunner_blind_check to the grenade sequence, which re-aims
 // the gunner at monsterinfo.blind_fire_target.  baseq2's sequence has no such
 // frame.
@@ -734,8 +734,8 @@ void gunner_attack(edict_t *self)
         self->monsterinfo.aiflags |= AI_MANUAL_STEERING;
         if (gunner_grenade_check(self)) {
             // if the check passes, go for the attack
-            // R-CORE-11: both sequences ship; the latch selects (if/else with
-            // literal assignments so genptr.py sees both -- R-CORE-11b).
+            // Both sequences ship; the latch selects (if/else with
+            // literal assignments so genptr.py sees both).
             if (self->content_flavour & CONTENT_ROGUE)
                 self->monsterinfo.currentmove = &gunner_move_attack_grenade;
             else
@@ -759,8 +759,8 @@ void gunner_attack(edict_t *self)
         self->monsterinfo.currentmove = &gunner_move_attack_chain;
     } else {
         if (random() <= 0.5f && gunner_grenade_check(self)) {
-            // R-CORE-11: both sequences ship; the latch selects (if/else with
-            // literal assignments so genptr.py sees both -- R-CORE-11b).
+            // Both sequences ship; the latch selects (if/else with
+            // literal assignments so genptr.py sees both).
             if (self->content_flavour & CONTENT_ROGUE)
                 self->monsterinfo.currentmove = &gunner_move_attack_grenade;
             else
@@ -1042,8 +1042,8 @@ static void gunner_precache(void)
 
 
 // ---------------------------------------------------------------------------
-// R-CORE-11: baseq2's duck-and-dodge for the gunner, restored alongside Ground
-// Zero's rewrite so that BOTH ship and the spawn-time latch selects.
+// Baseq2's duck-and-dodge for the gunner, restored alongside Ground
+// Zero's rewrite so that both ship and the spawn-time latch selects.
 //
 // Ground Zero does not add to this monster, it replaces its evasion: baseq2's
 // per-monster gunner_dodge and gunner_duck_* become the shared M_MonsterDodge with
@@ -1117,9 +1117,7 @@ void bq2_gunner_dodge(edict_t *self, edict_t *attacker, float eta, trace_t *tr)
 */
 void SP_monster_gunner(edict_t *self)
 {
-    // R-MODE-7 / R-CORE-8: the ruleset decides, not `deathmatch`.  The
-    // inherited test was right for baseq2 and wrong here, because `deathmatch`
-    // is 1 under ctf and R-MODE-7 promises monsters under ctf.
+    // deathmatch is 1 under ctf, which allows monsters: ask the ruleset.
     if (!G_MonstersAllowed()) {
         G_FreeEdict(self);
         return;
@@ -1147,10 +1145,8 @@ void SP_monster_gunner(edict_t *self)
     self->monsterinfo.walk = gunner_walk;
     self->monsterinfo.run = gunner_run;
     // pmm
-    // *** R-CORE-11's gate. ***  Both evasion sets ship; the latch selects at
-    // spawn.  content_flavour is latched in ED_CallSpawn, which runs BEFORE this
-    // function -- R-CORE-11 names monster_start as the latch point and that is
-    // too late, see doc/reconciliation.md R-31.
+    // Both evasion sets ship; the latch selects at spawn.  content_flavour is
+    // latched in ED_CallSpawn, which runs before this function.
     //
     // An if/else with literal assignments, deliberately: genptr.py builds
     // save_ptrs[] by scanning the source for `= &name`, so a ternary or a macro

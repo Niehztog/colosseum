@@ -17,18 +17,17 @@ along with this program; if not, write to the Free Software
 Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 */
-// Rocket Arena 2 v2.25, from rocketarena2-public@d20e1ce (doc/provenance.md).
+// Rocket Arena 2 v2.25, from rocketarena2-public@d20e1ce.
 // Donor-only: baseq2 has no counterpart, so it lives in src/arena/ rather than
-// being merged into a spine file (R-CORE-7).  The reconstruction's asm-matching
-// address comments are stripped -- SPECS.md N1 makes those oracles meaningless
-// here, and they survive at the pin.
+// being merged into a spine file.  The reconstruction's asm-matching
+// address comments are stripped.
 #include "g_local.h"
 #include "arena/arena.h"
 
-// HOW MANY ROWS FIT INSIDE THE BOX, measured off the box.
+// How many rows fit inside the box, measured off the box.
 //
 // The menu is drawn over `picn inventory` at `xv 32 yv 8`.  That pic is
-// 256x192 and its FLAT INTERIOR -- the field inside the bevel, palette index
+// 256x192 and its flat interior -- the field inside the bevel, palette index
 // 175 throughout -- is pic rows 18..174, so in statusbar coordinates the text
 // area is y 26..182.  A `string2` line at `yv Y` paints Y..Y+7 (every printable
 // glyph in conchars.pcx uses all eight rows), so the last line that fits starts
@@ -47,14 +46,14 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 // which paints 176..183 ACROSS the frame line, and its marker at `y + 10` =
 // 186 lands on the bevel outside the box entirely.  1999 never noticed because
 // its longest menu is 26 rows and both pages showed the fault equally; a play
-// test with `xatrix 1` did, because R-182's two extra weapon rows put "Allow
+// test with `xatrix 1` did, because the two extra weapon rows put "Allow
 // Phalanx" in the eighteenth slot where the damage is legible.  Screenshotted
 // through tools/play.sh before and after.
 //
-// SEVENTEEN AND NOT SIXTEEN, and the extra row is load bearing rather than
+// Seventeen and not sixteen, and the extra row is load bearing rather than
 // greed.  Sixteen would put the marker wholly inside as well, and it would also
 // push "Allow Bots" off the first page of the propose menu -- which is a
-// property R-RA-8 chose that row's POSITION for and `scenarios/ra2botvote`
+// property that row's position was chosen for and `scenarios/ra2botvote`
 // asserts by name.  Seventeen keeps every CONTENT row inside the interior and
 // spends the leftover on the marker; a "(More)" hint touching the frame is a
 // different thing from a settings row doing it.
@@ -130,7 +129,7 @@ DisplayMenu(edict_t *ent)
     if (cl->menu_owner != MENU_ARENA) {
         // Put the real bar back.  RA2 chose between two literals here; there
         // are no literals any more, so this is the composed bar for whichever
-        // ruleset is running (R-OSP-7a).
+        // ruleset is running.
         SendStatusBar(ent, G_Statusbar(), true);
         return;
     }
@@ -278,7 +277,7 @@ FinishMenu(edict_t *ent, qmenu_t *menu, bool show)
 {
     ent->client->curmenulink = menu;
     ent->client->selected = ((menuinfo_t *)menu->it)->items;
-    // R-MENU-2a: opening goes through the arbiter, which closes whatever else
+    // Opening goes through the arbiter, which closes whatever else
     // this client had open.  `show` false means "build it but do not display",
     // which is a closed menu as far as the owner field is concerned.
     if (show)
@@ -334,7 +333,7 @@ that node first.
 
 This was UseMenu's inline teardown and was the only one, so it is lifted out
 here for close_menus() to reach -- and lifting it out is what showed the leak.
-AddMenuItem makes THREE allocations per row (the qmenu_t node, the menuitem_t,
+AddMenuItem makes three allocations per row (the qmenu_t node, the menuitem_t,
 and its text) and the teardown released two: `node->it`, the menuitem_t itself,
 was never freed.  That is one block leaked per row every time anybody closes a
 menu by picking a row, which on a Rocket Arena server is how menus normally
@@ -392,18 +391,18 @@ UseMenu(edict_t *ent, int arg)
         return;
     }
 
-    // R-130: A CALLBACK MAY DISCARD THE WHOLE QUEUE, and `menu` above was read
-    // BEFORE it ran.  `init_player()` is the tail of two of them -- both "Leave
-    // Team" rows -- and it drops the queue rather than walking it, because a
-    // reused client slot must not inherit the previous occupant's TAG_LEVEL
-    // menus.  The menu captured here is then orphaned with its `prev` still
-    // pointing at the queue HEAD, so the unlink below writes
-    // `menuqueue.next = menu->next`, which is NULL, and takes the callback's
-    // BRAND NEW menu with it.  `curmenulink` ends up NULL, the `inven` reopen
-    // tests exactly that field, and the player is left in arena 0 with no menu,
-    // unable to rejoin or spawn -- which is what a play test hit and what the
-    // donor never could, because its `init_player` does not touch the queue.
-    // So ask whether the captured menu is still in the queue before unlinking.
+    // A callback may discard the whole queue, and `menu` above was read Before
+    // it ran.  `init_player()` is the tail of two of them -- both "Leave Team"
+    // rows -- and it drops the queue rather than walking it, because a reused
+    // client slot must not inherit the previous occupant's TAG_LEVEL menus.
+    // The menu captured here is then orphaned with its `prev` still pointing
+    // at the queue HEAD, so the unlink below writes `menuqueue.next =
+    // menu->next`, which is NULL, and takes the callback's brand new menu with
+    // it.  `curmenulink` ends up NULL, the `inven` reopen tests exactly that
+    // field, and the player is left in arena 0 with no menu, unable to rejoin
+    // or spawn -- which is what a play test hit and what the donor never
+    // could, because its `init_player` does not touch the queue.  So ask
+    // whether the captured menu is still in the queue before unlinking.
     orphan = true;
     for (qnode = ent->client->menuqueue.next; qnode; qnode = qnode->next) {
         if (qnode == menu) {
@@ -461,10 +460,10 @@ MenuThink(edict_t *ent)
     return false;
 }
 
-// The engine's own close.  G_MenuClose() calls THIS; nothing here may call
+// The engine's own close.  G_MenuClose() calls this; nothing here may call
 // G_MenuClose(), or the arbiter and the engine recurse into each other.
 //
-// CLOSING IS HIDING, NOT DESTROYING, and the difference is the whole function.
+// Closing is hiding, not destroying, and the difference is the whole function.
 // RA2 splits the two: `showmenu` is whether the menu is on screen, and
 // `curmenulink` + `menuqueue` are the menu itself, which `inven` toggles back
 // into view and which FinishMenu(show=false) builds without displaying.  Only
@@ -475,7 +474,7 @@ MenuThink(edict_t *ent)
 // had just built; and a menu popped off the queue took the rest of the queue
 // with it.
 //
-// What the close MUST do is repaint.  An RA2 menu *is* the client's statusbar,
+// What the close must do is repaint.  An RA2 menu *is* the client's statusbar,
 // drawn by overwriting CS_STATUSBAR for that one client, so a close that does
 // not write the real bar back leaves the player looking at a menu the game has
 // already forgotten.  G_MenuClose has set menu_owner to MENU_NONE by the time
@@ -498,20 +497,20 @@ clear_menus can afford to forget: it runs from the intermission, where the level
 and every TAG_LEVEL allocation behind a menu is over anyway.  PutClientInServer
 is the other place the queue head goes away -- it memsets the whole gclient_t
 and copies `pers`/`resp` back, and `menuqueue`, `curmenulink` and `selected` are
-in neither -- and that one runs on EVERY RESPAWN, so what it drops stays dropped
+in neither -- and that one runs on every respawn, so what it drops stays dropped
 for the rest of the map.  A menu is open on every one of those, because
 PutClientInServer ends in move_to_arena(..., 1) and that reopens the observer
 menu.
 
-R-147 already put a close there and it is not enough by itself, which is the
-point worth keeping: under arena, closing is HIDING (see ra_MenuClose above), so
+A close is already there and is not enough by itself, which is the point worth
+keeping: under arena, closing is hiding (see ra_MenuClose above), so
 the arbiter's close repaints the statusbar and frees nothing.  The repaint is
 still its job and still goes through it -- nothing here may call G_MenuClose's
-engine row directly (R-MENU-3) -- and the freeing is this function's.
+engine row directly -- and the freeing is this function's.
 
 Taken from `rocketarena2@28a8af7`.  RA2's own version tests its `showmenu` bool
 to decide whether a repaint is owed; this tree does not carry that field
-(sec 7 rule 3), and `menu_owner == MENU_ARENA` is the same question -- a menu
+and `menu_owner == MENU_ARENA` is the same question -- a menu
 built with FinishMenu(show=false) has never claimed the channel.
 ================
 */

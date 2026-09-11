@@ -1,0 +1,271 @@
+# Release packages, one per platform and architecture.
+#
+# Every job builds with the tree's own Makefile, so `make check` runs as part of
+# the build and a finding fails the job: a release cannot be produced from a
+# tree whose audits do not pass.
+#
+# THREE OF THEM CANNOT RUN HERE, and they say so rather than passing quietly.
+# `auditems`, `assets` and `dsweep` read donor trees and donor game data that
+# live in the WORKSPACE beside this repository -- and `q2pro/src/{ctf,xatrix,
+# rogue}` is a local replay branch (SPECS section 4.1), so a runner cannot have
+# it however it is set up.  audit.py reports those as "not applicable yet" and
+# prints the count it actually cleared, which is the figure a release claim
+# should quote.  `dsweep` used to RAISE there instead, arrive as a finding and
+# fail every job of this workflow; its `__main__` now carries the same guard
+# the other two always had.
+#
+# EVERY JOB BUILDS BOTH GAME ABIs, because every package carries both: the
+# default library in the package's `colosseum/` -- the gamedir the engine loads
+# it from, which is where everything an engine reads is staged -- for a Q2PRO
+# with `USE_NEW_GAME_API`, and the `API=old` build in `colosseum/oldapi/` for
+# R1Q2, Yamagi Quake II, id's own 3.20 or a Q2PRO without that switch.  They are not separate releases -- same sources,
+# same tag, same file name, different struct layouts -- so they ship together
+# and `package.sh` fails the job if either is missing.  The audits therefore run
+# twice per job, once per ABI, which is the point: `-Warray-bounds` at
+# `API=old -O2` has already caught a defect every other check passed.
+#
+# WHAT A PACKAGE CARRIES is decided in one place, `.github/package.sh`, and its
+# header states the rule: the game library, the default gamedir config set, the
+# OPERATOR documentation and the eight navigation meshes of the paragraph after
+# next.  It also states WHERE, which is the same decision: everything an engine
+# loads -- both libraries, the brain, the configs, the meshes -- is staged
+# inside the package's `colosseum/`, so installing a release is copying that
+# one directory beside the engine.  Never game assets, which are id's and the
+# mods' and are not ours to ship -- and never the DEVELOPER documentation.
+# `SPECS.md`, `DEVELOPMENT.md`,
+# `CLAUDE.md` and the four developer files under `docs/` are the repository's,
+# not the package's: they are how this tree is decided, built and audited, and
+# none of them helps anyone run a server.  package.sh names what ships and then
+# re-reads the staged tree to check that nothing else did, so the job fails
+# rather than the tarball quietly growing a file.
+#
+# THE GAMEDIR CONFIG SET IS PART OF THAT, and one file in it per ruleset is
+# checked rather than assumed: `README.md` starts a match with
+# `+exec configs/<ruleset>.cfg +map <map>`, so a package that shipped six of
+# the seven would be a package one of whose own rulesets cannot be started the
+# way its own documentation says.  package.sh reads the ruleset names out of
+# `src/g_ruleset.c` and compares both ways.
+#
+# THE NAVIGATION MESHES ARE FETCHED RATHER THAN BUILT, which is why every
+# packaging job runs `.github/aas.sh` before `package.sh`.  A bot on a map with
+# no `.aas` beside it does not play badly, it does not exist: the botlib refuses
+# the map and destroys the bot.  Making one is a `bspc` run plus a full load of
+# the map, so an operator who installs the bots and starts q2dm1 would find the
+# feature the release advertises does nothing -- unless the eight maps everybody
+# starts with come with theirs, which since 1999 they can: OSP Tourney DM 2.0
+# shipped q2dm1..q2dm8 already converted and computed, and that download still
+# resolves.  `aas.sh` checksums every file against `.github/aas.sha256`, falls
+# back to the Wayback copy of the same URL when OSP's host does not answer, and
+# package.sh re-verifies the staged copies -- so this step failing, being
+# skipped, or half-succeeding all fail the job rather than producing a package
+# whose `maps/` is quietly empty.  Every OTHER map still needs a mesh made.
+#
+# THE BOT BRAIN IS BUILT HERE TOO, once per job and for that job's own target,
+# out of the `vendor/gladiator-bot-restored` submodule -- which is why every
+# build job now checks submodules out.  It is a separate repository and a
+# separate build and stays one; what changed is only who runs it.  Eight meshes
+# are half a bot feature, and the other half was an operator fetching a C tree
+# and cross-compiling it for a platform this workflow already has a runner and
+# a toolchain standing ready for, having just built the game library for that
+# exact target.  So each job hands the brain the same compiler it used for the
+# library, `package.sh` stages it into `colosseum/` under the name the game
+# dlopens, and that script's BRAIN CHECK compares the two artifacts' headers so
+# a brain built for the host cannot ship.  The Windows jobs additionally run
+# `tools/pedeps.sh` over the DLL: R-SEC-6a is about every PE this release
+# produces, and a brain that needs a mingw runtime beside it is as unshippable
+# as a game library that does.
+#
+# Checking the submodule out has one further effect and it is wanted: `make
+# check` runs `tools/botabi.py` for real instead of skipping itself, so the
+# game<->brain ABI is compared at release time, against the pin the brain
+# shipping in the package was built from.
+#
+# A MANUAL RUN IS A REHEARSAL, NOT A RELEASE.  `workflow_dispatch` builds,
+# checks and uploads all seven packages and stops there: the publish job is
+# conditioned on the ref being a tag, because `gh release create` creates a tag
+# that does not exist yet and a dispatch would otherwise tag the branch it ran
+# on.  So `gh workflow run release.yml -f version=<name> --ref <ref>` is the
+# way to exercise this file end to end without touching the tag namespace, and
+# the packages come back as run artifacts under that name.
+#
+# WHAT IS NOT HERE, and why.  There is no 32-bit macOS: Apple removed i386 from
+# the OS and the toolchain, so the package does not exist to build.  macOS is
+# also the one platform that is not cross-compiled -- the SDK and linker are not
+# redistributable, so those two jobs run on macOS runners and are the only place
+# the Mach-O target is ever exercised.
+name: release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version string for a manual build -- names the packages, publishes nothing (e.g. v1.0.0)'
+        required: true
+
+permissions:
+  contents: read
+
+env:
+  VERSION: ${{ github.event.inputs.version || github.ref_name }}
+
+jobs:
+  linux:
+    name: linux ${{ matrix.arch }}
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {runner: ubuntu-24.04,     arch: x86_64, target: native,  packages: '',                    botmake: ''}
+          - {runner: ubuntu-24.04,     arch: i386,   target: linux32, packages: gcc-i686-linux-gnu,    botmake: 'CC=i686-linux-gnu-gcc YQ2_ARCH=i386'}
+          - {runner: ubuntu-24.04-arm, arch: arm64,  target: native,  packages: '',                    botmake: ''}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          submodules: true
+      - name: Install the cross compiler
+        if: matrix.packages != ''
+        run: sudo apt-get update && sudo apt-get install -y ${{ matrix.packages }}
+      - name: Build (the audits run inside this)
+        run: make ${{ matrix.target }}
+      - name: Build the classic-ABI library
+        run: make ${{ matrix.target }} API=old
+      # The same compiler the library was built with, and YQ2_ARCH with it on
+      # the cross row: the submodule reads the architecture off `uname -m`,
+      # which on that row is the host's and not the target's.
+      - name: Build the bot brain
+        run: make -C vendor/gladiator-bot-restored botlib ${{ matrix.botmake }}
+      - name: Fetch the navigation meshes
+        run: .github/aas.sh
+      - name: Package
+        run: .github/package.sh "$VERSION" linux ${{ matrix.arch }} game${{ matrix.arch }}.so tar
+      - uses: actions/upload-artifact@v7
+        with:
+          name: colosseum-linux-${{ matrix.arch }}
+          path: dist/*
+          if-no-files-found: error
+
+  windows:
+    name: windows ${{ matrix.arch }}
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {arch: x86,    target: win32, packages: gcc-mingw-w64-i686,   botmake: 'CC=i686-w64-mingw32-gcc'}
+          - {arch: x86_64, target: win64, packages: gcc-mingw-w64-x86-64, botmake: 'CC=x86_64-w64-mingw32-gcc'}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          submodules: true
+      - name: Install the cross compiler
+        run: sudo apt-get update && sudo apt-get install -y ${{ matrix.packages }}
+      - name: Build (the audits run inside this, and tools/pedeps.sh checks the imports)
+        run: make ${{ matrix.target }}
+      - name: Build the classic-ABI library (pedeps.sh checks its imports too)
+        run: make ${{ matrix.target }} API=old
+      # A mingw CC is also what makes the submodule build a PE at all: with the
+      # runner's own compiler it would emit an ELF `gladiator.so`, and
+      # package.sh would fail this job for want of a `gladiator.dll`.
+      - name: Build the bot brain
+        run: make -C vendor/gladiator-bot-restored botlib ${{ matrix.botmake }}
+      - name: Check what the brain imports (R-SEC-6a, for the DLL that ships)
+        run: sh tools/pedeps.sh vendor/gladiator-bot-restored/release/gladiator.dll
+      - name: Fetch the navigation meshes
+        run: .github/aas.sh
+      - name: Package
+        run: .github/package.sh "$VERSION" windows ${{ matrix.arch }} game${{ matrix.arch }}.dll zip
+      - uses: actions/upload-artifact@v7
+        with:
+          name: colosseum-windows-${{ matrix.arch }}
+          path: dist/*
+          if-no-files-found: error
+
+  macos:
+    name: macos ${{ matrix.arch }}
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # THE OLDEST IMAGE STILL SERVED, PER ARCHITECTURE, and that is a
+          # compatibility decision rather than a scheduling one: the Makefile
+          # sets no `-mmacosx-version-min`, so the minimum macOS an operator
+          # needs to load the library is whatever the runner's SDK says.  A
+          # newer image narrows the set of Macs the package works on for
+          # nothing.  `macos-13` was that choice until it was retired, and a
+          # retired label does not fail -- the job sits unassigned until the
+          # run expires, which is what it did (run 35190547919, cancelled after
+          # 83 minutes with six siblings already finished).  So a label here is
+          # re-checked when a run queues rather than when it fails.
+          - {runner: macos-15-intel, arch: x86_64}
+          - {runner: macos-14,       arch: arm64}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          submodules: true
+      # CC_NATIVE and CC_MACOS name the same compiler on purpose: the Makefile
+      # decides the fortify guard from CC_NATIVE and builds with CC_MACOS, and
+      # the two answers have to come from one compiler.
+      - name: Build (the audits run inside this)
+        run: make macos CC_NATIVE=cc CC_MACOS=cc
+      - name: Build the classic-ABI library
+        run: make macos CC_NATIVE=cc CC_MACOS=cc API=old
+      # No CC and no arch to pass: the runner is the target here, which is the
+      # same reason these two jobs are the ones that are not cross-compiled.
+      # The submodule emits `gladiator.dylib`; package.sh ships it under the
+      # name the game dlopens.
+      - name: Build the bot brain
+        run: make -C vendor/gladiator-bot-restored botlib
+      - name: Fetch the navigation meshes
+        run: .github/aas.sh
+      - name: Package
+        run: .github/package.sh "$VERSION" macos ${{ matrix.arch }} game${{ matrix.arch }}.dylib tar
+      - uses: actions/upload-artifact@v7
+        with:
+          name: colosseum-macos-${{ matrix.arch }}
+          path: dist/*
+          if-no-files-found: error
+
+  release:
+    name: publish
+    # A TAG IS WHAT PUBLISHES, and this condition is what makes that true.
+    # `gh release create` CREATES the tag when none exists, so without it a
+    # `workflow_dispatch` -- which exists to exercise the build and the
+    # packaging on demand -- would end by tagging whatever ref it ran on and
+    # publishing a release nobody asked for.  With it, a manual run stops after
+    # the seven packages are built, checked and uploaded as workflow artifacts,
+    # which is what a rehearsal wants; the `version` input still names them, so
+    # the file names are the ones a real tag would produce.  Only
+    # `push: tags: ['v*']` reaches this job.
+    if: startsWith(github.ref, 'refs/tags/')
+    needs: [linux, windows, macos]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v8
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Checksums
+        run: |
+          cd dist
+          sha256sum * > SHA256SUMS
+          cat SHA256SUMS
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$VERSION" dist/* \
+            --title "Colosseum $VERSION" \
+            --notes "One Quake II game library: baseq2, both mission packs, Threewave CTF, Rocket Arena 2 and OSP Tourney DM, with Gladiator bots.
+
+          **Installing is copying this package's \`colosseum/\` folder beside the engine** -- on Windows always, and on Linux unless your Q2PRO is a distribution package, which looks in \`~/.q2pro/colosseum/\` instead. The library is already in it, and so is everything else an engine loads. The bots need the brain, its pak, a bot list and one navigation mesh per map. **The brain for this platform is in that folder too**, as \`colosseum/gladiator.so\` (\`.dll\` on Windows), and so are the meshes for the eight retail deathmatch maps, under \`colosseum/maps/\`; what is left to install is \`pak7.pak\` and \`bots.cfg\` out of the 1999 Gladiator release, which go in beside them. \`README.md\` has both halves.
+
+          Each package carries **two builds of the library**: the one in \`colosseum/\` is for Q2PRO built with \`USE_NEW_GAME_API\`, which is the recommended engine, and \`colosseum/oldapi/\` holds the same library against the classic game ABI for R1Q2, Yamagi Quake II, id's own 3.20 or a Q2PRO without that switch. Same name, different struct layouts -- if your engine wants the second one, copy it over the first and delete that directory, renaming it to whatever your engine looks for (Yamagi wants a flat \`game.so\`). \`colosseum/oldapi/README.md\` says what the choice costs.
+
+          Packages carry the library, the bot brain built for the same platform, the default gamedir config set and the operator documentation -- \`README.md\` and the cvar, command and entity inventories under \`docs/\`. The first three are inside \`colosseum/\`, which is the directory to copy; the documentation is beside it, for reading rather than installing. The config set holds one ready-to-exec file per ruleset, so a match is one line: \`q2pro +set game colosseum +set maxclients 32 +exec configs/ctf.cfg +map q2ctf1\`, and the same for \`dm\`, \`dmpro\`, \`tdm\`, \`duel\`, \`arena\` and \`sp\` -- \`README.md\` lists all seven. Game assets are not included and never will be: they are id's and the mods'. The one exception is data rather than an asset -- the eight navigation meshes for q2dm1..q2dm8, precomputed by OSP Tourney DM in 1999, which ride along under \`colosseum/maps/\` so the bots have somewhere to walk on the stock deathmatch maps without a \`bspc\` run. Any other map still needs one made. The brain is not an asset either: it is a build of the [\`gladiator-bot-restored\`](https://github.com/Niehztog/gladiator-bot-restored) submodule, GPL like everything else here, from the commit this tag pins. The specification, the contributor guide and the rest of \`docs/\` live in the repository, at the tag this release was cut from."

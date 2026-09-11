@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """No unbounded string copy or raw token scan anywhere in the game library.
 
-WHY.  R-SEC-1 names the reachable paths -- userinfo, a client command, a chat
+WHY.  The reachable paths are userinfo, a client command, a chat
 string, an address string, a config file -- and asks that every `strcpy`,
 `strcat`, `sprintf` and unterminated `strncpy` on one of them be replaced.  A
 tool cannot compute reachability, and a reviewer who tries gets it wrong in the
@@ -22,7 +22,7 @@ does not fit rather than silently parse its tail as another token.  This audit
 therefore rejects every unbounded string conversion in fscanf as well.
 
 WHAT IS EXEMPT, AND WHY IT IS A PATH AND NOT A NAME.  `src/shared/` is vendored
-byte-identical from `q2pro/src/shared` (SPECS.md 5.2) and is diffed against it
+byte-identical from `q2pro/src/shared` and is diffed against it
 by `divergence.py`; editing it here would make this tree the odd one out for two
 constant literals that provably fit (`Info_NextPair`'s `"<MISSING KEY>"` into a
 `MAX_INFO_KEY` buffer).  The exemption is the directory, so a new file dropped

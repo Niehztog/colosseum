@@ -1,6 +1,5 @@
 #!/bin/bash
 # Drive a real Q2PRO client, headlessly, against a local Colosseum server.
-# R-VER-3 / doc/reconciliation.md R-62.
 #
 # WHY THIS EXISTS.  Every check in this project up to now is static, a
 # spawn-time census, or a boot.  None of them needs a player, and so none of
@@ -11,7 +10,7 @@
 # got".  It has got one: q2pro's own client runs under Xvfb with its X11/GLX
 # backend on Mesa's software rasteriser, connects to localhost, and executes a
 # script of console commands paced by the `wait` command.  The first run of it
-# dropped the server (R-62).
+# dropped the server.
 #
 # HOW IT DRIVES.  `+set cl_beginmapcmd "exec <script>"` fires once the client
 # has finished loading the map, which is the only moment at which sending
@@ -36,7 +35,7 @@
 #                                                          the engine only
 #                                                          looks in homedir and
 #                                                          the install libdir
-#                                                          (SPECS.md 1.5).
+#
 #
 # USAGE
 #   tools/play.sh <drive-script> [-r ruleset] [-m map] [-n name] [-p port]
@@ -54,7 +53,7 @@
 #   the game library userinfo `ip` "loopback" for them and for nobody else, and
 #   `dedicated` is 0.  Anything the game library decides from those two facts is
 #   invisible to every other harness here: q2proded has no local client, and a
-#   libq2 client is a real UDP peer at 127.0.0.1.  R-BOT-28's host exemption is
+#   libq2 client is a real UDP peer at 127.0.0.1.  The bot menu's host exemption is
 #   the first such thing (tools/drive/listen-botmenu.cfg).
 #
 #   In -L mode there is one console, the client's, and the server's prints

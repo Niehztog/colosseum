@@ -17,12 +17,11 @@ along with this program; if not, write to the Free Software
 Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 */
-// OSP Tourney DM v2.75, from osp-tourney@1d8427e (doc/provenance.md).
+// OSP Tourney DM v2.75, from osp-tourney@1d8427e.
 // Donor-only: baseq2 has no counterpart, so it lives in src/tourney/ rather
-// than being merged into a spine file (R-CORE-7).  The reconstruction's
-// asm-matching address comments are stripped -- SPECS.md N1 makes those oracles
-// meaningless here, and they survive at the pin.
-// osp_hook.c -- <INVENTED FILENAME>. The mod's grappling hook.
+// than being merged into a spine file.  The reconstruction's asm-matching
+// address comments are stripped.  osp_hook.c -- filename assigned by this
+// tree.  The mod's grappling hook.
 //
 // id's Quake II CTF `g_ctf.c` grapple section with the `CTF` prefix stripped,
 // plus two of the mod's own, OSP_hookAliases and G_Spawn_Sparks.

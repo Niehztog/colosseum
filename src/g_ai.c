@@ -549,9 +549,9 @@ bool FindTarget(edict_t *self)
             return false;
     } else if (heardit) {
         // Gladiator's NULL check sits OUTSIDE its ROGUE fence
-        // (gladq2_src/g_ai.c:597), so under R-200 it is the integration
-        // decision for BOTH arms rather than Ground Zero's own addition.
-        // The base donor's bare deref is the arm R-211 rejects: it can only
+        // in its own g_ai.c, so it is the integration decision for both arms
+        // rather than Ground Zero's own addition.
+        // The base donor's bare deref is the arm to reject: it can only
         // differ from this one by crashing.
         if (client->owner && (client->owner->flags & FL_NOTARGET))
             return false;
@@ -1002,15 +1002,15 @@ static void ai_run_slide(edict_t *self, float distance)
     // flyer (which has FL_FLY) and never for any non-flyer carrying any other
     // flag.  The jerkiness smoothing has therefore never operated.
     //
-    // R-30 kept the broken grouping, with the reason that turning the clamp on
-    // would change how every Ground Zero monster sidesteps -- a gameplay change
-    // disguised as a warning fix, which §7 rule 2 refuses.  **That decision is
-    // reversed here (R-148), because the donor has made it**: `q2pro@21381ffa`
-    // writes `!(self->flags & FL_FLY)` on the mission-packs branch, so taking it
-    // is following the donor rather than overruling it, and §7 rule 7 makes a
-    // Q2PRO fix cumulative.  The clamp now does what its own comment says --
-    // "clamp maximum sideways move for non flyers" -- and Ground Zero's
-    // sidestep smoothing operates for the first time since 1998.
+    // The broken grouping was kept at first, on the grounds that turning the
+    // clamp on would change how every Ground Zero monster sidesteps -- a
+    // gameplay change disguised as a warning fix.  That is reversed here,
+    // because the donor has made the same call: `q2pro@21381ffa` writes
+    // `!(self->flags & FL_FLY)` on the mission-packs branch, so taking it is
+    // following the donor rather than overruling it.  The clamp now does what
+    // its own comment says -- "clamp maximum sideways move for non flyers" --
+    // and Ground Zero's sidestep smoothing operates for the first time since
+    // 1998.
     //
     // Found by clang; gcc is silent.
     if (!(self->flags & FL_FLY))

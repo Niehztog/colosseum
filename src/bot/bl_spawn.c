@@ -17,7 +17,7 @@ along with this program; if not, write to the Free Software
 Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 */
-// Fake clients, from osp-tourney@1d8427e (SPECS.md sec 5.4.4).
+// Fake clients, from osp-tourney@1d8427e.
 //===========================================================================
 //
 // Name:                bl_spawn.c
@@ -34,10 +34,10 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "bot/bl_botcfg.h"
 #include "bot/p_menulib.h"
 #include "arena/arena.h"
-// R-CTF-8's half of the fill: the seat count and the balanced removal are CTF's
+// CTF's half of the fill: the seat count and the balanced removal are CTF's
 // own knowledge, the same way arena.h's are arena's.
 #include "ctf/g_ctf.h"
-// ...and R-DM-1's half for `tdm` and `duel` is the capacity OSP declares.
+// ...and the half for `tdm` and `duel` is the capacity OSP declares.
 #include "tourney/osp_hooks.h"
 
 // `old_botcount` is the mod's own, not the SDK's: osp_teams.c compares it
@@ -68,9 +68,9 @@ static queuedbot_t *queuedbots;
 // spawns a client entity, initializes the edict and sets the pointer
 // to the gclient_t structure
 //
-// R-BOT-14: the search runs game.maxclients-1 -> 0, i.e. DOWNWARD, so bots take
+// The search runs game.maxclients-1 -> 0, i.e. DOWNWARD, so bots take
 // high slots and humans take low ones.  That is not cosmetic: a human
-// connecting to a full server relocates a bot (R-BOT-15), and the relocation
+// connecting to a full server relocates a bot, and the relocation
 // only ever has somewhere to go if the bots are packed at the top.
 //
 // Parameter:               -
@@ -111,7 +111,7 @@ static void G_FreeClientEdict(edict_t *ent)
     ent->client->pers.connected = false;
 } //end of the function G_FreeClientEdict
 //===========================================================================
-// R-BOT-16: the engine and MVD spectators can tell a bot from a player only if
+// The engine and MVD spectators can tell a bot from a player only if
 // the game says so, and only the extended protocol has anywhere to say it.
 //===========================================================================
 static void BotSetSvFlags(edict_t *ent)
@@ -155,8 +155,8 @@ static void BotBecome(edict_t *ent, bot_library_t *lib)
 //===========================================================================
 // destroy the given bot
 //
-// R-BOT-19 fixes the donor's ORDER.  It cleared the edict and the gclient_t
-// FIRST and released the library reference afterwards, out of `bs` -- which
+// The donor's order is corrected here.  It cleared the edict and the gclient_t
+// First and released the library reference afterwards, out of `bs` -- which
 // still holds the pointer, so it works, but every step between the memset and
 // the release is running against a client structure that has already been
 // zeroed.  The order here is the requirement's: shut the brain's client down,
@@ -189,7 +189,7 @@ void BotDestroy(edict_t *bot)
     bs->started = false;
     //there is a bot less
     botglobals.numbots--;
-    //free the library used by the bot, and forget it BEFORE the clear
+    //free the library used by the bot, and forget it before the clear
     lib = bs->library;
     bs->library = NULL;
     BotFreeLibrary(lib);
@@ -291,10 +291,10 @@ static edict_t *BotCreate(char *userinfo, bot_library_t *lib)
         // `resp.context` is the arena number, which RA2's own code reads.  The
         // donor also clears `client->ra_time` here; no RA2 tree in this
         // workspace has that field.  It belongs to GLADIATOR's own RA2 support
-        // -- gladq2_src/g_arena.c -- which R-ARENA-1 explicitly does not carry,
+        // -- its own g_arena.c -- which this tree does not carry,
         // and the donor's #ifdef ROCKETARENA block was never compiled anywhere.
         //
-        // R-SEC-4: the key is text out of bots.cfg and `resp.context` indexes
+        // The key is text out of bots.cfg and `resp.context` indexes
         // arenas[MAX_ARENAS] from a dozen places -- give_ammo() takes
         // &arenas[context] before it looks at anything.  `arena 999` in a bot
         // file was an out-of-bounds read and write with no diagnostic, so the
@@ -321,8 +321,8 @@ static edict_t *BotCreate(char *userinfo, bot_library_t *lib)
 // move the given bot from its current client edict_t to a free one
 // returns true if the bot is moved otherwise returns false
 //
-// R-BOT-15.  Called from ClientConnect when a human needs the slot; if no slot
-// is free the human's connection is REFUSED, not stolen.
+// Called from ClientConnect when a human needs the slot; if no slot
+// is free the human's connection is refused, not stolen.
 //
 // Parameter:               bot             : bot to move
 // Returns:                 boolean depending on a succesfull move
@@ -364,7 +364,7 @@ bool BotMoveToFreeClientEdict(edict_t *bot)
     bs->library = NULL;
     //the new state is
     newbs->active = true;
-    //move the bot client in the library BEFORE the old edict is cleared: the
+    //move the bot client in the library before the old edict is cleared: the
     //brain is told the new client number while both still exist
     BotLib_BotMoveClient(bot, newcl);
     //change the user info
@@ -381,7 +381,7 @@ bool BotMoveToFreeClientEdict(edict_t *bot)
     //set pointer to g_client structure
     bot->client = &game.clients[playernum];
     bot->inuse = false;
-    //remove client userinfo.  R-81: the configstring number is game.csr's,
+    //remove client userinfo.  The configstring number is game.csr's,
     //never a literal.
     gi.configstring(game.csr.playerskins + playernum, "");
     //the bot has been succesfully moved
@@ -415,7 +415,7 @@ void BotSpawn(void)
     edict_t *cl_ent;
 
     //a new level is a new question: the last one's roster ceiling was about the
-    //last one's target (R-RA-7, R-CTF-8, R-DM-1).  Ahead of the guard below,
+    //last one's target.  Ahead of the guard below,
     //because a server with no bot states yet still changes map.  This is
     //arena's clear too now -- arena_init() used to zero a second copy.
     botfill_ceiling = 0;
@@ -439,7 +439,7 @@ void BotSpawn(void)
     } //end for
 } //end of the function BotSpawn
 //===========================================================================
-// R-BOT-29, blocks 6 and 7 of seventeen: the donor's two `#ifndef TOURNEY`
+// Blocks 6 and 7 of seventeen: the donor's two `#ifndef TOURNEY`
 // fences EMPTY these, because tourney's own statusbar owns the layout channel
 // and a "loading" pic drawn over it never goes away.  A runtime branch, so the
 // other four rulesets keep the SDK's loading screen.
@@ -470,11 +470,10 @@ void RemoveLoadImage(edict_t *ent)
     if (!ent || !ent->client) return;
     //
     // The donor repaints dm_statusbar or single_statusbar here, which is the
-    // 1999 shape: one bar per game type, chosen at the point of use.  R-OSP-7a
-    // composes the bar per ruleset and G_Layout_Clear() is the one place that
+    // 1999 shape: one bar per game type, chosen at the point of use.  Here the
+    // bar is composed per ruleset and G_Layout_Clear() is the one place that
     // knows how to take a layout back off a client -- so the repaint is asked
-    // for by name rather than re-derived here (doc/reconciliation.md R-87 is
-    // the same mistake in the other donor).
+    // for by name rather than re-derived here.
     if (ent->client->menu_owner != MENU_BOT)
     {
         G_LayoutClear(ent);
@@ -498,7 +497,7 @@ void AddBotToQueue(edict_t *ent, const char *library, const char *userinfo)
     bot->ent = ent;
     bot->count = 2;
     Q_strlcpy(bot->library, library, sizeof(bot->library));
-    // R-BOT-30: MAX_INFO_STRING-1 on the userinfo copy, and Q_strlcpy rather
+    // MAX_INFO_STRING-1 on the userinfo copy, and Q_strlcpy rather
     // than a memcpy of a fixed length out of a buffer that may be shorter.
     Q_strlcpy(bot->userinfo, userinfo, sizeof(bot->userinfo));
 
@@ -506,7 +505,7 @@ void AddBotToQueue(edict_t *ent, const char *library, const char *userinfo)
     queuedbots = bot;
 } //end of the function AddBotToQueue
 //===========================================================================
-// R-BOT-18: spawning is deferred to frame start, so no bot is created inside
+// Spawning is deferred to frame start, so no bot is created inside
 // SpawnEntities or inside a ClientConnect.
 //
 // Parameter:               -
@@ -569,11 +568,11 @@ static bool ClientNameExists(const char *name)
     return false;
 } //end of the function ClientNameExists
 //===========================================================================
-// R-BOT-29, block 5 of seventeen: a duplicate bot name.  The SDK REFUSES it;
-// tourney auto-suffixes so that `addrandom 8` cannot stall on a name clash.
-// The suffixing is the better behaviour and it is also the one that changes
-// what a client sees, so it stays tourney's -- R-MODE-4's shape: a donor's
-// behaviour belongs to the ruleset that shipped it.
+// Block 5 of seventeen: a duplicate bot name.  The SDK refuses it; tourney
+// auto-suffixes so that `addrandom 8` cannot stall on a name clash.  The
+// suffixing is the better behaviour and it is also the one that changes what a
+// client sees, so it stays tourney's: a donor's behaviour belongs to the
+// ruleset that shipped it.
 //
 // Returns false when the name cannot be used at all.
 //===========================================================================
@@ -659,15 +658,15 @@ void BotAddDeathmatch(edict_t *ent)
     // The donor's two #ifdef fences, as the resolution's answer.  `arena` and
     // `botctfteam` are cvars a server operator sets; the userinfo key is how
     // the value reaches ClientConnect, which is the only place that can act on
-    // it.  R-BOT-28 re-registers botctfteam, which RA2's port dropped.
+    // it.  botctfteam is re-registered here, RA2's port having dropped it.
     if (G_Ruleset() == RULESET_ARENA)
     {
-        // R-RA-9: "0", and see RA_BotFillArena() for why -- the four readers of
+        // "0", and see RA_BotFillArena() for why -- the four readers of
         // this cvar have to agree on the default, because the first one to run
         // is the one that creates it.
         cvar_t *arena_cvar = gi.cvar("arena", "0", 0);
 
-        // R-131: the donor forced "1" here when the cvar was out of range, and
+        // The donor forced "1" here when the cvar was out of range, and
         // "1" is a request like any other -- it cannot be told apart from an
         // operator who meant arena 1.  "0" is the absence of a request, which
         // RA_BotJoinArena resolves by following the people; 1..N still reaches
@@ -676,14 +675,14 @@ void BotAddDeathmatch(edict_t *ent)
             Info_SetValueForKey(uinfo, "arena", arena_cvar->string);
         else
         {
-            // R-RA-9: ...and where the operator named no arena, the FILL may
+            // ...and where the operator named no arena, the FILL may
             // still have one in mind.  It works the arena furthest from its own
             // target, which on a multi-arena map is not the one "follow the
             // people" resolves to -- that is always the lowest-numbered
             // populated arena, so without this every bot the fill added for
             // arena 5 would arrive in arena 1 and the fill would ask again next
             // tick, forever.  0 still comes back for a staging bot, which must
-            // stay a follower or R-131 cannot move it when people arrive.
+            // stay a follower or it cannot be moved when people arrive.
             int want = RA_BotFillDestination();
             char buf[16];
 
@@ -747,17 +746,17 @@ Spawns a bot.
 
 void SP_bot(edict_t *self)
 {
-    // R-MODE-7/N6: no bots in the campaign, and a map that spawns one there is
+    // No bots in the campaign, and a map that spawns one there is
     // a map that was built for a deathmatch mod.  Freed rather than refused.
     if (!G_BotsAllowed())
     {
         G_FreeEdict(self);
         return;
     } //end if
-    // R-BOT-18: this runs inside SpawnEntities, so it may only QUEUE.  The
+    // This runs inside SpawnEntities, so it may only QUEUE.  The
     // donor is already careful about that -- BotAddDeathmatch ends in
     // AddBotToQueue -- and the synthesised argument vector is what carries the
-    // five spawn keys to it.  Those keys are spawn_temp_t's (R-OSP-6).
+    // five spawn keys to it.  Those keys are spawn_temp_t's.
     BotStoreClientCommand("sv", "addbot", st.name, st.skin, st.charfile,
                           st.charname, NULL);
     BotAddDeathmatch(NULL);
@@ -806,15 +805,15 @@ void BotRemoveDeathmatch(edict_t *ent)
     else gi.cprintf(ent, PRINT_HIGH, "No bots found to remove!\n");
 } //end of the functoin BotRemoveDeathmatch
 //===========================================================================
-// R-RA-7, R-CTF-8 and R-DM-1.  What `botfill` asks for, or 0 when the switch is
-// off -- and 0 is the only value that means off, which is why the clamp to two
-// lives here: a map with nothing to count still gets a game.
+// What `botfill` asks for, or 0 when the switch is off -- and 0 is the only
+// value that means off, which is why the clamp to two lives here: a map with
+// nothing to count still gets a game.
 //
 // The RULESET owns its number and this owns the ceilings, because the ceilings
 // are the same three questions for all of them: two sides make a round,
 // `game.maxclients` is what the engine will seat, and the roster is what
 // `bots.cfg` can supply.  arena's number is per arena as well, so it comes from
-// RA_BotFillTarget(), but it comes through HERE now -- arena.c carried its own
+// RA_BotFillTarget(), but it comes through here now -- arena.c carried its own
 // copy of these same three lines over its own `botfill_ceiling`, so "the
 // ceilings are shared" was true of two rulesets and not the third.
 //
@@ -835,30 +834,29 @@ int BotFillTarget(void)
         // `dm` and `dmpro` are the OSP four's teamless half and declare no
         // capacity -- `team_maxplayers` sizes a TEAM and they have none -- so
         // the map is the only signal, exactly as it was for baseq2's `dm`
-        // before the flattening (R-DM-1).
+        // before the flattening.
         case RULESET_DM:
         case RULESET_DMPRO: want = DM_BotFillSeats(); break;
-        // ...and `tdm` and `duel` DO declare one, which is what
-        // doc/reconciliation.md R-156 said should be used the day this question
-        // could no longer be deferred.  `duel` forces team_maxplayers to 1
-        // CVAR_NOSET, so this is 2 there by construction.
+        // ...and `tdm` and `duel` do declare one, so that is what is used.
+        // `duel` forces team_maxplayers to 1 CVAR_NOSET, so this is 2 there by
+        // construction.
         case RULESET_TDM:
         case RULESET_DUEL: want = 2 * OSP_TeamMaxPlayers(); break;
         case RULESET_ARENA:
         {
-            // R-RA-8: no arena on the map will take bots.  That is a REAL zero
+            // No arena on the map will take bots.  That is a real zero
             // and has to leave before the two-sides clamp below, which exists
             // for the other zero -- "a map with nothing to count" -- and would
             // otherwise turn this one into 2.  CheckMinimumPlayers never reads
             // it (its `fillarena` is 0 too, so it does not ask), but `sv
             // ruleset` prints it unconditionally, and a diagnostic that says
             // `want=2` beside "every arena has bots switched off" is the kind
-            // of half-truth R-VER-19 wanted this line to stop telling.
+            // of half-truth this line exists to stop telling.
             int n = RA_BotFillArena();
 
             if (!n) return 0;
             want = RA_BotFillTarget(n);
-            // R-RA-9: ...and a selected arena can want ZERO -- the one everyone
+            // ...and a selected arena can want zero -- the one everyone
             // has just walked out of, which the removal arm has to drain to
             // nothing.  That zero leaves before the two-sides clamp for the
             // same reason the other one does: the clamp is for a map with
@@ -877,8 +875,8 @@ int BotFillTarget(void)
     return want;
 } //end of the function BotFillTarget
 //===========================================================================
-// Where the number in BotFillTarget() came from, for `sv ruleset`.  R-VER-19:
-// the target is COMPUTED rather than stored, so a play test has nowhere else to
+// Where the number in BotFillTarget() came from, for `sv ruleset`.
+// The target is computed rather than stored, so a play test has nowhere else to
 // read it back from, and printing only the clamped answer hides the clamp.
 //
 // Parameter:               buf, len: the description is written here
@@ -890,7 +888,7 @@ void BotFillDescribe(char *buf, size_t len)
     switch (G_Ruleset())
     {
         case RULESET_CTF:
-            Q_snprintf(buf, len, "seats=%d, shared=%d base=%d+%d (R-CTF-8)",
+            Q_snprintf(buf, len, "seats=%d, shared=%d base=%d+%d",
                        CTF_BotFillSeats(),
                        G_SpawnPointPool("info_player_deathmatch"),
                        G_SpawnPointPool("info_player_team1"),
@@ -898,31 +896,31 @@ void BotFillDescribe(char *buf, size_t len)
             break;
         case RULESET_DM:
         case RULESET_DMPRO:
-            Q_snprintf(buf, len, "seats=%d, spawns=%d (R-DM-1)",
+            Q_snprintf(buf, len, "seats=%d, spawns=%d",
                        DM_BotFillSeats(),
                        G_SpawnPointPool("info_player_deathmatch"));
             break;
         case RULESET_TDM:
         case RULESET_DUEL:
-            Q_snprintf(buf, len, "2 * team_maxplayers %d (R-DM-1, R-156)",
+            Q_snprintf(buf, len, "2 * team_maxplayers %d",
                        OSP_TeamMaxPlayers());
             break;
         case RULESET_ARENA:
         {
             int n = RA_BotFillArena();
 
-            // R-RA-8: 0 is an answer now -- no arena on the map will take bots
+            // 0 is an answer now -- no arena on the map will take bots
             // -- and it is worth saying so in words, because the numbers that
             // would otherwise be printed beside it are those of arena 0, which
             // is the observers' non-arena and never a fill target.
             if (!n)
             {
-                Q_strlcpy(buf, "nothing -- every arena has bots switched off "
-                               "(R-RA-8)", len);
+                Q_strlcpy(buf, "nothing -- every arena has bots switched off",
+                          len);
                 break;
             } //end if
 
-            Q_snprintf(buf, len, "arena %d, %d here, %s (R-RA-7)", n,
+            Q_snprintf(buf, len, "arena %d, %d here, %s", n,
                        RA_ArenaPlayers(n, NULL),
                        RA_ArenaIsPickup(n) ? "pickup: by spawn points"
                                            : "duel: by playersperteam");
@@ -934,15 +932,15 @@ void BotFillDescribe(char *buf, size_t len)
     } //end switch
 } //end of the function BotFillDescribe
 //===========================================================================
-// The roster ran out.  Both arms of CheckMinimumPlayers have to settle on ONE
-// number or the server never sits still, and the arms that read a flat count get
-// that by writing the count they achieved back into `minimumplayers`.  A switch
-// cannot carry a count -- and writing 0 into it would be worse than useless,
-// because the target would fall back to `minimumplayers`, which a server using
-// the fill has no reason to have set, and the removal arm would then delete
-// every bot that had just been added.  So the ceiling is held here and cleared
-// by BotSpawn() (R-RA-7, R-CTF-8, R-DM-1).  arena's used to be a second copy in
-// arena.c; there is one now.
+// The roster ran out.  Both arms of CheckMinimumPlayers have to settle on one
+// number or the server never sits still, and the arms that read a flat count
+// get that by writing the count they achieved back into `minimumplayers`.  A
+// switch cannot carry a count -- and writing 0 into it would be worse than
+// useless, because the target would fall back to `minimumplayers`, which a
+// server using the fill has no reason to have set, and the removal arm would
+// then delete every bot that had just been added.  So the ceiling is held here
+// and cleared by BotSpawn().  arena's used to be a second copy in arena.c;
+// there is one now.
 //
 // Parameter:               achieved: the bot count the roster could reach
 // Returns:                 -
@@ -955,12 +953,12 @@ void BotFillNoMore(int achieved)
         botfill_ceiling = achieved;
 } //end of the function BotFillNoMore
 //===========================================================================
-// R-BOT-17, and R-BOT-29's blocks 3 and 4 of seventeen.
+// Blocks 3 and 4 of seventeen.
 //
 // The donor's `#ifdef TOURNEY` arm is not one branch but four differences, and
 // keeping them straight is the whole job:
 //
-//   * the cvar is `bots_minplayers`, not `minimumplayers`  (R-OSP-11)
+//   * the cvar is `bots_minplayers`, not `minimumplayers`
 //   * a client only counts when resp.osp_entered == ENTERED_ENTERED
 //   * the arithmetic subtracts bots_votedin -- players who voted a bot in are
 //     not players the bot count should replace
@@ -987,7 +985,7 @@ void CheckMinimumPlayers(void)
 
     minplayers = BotMinPlayers();
 
-    // R-RA-7.  Which arena the fill is feeding, and it is asked for FIRST
+    // Which arena the fill is feeding, and it is asked for first
     // because under `arena` it is also the CENSUS that changes: a target
     // belonging to one of up to 32 games on the map has to be compared against
     // that game's head count and not the server's.  That is the one asymmetry
@@ -995,13 +993,12 @@ void CheckMinimumPlayers(void)
     // function -- and it is an asymmetry of counting, not of switching.
     fillarena = G_Ruleset() == RULESET_ARENA ? RA_BotFillArena() : 0;
 
-    // ONLY THE SWITCH IS READ HERE.  Everything above the frame gate below runs
-    // on EVERY frame, and the target is not a cvar read: BotFillTarget() walks
+    // Only the switch is read here.  Everything above the frame gate below runs
+    // on every frame, and the target is not a cvar read: BotFillTarget() walks
     // the entity list once per spawn-point class -- three times under `ctf` --
-    // so it is asked for on a fill tick and not before (R-BASE-6's argument
-    // about hot paths, reached from the other side).
+    // so it is asked for on a fill tick and not before.
     fill = 0;
-    // R-RA-8: `!fillarena` USED TO MEAN "not the arena ruleset", and now it can
+    // `!fillarena` used to mean "not the arena ruleset", and now it can
     // also mean "the arena ruleset declined".  Until this feature there was no
     // difference: with `botfill` on and a map loaded, RA_BotFillArena() always
     // answered 1..N, so a 0 from it could only be the switch being off -- in
@@ -1016,13 +1013,13 @@ void CheckMinimumPlayers(void)
     if (!minplayers->value && !fillarena && !fillon) return;
     //
     if (level.framenum & 31) return;
-    //arena used to return here, and Phase 6 was right to: with no bot able to
-    //reach an arena roster, a bot added under `arena` stood in arena 0 forever
-    //and adding "a body mid-round" was the only thing it could have meant.
-    //R-ARENA-2 changes the fact the early-out rested on -- RA_BotJoinArena puts
-    //a new bot in the selected arena's WAITING queue, which is where a human
-    //who connects mid-round goes too -- so R-MODE-7's bot row ("bots: yes under
-    //arena") is now implementable and the early-out is gone.  What keeps this
+    //arena used to return here, and rightly: with no bot able to reach an
+    //arena roster, a bot added under `arena` stood in arena 0 forever and
+    //adding "a body mid-round" was the only thing it could have meant.
+    //RA_BotJoinArena changes the fact the early-out rested on -- it puts a new
+    //bot in the selected arena's waiting queue, which is where a human who
+    //connects mid-round goes too -- so bots under `arena` are implementable
+    //and the early-out is gone.  What keeps this
     //from running away is BotCountsAsPlayer's arena arm: under arena a player
     //is somebody on a team, not somebody currently alive in the round.
     if (!G_BotsAllowed()) return;
@@ -1035,7 +1032,7 @@ void CheckMinimumPlayers(void)
         cl_ent = DF_CLIENTENT(i);
         if (!BotCountsAsPlayer(cl_ent))
         {
-            // A BOT THAT IS NOT YET A PLAYER IS STILL A BOT ON ITS WAY IN, and
+            // A bot that is not yet a player is still a bot on its way in, and
             // the add arm below has to know that or it asks for the same bot
             // again every 32 frames.  BotStarted() holds a connected bot's
             // ClientBegin back until its library reports initialised, and on
@@ -1063,7 +1060,7 @@ void CheckMinimumPlayers(void)
         pending++;
     } //end for
     //
-    // R-RA-7's arithmetic replaces the two counts and the target, and leaves
+    // The arena arithmetic replaces the two counts and the target, and leaves
     // `pending` alone.  A pending bot has connected and has no arena yet --
     // `resp.context` is 0 and `resp.teamnum` is -1 until RA_BotJoinArena runs
     // from the deferred ClientBegin -- so it belongs to no arena's census and
@@ -1075,14 +1072,14 @@ void CheckMinimumPlayers(void)
     } //end if
     //0 from a ruleset that has no fill target, which `arena` is when its own
     //RA_BotFillArena() declined -- then the flat count is the target, as it is
-    //with the switch off.  ONE call for every ruleset now that there is one
+    //with the switch off.  One call for every ruleset now that there is one
     //cvar: the arena's census is still its own, but its TARGET comes back
     //through BotFillTarget() with everybody else's ceilings applied.
     if (fillon || fillarena) fill = BotFillTarget();
-    // R-RA-9: UNDER `arena` THE FILL OWNS THE NUMBER, AND ZERO IS ONE OF ITS
+    // Under `arena` the fill owns the number, and zero is one of its
     // ANSWERS.  `fill ? fill : minimumplayers` reads 0 as "this ruleset has no
     // target", which is true of a ruleset that declined and false of an ARENA
-    // THAT WANTS NONE -- the one everybody has just walked out of.  Falling
+    // That wants none -- the one everybody has just walked out of.  Falling
     // back to the flat count there would answer a per-arena question with a
     // server-wide census and re-add the bots the removal arm had just drained.
     if (fillarena) want = fill;
@@ -1111,8 +1108,8 @@ void CheckMinimumPlayers(void)
     {
         if (!AddRandomBot(NULL))
         {
-            // R-RA-7: the clamp exists so that the add and the remove arms
-            // settle on ONE number when the roster runs out.  `botfill` is a
+            // The clamp exists so that the add and the remove arms
+            // settle on one number when the roster runs out.  `botfill` is a
             // switch and cannot hold a count -- and writing 0 into it would be
             // worse than useless, because the target would fall back to the
             // flat count, which is 0 under this configuration, and the removal
@@ -1129,14 +1126,13 @@ void CheckMinimumPlayers(void)
     } //end if
     else
     {
-        // R-BOT-17 says "adding AND removing", and the non-TOURNEY arm is the
-        // SDK's own: gladq2_src/bl_spawn.c ends in
-        // `else if (numplayers > minplayers->value)` with no `- 1`, so add and
-        // remove settle on the SAME number.  tourney's `- bots_votedin - 1` is
-        // tourney's, and carrying it into the other rulesets left the two arms
-        // half a player apart -- adding up to `want`, removing down to
-        // `want + 1` -- which is a server that never sits still on either
-        // side of a join.
+        // Adding and removing both, and the non-TOURNEY arm is the SDK's own:
+        // Gladiator's bl_spawn.c ends in `else if (numplayers >
+        // minplayers->value)` with no `- 1`, so add and remove settle on the
+        // same number.  Tourney's `- bots_votedin - 1` is tourney's, and
+        // carrying it into the other rulesets left the two arms half a player
+        // apart -- adding up to `want`, removing down to `want + 1` -- which
+        // is a server that never sits still on either side of a join.
         if (G_IsOspRuleset()
             ? ((numplayers - votedin - 1) > want)
             : (numplayers > want))
@@ -1144,8 +1140,8 @@ void CheckMinimumPlayers(void)
             // Under the fill the bot is NAMED, because `removebot` with no name
             // takes the lowest client slot -- and that bot may be playing in an
             // arena nobody asked to shrink, or holding up the side that is
-            // already short (R-CTF-8).  A NULL name terminates the vararg list,
-            // which is the call the other rulesets already make (R-RA-7).
+            // already short.  A NULL name terminates the vararg list,
+            // which is the call the other rulesets already make.
             if (numbots > 0)
                 BotServerCommand("sv", "removebot",
                                  fillarena ? RA_ArenaBotName(fillarena) :

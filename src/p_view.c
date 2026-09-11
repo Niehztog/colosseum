@@ -188,7 +188,7 @@ static void P_DamageFeedback(edict_t *player)
     client->damage_knockback = 0;
 }
 
-// R-EXTRA-6: is arena.c driving this client's view?
+// Is arena.c driving this client's view?
 //
 // TRACKCAM and EYECAM place the camera and set its angles from the player being
 // watched, which makes three things about this client not its own any more: its
@@ -230,7 +230,7 @@ static void SV_CalcViewOffset(edict_t *ent)
     // base angles
     angles = ent->client->ps.kick_angles;
 
-    // R-EXTRA-6: nothing kicks an arena camera.
+    // Nothing kicks an arena camera.
     //
     // The run and bob terms below are computed from ent->velocity, and
     // track_think() parks the whole camera-to-goal offset there every frame --
@@ -608,7 +608,7 @@ static void P_FallingDamage(edict_t *ent)
         VectorSet(dir, 0, 0, 1);
 
         // RA2 makes falling damage a per-arena setting rather than a dmflag
-        // (R-RA-1's per-arena settings); everywhere else DF_NO_FALLING decides.
+        // out of arena.cfg; everywhere else DF_NO_FALLING decides.
         if (G_Ruleset() == RULESET_ARENA
             ? arenas[ent->client->resp.context].fallingdamage != 0
             : (!deathmatch->value || !((int)dmflags->value & DF_NO_FALLING)))
@@ -856,7 +856,7 @@ static void G_SetClientEffects(edict_t *ent)
         ent->s.renderfx |= (RF_SHELL_RED | RF_SHELL_GREEN | RF_SHELL_BLUE);
     }
 
-    // R-OSP-1's runes announce themselves on the carrier's model: a shell for
+    // Tourney's runes announce themselves on the carrier's model: a shell for
     // the rune just picked up, and a colour per rune when `runes_flash` is on.
     // The colours are the donor's and are not arbitrary -- they are what a
     // tourney player reads across a room to know which rune the other player
@@ -1055,7 +1055,7 @@ void ClientEndServerFrame(edict_t *ent)
     // If it wasn't updated here, the view position would lag a frame
     // behind the body position when pushed -- "sinking into plats"
     //
-    // R-EXTRA-6: an arena observer in TRACKCAM or EYECAM has its view driven by
+    // An arena observer in TRACKCAM or EYECAM has its view driven by
     // arena.c from the tracked player, so its own body position must not be
     // written over the top of it.
     if (!RA_CameraObserver(ent)) {
@@ -1074,11 +1074,11 @@ void ClientEndServerFrame(edict_t *ent)
         current_client->ps.blend[3] = 0;
         current_client->ps.fov = 90;
         G_SetStats(ent);
-        // R-OSP-1: tourney's HUD panels are configstring indices held in its
+        // Tourney's HUD panels are configstring indices held in its
         // own stat slots, so intermission has to blank them or the match clock
         // and team columns stay on screen over the end-of-level board.  The
-        // second half is the hi-score board, which is the ONLY scoreboard that
-        // keeps refreshing during intermission (R-OSP-9's `hs_mode`).
+        // second half is the hi-score board, which is the only scoreboard that
+        // keeps refreshing during intermission (`hs_mode`).
         if (G_IsOspRuleset()) {
             OSP_clearStats(ent);
             if (ent->client->showscores && !(level.framenum & 31) &&
@@ -1164,7 +1164,7 @@ void ClientEndServerFrame(edict_t *ent)
 
     // chase cam stuff.  G_IsObserver() rather than resp.spectator: under ctf an
     // observer is a CTF_NOTEAM player and resp.spectator is never set, so the
-    // inherited test would give an observer a live player's HUD (R-CTF-5).
+    // inherited test would give an observer a live player's HUD.
     // Tourney has no base spectator HUD.  A free observer gets its ordinary
     // OSP stats, but a chase/autocam client receives its target's full array
     // below and must not overwrite that copy on its own later slot pass.
@@ -1180,14 +1180,14 @@ void ClientEndServerFrame(edict_t *ent)
     if (!G_IsOspRuleset())
         G_CheckChaseStats(ent);
 
-    // R-OSP-1 and R-OSP-7: tourney owns the upper half of its own stat map --
-    // the match clock, the frag/rank columns, the team panels and the id line
-    // -- and writes them as configstring INDICES rather than values, which is
-    // why it is a second pass rather than a replacement for G_SetStats.  The
-    // guards are the donor's and each one means something: a client that is
-    // observing gets the panels blanked, a client in its first ten frames does
-    // not get them at all (the configstrings it would point at are still being
-    // built), and a bot never gets a unicast.
+    // Tourney owns the upper half of its own stat map -- the match clock, the
+    // frag/rank columns, the team panels and the id line -- and writes them as
+    // configstring INDICES rather than values, which is why it is a second
+    // pass rather than a replacement for G_SetStats.  The guards are the
+    // donor's and each one means something: a client that is observing gets
+    // the panels blanked, a client in its first ten frames does not get them
+    // at all (the configstrings it would point at are still being built), and
+    // a bot never gets a unicast.
     if (G_IsOspRuleset()) {
         if (ent->client->resp.osp_r2dc)
             OSP_clearStats(ent);
@@ -1225,13 +1225,13 @@ void ClientEndServerFrame(edict_t *ent)
             ent->client->resp.osp_r000 = count;
         }
 
-        // R-OSP-3: a powerup running out is a logged event, because the report
+        // A powerup running out is a logged event, because the report
         // wants to know how long the player actually held it -- `osp_r200` is
-        // the ENTITY it came from (g_items.c:264) and is cleared once BOTH
+        // the ENTITY it came from (g_items.c:264) and is cleared once both
         // powerups are gone, so a player holding quad and invulnerability at
         // once does not lose the second one's source to the first one's expiry.
         // TossClientWeapon closes the two cases this reader cannot see: a quad
-        // dropped on death, and one held with DF_QUAD_DROP off (R-195.6).
+        // dropped on death, and one held with DF_QUAD_DROP off.
         if (ent->client->resp.osp_r200) {
             if (ent->client->quad_framenum &&
                 ent->client->quad_framenum < level.framenum) {
@@ -1268,7 +1268,7 @@ void ClientEndServerFrame(edict_t *ent)
     VectorClear(ent->client->kick_origin);
     VectorClear(ent->client->kick_angles);
 
-    // R-BOT-27: the bounding box follows the entity it outlines, so it is
+    // The bounding box follows the entity it outlines, so it is
     // re-laid every frame it is up.  Here rather than in the entity loop
     // because the origin this reads is the one this function has just settled.
     // Before the bot arm below, not after: the box is drawn AROUND a bot, for a
@@ -1276,16 +1276,16 @@ void ClientEndServerFrame(edict_t *ent)
     if (ent->box.created)
         SetVisibleBoundingBox(&ent->box, ent);
 
-    // R-MENU-4's second half, the v0.91 fix: "added ent->client->showscores set
-    // to false for bots in ClientEndServerFrame in p_view.c".  A bot has no
-    // screen, so every layout composed for one is a scoreboard nobody reads
-    // followed by a unicast to a fake client -- which is also why v0.91's next
-    // line removed unicast messages for bots from the redirection.
+    // The v0.91 fix: "added ent->client->showscores set to false for bots in
+    // ClientEndServerFrame in p_view.c".  A bot has no screen, so every layout
+    // composed for one is a scoreboard nobody reads followed by a unicast to a
+    // fake client -- which is also why v0.91's next line removed unicast
+    // messages for bots from the redirection.
     //
-    // The donor knew ONE layout owner and could clear ONE field.  This tree has
+    // The donor knew one layout owner and could clear one field.  This tree has
     // four menu engines and RA2's `scoremode` in place of `showscores`
-    // (sec 7 rule 3), so the requirement is expressed as what it means -- a bot
-    // is never sent a layout -- rather than as the donor's single assignment.
+    // so the rule is expressed as what it means -- a bot is never sent a
+    // layout -- rather than as the donor's single assignment.
     // Arena is where it stops being cosmetic: init_player() opens the team menu
     // for every connecting client, so without this every bot on an arena server
     // repaints a menu it cannot operate every 32 frames.
@@ -1299,7 +1299,7 @@ void ClientEndServerFrame(edict_t *ent)
     if (G_Ruleset() == RULESET_ARENA && MenuThink(ent))
         return;
 
-    // R-BOT-28: the Gladiator menu redraws on its OWN cadence -- every 16
+    // The Gladiator menu redraws on its OWN cadence -- every 16
     // frames from bot_MenuThink, plus immediately after any cursor move -- so
     // it is not inside the 32-frame scoreboard block below.  It writes a
     // complete unicast of its own, which is why it comes before the block
@@ -1311,8 +1311,8 @@ void ClientEndServerFrame(edict_t *ent)
     }
 
     // if the scoreboard is up, update it.  `scoremode` is RA2's replacement for
-    // baseq2's `showscores` bool and the merged struct keeps both (sec 7 rule
-    // 3), so this asks whichever field the running ruleset writes.
+    // baseq2's `showscores` bool and the merged struct keeps both, so this
+    // asks whichever field the running ruleset writes.
     if (G_ScoreboardUp(ent) &&
         (!(level.framenum & 31) ||
          (G_IsOspRuleset() && match_paused &&
@@ -1320,7 +1320,7 @@ void ClientEndServerFrame(edict_t *ent)
           pause_time - (int)pause_time < FRAMETIME &&
           !((int)pause_time % 3)))) {
         // The menu shares the layout channel with the scoreboard -- which is
-        // exactly why every engine sets showscores when it opens (R-MENU-2a) --
+        // exactly why every engine sets showscores when it opens --
         // so the owner decides which of the two is redrawn.  MENU_ARENA is the
         // exception and does not contend: it draws by overwriting CS_STATUSBAR
         // for the one client (arena/menu.c SendMenu), on its own cadence, out
@@ -1329,7 +1329,7 @@ void ClientEndServerFrame(edict_t *ent)
         // was up, which is all the time.
         if (G_MenuActive(ent) && ent->client->menu_owner != MENU_ARENA) {
             // Composing is what makes this a redraw.  MENU_TOURNEY reached
-            // here and composed NOTHING before 1.31, so the unicast below sent
+            // here and composed nothing before 1.31, so the unicast below sent
             // an EMPTY message every 32 frames -- the branch was claiming the
             // channel off the scoreboard and then not drawing on it.  It now
             // repaints the same way MENU_CTF does.  MENU_BOT still composes
@@ -1340,7 +1340,7 @@ void ClientEndServerFrame(edict_t *ent)
             // osp_PMenu_Sync() changes what is in that copy, so Team_Menu's
             // "*(%d players)" is still the count from when the menu was opened
             // or last acted on.  RA2 is the only one of the three that closes
-            // that gap (RA_RefreshMenuCounts out of MenuThink, R-136), and it
+            // that gap (RA_RefreshMenuCounts out of MenuThink), and it
             // can because a qmenu_t knows how to rebuild itself; a pmenu_t
             // handle does not record which builder made it.
             if (ent->client->menu_owner == MENU_CTF)
@@ -1355,7 +1355,7 @@ void ClientEndServerFrame(edict_t *ent)
         gi.unicast(ent, false);
     }
 
-    // R-EXTRA-6: an observer watching somebody else gets that player's HUD, so
+    // An observer watching somebody else gets that player's HUD, so
     // the ammo and armour counters belong to who is on screen.  Only the first
     // thirteen stats: everything above them is the layout and the scoreboard,
     // which are this client's own (the donor's comment, and it is right).
@@ -1364,7 +1364,7 @@ void ClientEndServerFrame(edict_t *ent)
     // copying the stats of a player who has just respawned makes the client
     // print "Can't find pic:" for the icons the new inventory has not indexed
     // yet.  `respawn_framenum` is the frame-number spelling of the donor's
-    // `respawn_time` (R-VER-21), so the wait is 2 * BASE_FRAMERATE frames.
+    // `respawn_time`, so the wait is 2 * BASE_FRAMERATE frames.
     if ((ent->flags & FL_OBSERVER) && ent->client->camera.ent &&
         ent->client->camera.ent != ent) {
         edict_t *cam = ent->client->camera.ent;

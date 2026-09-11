@@ -17,12 +17,11 @@ along with this program; if not, write to the Free Software
 Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 */
-// OSP Tourney DM v2.75, from osp-tourney@1d8427e (doc/provenance.md).
+// OSP Tourney DM v2.75, from osp-tourney@1d8427e.
 // Donor-only: baseq2 has no counterpart, so it lives in src/tourney/ rather
-// than being merged into a spine file (R-CORE-7).  The reconstruction's
-// asm-matching address comments are stripped -- SPECS.md N1 makes those oracles
-// meaningless here, and they survive at the pin.
-// osp_cmds.c -- <INVENTED FILENAME>. The mod's client commands, the vote
+// than being merged into a spine file.  The reconstruction's
+// asm-matching address comments are stripped.
+// osp_cmds.c -- filename assigned by this tree.  The mod's client commands, the vote
 // system and the referee commands.
 //
 // Three groups that share the vote state: the plain `OSP_*_cmd` client
@@ -35,10 +34,10 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "tourney/osp_stats.h"
 #include "bot/bl_main.h"
 #include "bot/bl_botcfg.h"
-// The two bot entry points, from the headers that own them.  Until Phase 6
-// these were re-declared here, which is the very shape R-OSP-5 names: a donor's
-// name declared outside the header that declares it.  The seam file they
-// resolved to is gone.
+// The two bot entry points, from the headers that own them.  These were once
+// re-declared here, which is the shape to avoid: a donor's name declared
+// outside the header that declares it.  The seam file they resolved to is
+// gone.
 #include "bot/bl_redirgi.h"
 #include "bot/bl_spawn.h"
 
@@ -985,7 +984,7 @@ void OSP_map_vote(void)
         sl_SoftGameEnd(&gi, level);
         OSP_Stats_MatchEnd("player map vote");
         manual_map = 1;
-        EndDMLevel();
+        G_EndLevel();
     }
 }
 
@@ -1003,11 +1002,12 @@ void OSP_config_vote(void)
         manual_map = 2;
         gi.cvar_set("__current_config", vote_value);
         gi.dprintf("Changing to config: %s\n", vote_value);
-        Q_snprintf(cmd, sizeof(cmd), "exec %s\n", vote_value);
+        // Quoted, for the reason at the other exec site.
+        Q_snprintf(cmd, sizeof(cmd), "exec \"%s\"\n", vote_value);
         G_QueueOspHookRequest();
         gi.AddCommandString(cmd);
         OSP_loadMaps();
-        EndDMLevel();
+        G_EndLevel();
     }
 }
 
@@ -1800,7 +1800,7 @@ void OSP_hud_cmd(edict_t *ent)
         ent->client->resp.osp_r00c = 0;
     ent->client->resp.osp_r00c = 1 - ent->client->resp.osp_r00c;
 
-    // Four literals in the donor; one emitter and two booleans here (R-OSP-7a).
+    // Four literals in the donor; one emitter and two booleans here.
     OSP_clientConfigString(ent, CS_STATUSBAR,
                            G_StatusbarVariant(ent->client->resp.osp_r00c != 0,
                                               OSP_IsTeams()));
@@ -1889,13 +1889,13 @@ void OSP_isreferee_cmd(edict_t *ent)
 // rcon_password will do, and either being unset or literally "none" takes it
 // out of play -- so the mode is only available when at least one of the two is
 // a real password.  Every outcome is logged to the admin log with the player's
-// address, which OSP_getPlayerAddr writes into ent->osp_e37c.
+// address, which ClientConnect latched into ent->client->pers.address.
 void OSP_referee_cmd(edict_t *ent)
 {
     cvar_t  *rcon;
 
     // "" and not NULL: `rcon_password` is the ENGINE's cvar and this library
-    // re-obtains it from two files, so the defaults have to agree (R-COMPAT-6)
+    // re-obtains it from two files, so the defaults have to agree
     // -- and a NULL default is a null pointer handed to Cvar_Get on the one
     // path where the cvar does not already exist.
     rcon = gi.cvar("rcon_password", "", 0);
@@ -1913,10 +1913,9 @@ void OSP_referee_cmd(edict_t *ent)
                    "Referee mode is disabled on this server.\n");
 
         if (server_log) {
-            OSP_getPlayerAddr(ent);
             OSP_logAdminLog("Referee_Attempt: %s (%s) [%s]",
                             ent->client->pers.netname, gi.argv(1),
-                            ent->osp_e37c);
+                            ent->client->pers.address);
         }
 
         return;
@@ -1932,10 +1931,9 @@ void OSP_referee_cmd(edict_t *ent)
         strcmp(referee_password->string, gi.argv(1)) &&
         rcon && rcon->string[0] && strcmp(rcon->string, gi.argv(1))) {
         if (server_log) {
-            OSP_getPlayerAddr(ent);
             OSP_logAdminLog("Referee_Fail: %s (%s) [%s]",
                             ent->client->pers.netname, gi.argv(1),
-                            ent->osp_e37c);
+                            ent->client->pers.address);
         }
 
         gi.cprintf(ent, PRINT_HIGH, "Password incorrect.\n");
@@ -1954,9 +1952,9 @@ void OSP_referee_cmd(edict_t *ent)
         ent->osp_e39c = 2;
 
         if (server_log) {
-            OSP_getPlayerAddr(ent);
             OSP_logAdminLog("Referee_Enable: %s [%s]",
-                            ent->client->pers.netname, ent->osp_e37c);
+                            ent->client->pers.netname,
+                            ent->client->pers.address);
         }
 
         OSP_adminMenu(ent);
@@ -1966,10 +1964,9 @@ void OSP_referee_cmd(edict_t *ent)
     gi.cprintf(ent, PRINT_HIGH, "Password incorrect.\n");
 
     if (server_log) {
-        OSP_getPlayerAddr(ent);
         OSP_logAdminLog("Referee_Fail2: %s (%s) [%s]",
                         ent->client->pers.netname, gi.argv(1),
-                        ent->osp_e37c);
+                        ent->client->pers.address);
     }
 }
 
@@ -2020,10 +2017,10 @@ void OSP_rkick_cmd(edict_t *ent)
     gi.bprintf(PRINT_CHAT, "%s has been kicked!\n",
                victim->client->pers.netname);
     if (server_log) {
-        OSP_getPlayerAddr(victim);
         OSP_logAdminLog("Referee_Kick: %s -> %s [%s]",
                         ent->client->pers.netname,
-                        victim->client->pers.netname, victim->osp_e37c);
+                        victim->client->pers.netname,
+                        victim->client->pers.address);
     }
 
     if (victim->flags & FL_BOT) {
@@ -2084,7 +2081,7 @@ void OSP_rmap_cmd(edict_t *ent)
         sl_SoftGameEnd(&gi, level);
         OSP_Stats_MatchEnd("referee map change");
         manual_map = 1;
-        EndDMLevel();
+        G_EndLevel();
     }
 }
 
@@ -2261,8 +2258,7 @@ void OSP_rban_cmd(edict_t *ent, char *who)
     }
 
     Q_strlcpy(bname, victim->client->pers.netname, sizeof(bname));
-    OSP_getPlayerAddr(victim);
-    ret = OSP_addBan(bname, victim->osp_e37c);
+    ret = OSP_addBan(bname, victim->client->pers.address);
     if (!ret) {
         gi.cprintf(ent, PRINT_HIGH, "Player \"%s\" already in ban list!\n",
                    bname);
@@ -2283,7 +2279,8 @@ void OSP_rban_cmd(edict_t *ent, char *who)
     gi.cprintf(ent, PRINT_HIGH, "Player \"%s\" added to ban list.\n", bname);
     if (server_log)
         OSP_logAdminLog("Referee_Ban: %s -> %s [%s]",
-                        ent->client->pers.netname, bname, victim->osp_e37c);
+                        ent->client->pers.netname, bname,
+                        victim->client->pers.address);
     gi.bprintf(PRINT_CHAT, "%s has been banned!\n", bname);
     victim->client->resp.osp_r07c[0] = 1;
     gi.WriteByte(svc_disconnect);
@@ -2323,7 +2320,7 @@ void OSP_rbanaddr_cmd(edict_t *ent)
         if (!e->inuse || !e->client || !e->client->pers.connected)
             continue;
 
-        cliaddr = e->osp_e37c;
+        cliaddr = e->client->pers.address;
 
         if (strstr(cliaddr, banip) == cliaddr) {
             gi.bprintf(PRINT_CHAT, "%s has been banned!\n",
@@ -2456,7 +2453,7 @@ void OSP_playerlist_svcmd(void)
 =================
 OSP_ServerCommand
 
-Tourney's five `sv` commands (R-OSP-2), delegated the same way its 63 client
+Tourney's five `sv` commands, delegated the same way its 63 client
 commands are: one gate in the shared file, the table here.
 
 `sv` is how a referee who is not in the game controls a match -- an admin on the

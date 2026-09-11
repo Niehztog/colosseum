@@ -1,33 +1,32 @@
-// Colosseum per-ruleset stat slot map and composed statusbar -- R-OSP-7,
-// R-OSP-7a.
+// Colosseum per-ruleset stat slot map and composed statusbar.
 //
-// THE PROBLEM, measured.  A statusbar is a program in a configstring and it
+// The problem, measured.  A statusbar is a program in a configstring and it
 // addresses player_state_t.stats[] by NUMBER: `pic 17`, `num 2 19`,
 // `stat_string 27`.  Every donor invented its own numbering above slot 15 and
-// they collide almost completely (SPECS.md R-OSP-7's table).  CTF is the case
-// that forces the issue: slots 17, 18 and 19 each carry two assigned names --
+// they collide almost completely.  CTF is the case that forces the issue:
+// slots 17, 18 and 19 each carry two assigned names --
 // STAT_SPECTATOR/STAT_CTF_TEAM1_PIC, STAT_TIMER2_ICON/STAT_CTF_TEAM1_CAPS,
 // STAT_TIMER2/STAT_CTF_TEAM2_PIC -- and CTF already uses 0..30 of
-// MAX_STATS_OLD's 32, so there is no free pair to move the second powerup timer
-// to.  Upstream resolved it by gating the writes on `!ctf->value`, which works
-// only because the bar is a static string chosen once.
+// MAX_STATS_OLD's 32, so there is no free pair to move the second powerup
+// timer to.  Upstream resolved it by gating the writes on `!ctf->value`, which
+// works only because the bar is a static string chosen once.
 //
-// THE SHAPE HERE.  A slot is not a #define.  It is a *logical id* (statslot_t)
+// The shape here.  A slot is not a #define.  It is a *logical id* (statslot_t)
 // that resolves through the active ruleset's row of the map below, and the
 // statusbar is EMITTED from that same map rather than stored as a literal
-// (R-OSP-7a).  So a slot number exists in exactly one place, the bar and the
+//So a slot number exists in exactly one place, the bar and the
 // code that writes it cannot disagree, and the shared second-powerup-timer
 // mechanic stops needing one #define per ruleset.
 //
-// The map is one table, in this header, per R-OSP-7 clause 3 -- "18 upward is
-// ruleset-private, one numbering per ruleset, declared in one header, including
-// dm's own".  It is an X-macro so that the C tables and tools/slotkind.py read
-// the same text; a map a tool cannot parse is a map nothing checks.
+// The map is one table, in this header -- "18 upward is ruleset-private, one
+// numbering per ruleset, declared in one header, including dm's own".  It is
+// an X-macro so that the C tables and tools/slotkind.py read the same text; a
+// map a tool cannot parse is a map nothing checks.
 
 #ifndef G_STATS_H
 #define G_STATS_H
 
-// What a slot HOLDS.  R-OSP-7 clause 7: the check is on kind as well as number,
+// What a slot holds.  The check is on kind as well as number,
 // because writing an image index where the bar draws a configstring is a type
 // error across a boundary with no compiler on it, and a name-collision test
 // cannot see it when the bar uses a bare number.  That is how RA2's slot 20 got
@@ -45,19 +44,19 @@ typedef enum {
 // Slots 0..15 are universal and unclaimable (clause 1) and keep their shared.h
 // names; they are not in this table.  16 and 17 are claimable only by a ruleset
 // that does not use baseq2's STAT_CHASE/STAT_SPECTATOR semantics (clause 2) --
-// Threewave qualifies, having no baseq2 spectator flag at all (R-CTF-5).
+// Threewave qualifies, having no baseq2 spectator flag at all.
 //
 // A half-wired column -- a map that renumbers a slot while the bar still says
 // 18 -- would be worse than inheriting, which is why each ruleset's column and
 // its bar landed in the same commit.
 //
-// TOURNEY's timer pair goes to 29/30, where R-OSP-7's table put it, its five
+// TOURNEY's timer pair goes to 29/30, where the table puts it, its five
 // runes to 22..26 and the popup-menu layout to 27.  It keeps 16 as the chase/ID
 // name -- the same meaning and the same SK_CS kind baseq2 gives STAT_CHASE, so
 // there is nothing to claim -- but it DOES claim 17, which baseq2 uses as the
 // spectator flag and tourney draws with `stat_string`.  Clause 2 permits that
 // for a ruleset that does not use baseq2's spectator semantics, and tourney
-// has its own observer and camera (R-EXTRA-6).
+// has its own observer and camera.
 //
 // 18..21 are four more status lines the donor addresses by bare number.  Their
 // names here are neutral on purpose: the reconstruction did not name them and
@@ -67,9 +66,9 @@ typedef enum {
 // ARENA claims 16 and 17, which clause 2 permits only for a ruleset that does
 // not use baseq2's STAT_CHASE/STAT_SPECTATOR semantics.  RA2 qualifies the same
 // way Threewave does and for a stronger reason: it ships its own four-mode
-// observer inside arena.c (R-EXTRA-6), so there is no chase-cam name to draw and
+// observer inside arena.c, so there is no chase-cam name to draw and
 // no spectator flag to test.  Its own block runs 16..25 and the shared second
-// powerup timer therefore goes to 26/27, which is where R-OSP-7's table put it.
+// powerup timer therefore goes to 26/27, which is where the table puts it.
 //
 // The kinds below are read off RA2's own statusbar literal rather than off the
 // field names, because two of the names lie: STAT_QUEUE1_ICON and
@@ -81,14 +80,14 @@ typedef enum {
 // It is legal under clause 6 *because* it is content a ruleset can drop: the
 // pent countdown is a display, not a mechanic, and G_InitStats() removes any
 // slot the running configuration cannot reach, so the bar and the writes
-// disappear together (R-COMPAT-5).  This is the thing upstream could not do
+// disappear together.  This is the thing upstream could not do
 // with a literal bar: under ctf the second powerup timer now displays at all,
 // for clients that negotiated the extension.
 //
 // "Cannot reach" is two conditions, not one -- see g_stats.c's stat_ceiling().
 // The wire carries 32..63 only to a client that negotiated the extension, and
 // the ARRAY only holds them on a library built against the new game API, which
-// R-ENG-1a made a build switch.  On an `API=old` build the pair is therefore
+// is a build switch.  On an `API=old` build the pair is therefore
 // dropped unconditionally and ctf loses the second powerup timer, exactly as
 // upstream does; every other ruleset's column stays inside 32 and is unaffected.
 //
@@ -161,9 +160,9 @@ int  G_GetStat(edict_t *ent, statslot_t id);
 // ---------------------------------------------------------------- statusbar
 //
 // The `sb_*` emitter.  1400 is Quake II's own statusbar/layout budget and the
-// number R-MENU-5 names; the engine spreads CS_STATUSBAR across configstrings
+// number the menu core names; the engine spreads CS_STATUSBAR across configstrings
 // up to csr.airaccel, so more would fit, but a bar that only fits under
-// protocol extensions would break R-COMPAT-5.
+// protocol extensions would break compatibility.
 #define MAX_STATUSBAR   1400
 
 typedef struct {
@@ -196,30 +195,30 @@ void sb_unum(statusbar_t *sb, int width, int slot);
 void sb_ustat_string(statusbar_t *sb, int slot);
 
 // Compose the active ruleset's bar and install it.  Replaces baseq2's two
-// string literals and CTF's third (R-OSP-7a).
+// string literals and CTF's third.
 void G_SetStatusbar(void);
 
-// The composed bar as text.  RA2's menu engine draws its menu INTO the
+// The composed bar as text.  RA2's menu engine draws its menu into the
 // statusbar configstring, unicast per client, and has to put the real bar back
 // when the menu closes -- it cannot use a literal any more, because there is no
-// literal (R-OSP-7a).
+// literal.
 const char *G_Statusbar(void);
 
 // One tourney bar variant, composed on demand.  Its `hud` client command
 // unicasts a different bar per client, which is four literals in the donor and
-// two booleans here -- the case R-OSP-7a exists for.  The buffer is static and
+// two booleans here -- the case the composed bar exists for.  The buffer is static and
 // is overwritten by the next call, which is enough because the caller unicasts
 // it immediately.
 const char *G_StatusbarVariant(bool alt, bool team);
 
 // `sv slots` -- the resolved map and the composed bar, for the same reason
-// R-VER-18 gave `sv ruleset`: a slot number that only exists inside the library
+// Reported by `sv ruleset`: a slot number that only exists inside the library
 // cannot be checked from outside it, and "the HUD looks right" is not evidence
 // about slot 32.
 void G_Svcmd_Slots_f(void);
-// `sv extras` -- R-EXTRA-1..7 made observable from outside (R-VER-33).
+// `sv extras` -- the seven Gladiator extras, made observable from outside.
 void G_Svcmd_Extras_f(void);
-// `sv census <classname>` -- R-VER-20's temporal check, twice over.
+// `sv census <classname>` -- the temporal check, twice over.
 void G_Svcmd_Census_f(void);
 
 #endif // G_STATS_H

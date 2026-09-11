@@ -580,7 +580,7 @@ void hover_pain(edict_t *self, edict_t *other, float kick, int damage)
     if (skill->value == 3)
         return;     // no pain anims in nightmare
 
-    // THE SOUND AND THE MOVE ARE PAIRED, and baseq2 pairs them 1/pain3,
+    // The sound and the move are paired, and baseq2 pairs them 1/pain3,
     // 2/pain2, 1/pain1 -- light damage takes the 9- or 12-frame flinch and
     // heavy damage the 28-frame one.  Ground Zero replaced the heavy arm with
     // its own two-way roll ("pain sequence is WAY too long") and kept the light
@@ -734,9 +734,7 @@ This is the improved icarus monster.
 */
 void SP_monster_hover(edict_t *self)
 {
-    // R-MODE-7 / R-CORE-8: the ruleset decides, not `deathmatch`.  The
-    // inherited test was right for baseq2 and wrong here, because `deathmatch`
-    // is 1 under ctf and R-MODE-7 promises monsters under ctf.
+    // deathmatch is 1 under ctf, which allows monsters: ask the ruleset.
     if (!G_MonstersAllowed()) {
         G_FreeEdict(self);
         return;

@@ -65,22 +65,22 @@ typedef struct {
 
 static const save_field_t entityfields[] = {
 #define _OFS FOFS
-    // R-SAVE-3.  content_flavour is latched at monster_start and decides which
-    // frame tables a monster uses (R-CORE-11/11a), so it MUST persist: a monster
+    // Content_flavour is latched at monster_start and decides which
+    // frame tables a monster uses, so it must persist: a monster
     // reloaded without it would silently change flavour mid-game, which is the
-    // class of defect R-SAVE-3a exists to catch.  Type is int, macro is I().
+    // class of defect this list exists to catch.  Type is int, macro is I().
     I(content_flavour),
-    // R-SAVE-3: descriptors for every field the mission-pack merge added to a
+    // Descriptors for every field the mission-pack merge added to a
     // persistent struct.  Found by tools/dsweep.py, which brace-matches the
     // struct bodies and self-tests -- auditsave.py misattributed spawn_temp_t
     // members to monsterinfo_t and would have sent this list wrong.
     //
-    // gravityVector and the blindfire set below are R-SAVE-3a's named cases:
+    // gravityVector and the blindfire set below are the named cases:
     // the mission-pack port lost exactly these to missing rows.
     I(orders),                          // XATRIX
     I(plat2flags),                      // ROGUE
     V(offset),                          // ROGUE
-    V(gravityVector),                   // ROGUE -- R-SAVE-3a's named case
+    V(gravityVector),                   // ROGUE
     I(hint_chain_id),                   // ROGUE
     F(lastMoveTime),                    // ROGUE
     E(bad_area),                        // ROGUE
@@ -103,7 +103,7 @@ static const save_field_t entityfields[] = {
     F(monsterinfo.base_height),         // ROGUE
     I(monsterinfo.next_duck_framenum),  // ROGUE
     I(monsterinfo.duck_wait_framenum),  // ROGUE
-    O(monsterinfo.blindfire),           // ROGUE -- R-SAVE-3a's named set
+    O(monsterinfo.blindfire),           // ROGUE
     F(monsterinfo.blind_fire_delay),    // ROGUE -- ditto
     V(monsterinfo.blind_fire_target),   // ROGUE -- ditto
     I(monsterinfo.monster_slots),       // ROGUE
@@ -447,10 +447,10 @@ static const save_field_t clientfields[] = {
 
     O(pers.spectator),
 
-    // CTF (R-CTF-5, R-SAVE-3a).  Savegames are sp-only (R-ENG-6) so none of
-    // this can be reached today, but a descriptor that is absent because the
-    // field "cannot be saved yet" is exactly the R-VER-15 item 2 defect --
-    // xatrix's quadfire_framenum was lost that way.
+    // CTF.  Savegames are sp-only so none of this can be reached today, but a
+    // descriptor that is absent because the field "cannot be saved yet" is
+    // exactly the defect above -- xatrix's quadfire_framenum was lost that
+    // way.
     I(resp.ctf_team),
     I(resp.ctf_state),
     F(resp.ctf_lasthurtcarrier),
@@ -461,7 +461,7 @@ static const save_field_t clientfields[] = {
     F(resp.lastidtime),
     O(resp.voted),
 
-    // Rocket Arena (R-SAVE-3a).  Only the scalars: `teammember` is a list node
+    // Rocket Arena.  Only the scalars: `teammember` is a list node
     // and `track_target` an edict pointer, both of them per-level state that
     // arena_init() rebuilds, so saving either would restore a link into a level
     // that no longer exists.  Named here rather than left silent, which is what
@@ -487,7 +487,7 @@ static const save_field_t clientfields[] = {
     // Deliberately not saved, and named here so dsweep.py's finding is answered
     // rather than merely absent.
 
-    // R-EXTRA-6: the Gladiator camera.  Saved in full, including its three
+    // The Gladiator camera.  Saved in full, including its three
     // edict pointers -- an observer who saves mid-flyby reloads watching the
     // same player from the same place, and a dangling `camera.ent` after a load
     // is what CheckValidCamera exists to catch but should never have to.
@@ -993,7 +993,7 @@ static void read_fields(gzFile f, const save_field_t *fields, void *base)
 
 #define SAVE_MAGIC1     MakeLittleLong('S','S','V','1')
 #define SAVE_MAGIC2     MakeLittleLong('S','A','V','1')
-// R-203 adds level.rogue_sight_client to the serialized level state.
+// level.rogue_sight_client is part of the serialized level state.
 #if USE_NEW_GAME_API
 #define SAVE_VERSION    0x101
 #else
@@ -1061,7 +1061,7 @@ void ReadGame(const char *filename)
     // `game.maxclients` has been read.
     BotForgetGameMemory();
 
-    // R-EXTRA-2's delayed-command pool is the fourth owner (R-108: "any new
+    // The lag simulation's delayed-command pool is the fourth owner ("any new
     // owner needs a Forget/Setup pair like the bot layer's").  It has no Setup
     // half because the pool is a cache -- it re-extends on the next command --
     // but the queue POINTERS have to go with the blocks they point into.
@@ -1090,7 +1090,7 @@ void ReadGame(const char *filename)
 
     // should agree with server's version
     // ...and the same defect in the savegame's own consistency check, where the
-    // comparison had become a tautology and could never fire (R-47).
+    // comparison had become a tautology and could never fire.
     if (game.maxclients != (int)maxclients->value) {
         gzclose(f);
         gi.error("Savegame has bad maxclients");
@@ -1113,7 +1113,7 @@ void ReadGame(const char *filename)
 
     // The FreeTags(TAG_GAME) at the top of this function invalidates every
     // TAG_GAME owner in the library, not just the two arrays re-allocated
-    // above, and the bot layer is the third one: the index tables (R-BOT-11),
+    // above, and the bot layer is the third one: the index tables,
     // botstates/botinputs/botnewinput, the bots.cfg roster, the library records
     // and the Gladiator menu tree.  Nothing re-established them, so `load`
     // segfaulted -- SpawnEntities precached into freed memory and

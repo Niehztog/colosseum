@@ -17,13 +17,11 @@ along with this program; if not, write to the Free Software
 Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 */
-// OSP Tourney DM v2.75, from osp-tourney@1d8427e (doc/provenance.md).
+// OSP Tourney DM v2.75, from osp-tourney@1d8427e.
 // Donor-only: baseq2 has no counterpart, so it lives in src/tourney/ rather
-// than being merged into a spine file (R-CORE-7).  The reconstruction's
-// asm-matching address comments are stripped -- SPECS.md N1 makes those oracles
-// meaningless here, and they survive at the pin.
-// osp_stats.c -- the local game-event / statistics log.  See osp_stats.h for
-// what it replaces and why.
+// than being merged into a spine file.  The reconstruction's asm-matching
+// address comments are stripped.  osp_stats.c -- the local game-event /
+// statistics log.  See osp_stats.h for what it replaces and why.
 
 #include "g_local.h"
 #include "tourney/osp_types.h"
@@ -42,15 +40,15 @@ static const char *const acc_names[ACC_COUNT] = {
     "Blaster", "Shotgun", "Super Shotgun", "Machinegun", "Chaingun",
     "Grenade Launcher", "Rocket Launcher", "HyperBlaster", "Railgun",
     "BFG10K", "Grenades",
-    // The content layers' nine, appended (R-MODE-3, R-181).  A parser reads
-    // the eleven above unchanged and gains these only when they are used.
+    // The content layers' nine, appended.  A parser reads the eleven above
+    // unchanged and gains these only when they are used.
     "Ionripper", "Phalanx", "Trap",
     "ETF Rifle", "Prox Launcher", "Plasma Beam", "Chainfist", "Tesla",
     "Disruptor"
 };
 
 // The allow_* cvars and the names this log reports them under are
-// osp_main.c's `osp_allow_items[]` since R-183.  There were three copies of
+// osp_main.c's `osp_allow_items[]`.  There were three copies of
 // that correspondence -- SpawnItem's inhibit, the scoreboard banner and this
 // list -- and they had already drifted apart before either content layer made
 // them wrong: two rows the inhibit honours are named by neither of the others.
@@ -187,7 +185,8 @@ void OSP_Stats_Init(void)
     }
 
 
-    // R-COMPAT-6: composed by g_fs.c, which owns the two cvars' defaults.
+    // Path composed by g_fs.c; the two cvars are registered ONCE, in
+    // G_InitRuleset(), which owns their per-ruleset default (R-COMPAT-6).
     if (!G_FsGamePath(stats_path, sizeof(stats_path), g_statsname->string)) {
         gi.dprintf("Stats log path too long, logging disabled.\n");
         stats_path[0] = 0;
@@ -263,7 +262,7 @@ void OSP_Stats_GameInit(void)
     json_key_string(f, "map", level.mapname);
     json_key_string(f, "level_name", level.level_name);
     // The record field keeps its 1999 name; the cvar behind it is gone and
-    // `match_type` is derived from the ruleset now (R-OSP-12).
+    // `match_type` is derived from the ruleset now.
     json_key_string(f, "match_mode", match_type->string);
     fprintf(f, ",\"timelimit\":%d,\"fraglimit\":%d,\"dmflags\":%d",
             (int)timelimit->value, (int)fraglimit->value,
@@ -290,7 +289,7 @@ void OSP_Stats_GameInit(void)
     fprintf(f, ",\"disabled_items\":[");
     for (i = 0, first = true; osp_allow_items[i].cvar; i++) {
         if (!osp_allow_items[i].logname)
-            continue;   // inhibited but deliberately not named -- R-183
+            continue;   // inhibited but deliberately not named
         if ((int)gi.cvar(osp_allow_items[i].cvar, "1", 0)->value)
             continue;
         if (!first)
@@ -351,7 +350,8 @@ void OSP_Stats_PlayerConnect(edict_t *ent)
         return;
 
     json_player(f, ent);
-    json_key_string(f, "addr", (ent->flags & FL_BOT) ? "" : ent->osp_e37c);
+    json_key_string(f, "addr",
+                    (ent->flags & FL_BOT) ? "" : ent->client->pers.address);
     fprintf(f, ",\"bot\":%s", (ent->flags & FL_BOT) ? "true" : "false");
     end_event(f);
 }
@@ -369,7 +369,8 @@ void OSP_Stats_PlayerReconnect(edict_t *ent)
         return;
 
     json_player(f, ent);
-    json_key_string(f, "addr", (ent->flags & FL_BOT) ? "" : ent->osp_e37c);
+    json_key_string(f, "addr",
+                    (ent->flags & FL_BOT) ? "" : ent->client->pers.address);
     fprintf(f, ",\"bot\":%s", (ent->flags & FL_BOT) ? "true" : "false");
     end_event(f);
 }
@@ -503,7 +504,7 @@ void OSP_Stats_BotDetect(edict_t *ent, const char *why)
         return;
 
     json_player(f, ent);
-    json_key_string(f, "addr", ent->osp_e37c);
+    json_key_string(f, "addr", ent->client->pers.address);
     json_key_string(f, "reason", why ? why : "");
     end_event(f);
 }
@@ -627,7 +628,7 @@ OSP_statsPickupMinor
 The cheap half of the item log.  `stats_logallpickups` lives in this file, so
 the dozen call sites in g_items.c and p_weapon.c ask through this rather than
 each carrying a copy of the test; the ruleset gate stays visible at the call
-site, where R-VER-25 wants it.
+site, where it can be seen.
 
 The split between "minor" and the plain OSP_Stats_ItemPickup is the donor's own
 and it is a judgement about what a match report is for: a quad, an
@@ -716,7 +717,7 @@ static const char *means_of_death_name(int mod, bool *self_inflicted)
     switch (mod) {
     case MOD_FALLING:           return "Fell";
     case MOD_CRUSH:             return "Crushed";
-    // R-183: HERE, in the SELF-INFLICTED half, and not below with the weapons.
+    // Here, in the SELF-INFLICTED half, and not below with the weapons.
     // dm_ball.c raises MOD_DBALL_CRUSH from `T_Damage(other, ent, ent, ...)`
     // where `ent` is the ball, so there is no attacker to credit; it scores
     // against the victim like every cause around it.  stdlog.c has the same
@@ -759,11 +760,11 @@ static const char *means_of_death_name(int mod, bool *self_inflicted)
     case MOD_TELEFRAG:          return "Telefrag";
     case MOD_GRAPPLE:           return "Hook";
 
-    // R-183: the content layers, which R-MODE-3 makes valid with every ruleset
-    // -- so a Reckoning or Ground Zero kill was reaching this table and falling
-    // out of it as "Unknown".  The names are the items' own pickup names, which
-    // is what `acc_names[]` in the accuracy record already uses, so a consumer
-    // joining the two records matches on one spelling.
+    // The content layers, which are valid with every ruleset -- so a Reckoning
+    // or Ground Zero kill was reaching this table and falling out of it as
+    // "Unknown".  The names are the items' own pickup names, which is what
+    // `acc_names[]` in the accuracy record already uses, so a consumer joining
+    // the two records matches on one spelling.
     //
     // The Disruptor's two MODs share a name the way the BFG's three do.  The
     // monsters' own -- MOD_BRAINTENTACLE, MOD_BLASTOFF, MOD_GEKK, MOD_BLASTER2

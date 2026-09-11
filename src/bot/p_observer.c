@@ -19,17 +19,16 @@
 //===========================================================================
 
 //
-// COLOSSEUM.  R-EXTRA-6's third implementation: the eye and chase cameras the
+// COLOSSEUM.  The third observer implementation: the eye and chase cameras the
 // 1999 module carried behind `#define OBSERVER`, for `dm`, `sp` and `ctf`.
 // Tourney has its own (osp_observe.c + p_camera.c) and arena has its own four
-// modes inside arena.c, and neither can be substituted away -- SPECS.md
-// R-EXTRA-6 is the second exemption to sec 7 rule 6 and says why.
+// modes inside arena.c, and neither can be substituted away.
 //
-// The fence is gone: R-EXTRA's rule is that each define becomes a cvar and none
-// is compiled out.  The cvar is `g_observer` and the RULESET decides whether
-// this file is asked at all, which is what the dispatch is for -- the donor
-// asked `ctf->value` and `ra->value` directly at three sites and those are the
-// three edits of substance below.
+// The fence is gone: each define becomes a cvar and none is compiled out.  The
+// cvar is `g_observer` and the RULESET decides whether this file is asked at
+// all, which is what the dispatch is for -- the donor asked `ctf->value` and
+// `ra->value` directly at three sites and those are the three edits of
+// substance below.
 //
 #include "g_local.h"
 #include "bot/p_observer.h"
@@ -75,12 +74,12 @@ float ChangeAngle(float from, float to, float maxstep)
 }
 
 //===========================================================================
-// Forward declarations (the dispatcher and DoObserver call functions
-// defined further down in this file; their reconstructions live near the
-// bottom, in the original source order).  Kept here so the linker
-// notices the cross-references inside ClientCycleCamera/ClientSetCamera/
-// ClientToggleAutoCam/ClientToggleChaseCam which all call
-// ClientToggleObserver as their first action.
+// Forward declarations (the dispatcher and DoObserver call functions defined
+// further down in this file; their reconstructions live near the bottom, in
+// the original source order).  Kept here so the linker notices the
+// cross-references inside ClientCycleCamera/ClientSetCamera/
+// ClientToggleAutoCam/ClientToggleChaseCam which all call ClientToggleObserver
+// as their first action.
 //===========================================================================
 void ClientToggleObserver(edict_t *ent);
 void SetClientView(edict_t *ent, vec3_t end, vec3_t out_angles, vec3_t cmdangles);
@@ -111,8 +110,8 @@ void ChangeCameraAnglesSmooth(float *out, vec3_t target, float frac, float maxst
 //===========================================================================
 // AngleDifference                                            sub_10077eba
 //
-// Public per the original p_observer.h from gladq2_src.  The shipping
-// gamex86.dll has exactly ONE copy of this routine in .text at
+// Public per Mr. Elusive's original p_observer.h.  The shipping
+// gamex86.dll has exactly one copy of this routine in .text at
 // 0x10077eba; earlier drafts of this reconstruction carried a second
 // "SubAngleDifference" alias which has now been folded into this one.
 //
@@ -155,7 +154,7 @@ void SetClientOrigin(edict_t *ent, vec3_t origin)
 // --- sub_10077f7d -----------------------------------------------------------
 // Apply new view angles to the observer by locking the client's view via
 // pmove.delta_angles.  delta_angles[i] = ANGLE2SHORT(new[i] - cmd[i]).
-// Does NOT touch v_angle / ps.viewangles directly --- the engine will
+// Does not touch v_angle / ps.viewangles directly --- the engine will
 // derive viewangles = cmd + delta on the next pmove tick.
 //===========================================================================
 void ClientSetViewAngles(edict_t *ent, vec3_t new_angles, vec3_t cmd_angles)
@@ -172,11 +171,11 @@ void ClientSetViewAngles(edict_t *ent, vec3_t new_angles, vec3_t cmd_angles)
 //   sub_10077f7d(ent, end_arg, out_angles_arg);
 //
 // Note: arg layout from disasm is (ent, end, out_angles, cmdangles) but the
-// helper SetClientOrigin's vec3 arg is the SECOND function arg (ebp+0xc).
+// helper SetClientOrigin's vec3 arg is the second function arg (ebp+0xc).
 // UpdateChaseCamera calls us with: (ent, end, &out_angles, cmdangles)
-// and the disasm shows sub_10077f15(ent, ebp+0xc), i.e. with 'end'.
+// and the disasm shows sub_10077f15(ent, ebp+0xc), i.e. With 'end'.
 //===========================================================================
-/* NAME ASSIGNED BY ELIMINATION, not by content -- weaker than the other 25
+/* name assigned by elimination, not by content -- weaker than the other 25
  * names recovered from gamei386.so in the same pass, and flagged here so a
  * later session does not read it as verified.
  *
@@ -274,7 +273,7 @@ bool Cam_SpotVisible(edict_t *ent, vec3_t point)
 
     if (tr.contents & MASK_WATER) {
         /* No `!`: the original re-traces when the surface IS translucent (or when
-           there is no surface at all).  `je bd6b9` on the null test jumps INTO this
+           there is no surface at all).  `je bd6b9` on the null test jumps into this
            block and `je bd6d9` on the flags test jumps PAST it, so the condition is
            `surface == NULL || (flags & TRANS)`.  Behavioural, not just a byte diff. */
         if (tr.surface == NULL || (tr.surface->flags & (SURF_TRANS33 | SURF_TRANS66))) {
@@ -329,7 +328,7 @@ bool Cam_EntityVisible(edict_t *ent, edict_t *target)
 
     if (tr.contents & MASK_WATER) {
         /* No `!`: the original re-traces when the surface IS translucent (or when
-           there is no surface at all).  `je bd6b9` on the null test jumps INTO this
+           there is no surface at all).  `je bd6b9` on the null test jumps into this
            block and `je bd6d9` on the flags test jumps PAST it, so the condition is
            `surface == NULL || (flags & TRANS)`.  Behavioural, not just a byte diff. */
         if (tr.surface == NULL || (tr.surface->flags & (SURF_TRANS33 | SURF_TRANS66))) {
@@ -345,7 +344,7 @@ bool Cam_EntityVisible(edict_t *ent, edict_t *target)
 
 // --- sub_1007845f -----------------------------------------------------------
 // NextClient(prev): return next entity after `prev` in g_edicts that has
-// classname=="player" (case-insensitive), is inuse, and does NOT have the
+// classname=="player" (case-insensitive), is inuse, and does not have the
 // FL_OBSERVER (0x10000) flag.  If `prev` is NULL, start from g_edicts[1]
 // (the lea +0x458 indexes prev+1 in either case).
 //===========================================================================
@@ -549,15 +548,14 @@ void Cam_EnterIdleMode(edict_t *ent, usercmd_t *ucmd)
 }
 
 //===========================================================================
-// NOTE: ClientSetViewAngles was declared in Mr. Elusive's original
-// p_observer.h (gladq2_src, 1998-01-12) but its body was removed from
-// p_observer.c before the 1999 shipping gamex86.dll was compiled --
-// byte-pattern search of the full DLL finds no function matching the
-// signature.  The header declaration is kept verbatim for archival
-// fidelity to the 1998 source; no body is provided here because doing
-// so would require synthesizing code with no disassembly origin.
-// Nothing in the reconstructed codebase calls it, so the missing
-// definition does not break the link.
+// NOTE: ClientSetViewAngles was declared in Mr.  Elusive's original
+// p_observer.h (1998-01-12) but its body was removed from p_observer.c before
+// the 1999 shipping gamex86.dll was compiled -- byte-pattern search of the
+// full DLL finds no function matching the signature.  The header declaration
+// is kept verbatim for archival fidelity to the 1998 source; no body is
+// provided here because doing so would require synthesizing code with no
+// disassembly origin.  Nothing in the reconstructed codebase calls it, so the
+// missing definition does not break the link.
 //===========================================================================
 
 //===========================================================================
@@ -802,7 +800,7 @@ float Cam_TryFlyByVector(edict_t *ent, vec3_t ofs, vec3_t out_endpos)
 
     /* disasm @ 0x10078f27..0x10078f36: fld [0x100925d8]=333.0; fsub dist;
        call 0x10087ba7 -- this is _CIfabs (clears the sign bit at
-       0x10087c3f), NOT sqrt.  Since dist<=50 here, 333-dist>=283 is
+       0x10087c3f), not sqrt.  Since dist<=50 here, 333-dist>=283 is
        always non-negative and the fabs() is identity. */
     return (float)fabs(333.0 - (double)dist);
 }
@@ -988,7 +986,7 @@ void Cam_EnterFlyByMode(edict_t *ent, edict_t *target, usercmd_t *ucmd)
 
     /* disasm @ 0x10079be7: fmul qword [0x100922b0]=1.5 -- double-precision
        multiply, so the literal must be a double (no `f` suffix).
-       Also: the value is written to cam->maxflybydist BEFORE the 500.0
+       Also: the value is written to cam->maxflybydist before the 500.0
        floor check (disasm @ 0x10079bed stores, then reloads at 0x10079bf6
        and compares against [0x10092184]=500.0f).  The clamp fires when
        the stored value is < 500, enforcing a FLOOR (not a ceiling). */
@@ -1018,7 +1016,7 @@ void Cam_DeathThink(edict_t *ent, usercmd_t *ucmd)
 
     /* disasm @ 0x10079c63: strcmp(classname, "bodyque"); je skip-block
        (jumps when strings EQUAL).  The chain-follow block runs only when
-       cam->ent is NOT a "bodyque" entity but is alive; the indirection
+       cam->ent is not a "bodyque" entity but is alive; the indirection
        it walks is edict_t.goalentity (offset 0x19c), not chain (0x218). */
     if (strcmp(cam->ent->classname, "bodyque") != 0
         && cam->ent->deadflag == 0) {
@@ -1176,7 +1174,7 @@ void Cam_FlyByThink(edict_t *ent, usercmd_t *ucmd)
 } //end of the function Cam_FlyByThink
 
 // --- sub_10077eba is reconstructed as AngleDifference() at the top of this
-// file (it is the public per gladq2_src/p_observer.h).  The earlier draft
+// file (it is public per the original p_observer.h).  The earlier draft
 // duplicated it as `SubAngleDifference`; that alias has been removed and the
 // three call sites below in ChangeCameraAnglesSmooth / ClientSetViewAngles now call
 // AngleDifference directly.
@@ -1242,7 +1240,7 @@ void Cam_IdleThink(edict_t *ent, usercmd_t *ucmd)
        declaration order, so cam comes LAST here. */
     float     best;
     float     yaw_random;   /* also the anglemod'ed value: our `yaw_anglemod`
-	                        * was a second name for this slot, and was READ
+	                        * was a second name for this slot, and was read
 	                        * UNINITIALISED. */
     float     yaw_to_target;
     edict_t  *chosen;
@@ -1262,9 +1260,8 @@ void Cam_IdleThink(edict_t *ent, usercmd_t *ucmd)
     vec3_t    delta;        // [-0x64..-0x5c]: pos diff → vectoangles result → trace target
     // → trace endpoint.  Both blocks pass &delta to gi.trace.
     vec3_t    out_ang;      // vectoangles destination; declared HERE, not in the
-    // inner block -- it is the fourth vec3 of the
-    // reference's group-1 run (the `1 2 2` after delta's
-    // `8 8 11`), which an inner-block local cannot be.
+    // inner block -- it is the fourth vec3 of the reference's group-1 run (the
+    // `1 2 2` after delta's `8 8 11`), which an inner-block local cannot be.
     vec3_t    fwd;          // [-0xc..0x0]: AngleVectors output
     trace_t   tr;
 
@@ -1415,7 +1412,7 @@ install_target:
          fabs(anglemod(yaw_random - yaw_to_target)) > 60.0
        (call 0x10087ba7 is _CIfabs -- the function clears the sign bit at
        0x10087c3f -- *not* sqrt as earlier drafts assumed; the block is
-       therefore LIVE for most yaw deltas, not dead.  Constant at
+       therefore live for most yaw deltas, not dead.  Constant at
        0x100925e8 is 60.0 (double).  Since anglemod's output is already
        non-negative the fabs() is identity here, but kept verbatim.
 
@@ -1502,7 +1499,7 @@ install_target:
         VectorNormalize(diff);
 
         /* disasm @ 0x1007aa68 fmul [0x100923a4]=50.0; @ 0x1007aa6e fadd
-           [0x10092164]=5.0 (NOT 10.0) -- scale range is [5, 55]. */
+           [0x10092164]=5.0 (not 10.0) -- scale range is [5, 55]. */
         scale = (float)(rand() & 0x7FFF) / 32767.0f * 50.0f + 5.0f;
         VectorScale(diff, scale, diff);
 
@@ -1740,7 +1737,7 @@ void UpdateChaseCamera(edict_t *ent, usercmd_t *ucmd)
     end[2] = cam->origin[2] + dir[2];
 
     // Trace from cam->origin to end, ignoring the chase target itself.
-    /* vec3_origin here, NOT NULL: this one trace really does pass the address of
+    /* vec3_origin here, not NULL: this one trace really does pass the address of
        the zero vector -- swapping it for NULL takes this row off MATCH.  The
        other four traces in this file push two immediate zeroes. */
     tr = gi.trace(cam->origin, vec3_origin, vec3_origin, end, cam->ent, MASK_OPAQUE);
@@ -1777,7 +1774,7 @@ void UpdateChaseCamera(edict_t *ent, usercmd_t *ucmd)
 // camera forward 15 units along the horizontal view vector before
 // finalising via SetClientView.
 //===========================================================================
-/* NAME ASSIGNED BY ELIMINATION, not by content -- weaker than the other 25
+/* name assigned by elimination, not by content -- weaker than the other 25
  * names recovered from gamei386.so in the same pass, and flagged here so a
  * later session does not read it as verified.
  *
@@ -1854,7 +1851,7 @@ void UpdateEyeCamera(edict_t *ent, usercmd_t *ucmd)
 // or hand the camera back to him (calling SetClientView) when the
 // current target is gone / no longer an observer.
 //===========================================================================
-/* NAME ASSIGNED BY ELIMINATION, not by content -- weaker than the other 25
+/* name assigned by elimination, not by content -- weaker than the other 25
  * names recovered from gamei386.so in the same pass, and flagged here so a
  * later session does not read it as verified.
  *
@@ -1993,11 +1990,11 @@ void ClientSetCamera(edict_t *ent)
 // DoObserver                                                 sub_1007b926
 //
 // Called from ClientThink per frame.  Returns 0 if the entity is not an
-// observer (caller continues normal player think).  When observing, runs
-// the autocam/chasecam jump-button retarget, dispatches to
-// Cam_Think / UpdateChaseCamera, and either zeros the usercmd
-// for a spectator frame or returns 1 with PM_SPECTATOR set when the
-// camera has been handed back to the observer himself.
+// observer (caller continues normal player think).  When observing, runs the
+// autocam/chasecam jump-button retarget, dispatches to Cam_Think /
+// UpdateChaseCamera, and either zeros the usercmd for a spectator frame or
+// returns 1 with PM_SPECTATOR set when the camera has been handed back to the
+// observer himself.
 //===========================================================================
 int DoObserver(edict_t *ent, usercmd_t *ucmd)
 {
@@ -2076,7 +2073,7 @@ void ClientToggleObserver(edict_t *ent)
         // ruleset chosen by testing a cvar, and it is right to -- `ctf` is a
         // legacy ALIAS that can select the ruleset and is then forced to agree
         // with it, so reading it here would be asking the request rather than
-        // the answer (R-MODE-2, R-88).
+        // the answer.
         if (G_Ruleset() == RULESET_CTF) {
             CTFOpenJoinMenu(ent);
             return;

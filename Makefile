@@ -5,14 +5,14 @@
 # target, the same one-rule-per-TU tail.  Three deliberate departures:
 #
 #  1. WARNINGS ARE ON.  The donors carry -w because their trees still hold
-#     pre-existing warnings.  R-BUILD-2 forbids that: -Wall -Wextra, clean, and
-#     a new warning is not tolerated.  Phase 0 starts from a warning-clean
+#     pre-existing warnings.  That is not allowed here: -Wall -Wextra, clean, and
+#     a new warning is not tolerated.  The build starts from a warning-clean
 #     q2pro/src/game, so the debt is never taken on in the first place.
 #
-#  2. FIVE TARGETS, not two (R-BUILD-5).  ELF aarch64 is the native one on the
-#     reference machine (R-BUILD-6); ELF x86-64, ELF i386, win32 PE and win64 PE
+#  2. FIVE TARGETS, not two.  ELF aarch64 is the native one on the
+#     reference machine; ELF x86-64, ELF i386, win32 PE and win64 PE
 #     all cross-build from it.  Only the native one can be executed here, so
-#     "built" and "run" are tracked separately -- see doc/regression.md.
+#     "built" and "run" are tracked separately.
 #
 #  3. THE LIBRARY NAME FOLLOWS THE ENGINE, NOT uname.  Q2PRO loads
 #     game<CPUSTRING><LIBSUFFIX> (src/server/game.c:952) where CPUSTRING is
@@ -27,9 +27,9 @@
 #     emits gameaarch64.so while the engine looks for gamearm64.so.  The CPU_*
 #     variables below implement the engine's mapping.
 #
-# R-VER-9 was amended in SPECS.md 1.5: this Makefile IS run, and every
+# This Makefile IS run, and every
 # configuration it defines has been built and the native one smoke-tested
-# (R-VER-17).  The four cross targets are built, not run.
+#.  The four cross targets are built, not run.
 
 # ---------------------------------------------------------------- toolchains
 
@@ -38,12 +38,17 @@ CC_LINUX64  ?= x86_64-linux-gnu-gcc
 CC_LINUX32  ?= i686-linux-gnu-gcc
 CC_WIN32    ?= i686-w64-mingw32-gcc
 CC_WIN64    ?= x86_64-w64-mingw32-gcc
+# macOS builds ON macOS and is not a cross target: Apple's linker and SDK are
+# not redistributable, so the host IS the toolchain.  `cc` is Apple clang there,
+# which is also what CC_IS_CLANG below has to see for the fortify guard to fire
+# -- so a macOS build sets both CC_NATIVE and CC_MACOS to the same compiler.
+CC_MACOS    ?= cc
 
 PYTHON      ?= python3
 
 # Read by tools/mech.py, not by this file -- exported so that the reformat pass
-# and the build agree on which astyle they mean (R-CONV-1a pins the version at
-# 3.1, R-BUILD-6 records that the host's native one is that version and produces
+# and the build agree on which astyle they mean (the version is pinned at 3.1,
+# and the host's native one is that version and produces
 # byte-identical output).  mech.py falls back to the same default on its own.
 ASTYLE      ?= astyle
 export ASTYLE
@@ -57,16 +62,19 @@ CPU_NATIVE := $(shell echo $(NATIVE_MACHINE) | sed \
 
 CPU_LINUX64 = x86_64
 CPU_LINUX32 = i386
+# The Mach-O CPU is the host's, remapped the same way: macOS reports `arm64`
+# already and `x86_64` unchanged, so CPU_NATIVE is right for both.
+CPU_MACOS   = $(CPU_NATIVE)
 CPU_WIN32   = x86
 CPU_WIN64   = x86_64
 
 # ---------------------------------------------------------------- game API
 #
-# R-ENG-1a.  Which Quake II game ABI the library exports.  Composes with every
+# Which Quake II game ABI the library exports.  Composes with every
 # target above: `make API=old`, `make windows API=old`, `make everything API=old`.
 #
 #   new   GAME_API_VERSION_NEW (3302), gclient_new_t / pmove_new_t, 64 stats.
-#         THE DEFAULT and the shipped configuration (R-ENG-1) -- an unqualified
+#         THE DEFAULT and the shipped configuration -- an unqualified
 #         `make` is identical to what it was before this switch existed.
 #   old   GAME_API_VERSION_OLD (3), gclient_old_t / pmove_old_t, 32 stats.  The
 #         classic id ABI, for a 1997-vintage engine or any Q2PRO built without
@@ -76,7 +84,7 @@ CPU_WIN64   = x86_64
 # player_state_t, pmove_state_t and gclient_t -- struct layouts, not just a
 # version number -- so an object from one setting linked against an object from
 # the other reads every field at the wrong offset AND LINKS CLEANLY.  That is
-# the R-48 failure the -MMD -MP note below describes, except that header
+# the failure the -MMD -MP note below describes, except that header
 # dependencies cannot catch this one: no header changed, so `make API=old` in a
 # tree built as `new` would recompile nothing at all.  Separate BUILDDIRs make
 # the two physically incapable of meeting; -MMD -MP still covers everything
@@ -104,30 +112,30 @@ endif
 
 INCLUDES = -I. -Iinc -Isrc
 
-# CLAUDE.md / the workspace standard for this era of code.  -fvisibility=hidden
+# The workspace standard for this era of code.  -fvisibility=hidden
 # keeps everything but GetGameAPI/GetGameAPIEx out of the dynamic symbol table.
 # -MMD -MP: HEADER DEPENDENCIES, and this is not a nicety.  Without them a
 # change to g_local.h rebuilds nothing, so the next `make` links objects
-# compiled against DIFFERENT struct layouts -- and it links cleanly.  Phase 3
+# compiled against DIFFERENT struct layouts -- and it links cleanly.  The merge
 # hit exactly that: adding level_locals_t.forcemap and six gclient_t fields
 # produced a library that read level.sight_client at the old offset and
 # segfaulted on the first frame, while `make` reported nothing to do.  The
 # symptom looked like memory corruption in game code and cost an hour of
-# bisecting before the build was suspected (doc/reconciliation.md R-48).
+# bisecting before the build was suspected.
 BASE_CFLAGS = -DHAVE_CONFIG_H $(INCLUDES) -std=gnu99 -MMD -MP \
 	-fno-strict-aliasing -fwrapv -fvisibility=hidden $(API_CFLAGS)
 
-# R-BUILD-2 / R-SEC-9.  -Wall -Wextra, no casts to silence the
+# -Wall -Wextra, no casts to silence the
 # __attribute__((format)) annotations Q2PRO puts on the game import table, and
 # -Werror so that "new warnings are not tolerated" is mechanical rather than
 # aspirational.
 #
-# THREE SUPPRESSIONS, all measured, all forced by R-CORE-5.
+# Three suppressions, all measured, all forced by keeping src/ byte-identical.
 #
-# R-BUILD-2 wants -Wall -Wextra clean; R-CORE-5 wants src/ byte-identical to
-# q2pro/src/game.  On inherited code those two conflict, and R-CORE-5 wins in
-# Phase 0 -- its exit criterion is an *unmodified* baseq2 library, so a warning
-# in inherited code must be suppressed, not edited away.  Measured 2026-08-21 on
+# The build wants -Wall -Wextra clean; the merge wants src/ byte-identical to
+# q2pro/src/game.  On inherited code those two conflict, and byte-identity wins
+# first -- the starting point is an *unmodified* baseq2 library, so a warning
+# in inherited code must be suppressed, not edited away.  Measured on
 # the pristine spine: 622 warnings, all of them from -Wextra, none from -Wall.
 #
 #   -Wno-unused-parameter   594 of the 622.  Structural, not sloppy: Quake II's
@@ -135,7 +143,7 @@ BASE_CFLAGS = -DHAVE_CONFIG_H $(INCLUDES) -std=gnu99 -MMD -MP \
 #                           pointer types (touch takes plane and surf, die takes
 #                           inflictor and point), so most implementations ignore
 #                           some parameters.  Silencing them individually would
-#                           mean ~600 (void) casts in code R-CORE-5 requires to
+#                           mean ~600 (void) casts in code that has to
 #                           stay byte-identical.
 #   -Wno-sign-compare       the other 28.  Each was read: all are int-versus-
 #                           unsigned in a bounded loop or a guarded check, and
@@ -157,23 +165,23 @@ BASE_CFLAGS = -DHAVE_CONFIG_H $(INCLUDES) -std=gnu99 -MMD -MP \
 #                           Both are idiomatic zero-init and both are
 #                           load-bearing: the terminator is what the item loop
 #                           and auditems.py walk to.  gcc does not warn; clang
-#                           does, and CLAUDE.md requires both to be clean, so
+#                           does, and both have to be clean, so
 #                           the flag is set for both rather than diverging the
 #                           two compilers' flags.
 WARN_CFLAGS = -Wall -Wextra -Werror \
 	-Wno-unused-parameter -Wno-sign-compare -Wno-missing-field-initializers
 
-# q2pro's own curated set, adopted under §7 rule 1: warning policy is not a
+# q2pro's own curated set, adopted as-is: warning policy is not a
 # donor's feature, so the base tree's choice wins.  From q2pro/meson.build's
 # test_args, filtered there through cc.get_supported_arguments().
 WARN_CFLAGS += -Werror=vla -Wformat-security -Wpointer-arith \
 	-Wstrict-prototypes
 
-# R-BUILD-2 / R-SEC-6.  -fstack-protector-strong applies to every
+# -fstack-protector-strong applies to every
 # configuration.  _FORTIFY_SOURCE is release-only, and that is not the
-# "disabled to make something compile" that R-SEC-6 forbids: glibc's fortified
+# "disabled to make something compile" that would be an evasion: glibc's fortified
 # headers require optimisation, so at -O0 the define is inert and only produces
-# a "requires compiling with optimization" warning -- which R-BUILD-2 would
+# a "requires compiling with optimization" warning -- which the build would
 # then fail the build on.  Release is where it has meaning and there it is on.
 HARDEN_CFLAGS         = -fstack-protector-strong
 HARDEN_RELEASE_CFLAGS = -D_FORTIFY_SOURCE=2
@@ -195,14 +203,14 @@ HARDEN_RELEASE_CFLAGS = -D_FORTIFY_SOURCE=2
 #
 #     src/g_ai.c:338:12: error: no member named '__dprintf_chk' in 'game_import_t'
 #
-# Isolated 2026-08-21: it needs clang AND -O2 AND _FORTIFY_SOURCE together; any
-# two are fine.  Neither side can move -- R-CORE-9 forbids editing the vendored
-# header that names the member, and R-CORE-5 forbids parenthesising the call
+# Isolated: it needs clang AND -O2 AND _FORTIFY_SOURCE together; any
+# two are fine.  Neither side can move -- the vendored header that names the
+# member may not be edited, and parenthesising the call is not allowed
 # sites as `(gi.dprintf)(...)` to suppress macro expansion.
 #
 # So fortify applies to gcc, which is the compiler the shipped artifact is built
 # with, and clang remains a full second opinion on warnings at every level plus
-# -O2 without fortify.  This is not the evasion R-SEC-6 forbids: the hardened
+# -O2 without fortify.  This is not an evasion: the hardened
 # configuration is not weakened, it is that clang + fortify + this ABI cannot
 # coexist at all.
 CC_IS_CLANG = $(findstring clang,$(shell $(CC_NATIVE) --version 2>/dev/null | head -1))
@@ -217,7 +225,7 @@ DEBUG_CFLAGS   = $(BASE_CFLAGS) $(WARN_CFLAGS) $(HARDEN_CFLAGS) -g -O0
 NATIVE_RELEASE_CFLAGS = $(BASE_CFLAGS) $(WARN_CFLAGS) $(HARDEN_CFLAGS) \
 	$(NATIVE_HARDEN_RELEASE) -O2
 
-# ELF: -ldl for the botlib dlopen path (R-BOT-3), stricmp is not in glibc.
+# ELF: -ldl for the botlib dlopen path, stricmp is not in glibc.
 ELF_CFLAGS      = -Dstricmp=strcasecmp
 ELF_LDFLAGS     = -ldl -lm
 ELF_SHLIBCFLAGS = -fPIC
@@ -228,40 +236,53 @@ ELF_SHLIBLDFLAGS = -shared -Wl,--no-undefined
 # format attributes are checked against.
 PE_CFLAGS       = -D__USE_MINGW_ANSI_STDIO=1
 # No -lws2_32 any more: src/arena/gslog.c's UDP event forwarding was the tree's
-# only socket user and R-SEC-7 does not allow it, so nothing links winsock.
+# only socket user and it is not allowed, so nothing links winsock.
 #
 # -Bstatic -lssp: the stack protector's runtime, linked IN rather than imported.
 # `-fstack-protector-strong` makes gcc add an implicit `-lssp`, and on mingw the
 # link prefers `libssp.dll.a` over `libssp.a` -- so the shipped DLL declared
 # `libssp-0.dll` as an import and would not load on a machine without it.  A
 # game DLL that needs a compiler runtime beside it is not shippable, and the
-# answer is not to drop the hardening (R-SEC-6 forbids exactly that): the static
+# answer is not to drop the hardening: the static
 # archive is right there in the toolchain.  -Bdynamic is restored immediately so
 # nothing after this line is affected.
 PE_LDFLAGS      = -Wl,-Bstatic -lssp -Wl,-Bdynamic -lm -static-libgcc
 PE_SHLIBCFLAGS  =
 PE_SHLIBLDFLAGS = -shared
 
+# Mach-O: `stricmp` is absent as it is on ELF, but the other two ELF answers are
+# wrong here.  There is no `-ldl`: dlopen lives in libSystem and asking for the
+# library fails the link.  And `--no-undefined` is GNU ld's spelling; Apple's
+# is `-undefined error`, which is the default anyway and is passed so that a
+# toolchain change cannot quietly make it a warning.  `-install_name` is set
+# because the engine dlopens the file by path and the default would otherwise
+# bake this machine's build directory into a shipped artifact.
+MACHO_CFLAGS      = -Dstricmp=strcasecmp
+MACHO_LDFLAGS     = -lm
+MACHO_SHLIBCFLAGS = -fPIC
+MACHO_SHLIBLDFLAGS = -dynamiclib -Wl,-undefined,error \
+	-Wl,-install_name,@rpath/game$(CPU).dylib
+
 # ---------------------------------------------------------------- sources
 #
-# src/ is q2pro/src/game file for file (R-CORE-5); src/shared/ is vendored from
+# src/ is q2pro/src/game file for file; src/shared/ is vendored from
 # q2pro/src/shared.  Donor subdirectories (ctf/ xatrix/ rogue/ arena/ tourney/
 # bot/) arrive in Phases 2-6 and are appended here as they land -- listed
 # explicitly rather than wildcarded so that a file appearing in the tree
 # without a spec row cannot be silently linked.
 
 
-# src/tourney/ -- OSP Tourney DM (R-OSP-1..13), linked as of spec 1.20.  It is
+# src/tourney/ -- OSP Tourney DM, linked as of spec 1.20.  It is
 # still its own variable because genptr.py and the spec both want to name the
 # donor's translation units as a set.
 #
-# It was imported-but-unlinked for one increment (R-VER-26, now discharged):
+# It was imported-but-unlinked for one increment:
 # the 21 units referenced `match_paused`, `pause_time`, `endlvl_frame`, three
 # armor tables, four statusbar literals and two static g_cmds.c helpers, every
 # one of them defined by a shared file whose merge had not landed.  `make
 # check-tourney` compiled them -fsyntax-only in the meantime.  When the merges
 # landed the target went away rather than becoming a permanent second build,
-# which is what R-VER-26 asked for.
+# which is what was asked for.
 TOURNEY_SRC = \
 	tourney/osp_acc.c tourney/osp_clientcmd.c \
 	tourney/osp_cmds.c \
@@ -273,16 +294,16 @@ TOURNEY_SRC = \
 	tourney/osp_teams.c tourney/p_camera.c tourney/p_menu.c \
 	tourney/sl_write.c tourney/stdlog.c
 
-# src/bot/ -- the Gladiator Bot SDK glue (R-BOT-1..30), linked as of spec 1.22.
+# src/bot/ -- the Gladiator Bot SDK glue, linked as of spec 1.22.
 # Six files are osp-tourney's already-ported bl_*.c and two are the Gladiator
 # reconstruction's menu, which osp-tourney cannot supply because it moved its
-# bot menu onto id's PMenu (R-BOT-28).
+# bot menu onto id's PMenu.
 #
 # `tourney/osp_botseam.c` is GONE, not edited: it defined BotServerCommand,
 # BotDestroy, AddRandomBot, CheckForNewBotFile, botglobals, botlist and
 # old_botcount as no-ops behind !G_BotsAllowed(), and bl_redirgi.c, bl_spawn.c
 # and bl_botcfg.c define all seven for real.  The early-out is what kept the
-# swap honest (doc/reconciliation.md R-86).
+# swap honest.
 BOT_SRC = \
 	bot/bl_botcfg.c bot/bl_cmd.c bot/bl_debug.c bot/bl_main.c \
 	bot/bl_redirgi.c bot/bl_spawn.c \
@@ -326,7 +347,7 @@ TARGET = $(BUILDDIR)/game$(CPU).$(SHLIBEXT)
 
 # ---------------------------------------------------------------- goals
 
-.PHONY: all everything native linux64 linux32 win32 win64 windows \
+.PHONY: all everything native linux64 linux32 win32 win64 windows macos \
 	oldapi bothapis check check-ptrs check-audits clean distclean help
 
 all: native
@@ -361,12 +382,21 @@ win64:
 	$(MAKE) _build BUILDDIR=release-win64$(API_SUFFIX)   CC=$(CC_WIN64)   CPU=$(CPU_WIN64) \
 		SHLIBEXT=dll CFLAGS="$(RELEASE_CFLAGS) $(PE_CFLAGS)"  KIND=PE
 
+# Not part of `everything`: it cannot run anywhere but on macOS, and a goal that
+# is unbuildable on the machine most of this is developed on does not belong in
+# the all-targets rule.  CI builds it on a macOS runner, once per architecture.
+macos:
+	$(MAKE) _build BUILDDIR=debug-macos$(API_SUFFIX)   CC=$(CC_MACOS) CPU=$(CPU_MACOS) \
+		SHLIBEXT=dylib CFLAGS="$(DEBUG_CFLAGS) $(MACHO_CFLAGS)" KIND=MACHO
+	$(MAKE) _build BUILDDIR=release-macos$(API_SUFFIX) CC=$(CC_MACOS) CPU=$(CPU_MACOS) \
+		SHLIBEXT=dylib CFLAGS="$(NATIVE_RELEASE_CFLAGS) $(MACHO_CFLAGS)" KIND=MACHO
+
 windows: win32 win64
 
-# R-BUILD-1 / R-VER-8: every gating target of R-BUILD-5, debug and release.
+# Every gating target, debug and release.
 everything: native linux64 linux32 win32 win64
 
-# R-ENG-1a, spelled as a target because `API=old` on a command line is easy to
+# Spelled as a target because `API=old` on a command line is easy to
 # forget and easy to misread in a build log.  The recursion re-enters this file
 # with API set, so it composes the same way the variable does: `make oldapi`
 # is the native pair, `make oldapi GOAL=everything` is all five.
@@ -375,7 +405,7 @@ GOAL ?= native
 oldapi:
 	$(MAKE) $(GOAL) API=old
 
-# Both settings of R-ENG-1a, which is what "the old API still builds" has to
+# Both settings of the game ABI, which is what "the old API still builds" has to
 # mean to be worth claiming.  Serial rather than a prerequisite list: the two
 # recursions must not interleave their `check` runs (see check-ptrs).
 bothapis:
@@ -384,7 +414,7 @@ bothapis:
 
 # ---------------------------------------------------------------- build
 
-# R-TOOL-3: the audits run in the build, not on request, and a finding fails it
+# The audits run in the build, not on request, and a finding fails it
 # the way a warning does.  They run once per invocation, before compiling.
 _build: check
 	@mkdir -p $(BUILDDIR)/shared $(BUILDDIR)/xatrix $(BUILDDIR)/rogue \
@@ -392,11 +422,11 @@ _build: check
 	$(MAKE) $(TARGET) BUILDDIR=$(BUILDDIR) CC=$(CC) CPU=$(CPU) \
 		SHLIBEXT=$(SHLIBEXT) CFLAGS="$(CFLAGS)" KIND=$(KIND)
 
-# R-SEC-6a: a PE artifact is checked for what it IMPORTS the moment it is
+# A PE artifact is checked for what it IMPORTS the moment it is
 # linked.  The failure it catches is invisible from a Linux host -- the DLL
 # links, the build is clean, and nothing here can load it to find out that it
 # wanted `libssp-0.dll` beside it.  In the build rather than on request, for the
-# same reason the audits are (R-TOOL-3).
+# same reason the audits are.
 $(TARGET): $(OBJS)
 	$(CC) $(CFLAGS) $($(KIND)_SHLIBLDFLAGS) -o $@ $(OBJS) $($(KIND)_LDFLAGS)
 ifeq ($(KIND),PE)
@@ -416,7 +446,7 @@ check: check-ptrs check-audits
 
 
 
-# R-SAVE-2 / R-BUILD-4: genptr.py runs over the whole tree as a build step and a
+# Genptr.py runs over the whole tree as a build step and a
 # stale g_ptrs.c is a build failure, not a warning.  The committed file must be
 # exactly what the generator produces from the current sources.
 # The scratch file carries the shell's PID, because `everything` builds five
@@ -429,22 +459,22 @@ check-ptrs:
 		&& if cmp -s g_ptrs.c .g_ptrs.gen.$$$$; then \
 			rm -f .g_ptrs.gen.$$$$; \
 		else \
-			echo "*** g_ptrs.c is stale (R-SAVE-2).  Regenerate it:"; \
+			echo "*** g_ptrs.c is stale.  Regenerate it:"; \
 			echo "***   cd src && python3 genptr.py $(PTR_SRC) > g_ptrs.c"; \
 			diff -u g_ptrs.c .g_ptrs.gen.$$$$ | head -40; \
 			rm -f .g_ptrs.gen.$$$$; \
 			exit 1; \
 		fi
 
-# R-TOOL-3 / R-VER-11: the four contract audits.  A finding fails the build.
+# The four contract audits.  A finding fails the build.
 # The four tools are reports and exit 0 whatever they find; tools/audit.py is
-# the driver that turns a finding into a non-zero exit, which is what R-TOOL-3
+# the driver that turns a finding into a non-zero exit, which is what the gate
 # actually asks for.  It also labels the two comparative audits "not applicable"
 # rather than "clean" while no donor is in the tree.
-# R-33 / R-VER-15 item 1: `auditems` compares the merged itemlist against
+# `auditems` compares the merged itemlist against
 # **q2pro's baseq2 entries**, not against a donor, because the regression it
 # names is a baseq2 field lost in a merge.  Passed here rather than left to a
-# human, because from Phase 2 on the tree HAS donors in it and "not applicable"
+# human, because the tree has donors in it and "not applicable"
 # would be a vacuous pass.  A missing reference tree is skipped and said so.
 BASEQ2_REF ?= ../q2pro/src/game
 
@@ -458,7 +488,7 @@ check-audits:
 # clean and gets linked later.
 BUILDDIRS = debug release debug-linux64 release-linux64 \
 	debug-linux32 release-linux32 debug-win32 release-win32 \
-	debug-win64 release-win64
+	debug-win64 release-win64 debug-macos release-macos
 
 clean:
 	-rm -rf $(BUILDDIRS) $(addsuffix -oldapi,$(BUILDDIRS))
@@ -474,19 +504,20 @@ distclean: clean
 	-find . -name __pycache__ -type d -prune -exec rm -rf {} +
 
 help:
-	@echo "Colosseum -- targets (R-BUILD-5):"
+	@echo "Colosseum -- targets:"
 	@echo "  native      ELF $(CPU_NATIVE) (this host), debug + release   [gating, runnable here]"
 	@echo "  linux64     ELF x86_64, cross                               [gating, not runnable here]"
 	@echo "  linux32     ELF i386, cross                                 [gating, not runnable here]"
 	@echo "  win32       win32 PE, cross                                 [gating, not runnable here]"
 	@echo "  win64       win64 PE, cross                                 [gating, not runnable here]"
+	@echo "  macos       Mach-O $(CPU_NATIVE) dylib, macOS hosts only       [not cross-buildable]"
 	@echo "  windows     win32 + win64"
 	@echo "  everything  all five, debug + release"
 	@echo "  check       the audits and the g_ptrs.c freshness check only"
 	@echo
-	@echo "This host builds all five and can execute only 'native' (R-BUILD-6)."
+	@echo "This host builds all five and can execute only 'native'."
 	@echo
-	@echo "Game ABI (R-ENG-1a) -- API=new is the default and the shipped one:"
+	@echo "Game ABI -- API=new is the default and the shipped one:"
 	@echo "  API=new     GAME_API_VERSION 3302, gclient_new_t/pmove_new_t, 64 stats"
 	@echo "  API=old     GAME_API_VERSION 3, gclient_old_t/pmove_old_t, 32 stats"
 	@echo "  oldapi      shorthand for 'native API=old'; GOAL=<target> to widen it"
@@ -495,5 +526,5 @@ help:
 	@echo "API=old builds into <dir>-oldapi, because the two settings differ in"
 	@echo "STRUCT LAYOUT and mixed objects would link cleanly and run wrong."
 	@echo "Under API=old, ctf drops the second powerup timer: its slots are"
-	@echo "32/33 and the old player_state_t holds 32 (R-OSP-7 clause 6)."
+	@echo "32/33 and the old player_state_t holds 32."
 	@echo "Now: API=$(API), so BUILDDIRs are '<dir>$(API_SUFFIX)'."

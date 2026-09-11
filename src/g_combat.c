@@ -115,7 +115,7 @@ static void Killed(edict_t *targ, edict_t *inflictor, edict_t *attacker, int dam
         targ->monsterinfo.aiflags &= ~AI_MEDIC;
         targ->enemy = attacker;
     } else if (G_Ruleset() == RULESET_ARENA && targ == attacker) {
-        // R-158.  RA2 writes `if (targ != attacker) targ->enemy = attacker;`
+        // RA2 writes `if (targ != attacker) targ->enemy = attacker;`
         // here, and the difference is a whole feature: on a SELF-kill baseq2
         // overwrites `enemy` with the victim, and RA2's suicide announcer reads
         // that field to grade the fight the player just took themselves out of
@@ -189,7 +189,7 @@ static void Killed(edict_t *targ, edict_t *inflictor, edict_t *attacker, int dam
         monster_death_use(targ);
     }
 
-    // R-EXTRA-6: a player who dies stops being a camera subject, and every
+    // A player who dies stops being a camera subject, and every
     // camera watching them has to be told before the body is turned into a
     // corpse -- afterwards there is nothing left to hand the next subject.
     if (G_IsOspRuleset())
@@ -245,7 +245,7 @@ static int CheckPowerArmor(edict_t *ent, const vec3_t point, const vec3_t normal
     int         save;
     int         power_armor_type;
     int         index;
-    // R-185: float, because `power_armor_screen` and `power_armor_shield` are
+    // Float, because `power_armor_screen` and `power_armor_shield` are
     // floats and the merge had left this an int with the two ratios hardcoded.
     // With the defaults the arithmetic is identical -- 1.0 and 2.0 are what the
     // int held -- so this widens the type without moving any number.
@@ -306,7 +306,7 @@ static int CheckPowerArmor(edict_t *ent, const vec3_t point, const vec3_t normal
         // CTF", the donor's own comment.  A balance decision that belongs to the
         // ruleset, so it is gated rather than taken globally.
         //
-        // R-185: and tourney's `power_armor_shield` answers under RegularDM,
+        // And tourney's `power_armor_shield` answers under RegularDM,
         // which is where upstream's `!m_mode` gate puts it.  Three rulesets,
         // three answers, and one of them is a cvar -- CTF's 1 first, because a
         // CTF server has no `m_mode` to be 0.
@@ -381,7 +381,7 @@ static int CheckArmor(edict_t *ent, const vec3_t point, const vec3_t normal, int
 
     take = save;
 
-    // R-ARENA-1: `armorprotect`, the armour half of RA2's friendly fire and a
+    // `armorprotect`, the armour half of RA2's friendly fire and a
     // per-arena SETTING rather than a dmflag -- 1 exempts anyone on your team
     // including yourself, 2 exempts a team-mate and leaves your own splash to
     // eat your armour, which is what makes a rocket jump cost something.  The
@@ -541,7 +541,7 @@ static void M_ReactToDamage(edict_t *targ, edict_t *attacker, edict_t *inflictor
 }
 
 // Non-static: CTF's grapple asks the same question before hurting whoever it
-// hit, so the linkage follows the call (R-CORE-13).
+// hit, so the linkage follows the call.
 bool CheckTeamDamage(edict_t *targ, edict_t *attacker)
 {
     // CTF: teammates cannot hurt each other at all.
@@ -550,7 +550,7 @@ bool CheckTeamDamage(edict_t *targ, edict_t *attacker)
             targ != attacker)
             return true;
 
-    // R-171: RA2 replaces this function outright with teamnum equality, and it
+    // RA2 replaces this function outright with teamnum equality, and it
     // had no arena arm at all.  The one caller is the grapple's damage tick, so
     // what the omission bought was a team-mate on the end of your hook hearing
     // `grhurt.wav` every frame while healthprotect cancelled the damage one
@@ -583,21 +583,29 @@ void T_Damage(edict_t *targ, edict_t *inflictor, edict_t *attacker, const vec3_t
 
     // An attacker is an edict, never NULL, and this is where that becomes true.
     //
-    // baseq2 leaves `activator` NULL on the way into damage: nothing in
-    // g_func.c ever assigns that field on a func_door, so a door reversing
-    // because something blocked it passes `ent->activator` to its targets, and
-    // a `target_explosion` among them hands it straight to T_RadiusDamage as
-    // the attacker.  id's own T_Damage survives that by accident rather than by
-    // design -- its single `attacker->client` read sits behind
+    // baseq2 leaves `activator` NULL on several paths into damage -- a door
+    // that reverses because something blocked it passes `ent->activator`
+    // (g_func.c), and nothing ever assigns that field on a func_door, so a
+    // `func_door` whose targets include a `target_explosion` reaches
+    // T_RadiusDamage with no attacker at all.  id's own T_Damage survived that
+    // by accident: its single `attacker->client` read sits behind
     // `!(dflags & DAMAGE_RADIUS)`, which short-circuits on exactly the path
-    // that produces the NULL.  Killed() and M_ReactToDamage() have no such
-    // luck: both dereference the attacker to decide what to do with it.
+    // that produces the NULL.
     //
-    // An accident is not a contract, and this function is where every donor's
-    // damage rules are going to land.  So the NULL is answered once, at the
-    // boundary, rather than at each read.  `world` is g_edicts[0]; its `client`
-    // is NULL, so every `attacker->client` test still answers exactly what the
-    // missing attacker meant.
+    // The accident does not survive the merge.  This function carries six
+    // donors' arms and reads `attacker` at some twenty sites -- CTF's strength
+    // tech and hurt-carrier bonus, tourney's runes and teams, RA2's arena
+    // teams and score-by-damage, Ground Zero's DMGame hooks -- and most of them
+    // dereference before testing.  Guarding them one at a time only moves the
+    // crash to the next one: `CTFCheckHurtCarrier()` below and
+    // `M_ReactToDamage()` (id's own) are both unconditional on every ruleset,
+    // and between them they cover both kinds of thing a door can crush.
+    //
+    // So the NULL is answered once, here, rather than twenty times downstream.
+    // `world` is g_edicts[0]; its `client` is NULL, so every `attacker->client`
+    // test still answers exactly what the missing attacker meant, and
+    // MOD_EXPLOSIVE already routes the obituary through the no-attacker arm.
+    // R-SEC-10.
     if (!attacker)
         attacker = world;
 
@@ -628,7 +636,7 @@ void T_Damage(edict_t *targ, edict_t *inflictor, edict_t *attacker, const vec3_t
     if (G_Ruleset() == RULESET_ARENA && attacker->client && (attacker != targ))
         targ->enemy = attacker;
 
-    // R-OSP-1: tourney decides friendly fire and self damage per TEAM and per
+    // Tourney decides friendly fire and self damage per TEAM and per
     // match mode rather than from dmflags, because both are things a referee
     // changes mid-match.  The donor deleted baseq2's dmflags friendly-fire arm,
     // so it remains available to every other ruleset but not to OSP.
@@ -659,7 +667,7 @@ void T_Damage(edict_t *targ, edict_t *inflictor, edict_t *attacker, const vec3_t
 
     meansOfDeath = mod;
 
-    // R-OSP-1's strength rune multiplies the damage the CARRIER deals, which
+    // Tourney's strength rune multiplies the damage the carrier deals, which
     // is why it reads the attacker and runs before any of the target's
     // reductions.  A no-op unless the rune set is on and the attacker has it,
     // in the same shape as CTFApplyStrength below.
@@ -703,11 +711,10 @@ void T_Damage(edict_t *targ, edict_t *inflictor, edict_t *attacker, const vec3_t
 
     // CTF strength tech.  A no-op without the tech, so no gate: CTFApplyStrength
     // returns its argument when the attacker holds nothing.  "Holds nothing"
-    // and "is not there" are different states, and only the first is this
-    // call's to answer -- the second is answered once at the top of T_Damage,
-    // and a gate here instead would leave it unanswered for
-    // CTFCheckHurtCarrier() below and for M_ReactToDamage(), which is id's own
-    // and runs whatever the ruleset is.
+    // and "is not there" are different states, and only the first one is this
+    // function's to answer -- the second is answered once at the top (R-SEC-10),
+    // because a ruleset gate here would have left the identical NULL to
+    // CTFCheckHurtCarrier() and M_ReactToDamage() further down.
     damage = CTFApplyStrength(attacker, damage);
 
     if (targ->flags & FL_NO_KNOCKBACK)
@@ -747,7 +754,7 @@ void T_Damage(edict_t *targ, edict_t *inflictor, edict_t *attacker, const vec3_t
 
     // check for invincibility
     //
-    // R-OSP-1's `client_protect` is the second disjunct: `resp.osp_r23c` is a
+    // Tourney's `client_protect` is the second disjunct: `resp.osp_r23c` is a
     // frame number OSP_seedPlayer sets to `client_protect` seconds ahead when a
     // player spawns into plain deathmatch with the blaster, and it makes them
     // untouchable until it passes or they pick something up.  Carrying the
@@ -796,15 +803,15 @@ void T_Damage(edict_t *targ, edict_t *inflictor, edict_t *attacker, const vec3_t
     //treat cheat/powerup savings the same as armor
     asave += save;
 
-    // R-ARENA-1: `healthprotect`, the health half of RA2's friendly fire, in
+    // `healthprotect`, the health half of RA2's friendly fire, in
     // the donor's own position -- after the armour has had its say and before
     // anything is taken off.  1 means nobody on your team takes health off you
     // and OnSameTeam answers true for yourself, so that covers your own splash
     // too; 2 exempts only a team-mate.  Both are per-arena settings from
     // arena.cfg, defaulting to armorprotect 2 / healthprotect 1.
     //
-    // This does NOT replace baseq2's dmflags friendly-fire arm at the top of
-    // the function (R-CORE-8): that is a different rule with a different
+    // This does not replace baseq2's dmflags friendly-fire arm at the top of
+    // the function: that is a different rule with a different
     // switch, and under arena its dmflags gate is off, so the two never both
     // fire.  meansOfDeath is rewritten rather than only `mod`, because
     // colosseum publishes it before this point and Killed() reads the global.
@@ -840,13 +847,11 @@ void T_Damage(edict_t *targ, edict_t *inflictor, edict_t *attacker, const vec3_t
     // later.  Records the fact; the scoring happens in CTFFragBonuses.
     //
     // Gated, where the donor's call is not, and the gate is this project's
-    // decision rather than the merge's.  The only reader of
-    // `ctf_lasthurtcarrier` is CTFFragBonuses, which returns at
-    // `CTFOtherTeam(...) < 0` before reaching it unless the victim is on a real
-    // CTF team, so outside ctf this call wrote a field nobody read.  The donor
-    // could leave it ungated because its library only ever ran CTF; this one
-    // runs every ruleset from one binary, and an ungated donor entry point in a
-    // shared T_Damage is exactly how a CTF rule reaches a deathmatch server.
+    // decision rather than the merge's (R-CTF-10).  The only reader of
+    // `ctf_lasthurtcarrier` is CTFFragBonuses, which returns before reaching it
+    // unless `resp.ctf_team` is a real team, so outside ctf this call already
+    // wrote a field nobody read -- the donor could leave it ungated because its
+    // library only ever ran CTF, and this one runs seven rulesets.
     if (G_Ruleset() == RULESET_CTF)
         CTFCheckHurtCarrier(targ, attacker);
 
@@ -859,7 +864,7 @@ void T_Damage(edict_t *targ, edict_t *inflictor, edict_t *attacker, const vec3_t
     }
 // ROGUE
 
-    // R-OSP-1's accuracy table, credited once, here, rather than at fifteen
+    // Tourney's accuracy table, credited once, here, rather than at fifteen
     // sites across g_weapon.c and g_combat.c -- see src/tourney/osp_acc.c for
     // what that changes and why.  This is the point every one of those sites
     // was feeding: `take` is the damage that survived armour, powerups and the
@@ -869,7 +874,7 @@ void T_Damage(edict_t *targ, edict_t *inflictor, edict_t *attacker, const vec3_t
 
 // do the damage
     if (take) {
-        // Three damage-effect rules union here (§7 rule 3): baseq2's blood,
+        // Three damage-effect rules union here: baseq2's blood,
         // Xatrix's green gekk blood, and Ground Zero's mechanical sparks and
         // chainfist extra blood.  They compose -- each tests a different thing
         // about the target or the weapon -- so no gate is needed, only ordering
@@ -887,7 +892,7 @@ void T_Damage(edict_t *targ, edict_t *inflictor, edict_t *attacker, const vec3_t
             SpawnDamage(te_sparks, point, normal, take);
 //PGM
 
-        // R-RA-1's score-by-damage, a per-arena setting.  Scored before the
+        // RA2's score-by-damage, a per-arena setting.  Scored before the
         // health is applied, because the points are what this hit actually took
         // off rather than what it asked for.
         if (G_Ruleset() == RULESET_ARENA &&

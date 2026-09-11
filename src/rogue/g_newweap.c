@@ -18,7 +18,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 */
 #include "g_local.h"
-// R-181: the accuracy hooks below.  osp_hooks.h is the surface a shared file may
+// The accuracy hooks below.  osp_hooks.h is the surface a shared file may
 // see (the header's own rule); osp_types.h would drag tourney's private names in.
 #include "tourney/osp_hooks.h"
 
@@ -75,8 +75,8 @@ void flechette_touch(edict_t *self, edict_t *other, cplane_t *plane, csurface_t 
     G_FreeEdict(self);
 }
 
-// R-181: the content layers' weapons reach tourney's accuracy report too --
-// R-MODE-3 makes both layers valid with every ruleset, so a match fought with
+// The content layers' weapons reach tourney's accuracy report too --
+// both layers are valid with every ruleset, so a match fought with
 // them is a match the report has to be able to describe.  OSP_accShot is a
 // no-op outside an OSP ruleset, outside a live match, and for a non-client, so
 // the calls below are safe on the monster paths that share these functions.

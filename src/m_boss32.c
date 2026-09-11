@@ -760,9 +760,7 @@ void MakronPrecache(void)
 */
 void SP_monster_makron(edict_t *self)
 {
-    // R-MODE-7 / R-CORE-8: the ruleset decides, not `deathmatch`.  The
-    // inherited test was right for baseq2 and wrong here, because `deathmatch`
-    // is 1 under ctf and R-MODE-7 promises monsters under ctf.
+    // deathmatch is 1 under ctf, which allows monsters: ask the ruleset.
     if (!G_MonstersAllowed()) {
         G_FreeEdict(self);
         return;
@@ -816,10 +814,10 @@ void MakronSpawn(edict_t *self)
 
     SP_monster_makron(self);
 
-    // jump at player.  R-203 gave the two arms separate caches, and this
+    // jump at player.  The two arms have separate caches, and this
     // reader chooses on the Makron's own resolved flavor: a Rogue-effective
     // Makron must not notice a disguised player, which is exactly what the
-    // base cache still reports (R-211).
+    // base cache still reports.
     player = M_UsesRogueBehavior(self) ? level.rogue_sight_client
                                        : level.sight_client;
     if (!player)

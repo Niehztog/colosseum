@@ -201,7 +201,7 @@ This fixed size trigger cannot be touched, it can only be fired by other events.
 */
 void trigger_relay_use(edict_t *self, edict_t *other, edict_t *activator)
 {
-    // R-EXTRA-3: a relay in a counting chain passes a count on -- its own
+    // A relay in a counting chain passes a count on -- its own
     // `style` if it has one, otherwise whatever fired it.  Off by default, so
     // a map that does not use trigger_counting sees the relay it always had.
     if (g_triggercounting->value) {
@@ -390,12 +390,12 @@ trigger_push
 ==============================================================================
 */
 
-// *** A spawnflag-bit collision between the two mission packs. ***
+// A spawnflag-bit collision between the two mission packs.
 //
 // Both extend `trigger_push` and both claim bit 1 (0x02) for different things:
 // Xatrix's PUSH_PLUS makes the trigger pulse on a `wait` interval, Ground Zero's
 // PUSH_START_OFF makes it toggleable and initially inert.  A map setting bit 1
-// would otherwise get BOTH behaviours (see doc/reconciliation.md R-28).
+// would otherwise get both behaviours.
 //
 // Resolved by the entity's own keys rather than by guessing the content layer,
 // which is better than either donor manages and needs no gate: Ground Zero's
@@ -725,7 +725,7 @@ void SP_trigger_monsterjump(edict_t *self)
 /*
 ==============================================================================
 
-trigger_log            R-EXTRA-3, from the 1999 module's TRIGGER_LOG
+trigger_log            from the 1999 module's TRIGGER_LOG
 
 ==============================================================================
 */
@@ -751,7 +751,7 @@ void trigger_log_touch(edict_t *self, edict_t *other, cplane_t *plane, csurface_
     if (!other->client)
         return;
 
-    // R-VER-21: two frames, not `level.time + FRAMETIME * 2`.  The donor's
+    // Two frames, not `level.time + FRAMETIME * 2`.  The donor's
     // 0.2 seconds is two frames and this tree counts frames.
     self->nextthink = level.framenum + 2;
     self->think = trigger_log_reset;
@@ -765,7 +765,7 @@ void trigger_log_touch(edict_t *self, edict_t *other, cplane_t *plane, csurface_
 
 void SP_trigger_log(edict_t *self)
 {
-    // R-EXTRA-3 is off by default, and for a spawn function "off" means the
+    // Off by default, and for a spawn function "off" means the
     // entity is not created rather than created and inert -- an inert trigger
     // still occupies an edict slot and still shows in the census.
     if (!g_triggerlog->value) {
@@ -782,7 +782,7 @@ void SP_trigger_log(edict_t *self)
 /*
 ==============================================================================
 
-trigger_counting       R-EXTRA-3, from the 1999 module's TRIGGER_COUNTING
+trigger_counting       from the 1999 module's TRIGGER_COUNTING
 
 ==============================================================================
 */

@@ -1,0 +1,16 @@
+# The eight navigation meshes OSP Tourney DM shipped precomputed, in the form
+# they come out of `tourney-2.5-linux-x86-glibc.tar.gz` -- and, byte for byte,
+# out of the win32 package beside it, which is how we know the set does not
+# depend on which architecture's download you take.
+#
+# `.github/aas.sh` is the only thing that writes them into the tree and it
+# hashes every one against this file, on the way in and again out of the staged
+# package.  `sha256sum -c` reads it too, from `colosseum/maps/`.
+41fcb54ccc07b2abe2c27dc44d132c7b33b1568825d8b6b2e01b0295fb009c67  q2dm1.aas
+0041195d3d4ffbb41476428971fb033d107f77cb62a943b5a0bd121ddb5e2b39  q2dm2.aas
+db0a6790ba19dd7fd010a1d33aae471be2d2269aea92de397839bd187dd03bf6  q2dm3.aas
+edfea95265ff1a6dff9c409489efe4b79b1c9611fcb0213da4aa79fffb0c797f  q2dm4.aas
+bdc27b26856aba567721d3a3b496197d730c8288b384d0b20fc4b34df3a5dbbb  q2dm5.aas
+bf99e97f313b628a15695a26278aedfb588bfd3f9593ffaa879c43e90e2e25bd  q2dm6.aas
+22a0d42af83cd146bebbcfdcefa0aa2f8a1ea7189fefa63e9c10281a2c2c3203  q2dm7.aas
+16c53c30110c559a03fbbc59f9e7249b6a3f96b430152cb49b1dbe6387eb47ce  q2dm8.aas

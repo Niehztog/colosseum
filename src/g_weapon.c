@@ -90,7 +90,7 @@ void check_dodge(edict_t *self, vec3_t start, vec3_t dir, int speed)        //PG
         VectorSubtract(tr.endpos, start, v);
         eta = (VectorLength(v) - tr.ent->maxs[0]) / speed;
         // Ground Zero's dodge takes the trace: its dodge AI needs the impact
-        // point to decide which way to duck (R-CORE-11 -- adopting Rogue's
+        // point to decide which way to duck (adopting Rogue's
         // monsterinfo_t means adopting its signature, at every call site).
         tr.ent->monsterinfo.dodge(tr.ent, self, eta, &tr);
     }
@@ -299,7 +299,7 @@ pistols, rifles, etc....
 */
 void fire_bullet(edict_t *self, vec3_t start, vec3_t aimdir, int damage, int kick, int hspread, int vspread, int mod)
 {
-    // R-OSP-1's accuracy report counts shots fired as well as shots that hit,
+    // Tourney's accuracy report counts shots fired as well as shots that hit,
     // and only the weapon knows it fired.  One line per weapon here, against
     // fifteen inline p_acc[] writes in the donor -- src/tourney/osp_acc.c has
     // the reasoning.  Damage credit is not here: it is one hook in T_Damage.
@@ -389,15 +389,15 @@ void fire_blaster(edict_t *self, vec3_t start, vec3_t dir, int damage, int speed
     VectorNormalize(dir);
 
     bolt = G_Spawn();
-    // R-195.7.  Q2PRO'S OWN DIVERGENCE BETWEEN TWO OF ITS OWN GAME LIBRARIES:
+    // Q2PRO'S own divergence between two of its own game libraries:
     // its `ctf` sets `SVF_PROJECTILE` here ("special net code is used for
     // projectiles", `port_ctf:g_weapon.c:320`) and its baseq2, xatrix and
     // rogue all set `SVF_DEADMONSTER`.  Not Threewave's feature, which is why
-    // R-40 counted the line among CTF's 167 stale hunks -- but a rule that
+    // the line was counted among CTF's 167 stale hunks -- but a rule that
     // names 167 hunks has not looked at this one, and under `ctf` upstream
     // really does set it.
     //
-    // BOTH, AND NOT THE DONOR'S ONE, because the two flags are not
+    // Both, and not the donor's one, because the two flags are not
     // interchangeable in the engine.  q2pro drops an entity from a trace whose
     // contentmask lacks the matching bit (`sv/world.c:541`), and the
     // SVF_PROJECTILE arm is inside `if (svs.csr.extended)` while the
@@ -1082,8 +1082,8 @@ void ionripper_touch(edict_t *self, edict_t *other, cplane_t *plane, csurface_t 
 // RAFAEL
 void fire_ionripper(edict_t *self, vec3_t start, vec3_t dir, int damage, int speed, int effect)
 {
-    // R-181: the content layers' weapons reach the accuracy report too --
-    // R-MODE-3 makes both valid with every ruleset, so a match fought with
+    // The content layers' weapons reach the accuracy report too --
+    // both are valid with every ruleset, so a match fought with
     // them is a match the report has to be able to describe.
     if (G_IsOspRuleset())
         OSP_accShot(self, MOD_RIPPER, 1);
@@ -1277,7 +1277,7 @@ void plasma_touch(edict_t *ent, edict_t *other, cplane_t *plane, csurface_t *sur
 void fire_plasma(edict_t *self, vec3_t start, vec3_t dir, int damage, int speed, float damage_radius, int radius_damage)
 {
     // The Phalanx.  `fire_plasma` is Xatrix's name for it and MOD_PHALANX is
-    // what it damages with (R-181).
+    // what it damages with.
     if (G_IsOspRuleset())
         OSP_accShot(self, MOD_PHALANX, 1);
 
@@ -1499,7 +1499,7 @@ void Trap_Think(edict_t *ent)
 void fire_trap(edict_t *self, vec3_t start, vec3_t aimdir, int damage, int speed, float timer, float damage_radius, bool held)
 {
     // A thrown device that damages, counted like the hand grenade the donor
-    // already counts (R-181).
+    // already counts.
     if (G_IsOspRuleset())
         OSP_accShot(self, MOD_TRAP, 1);
 

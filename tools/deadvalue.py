@@ -1,17 +1,17 @@
 #!/usr/bin/env python3
-"""Every value this tree READS is a value this tree can PRODUCE (R-192).
+"""Every value this tree READS is a value this tree can PRODUCE.
 
-WHY.  R-191's defect was not a wrong line, it was a MISSING one: the merge kept
+WHY.  The defect was not a wrong line, it was a missing one: the merge kept
 `resp.osp_r240`, kept all three of its readers, and dropped every write of 2.
 Nothing warns.  `if (client->resp.osp_r240 != 2)` is a valid comparison that is
 simply always true, so the guarded branch is dead and the feature behind it --
 the view weapon, the KillBox, the autocam's whole candidate search -- silently
-does the other thing forever.  R-155 is the same shape one field over
+does the other thing forever.  The same shape appears one field over
 (`pers.showmotd` had a reader, a clear and no write, so the message of the day
-was loaded at every map load and shown to nobody), and so is R-192's own
+was loaded at every map load and shown to nobody), and so is this check's own
 `osp_r24c == 8`: a five-page scoreboard whose fifth page nothing could open.
 
-This is R-TOOL-6's third space.  `itemnames.py` resolves a literal against the
+This is the third space.  `itemnames.py` resolves a literal against the
 ITEMLIST, `classnames.py` against every classname the tree can put in an edict,
 and this one against **the set of values a field can hold** -- the same rule
 ("resolve a literal against the space that can produce it") applied to state
@@ -37,7 +37,7 @@ THREE QUESTIONS, and the third is a different space in the same shape:
   3. DISPATCH.  A function-pointer row assigned through a named object and never
      called through one.  `DMGame.SelectSpawnPoint = DBall_SelectSpawnPoint` was
      installed and never read, so Ground Zero's DBall spawned both teams out of
-     the shared deathmatch pool for as long as this tree has existed (R-192).
+     the shared deathmatch pool for as long as this tree has existed.
      Rows reached through a macro (`GATE(row)`) or by another binary
      (`bot_import_t`, which the botlib calls back through) are not findings: the
      rule is per OBJECT, so only an object this tree dispatches through is asked.
@@ -65,7 +65,7 @@ REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 BLOCK_RE = re.compile(r'/\*.*?\*/', re.S)
 
 # Fields the merge renamed because the donor's name collided with baseq2's in
-# the merged struct (R-58).  PER DONOR, because the collision is between two
+# the merged struct.  PER DONOR, because the collision is between two
 # donors: `resp.entered` is tourney's four-state enum and RA2's bool, and mapping
 # both onto `osp_entered` would compare RA2's `true` against tourney's states.
 RENAME = {
@@ -75,12 +75,12 @@ RENAME = {
 
 # Verified.  Each entry is (field, value) -> why.  The first three are donor
 # writes correctly NOT carried; the last two are open findings recorded in
-# doc/reconciliation.md R-192, listed here so that `make check` reports the state
+# The known-dead set, listed here so that `make check` reports the state
 # of the tree rather than the state of the backlog.
 # A donor write of ZERO is never a finding -- a memset, an InitClientResp and a
 # designated initialiser all produce it -- so the three that resolve that way
 # (`isbot = 0`, `osp_r2a8 = 0`, `osp_r2bc = 0`) need no entry and have none; they
-# are recorded in R-192 as checked, along with why each was correctly dropped.
+# are recorded as checked, along with why each was correctly dropped.
 # Each entry names the DONOR it came from, or None for an in-tree finding, and
 # staleness is only asked of an exemption whose donor was actually compared --
 # `make check` passes one donor and would otherwise report the other four as
@@ -89,7 +89,7 @@ EXEMPT = {
     ('entered', 'true'): ('rocketarena2',
         "RA2's, and it is baseq2's bool rather than tourney's enum: its only "
         "reader in RA2 is a reconnect arm this tree does not have, and the field "
-        "is shared (R-58), so the owner clears it its own way"),
+        "is shared, so the owner clears it its own way"),
 }
 
 CONST = re.compile(r'^-?(?:0[xX][0-9a-fA-F]+|\d+|[A-Z][A-Z0-9_]*|true|false|NULL)$')
@@ -432,9 +432,9 @@ def main():
     hits = scan(tree, donors, check_stale=whole)
     for kind, rel, line, what in hits:
         if kind == 'stale':
-            print('!! stale exemption: %s (R-192)' % what)
+            print('!! stale exemption: %s' % what)
         else:
-            print('!! %s:%d: %s (R-192)' % (rel, line, what))
+            print('!! %s:%d: %s' % (rel, line, what))
     print('deadvalue: %d finding(s); %d donor tree(s) compared, %d exemption(s)%s'
           % (len(hits), len(donors), len(EXEMPT),
              '' if whole else ' (partial tree: exemptions not checked for going '

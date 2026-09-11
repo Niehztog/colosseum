@@ -1,5 +1,5 @@
 #!/bin/sh
-# extras.sh -- R-EXTRA-1..7 observed on a running server (R-VER-33).
+# extras.sh -- the seven Gladiator extras, observed on a running server.
 #
 # Six of the seven extras are invisible from outside the library: a log that is
 # open, a lag pool that is empty, two entity classnames no shipped map uses, a
@@ -10,7 +10,7 @@
 # lines and on the files the log actually wrote.
 #
 # `--control` runs four deliberate failures, the last of which is the one
-# R-VER-29 requires of any new script that starts a server: a boot that prints
+# What any script that starts a server has to do: a boot that prints
 # everything it was asked for and then dies must be reported as a failure.
 set -u
 
@@ -21,7 +21,18 @@ ROOT=$(cd "$(dirname "$0")/.." && pwd)
 Q2PRO_BUILD=${Q2PRO_BUILD:-$ROOT/../q2pro/builddir-native}
 Q2DATA=${Q2DATA:-/usr/share/games/quake2/baseq2}
 CTFDATA=${CTFDATA:-/usr/share/games/quake2/ctf}
-GLADDIR=${GLADDIR:-$ROOT/../gladiator-bot-restored}
+# GLADDIR -- the brain, its assets and bspc.  `vendor/gladiator-bot-restored`
+# is the submodule and the documented place; a sibling checkout beside the
+# repository still works, because that is where it lived before the submodule
+# existed.  An explicit GLADDIR wins over both, and a directory holding a BUILT
+# brain is preferred over one that does not, so neither layout stops working.
+if [ -z "${GLADDIR:-}" ]; then
+  for _g in "$ROOT/vendor/gladiator-bot-restored" \
+            "$ROOT/../gladiator-bot-restored"; do
+    [ -f "$_g/release/gladiator.so" ] && GLADDIR=$_g && break
+  done
+  GLADDIR=${GLADDIR:-$ROOT/vendor/gladiator-bot-restored}
+fi
 CPU=$(uname -m | sed -e 's/^aarch64$/arm64/' -e 's/^i.86$/i386/')
 LIB=${LIB:-$ROOT/release/game$CPU.so}
 
@@ -30,6 +41,17 @@ die() { echo "extras.sh: $*" >&2; exit 2; }
 [ -f "$LIB" ] || die "no game library at $LIB -- make native first"
 [ -d "$Q2DATA" ] || die "no baseq2 paks at $Q2DATA"
 
+# These three are read AFTER the chdir below -- the engines from every serve,
+# and `$Q2DATA`/`$LIB` from `bindings_in_layout`, which builds a second fixture
+# of its own -- so they have to survive it, and a caller is as entitled to pass
+# them relative to where it stood as $ROOT was to be derived that way.
+# Absolutised after the three `die`s so that those still quote what the caller
+# actually wrote.  $ROOT is already absolute by construction, $GLADDIR and
+# $CTFDATA are read only while the fixture is being built, which is before.
+Q2PRO_BUILD=$(cd "$Q2PRO_BUILD" && pwd) || die "cannot enter $Q2PRO_BUILD"
+Q2DATA=$(cd "$Q2DATA" && pwd)           || die "cannot enter $Q2DATA"
+LIB=$(cd "$(dirname "$LIB")" && pwd)/$(basename "$LIB")
+
 DIR=$(mktemp -d) || die "mktemp failed"
 trap 'rm -rf "$DIR"' EXIT
 mkdir -p "$DIR/colosseum" "$DIR/baseq2"
@@ -37,9 +59,20 @@ for p in "$Q2DATA"/pak*.pak; do ln -s "$p" "$DIR/colosseum/$(basename "$p")"; do
 i=8
 for p in "$CTFDATA"/pak*.pak; do ln -s "$p" "$DIR/colosseum/pak$i.pak"; i=$((i+1)); done
 ln -s "$LIB" "$DIR/colosseum/game$CPU.so"
-# D6: the shipped config set, installed the way an operator would install it.
+# the shipped gamedir set: the shipped config set, installed the way an operator would install it.
 cp -r "$ROOT/colosseum/." "$DIR/colosseum/" 2>/dev/null || true
-# The brain, if this machine has one.  R-VER-20's temporal row needs a bot to
+# The bot roster is the BRAIN's file and not part of the shipped set: it names
+# the character scripts inside the brain's own pak7.pak, so it is installed from
+# `assets/bots.cfg` exactly as an operator installs it.  Without a brain checked
+# out there is no roster, and the row below says SKIPPED rather than failing on
+# a file this repository does not carry.
+ROSTER=""
+[ -f "$GLADDIR/assets/bots.cfg" ] && {
+  mkdir -p "$DIR/colosseum/botcfg"
+  cp "$GLADDIR/assets/bots.cfg" "$DIR/colosseum/botcfg/bots.cfg"
+  ROSTER=1
+}
+# The brain, if this machine has one.  The temporal row needs a bot to
 # pick something up; without it the row is SKIPPED and says so rather than
 # being silently subtracted from the total.
 GLAD=""
@@ -59,6 +92,23 @@ GLAD=""
   GLAD=1
 }
 
+# EVERY SERVER BELOW IS STARTED FROM THE FIXTURE, for the reason
+# `tools/botmatrix.sh` states at the same point: the botlib does its own file
+# I/O (R-BOT-8), searching `<basedir>/<gamedir>/` and then `<cddir>/<gamedir>/`,
+# and with no `cddir` set the second arm is a RELATIVE path resolved against
+# whatever working directory the server inherited.  Run from the repository
+# root that arm reads `colosseum/maps/`, which is the shipped gamedir.
+#
+# **Nothing here was measuring the wrong thing**, and that is worth saying
+# plainly rather than implying a bug was fixed: this script copies the shipped
+# gamedir into its fixture a few lines above, meshes included, so the two arms
+# already resolved to the same eight files.  What was missing is that this was
+# a coincidence of the two directories agreeing rather than a property of the
+# fixture -- and R-VER-3's second control is what that coincidence costs when
+# they stop agreeing, which is the finding recorded against it in `SPECS.md`.
+# A fixture is only a fixture if the thing under test cannot see around it.
+cd "$DIR" || die "cannot enter $DIR"
+
 pass=0; fail=0
 ok()  { pass=$((pass+1)); printf '  [ ok ] %-42s %s\n' "$1" "$2"; }
 bad() { fail=$((fail+1)); printf '  [FAIL] %-42s %s\n' "$1" "$2"; }
@@ -66,7 +116,7 @@ have() { case "$2" in *"$1"*) return 0 ;; *) return 1 ;; esac; }
 
 # serve <log> <ruleset> <map> <console lines...>
 #
-# The EXIT STATUS is checked (R-VER-29): a server that printed everything it was
+# The EXIT STATUS is checked: a server that printed everything it was
 # asked for and then died on the way out is a failure, and three scripts in this
 # tree once said "ok" to exactly that.
 serve() {
@@ -92,7 +142,7 @@ serve() {
   return 1
 }
 
-line_for() { sed -n "s/^  \(R-EXTRA-$1 .*\)$/\1/p" "$2" | tail -1; }
+line_for() { sed -n "s/^  \(extra $1 .*\)$/\1/p" "$2" | tail -1; }
 
 # How many key bindings a client gets, starting from nothing, with the shipped
 # config set installed the way README.md says to install it.
@@ -116,7 +166,14 @@ bindings_in_layout() {
     cp -f "$LIB" "$b/home/colosseum/game$CPU.so"
     cp -r "$ROOT/colosseum/." "$b/home/colosseum/" 2>/dev/null
     [ -n "$extra" ] && cp "$ROOT/colosseum/server.cfg" "$b/home/colosseum/$extra"
+    # From ITS fixture, not from $DIR's.  This row builds a second, separate
+    # tree under $b and the chdir above points at the first one, which carries a
+    # different `colosseum/` -- and a check about which `default.cfg` a client
+    # reaches is the last one that should be run from beside a second copy of
+    # the gamedir.  The engine resolves through basedir/homedir rather than the
+    # working directory, so this is the rule applied, not a defect repaired.
     ( ulimit -c 0
+      cd "$b" || exit 2
       timeout -s KILL 90 xvfb-run -a -s "-screen 0 640x480x24" \
         "$Q2PRO_BUILD/q2pro" \
         +set basedir "$b" +set homedir "$b/home" +set game colosseum \
@@ -160,7 +217,7 @@ if [ "$CONTROL" = 1 ]; then
   else
     ok "control/observer" "the observer line follows the ruleset"
   fi
-  # 4. D6: a `default.cfg` in the gamedir must be reported, because id's own is
+  # 4. the shipped gamedir set: a `default.cfg` in the gamedir must be reported, because id's own is
   #    what a client's keyboard comes from.  Manufactured rather than hoped for.
   if [ -x "$Q2PRO_BUILD/q2pro" ] && command -v xvfb-run >/dev/null; then
     n=$(bindings_in_layout default.cfg)
@@ -173,7 +230,7 @@ if [ "$CONTROL" = 1 ]; then
     ok "control/shadowed default.cfg" "SKIPPED: no q2pro client or no xvfb-run"
   fi
 
-  # 5. R-VER-29: a boot killed after the census must still be a failure.
+  # 5. A boot killed after the census must still be a failure.
   before=$fail
   (
     ulimit -c 0
@@ -197,7 +254,7 @@ if [ "$CONTROL" = 1 ]; then
   fi
   fail=$((before + fail - before))
 
-  # 6. R-129: the "arena.cfg is RA2's own" test must reject an example of its
+  # 6. The "arena.cfg is RA2's own" test must reject an example of its
   # format.  The positive control is the file that actually shipped from 1.24 to
   # 1.27 -- valid, parseable, and with no per-map block in it -- reconstructed
   # here by stripping every block from the real one.
@@ -218,38 +275,38 @@ if [ "$CONTROL" = 1 ]; then
   exit $([ "$fail" -eq 0 ] && echo 0 || echo 1)
 fi
 
-echo "R-VER-33: the R-EXTRA features, observed"
+echo "the Gladiator extras, observed"
 echo
 
-# ---------------------------------------------- R-EXTRA-1, the game log
+# ---------------------------------------------------- extra 1, the game log
 EXTRA_SETS='+set g_gamelog boot.log'
 if serve "$DIR/log-on.log" dm q2dm1 'sv writelog round two starts now' 'sv extras'; then
   l=$(line_for 1 "$DIR/log-on.log")
-  have "open" "$l" && ok "R-EXTRA-1/opened by cvar" "$l" \
-                   || bad "R-EXTRA-1/opened by cvar" "$l"
+  have "open" "$l" && ok "extra 1/opened by cvar" "$l" \
+                   || bad "extra 1/opened by cvar" "$l"
   f=$DIR/colosseum/boot.log
   if [ -f "$f" ]; then
-    ok "R-EXTRA-1/file written" "$(wc -l <"$f") line(s) in colosseum/boot.log"
+    ok "extra 1/file written" "$(wc -l <"$f") line(s) in colosseum/boot.log"
   else
-    bad "R-EXTRA-1/file written" "no colosseum/boot.log"
+    bad "extra 1/file written" "no colosseum/boot.log"
   fi
   # the whole line, not the first word: the donor logged gi.argv(2)
   if grep -q 'round two starts now' "$f" 2>/dev/null; then
-    ok "R-EXTRA-1/writelog takes the line" "$(grep 'round two' "$f" | head -1)"
+    ok "extra 1/writelog takes the line" "$(grep 'round two' "$f" | head -1)"
   else
-    bad "R-EXTRA-1/writelog takes the line" "$(tail -1 "$f" 2>/dev/null)"
+    bad "extra 1/writelog takes the line" "$(tail -1 "$f" 2>/dev/null)"
   fi
   # ...and the timestamp is the donor's four-field h:mm:ss:cc shape
   if grep -qE '^[0-9]+ +[0-9]{2}:[0-9]{2}:[0-9]{2}:[0-9]{2} ' "$f" 2>/dev/null; then
-    ok "R-EXTRA-1/timestamp shape" "n hh:mm:ss:cc, as the 1999 log wrote it"
+    ok "extra 1/timestamp shape" "n hh:mm:ss:cc, as the 1999 log wrote it"
   else
-    bad "R-EXTRA-1/timestamp shape" "$(head -1 "$f" 2>/dev/null)"
+    bad "extra 1/timestamp shape" "$(head -1 "$f" 2>/dev/null)"
   fi
-  # closed at ShutdownGame, which R-EXTRA-1 names by hand
+  # closed at ShutdownGame, which the requirement names by hand
   if grep -q 'Closed log' "$DIR/log-on.log"; then
-    ok "R-EXTRA-1/closed on shutdown" "Log_ShutDown ran"
+    ok "extra 1/closed on shutdown" "Log_ShutDown ran"
   else
-    bad "R-EXTRA-1/closed on shutdown" "no 'Closed log' in the console"
+    bad "extra 1/closed on shutdown" "no 'Closed log' in the console"
   fi
 fi
 
@@ -257,34 +314,34 @@ rm -f "$DIR/colosseum/boot.log"
 EXTRA_SETS=''
 if serve "$DIR/log-off.log" dm q2dm1 'sv extras'; then
   l=$(line_for 1 "$DIR/log-off.log")
-  have "closed" "$l" && ok "R-EXTRA-1/off by default" "$l" \
-                     || bad "R-EXTRA-1/off by default" "$l"
-  [ -f "$DIR/colosseum/boot.log" ] && bad "R-EXTRA-1/no file when off" "boot.log exists" \
-                                   || ok "R-EXTRA-1/no file when off" "nothing written"
+  have "closed" "$l" && ok "extra 1/off by default" "$l" \
+                     || bad "extra 1/off by default" "$l"
+  [ -f "$DIR/colosseum/boot.log" ] && bad "extra 1/no file when off" "boot.log exists" \
+                                   || ok "extra 1/no file when off" "nothing written"
 fi
 
 # the path guard: `openlog` may not carry a path of its own
 if serve "$DIR/log-path.log" dm q2dm1 'sv openlog ../escape.log' 'sv extras'; then
   if grep -q 'may not contain a path' "$DIR/log-path.log"; then
-    ok "R-EXTRA-1/no path in openlog" "refused ../escape.log"
+    ok "extra 1/no path in openlog" "refused ../escape.log"
   else
-    bad "R-EXTRA-1/no path in openlog" "not refused"
+    bad "extra 1/no path in openlog" "not refused"
   fi
 fi
 
-# ---------------------------------------------- R-EXTRA-2, the lag pool
+# ---------------------------------------------------- extra 2, the lag pool
 EXTRA_SETS='+set g_clientlag 1'
 if serve "$DIR/lag.log" dm q2dm1 'sv extras'; then
   l=$(line_for 2 "$DIR/lag.log")
-  have "g_clientlag 1" "$l" && ok "R-EXTRA-2/cvar live" "$l" \
-                            || bad "R-EXTRA-2/cvar live" "$l"
+  have "g_clientlag 1" "$l" && ok "extra 2/cvar live" "$l" \
+                            || bad "extra 2/cvar live" "$l"
   # nothing is allocated until a command arrives, which is the point of the
   # cvar: an idle server with the simulation ON holds no memory for it.
-  have "pool 0" "$l" && ok "R-EXTRA-2/nothing allocated idle" "$l" \
-                     || bad "R-EXTRA-2/nothing allocated idle" "$l"
+  have "pool 0" "$l" && ok "extra 2/nothing allocated idle" "$l" \
+                     || bad "extra 2/nothing allocated idle" "$l"
 fi
 
-# ---------------------------------------------- R-EXTRA-3/4, the classnames
+# -------------------------------------------- extras 3 and 4, the classnames
 EXTRA_SETS=''
 for rs in dm dmpro tdm duel ctf arena sp; do
   case $rs in
@@ -296,22 +353,22 @@ for rs in dm dmpro tdm duel ctf arena sp; do
   l3=$(line_for 3 "$DIR/cls-$rs.log")
   l4=$(line_for 4 "$DIR/cls-$rs.log")
   if have "MISSING" "$l3$l4"; then
-    bad "R-EXTRA-3+4/$rs registered" "$l3 | $l4"
+    bad "extra 3+4/$rs registered" "$l3 | $l4"
   else
-    ok "R-EXTRA-3+4/$rs registered" "three classnames in the spawn table"
+    ok "extra 3+4/$rs registered" "three classnames in the spawn table"
   fi
-  # R-EXTRA-3 is off by default and the requirement says so
+  # Extra 3 is off by default and the requirement says so
   if have "g_triggercounting 0" "$l3" && have "g_triggerlog 0" "$l3"; then
-    ok "R-EXTRA-3/$rs off by default" "$l3"
+    ok "extra 3/$rs off by default" "$l3"
   else
-    bad "R-EXTRA-3/$rs off by default" "$l3"
+    bad "extra 3/$rs off by default" "$l3"
   fi
   l5=$(line_for 5 "$DIR/cls-$rs.log")
   n=$(printf '%s' "$l5" | sed -n 's/.*on, \([0-9]*\) item.*/\1/p')
   if [ "${n:-0}" -ge 1 ] 2>/dev/null; then
-    ok "R-EXTRA-5/$rs vwep data present" "$n item(s) carry a weapmodel"
+    ok "extra 5/$rs vwep data present" "$n item(s) carry a weapmodel"
   else
-    bad "R-EXTRA-5/$rs vwep data present" "$l5"
+    bad "extra 5/$rs vwep data present" "$l5"
   fi
   l6=$(line_for 6 "$DIR/cls-$rs.log")
   case $rs in
@@ -319,11 +376,11 @@ for rs in dm dmpro tdm duel ctf arena sp; do
     arena)             want=arena ;;
     *)                 want="ctf/sp" ;;
   esac
-  have "$want" "$l6" && ok "R-EXTRA-6/$rs observer" "$l6" \
-                     || bad "R-EXTRA-6/$rs observer" "$l6"
+  have "$want" "$l6" && ok "extra 6/$rs observer" "$l6" \
+                     || bad "extra 6/$rs observer" "$l6"
 done
 
-# ---------------------------------------------- D6, the shipped config set
+# ---------------------------------------------- the shipped gamedir set, the shipped config set
 #
 # Every file in colosseum/ is a default the code already carries, so the check
 # is not "does it change anything" -- it is that an operator who execs one gets
@@ -348,31 +405,31 @@ for rs in dm dmpro tdm duel ctf arena sp; do
   got=$(sed -n 's/^ruleset *\([a-z]*\).*/\1/p' "$log" | tail -1)
   bad_cmds=$(grep -ciE 'Unknown command|unknown command' "$log")
   if [ "$rc" != 0 ]; then
-    bad "D6/configs/$rs.cfg" "server exited $rc"
+    bad "gamedir/configs/$rs.cfg" "server exited $rc"
   elif [ "$got" != "$rs" ]; then
-    bad "D6/configs/$rs.cfg" "ruleset resolved to '$got'"
+    bad "gamedir/configs/$rs.cfg" "ruleset resolved to '$got'"
   elif [ "$bad_cmds" != 0 ]; then
-    bad "D6/configs/$rs.cfg" "$bad_cmds unknown command(s)"
+    bad "gamedir/configs/$rs.cfg" "$bad_cmds unknown command(s)"
   else
-    ok "D6/configs/$rs.cfg" "execs clean, ruleset $got"
+    ok "gamedir/configs/$rs.cfg" "execs clean, ruleset $got"
   fi
   # ...and under arena, the DATA arena.cfg has to have been read.
   if [ "$rs" = arena ]; then
     if grep -q "Couldn't read.*arena.cfg" "$log"; then
-      bad "D6/arena.cfg parses" "$(grep "Couldn't read" "$log" | head -1)"
+      bad "gamedir/arena.cfg parses" "$(grep "Couldn't read" "$log" | head -1)"
     elif grep -q 'Error reading config file' "$log"; then
-      bad "D6/arena.cfg parses" "$(grep 'Error reading config file' "$log" | head -1)"
+      bad "gamedir/arena.cfg parses" "$(grep 'Error reading config file' "$log" | head -1)"
     else
-      ok "D6/arena.cfg parses" "read with no unbalanced braces"
+      ok "gamedir/arena.cfg parses" "read with no unbalanced braces"
     fi
     # ...and that the file is RA2's OWN rather than an example of its format.
-    # R-129: the parse check above passes perfectly on a 69-line example with no
+    # The parse check above passes perfectly on a 69-line example with no
     # per-map blocks and no pickup arenas, which is what shipped from 1.24 --
     # valid, and empty of the data the arena ruleset exists for.  A play test
     # found it as "the join menu offers only Start New Team", because a pickup
     # team is a TEAM in that menu and no arena was marked to have one.
     #
-    # COUNT `pickup: 1`, NOT `pickup:`.  The bare key was counted until R-189 and
+    # COUNT `pickup: 1`, NOT `pickup:`.  The bare key was counted once, and
     # reported as "N pickup arena(s)", which is wrong twice over: three of the
     # 35 designations in the file are `pickup: 0` and turn a pickup arena OFF,
     # and two of the 32 that remain are map-level defaults for maps with no
@@ -384,10 +441,10 @@ for rs in dm dmpro tdm duel ctf arena sp; do
     blocks=$(grep -cE '^[a-z0-9_]+ *\{' "$ROOT/colosseum/arena.cfg" || true)
     picks=$(grep -cE '^[[:space:]]*pickup:[[:space:]]*1' "$ROOT/colosseum/arena.cfg" || true)
     if [ "${blocks:-0}" -lt 20 ] || [ "${picks:-0}" -lt 1 ]; then
-      bad "D6/arena.cfg is RA2's own" \
+      bad "gamedir/arena.cfg is RA2's own" \
           "$blocks per-map block(s), $picks pickup designation(s) -- an example, not the file"
     else
-      ok "D6/arena.cfg is RA2's own" "$blocks per-map block(s), $picks \`pickup: 1\` key(s)"
+      ok "gamedir/arena.cfg is RA2's own" "$blocks per-map block(s), $picks \`pickup: 1\` key(s)"
     fi
   fi
 done
@@ -401,9 +458,9 @@ done
 # movement, no fire, no menu key.  It cost nothing on a dedicated server, which
 # is why every check in this repository passed with it for a whole increment.
 if [ -e "$ROOT/colosseum/default.cfg" ]; then
-  bad "D6/no default.cfg" "colosseum/default.cfg shadows id's, which holds every key binding"
+  bad "gamedir/no default.cfg" "colosseum/default.cfg shadows id's, which holds every key binding"
 else
-  ok "D6/no default.cfg" "id's default.cfg in pak0 is not shadowed"
+  ok "gamedir/no default.cfg" "id's default.cfg in pak0 is not shadowed"
 fi
 
 # ...and the same question asked of the running client rather than of the
@@ -411,13 +468,13 @@ fi
 # breaking it.  Needs the client binary and a display; skipped, and said, when
 # either is missing.
 if [ ! -x "$Q2PRO_BUILD/q2pro" ] || ! command -v xvfb-run >/dev/null; then
-  ok "D6/a client has bindings" "SKIPPED: no q2pro client or no xvfb-run"
+  ok "gamedir/a client has bindings" "SKIPPED: no q2pro client or no xvfb-run"
 else
   n=$(bindings_in_layout)
   if [ "${n:-0}" -ge 60 ] 2>/dev/null; then
-    ok "D6/a client has bindings" "$n bindings, so id's default.cfg was reached"
+    ok "gamedir/a client has bindings" "$n bindings, so id's default.cfg was reached"
   else
-    bad "D6/a client has bindings" "only ${n:-0} binding(s) -- something in the gamedir shadows id's default.cfg"
+    bad "gamedir/a client has bindings" "only ${n:-0} binding(s) -- something in the gamedir shadows id's default.cfg"
   fi
 fi
 
@@ -430,17 +487,19 @@ EXTRA_SETS='+set bots 1'
 # `sv addrandom` is what makes the library READ the roster -- CheckForNewBotFile
 # runs on demand, not at InitGame -- and the bot then needs a brain to spawn,
 # which this script does not install.
-if serve "$DIR/roster.log" dm q2dm1 'sv addrandom' 'wait 20'; then
+if [ -z "$ROSTER" ]; then
+  ok "gamedir/botcfg/bots.cfg" "SKIPPED: no roster at $GLADDIR/assets/bots.cfg"
+elif serve "$DIR/roster.log" dm q2dm1 'sv addrandom' 'wait 20'; then
   line=$(grep -E 'loaded [0-9]+ bots from' "$DIR/roster.log" | tail -1)
   n=$(printf '%s' "$line" | sed -n 's/^loaded \([0-9]*\) bots.*/\1/p')
   if [ "${n:-0}" -ge 1 ] 2>/dev/null && have "botcfg/bots.cfg" "$line"; then
-    ok "D6/botcfg/bots.cfg" "$line"
+    ok "gamedir/botcfg/bots.cfg" "$line"
   else
-    bad "D6/botcfg/bots.cfg" "${line:-no roster line}"
+    bad "gamedir/botcfg/bots.cfg" "${line:-no roster line}"
   fi
 fi
 
-# ---------------------------------------------- R-VER-20, a check that waits
+# ---------------------------------------------- a check that waits
 #
 # "At least one check must wait for something to happen ... spawn a level,
 # advance past a known think deadline, and assert the thing that think was
@@ -454,7 +513,7 @@ fi
 # own think -- and the row takes it three times: at the start, after the bots
 # have been loose in the map, and again past the deadline.
 if [ -z "$GLAD" ]; then
-  ok "R-VER-20/item respawn" "SKIPPED: no brain at $GLADDIR/release/gladiator.so"
+  ok "respawn/back in world" "SKIPPED: no brain at $GLADDIR/release/gladiator.so"
 else
   log=$DIR/respawn.log
   ( ulimit -c 0
@@ -474,7 +533,7 @@ else
       +set deathmatch 1 +set coop 0 +set g_ruleset dm +set bots 1 \
       +set minimumplayers 0 +set bots_minplayers 0 +map q2dm1 >"$log" 2>&1 )
   # BOTH spellings, and the second one is not belt and braces.  `dm` reads
-  # tourney's `bots_minplayers` since spec 1.36 (R-OSP-11) and that cvar
+  # tourney's `bots_minplayers` since spec 1.36 and that cvar
   # defaults to 4, so a server setting only the Gladiator name gets four bots
   # back the moment `sv removebot all` runs -- and this row then measures item
   # respawn on a map that is not empty.  It failed exactly that way once.
@@ -488,16 +547,16 @@ else
   frames=$(sed -n 's/.*frame \([0-9]*\)$/\1/p' "$log" | tail -1)
 
   if [ "$rc" != 0 ]; then
-    bad "R-VER-20/item respawn" "server exited $rc"
+    bad "respawn/back in world" "server exited $rc"
   elif [ -z "$n2" ]; then
-    bad "R-VER-20/item respawn" "fewer than three censuses ($(printf '%s' "$inworld" | tr '\n' ' '))"
+    bad "respawn/back in world" "fewer than three censuses ($(printf '%s' "$inworld" | tr '\n' ' '))"
   elif [ "${w1:-0}" -lt 1 ] 2>/dev/null; then
-    bad "R-VER-20/item taken" "no weapon was ever waiting to respawn (in world $n0 -> $n1)"
+    bad "respawn/taken" "no weapon was ever waiting to respawn (in world $n0 -> $n1)"
   elif [ "${n2:-0}" -lt "${n0:-99}" ] 2>/dev/null; then
-    bad "R-VER-20/item respawn" "$n2 of $n0 back in the world at frame $frames, 50s after the last bot left"
+    bad "respawn/back in world" "$n2 of $n0 back in the world at frame $frames, 50s after the last bot left"
   else
-    ok "R-VER-20/item taken" "$n0 in world -> $n1, $w1 waiting on their own think"
-    ok "R-VER-20/item respawn" "all $n2 back by frame $frames, with nobody left to take them"
+    ok "respawn/taken" "$n0 in world -> $n1, $w1 waiting on their own think"
+    ok "respawn/back in world" "all $n2 back by frame $frames, with nobody left to take them"
   fi
 fi
 

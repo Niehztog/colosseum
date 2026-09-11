@@ -17,8 +17,8 @@ along with this program; if not, write to the Free Software
 Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 */
-// Game-import redirection, from osp-tourney@1d8427e (SPECS.md sec 5.4.3).
-// The reconstruction's asm-matching address comments are stripped -- SPECS.md
+// Game-import redirection, from osp-tourney@1d8427e.
+// The reconstruction's asm-matching address comments are stripped --
 // N1 makes those oracles meaningless here, and they survive at the pin.
 //===========================================================================
 //
@@ -34,7 +34,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "bot/bl_redirgi.h"
 
 #define MAX_COMMANDARGUMENTS            20
-// R-BOT-12: "at least the engine's maximum message size".  Q2PRO's MAX_MSGLEN
+// "at least the engine's maximum message size".  Q2PRO's MAX_MSGLEN
 // is 0x8000 (inc/common/protocol.h, which the game library does not include)
 // and one gi.WriteString of a scoreboard page is already over 1400 bytes, so
 // the 1999 constant of 2048 was under the size of a single legal message.  The
@@ -44,7 +44,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 // MZ_NUKE8 is 38, not 31.  The 1999 constant of 32 predates Ground Zero's
 // flashes, and with it every rogue row in the table below indexes past the end
 // of muzzleflashsoundindex[].  That used to be harmless only because all ten of
-// those rows had no sound; R-183 gave two of them one (MZ_ETF_RIFLE at 30 and
+// those rows had no sound; two of them were given one (MZ_ETF_RIFLE at 30 and
 // MZ_TRACKER at 35), so the write at muzzleflashsoundindex[mf] now actually
 // happens above 31 and this constant is the only reason it lands inside the
 // array.
@@ -55,7 +55,7 @@ game_import_t newgameimport;
 //command arguments for the bots
 static char *commandarguments[MAX_COMMANDARGUMENTS];
 static char commandline[150]; //max see g_cmds.c
-//the model, sound and image indexes -- R-BOT-11, sized from game.csr
+//the model, sound and image indexes, sized from game.csr
 char **modelindexes;
 char **soundindexes;
 char **imageindexes;
@@ -68,11 +68,11 @@ static int muzzleflashsoundindex[MAX_MUZZLEFLASHES];
 /*
 ===============================================================================
 
-THE STAGING MESSAGE, AND WHY IT HOLDS TYPED RECORDS RATHER THAN BYTES
+The staging message, and why it holds typed records rather than bytes
 
-R-BOT-10 asks for the writes to be "buffered into one staging message so
-multicast/unicast can read it before it goes out", and R-BOT-13 asks for the
-redirection to be transparent -- with numbots == 0, every redirected slot must
+The writes are buffered into one staging message so multicast/unicast can read
+it before it goes out, and the redirection has to be transparent -- with
+numbots == 0, every redirected slot must
 behave exactly as if the engine had been called directly.  The 1999 design
 cannot satisfy both against Q2PRO, and measuring it is what says so:
 
@@ -93,12 +93,10 @@ cannot satisfy both against Q2PRO, and measuring it is what says so:
 So the staging message records what was written, not how the engine would
 encode it: one type byte and the argument, replayed through newgameimport's own
 writers at flush.  The engine therefore receives exactly the call sequence it
-would have received unredirected, in the same order, which makes R-BOT-13 true
+would have received unredirected, in the same order, which makes that true
 by construction instead of by hoping two encoders match.  It also makes the
 muzzle-flash sniff read a short as a short rather than parsing bytes back out
 of a buffer, and it drops anorms.h from the tree entirely.
-
-`doc/reconciliation.md` R-93.
 
 ===============================================================================
 */
@@ -150,12 +148,12 @@ rocket->s.sound = gi.soundindex ("weapons/rockfly.wav");
 
 */
 
-// The mission-pack rows are NOT behind a layer test.  A muzzle flash number is
+// The mission-pack rows are not behind a layer test.  A muzzle flash number is
 // a wire constant, the two packs' numbers do not overlap baseq2's, and a row
 // whose sound is NULL costs one comparison at level load and nothing after --
 // so the table is the union and the layers select themselves by which flashes
-// the world actually produces (R-MODE-3).  The donor's #ifdef XATRIX / #ifdef
-// ROGUE fences go with them (sec 7 rule 6).
+// the world actually produces.  The donor's #ifdef XATRIX / #ifdef
+// ROGUE fences go with them.
 static bot_muzzleflashinfo_t muzzleflashinfo[MAX_MUZZLEFLASHES] =
 {
 //Blaster
@@ -185,7 +183,7 @@ static bot_muzzleflashinfo_t muzzleflashinfo[MAX_MUZZLEFLASHES] =
     {MZ_LOGOUT,         NULL},
     {MZ_RESPAWN,        "misc/spawn1.wav"},
     {MZ_ITEMRESPAWN,    "items/respawn1.wav"},
-    // R-183.  Every mission-pack row arrived NULL and stayed NULL, so a bot
+    // Every mission-pack row arrived NULL and stayed NULL, so a bot
     // could not HEAR those weapons fire: BotInitMuzzleFlashToSoundindex leaves
     // muzzleflashsoundindex[] at 0 for a row with no sound, and a flash the
     // brain has no sound for is a shot it never notices.
@@ -204,7 +202,7 @@ static bot_muzzleflashinfo_t muzzleflashinfo[MAX_MUZZLEFLASHES] =
     //END RAFAEL
     //ROGUE
     {MZ_ETF_RIFLE,      "weapons/nail1.wav"},
-    // THE REMAINING ROGUE ROWS STAY NULL, each for its own reason, and none of
+    // The remaining rogue rows stay NULL, each for its own reason, and none of
     // them is an omission:
     //
     //  * MZ_HEATBEAM and the four NUKES: the ENGINE plays nothing.
@@ -235,21 +233,21 @@ static bot_muzzleflashinfo_t muzzleflashinfo[MAX_MUZZLEFLASHES] =
     {-1, NULL}
 };
 
-// R-BOT-29: the rune->tech translation.  The donor rewrote bue.modelindex to a
+// The rune->tech translation.  The donor rewrote bue.modelindex to a
 // fixed 251..255 so the brain would recognise an OSP rune as a CTF tech; those
 // constants are indexes into the 1999 256-entry table and mean nothing once
-// R-BOT-11 sizes the table from game.csr.  The models are looked up by name in
+// The table is sized from game.csr.  The models are looked up by name in
 // the live table instead, which is the same translation expressed against a
 // table whose size is a runtime fact.
 //
-// R-184: THERE IS NO FIFTH TECH.  OSP has five runes and Threewave has four
+// There is no fifth tech.  OSP has five runes and Threewave has four
 // techs, and the fifth row named `models/ctf/vampire/tris.md2` -- a path that
 // exists in no pak any donor ships.  The lookup below is a strcmp against the
 // live modelindex table, so it could never match and a vampire rune was already
 // reaching the brain as modelindex 0; the name only made it look otherwise.
 //
-// NULL says the same thing and says it out loud, which is the distinction R-183
-// drew between a documented NULL and a name that resolves to nothing.  Mapping
+// NULL says the same thing and says it out loud, which is the distinction
+// between a documented NULL and a name that resolves to nothing.  Mapping
 // vampire onto the regeneration tech would ALSO have worked and would have made
 // bots pick the rune up -- both drain-to-heal -- but that is a change to what
 // the AI values, not a spelling fix, so it is recorded rather than made.
@@ -262,7 +260,7 @@ const char *const bot_tech_models[5] = {
 };
 
 //===========================================================================
-// R-BOT-11.  Allocated at InitGame, after game.csr is chosen, and TAG_GAME so
+// Allocated at InitGame, after game.csr is chosen, and TAG_GAME so
 // that a level change does not take the tables with it -- the strings inside
 // them are TAG_LEVEL and are re-registered by the next map's precache.
 //===========================================================================
@@ -349,7 +347,7 @@ void BotInitMuzzleFlashToSoundindex(void)
 } //end of the function BotInitMuzzleFlashToSoundindex
 //===========================================================================
 // The three dumps are `sv modelindex` / `soundindex` / `imageindex`
-// (R-BOT-24).  Empty rows are skipped: the 1999 table had 256 entries and
+//Empty rows are skipped: the 1999 table had 256 entries and
 // printing all of them was already a screenful; game.csr's is up to 8192.
 //===========================================================================
 static bool BotIndexRecord(char **table, int count, const char *what, int i, const char *name);
@@ -384,19 +382,19 @@ void BotDumpImageindex(void)
     BotDumpIndex("image", imageindexes, bot_max_imageindexes);
 } //end of the function BotDumpImageindex
 //===========================================================================
-// `sv indexprobe <model|sound|image> <index>` -- R-VER-6's control.
+// `sv indexprobe <model|sound|image> <index>` -- the control for the above.
 //
-// The tables are sized from game.csr (R-BOT-11), which is the whole point: the
+// The tables are sized from game.csr, which is the whole point: the
 // engine cannot hand out an index the table has no room for, so the overflow
-// arm of BotIndexRecord is a backstop that CANNOT FIRE on a real server.  That
-// is the right design and it leaves R-VER-6's second half -- "overflow is
+// arm of BotIndexRecord is a backstop that cannot fire on a real server.  That
+// is the right design, and it leaves the second half -- "overflow is
 // reported rather than written" -- with nothing to observe, because a check
 // that only ever sees silence cannot tell "it did not overflow" from "the
 // reporting is broken".
 //
 // So the probe asks BotIndexRecord the question directly, with an index the
 // caller chooses.  It is a diagnostic beside `sv modelindex` and the other
-// three (R-BOT-24), it writes nothing -- the name it passes is NULL, so even a
+// three, it writes nothing -- the name it passes is NULL, so even a
 // valid index only reports -- and it is what the check's control drives.
 //===========================================================================
 void BotIndexProbe(const char *what, int index)
@@ -447,7 +445,7 @@ void BotClearCommandArguments(void)
 //
 // The donor had this loop written out three times, once per caller, with the
 // same off-by-one in each: `for (i = 1; ...) { ... if (!arg) break; }` leaves
-// `i == MAX_COMMANDARGUMENTS` both when the list was exactly full AND when it
+// `i == MAX_COMMANDARGUMENTS` both when the list was exactly full and when it
 // overflowed, and the overflow branch then calls newgameimport.error(), which
 // kills the server on a legal 19-argument command.  One copy, and the test is
 // on whether a terminator was actually seen.
@@ -583,7 +581,7 @@ static void q_printf(2, 3) Bot_centerprintf(edict_t *ent, const char *fmt, ...)
         va_start(ap, fmt);
         Q_vsnprintf(str, sizeof(str), fmt, ap);
         va_end(ap);
-        // R-BOT-30: `%s`, not `str`.  The donor's port made this fix and it is
+        // `%s`, not `str`.  The donor's port made this fix and it is
         // a real one -- a centerprint carrying a player name carries whatever
         // format specifiers that name contains.
         newgameimport.centerprintf(ent, "%s", str);
@@ -630,7 +628,7 @@ static void Bot_sound(edict_t *ent, int channel, int soundindex, float volume, f
 } //end of the function Bot_sound
 //===========================================================================
 // Records name -> index so BotLoadMap can hand the brain the whole index
-// space.  R-BOT-11: an index past the end of the table is DROPPED with one
+// space.  An index past the end of the table is dropped with one
 // warning, never written -- the donor called newgameimport.error() here, which
 // aborts the map, and on an extended server every index above 255 took that
 // branch.
@@ -648,7 +646,7 @@ static bool BotIndexRecord(char **table, int count, const char *what, int i, con
         if (!reported[slot])
         {
             newgameimport.dprintf("WARNING: %sindex %d past the bot table's %d "
-                                  "slots; the brain will not see it (R-BOT-11)\n",
+                                  "slots; the brain will not see it\n",
                                   what, i, count);
             reported[slot] = true;
         } //end if
@@ -711,7 +709,7 @@ static void Bot_setmodel(edict_t *ent, const char *name)
 /*
 ===============================================================================
 
-THE STAGING MESSAGE
+The staging message
 
 ===============================================================================
 */
@@ -910,7 +908,7 @@ static void Bot_multicast(const vec3_t origin, multicast_t to)
                 } //end if
                 //and its light, if the table gives the flash one.  Every row
                 //ships with radius 0, so this is inert until one does not --
-                //kept because R-BOT-10 names it and because the alternative is
+                //kept because the contract names it and because the alternative is
                 //a table column nothing reads.
                 for (i = 0; muzzleflashinfo[i].muzzleflash >= 0; i++)
                 {
@@ -937,7 +935,7 @@ static void Bot_multicast(const vec3_t origin, multicast_t to)
 //===========================================================================
 static void Bot_unicast(edict_t *ent, qboolean reliable)
 {
-    // R-BOT-10: suppressed for FL_BOT recipients.  A bot has no network
+    // Suppressed for FL_BOT recipients.  A bot has no network
     // connection, so the message has nowhere to go -- and this is the reason
     // the writes are staged at all rather than forwarded as they arrive: once
     // a byte is in the engine's message buffer there is no gi slot to take it
@@ -1003,7 +1001,7 @@ static void Bot_WriteFloat(float f)
 {
     // Q2PRO's PF_WriteFloat is `Com_Error(ERR_DROP, "not implemented")`, so a
     // caller that reaches this has a bug and the transparent thing is to fail
-    // the same way it would have without the redirection (R-BOT-13).  Staging
+    // the same way it would have without the redirection.  Staging
     // it and replaying it does exactly that, at the flush.
     BotStageFloat(BW_FLOAT, f);
 } //end of the function Bot_WriteFloat
@@ -1036,7 +1034,7 @@ static void Bot_WriteDir(const vec3_t dir)
     BotStageVec(BW_DIR, dir ? dir : zero);
 } //end of the function Bot_WriteDir
 //===========================================================================
-// R-BOT-10's last row: argc/argv/args serve synthesised bot command arguments
+// The last row: argc/argv/args serve synthesised bot command arguments
 // when a bot command is executing, and the engine's otherwise.
 //
 // Parameter:               -
@@ -1079,7 +1077,7 @@ static char *Bot_args(void)
     } //end else
 } //end of the function Bot_args
 //===========================================================================
-// R-BOT-9: called from GetGameAPI immediately after `gi = *import` and before
+// Called from GetGameAPI immediately after `gi = *import` and before
 // anything else.  Nothing may read gi before it returns.
 //
 // Parameter:               -

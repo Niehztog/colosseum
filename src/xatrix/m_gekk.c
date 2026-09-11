@@ -4,8 +4,7 @@
 // the same member `int` and so writes frame numbers here, which is consistent
 // *within that pack* and a unit mix in a merged one: the gekk's own three sites
 // agreed with each other while g_ai.c's shared M_CheckAttack read them as
-// seconds.  Converted to seconds to match the declaration
-// (doc/reconciliation.md R-56).
+// seconds.  Converted to seconds to match the declaration.
 /*
 Copyright (C) 1997-2001 Id Software, Inc.
 
@@ -1418,9 +1417,7 @@ static void gekk_precache(void)
 */
 void SP_monster_gekk(edict_t *self)
 {
-    // R-MODE-7 / R-CORE-8: the ruleset decides, not `deathmatch`.  Converted on
-    // import for the same reason as baseq2's monsters -- `deathmatch` is 1 under
-    // ctf, and R-MODE-7 promises monsters there.
+    // deathmatch is 1 under ctf, which allows monsters: ask the ruleset.
     if (!G_MonstersAllowed()) {
         G_FreeEdict(self);
         return;

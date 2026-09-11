@@ -1,4 +1,5 @@
-# Build output.  R-BUILD-4: no generated file is committed except g_ptrs.c.
+# Build output.  No generated file is committed except g_ptrs.c.
+/dist/
 /debug/
 /release/
 /debug-linux32/
@@ -10,7 +11,7 @@
 /debug-win64/
 /release-win64/
 
-# ...and the same ten again under R-ENG-1a's `make API=old`, which builds into
+# ...and the same ten again under `make API=old`, which builds into
 # <dir>-oldapi because the two game ABIs differ in STRUCT LAYOUT and objects
 # from one must never link against objects from the other.  Listed rather than
 # globbed to match the set above; the Makefile's BUILDDIRS is the other copy and
@@ -32,11 +33,77 @@
 *.a
 
 # Derived from vendor/replay/ by tools/divergence.py and tools/coverage.py.
-# The bundles are the durable provenance (R-PROV-6); this is just a cache.
+# The bundles are the durable provenance; this is just a cache.
 /build/
+
+# The eight OSP navigation meshes, which `.github/aas.sh` fetches into the
+# gamedir before a release package is built (R-BUILD-10).  They are OSP Tourney
+# DM's data and not this tree's, so what is versioned is the script and the
+# SHA-256 manifest beside it; the files themselves are re-fetched (R-LIC-7).
+/colosseum/maps/
 
 # genptr.py scratch (tools/audit.py and the Makefile's check-ptrs target)
 src/.g_ptrs.gen*
 
 __pycache__/
 *.pyc
+
+# JetBrains IDE
+/.idea/
+
+# The play-test harness: `go build ./scenarios/X` with no -o drops the binary
+# in the harness root, named after the scenario.  Listed by name rather than by
+# a glob, because `ra2*` would also match `ra2/`, which is a real package -- and
+# an allow-list would hide new source at that level instead.  A stray this does
+# not name shows up as untracked, which is visible.
+/tools/playtest-harness/botfill
+/tools/playtest-harness/botmenugate
+/tools/playtest-harness/colosseum
+/tools/playtest-harness/csdump
+/tools/playtest-harness/ctfgrapple
+/tools/playtest-harness/ctfidview
+/tools/playtest-harness/ctfteams
+/tools/playtest-harness/layeracc
+/tools/playtest-harness/mapinfo
+/tools/playtest-harness/ospcamera
+/tools/playtest-harness/ospchatlog
+/tools/playtest-harness/ospclock
+/tools/playtest-harness/ospenter
+/tools/playtest-harness/ospff
+/tools/playtest-harness/ospfixes
+/tools/playtest-harness/ospmapchange
+/tools/playtest-harness/ospmenu
+/tools/playtest-harness/ospobsmodes
+/tools/playtest-harness/ospreconnect
+/tools/playtest-harness/osprunes
+/tools/playtest-harness/ospscore
+/tools/playtest-harness/ospthink
+/tools/playtest-harness/ospwarmup
+/tools/playtest-harness/ra2botchat
+/tools/playtest-harness/ra2botvote
+/tools/playtest-harness/ra2camera
+/tools/playtest-harness/ra2gskill
+/tools/playtest-harness/ra2gslog
+/tools/playtest-harness/ra2holdfire
+/tools/playtest-harness/ra2join
+/tools/playtest-harness/ra2menuleak
+/tools/playtest-harness/ra2observer
+/tools/playtest-harness/ra2packweap
+/tools/playtest-harness/ra2pickuptwins
+/tools/playtest-harness/ra2prefire
+/tools/playtest-harness/ra2queuefire
+/tools/playtest-harness/ra2reachscore
+/tools/playtest-harness/ra2spawn
+/tools/playtest-harness/ra2teamfire
+/tools/playtest-harness/ra2trackcam
+/tools/playtest-harness/ra2twins
+/tools/playtest-harness/ra2waitroom
+
+# ...and four of those scenarios share a name with a package directory beside
+# them, so the rules above would swallow the source too.  The trailing slash
+# re-includes the DIRECTORY only, leaving the same-named binary ignored.
+!/tools/playtest-harness/colosseum/
+!/tools/playtest-harness/playtest/
+!/tools/playtest-harness/ra2/
+!/tools/playtest-harness/scenarios/
+!/tools/playtest-harness/vendor/

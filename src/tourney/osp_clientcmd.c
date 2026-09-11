@@ -23,15 +23,14 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 // Threewave's twelve commands are arms in ClientCommand's chain, each gated
 // `G_Ruleset() == RULESET_CTF && Q_stricmp(...)`, and that reads fine at twelve.
 // Tourney has 137.  Writing them out would triple g_cmds.c and put a donor's
-// entire command surface in a spine file, which R-CORE-7 is against for files
-// and which reads no better for functions.
+// entire command surface in a spine file, which is the wrong place for it.
 //
 // So ClientCommand asks once, under one gate: `OSP_ClientCommand(ent)` returns
 // true if it handled the command and false if it did not, and the shared chain
 // carries on.  The body below is the donor's own chain, with three changes:
 // the tail returns false instead of falling through to chat (the caller owns
 // that), Cmd_Say_f gained RA2's third argument, and the bot-command hook is
-// Phase 6's.
+// added.
 
 #include "g_local.h"
 #include "tourney/osp_types.h"

@@ -17,9 +17,8 @@ along with this program; if not, write to the Free Software
 Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 */
-// Bot setup and the botlib handshake, from osp-tourney@1d8427e (SPECS.md
-// sec 5.4.1, 5.4.2, 5.4.5).  The reconstruction's asm-matching address comments
-// are stripped -- SPECS.md N1 makes those oracles meaningless here.
+// Bot setup and the botlib handshake, from osp-tourney@1d8427e.  The
+// reconstruction's asm-matching address comments are stripped.
 //===========================================================================
 //
 // Name:                bl_main.c
@@ -57,7 +56,7 @@ bot_globals_t botglobals;
 /*
 ===============================================================================
 
-R-BOT-29 -- THE SEVENTEEN TOURNEY BLOCKS, AS RUNTIME BRANCHES
+The seventeen tourney blocks, as runtime branches
 
 The donor defines TOURNEY live in its g_local.h, so all seventeen apply
 library-wide.  Here each one asks the active ruleset instead, and the tourney
@@ -68,7 +67,7 @@ tourney is running.  The mode accessor is gone with `m_mode` itself -- see
 bl_main.h for the rule it protected, which the ruleset test now carries.
 
 The donor also declared `extern void OSP_serverbotsRemove(void);` here and
-never called it.  That is R-OSP-5's shape -- a donor's name declared outside
+never called it.  That is the familiar shape -- a donor's name declared outside
 the header that owns it -- and it goes rather than being carried; the function
 exists in src/tourney/ and osp_teams.c is what calls it.
 
@@ -93,7 +92,7 @@ int BotTourneyVotedIn(void)
 
 const char *BotMinPlayersCvar(void)
 {
-    // R-OSP-11: the cvar names stay PER RULESET.  tourney's readme, its configs
+    // The cvar names stay PER RULESET.  tourney's readme, its configs
     // and its `bots_*` family all say bots_minplayers; every other ruleset's
     // 1999 documentation says minimumplayers.  Renaming either would break a
     // config file that has been correct for twenty years.
@@ -105,20 +104,19 @@ const char *BotFileCvar(void)
     return G_IsOspRuleset() ? "bots_botfile" : "botfile";
 }
 
-// R-RA-7, R-CTF-8, R-DM-1.  ONE switch that replaces the flat count with a
-// target read off the game itself.
+// One switch that replaces the flat count with a target read off the game
+// itself.
 //
 // It was three cvars -- `ra_botfill`, `ctf_botfill`, `dm_botfill` -- named per
-// ruleset on R-OSP-11's authority.  That was wrong about which rule applied.
-// R-OSP-11 governs cvars a DONOR named, so that each donor's twenty-year-old
-// readme and configs keep spelling its own; all three of these are Colosseum's
-// own invention from spec 1.34 and 1.35 and appear in no donor's documentation
-// at all.  What governs them is sec 7 rule 6 -- one implementation per concept --
-// and one concept with three names was already only one implementation, since
+// ruleset, on the rule that a donor's own cvar names are kept so its
+// twenty-year-old readme and configs keep working.  That rule does not apply:
+// all three of these are Colosseum's own invention and appear in no donor's
+// documentation at all.  What applies is one implementation per concept -- and
+// one concept with three names was already only one implementation, since
 // BotFillEnabled() and BotFillTarget() were shared from the first day.
 //
 // `sp` is the one ruleset where the switch does nothing, and it needs no arm:
-// it has no bots (R-MODE-7, N6), so G_BotsAllowed() has already refused before
+// it has no bots, so G_BotsAllowed() has already refused before
 // anything asks.
 bool BotFillEnabled(void)
 {
@@ -144,20 +142,19 @@ bool BotCountsAsPlayer(edict_t *cl_ent)
 {
     if (!cl_ent->inuse || !cl_ent->client)
         return false;
-    // The Gladiator SDK's own exclusion, which R-BOT-17 keeps and uGladQ2
-    // records as a fix for CTF (v0.98.2u) and RA2 (v0.98.1u): somebody watching
-    // is not somebody playing, so a server full of spectators still fills up
-    // with bots.  G_IsObserver() is the one predicate that knows all four
-    // spellings of that question (R-CTF-5).
-    // Arena is asked FIRST and differently, and R-RA-4's sixteenth row is why.
+    // The Gladiator SDK's own exclusion, and 1999 recorded it as a fix for
+    // CTF and for RA2 alike: somebody watching is not somebody playing, so a
+    // server full of spectators still fills up with bots.
+    // G_IsObserver() is the one predicate that knows all four spellings of
+    // that question.  Arena is asked first and differently, and here is why.
     // Under arena G_IsObserver() means `fightstate == FIGHT_SPECTATING`, which
     // is true of everyone not in the CURRENT ROUND -- the whole waiting queue
-    // included.  Read through the generic test, a server with four bots of whom
-    // two are fighting counts two players and adds two more, then four more,
-    // for as long as anybody is waiting: `minimumplayers` would never be
-    // satisfied.  What "playing" means under arena is being on a team, which is
-    // also what the uGladQ2 fix wants -- a person parked in arena 0 with the
-    // team menu open is an audience and must not hold bots out.
+    // included.  Read through the generic test, a server with four bots of
+    // whom two are fighting counts two players and adds two more, then four
+    // more, for as long as anybody is waiting: `minimumplayers` would never be
+    // satisfied.  What "playing" means under arena is being on a team, which
+    // is also what that fix wants -- a person parked in arena 0 with
+    // the team menu open is an audience and must not hold bots out.
     if (G_Ruleset() == RULESET_ARENA)
         return cl_ent->client->resp.teamnum >= 0;
     if ((cl_ent->flags & FL_OBSERVER) || G_IsObserver(cl_ent))
@@ -255,12 +252,12 @@ void BotExecuteInput(edict_t *bot)
     //      forwardmove and sidemove are relative to the given yaw
     //      upmove is not related to the given yaw
     //
-    // R-140: a bot in an arena does not fire until the round starts.
+    // A bot in an arena does not fire until the round starts.
     //
     // RA2 hands a fighter its ammo once per round and does not grant damage
     // until the countdown reaches zero (RA_RoundFighting), so a shot before
     // that is spent ammo and nothing else.  The brain cannot know this -- it
-    // has no round, and no libvar tells it about one -- so the ANSWER IS THE
+    // has no round, and no libvar tells it about one -- so the answer is the
     // BUTTON, which is the one thing this side of the seam owns: the brain goes
     // on aiming, tracking and choosing a weapon, and the usercmd_t carries no
     // attack out of the countdown.  Reported from a play test on `ra2map9`:
@@ -342,7 +339,7 @@ void BotExecuteInput(edict_t *bot)
     //light level at client location
     ucmd.lightlevel = 64;
     //
-    // R-BOT-21: FL_BOTINPUT is set for the duration, so client code can tell a
+    // FL_BOTINPUT is set for the duration, so client code can tell a
     // synthesised command from a network one.
     bot->flags |= FL_BOTINPUT;
     //the Pmove function was probably designed to run at a higher frequency
@@ -553,10 +550,10 @@ void BotLib_BotClientSettings(edict_t *ent)
     Q_strlcpy(settings.skin, Info_ValueForKey(ent->client->pers.userinfo, "skin"),
               sizeof(settings.skin));
 
-    // R-ARENA-2 / R-BOT-29: under arena the skin is how the brain is told about
-    // RA2's TEAMS.  "Everything the bots need from the old file, re-provided
-    // against the real RA2" is R-ARENA-2's clause, and knowing whose side a
-    // player is on is the last of it.
+    // Under arena the skin is how the brain is told about RA2's TEAMS.
+    // "Everything the bots need from the old file, re-provided against the
+    // real RA2" is the clause, and knowing whose side a player is on is the
+    // last of it.
     //
     // `clientsettings[].skin` has exactly two readers inside the brain --
     // BotSameTeam() and BotCTFTeam() -- and BotSameTeam is the whole of the
@@ -593,7 +590,7 @@ void BotLib_BotClientSettings(edict_t *ent)
     } //end for
 } //end of the function BotLib_BotClientSettings
 //==========================================================================
-// R-137's neighbour: THE BRAIN'S CLIENT TABLE IS ONLY EVER WRITTEN.
+// The brain's client table is only ever written.
 //
 // BotLib_UpdateAllClientSettings() skips a slot whose edict is not `inuse`,
 // and ClientDisconnect clears `inuse` -- so a client that leaves stays in the
@@ -653,10 +650,10 @@ void BotLib_BotSettings(edict_t *bot, bot_settings_t *settings)
 {
 } //end of the function BotLib_BotSettings
 //===========================================================================
-// R-141: THE ITEM INDEX SPACE IS THE BRAIN'S, NOT THE GAME'S.
+// The item index space is the brain's, not the game's.
 //
 // `bot_updateclient_t.inventory` is 256 ints and the contract says so
-// (BOTLIB_MAX_ITEMS, doc/botlib-contract.md).  What the contract did NOT say is
+// (BOTLIB_MAX_ITEMS, docs/botlib-contract.md).  What the contract did not say is
 // what any one of those slots MEANS, and the brain has a very definite opinion:
 // its data files are written against `inv.h` out of the 1999 asset pak, where
 // slot 10 is the Machinegun and slot 19 is Bullets.  Three places read those
@@ -666,8 +663,8 @@ void BotLib_BotSettings(edict_t *bot, bot_settings_t *settings)
 // internal business.  It is half of the contract, supplied as data.
 //
 // `inv.h`'s numbering is baseq2's itemlist with Gladiator's own additions
-// appended.  Colosseum's itemlist is FIVE donors merged into one array
-// (R-CORE-2), so it agrees for the first six rows and then diverges at the
+// appended.  Colosseum's itemlist is five donors merged into one array
+//So it agrees for the first six rows and then diverges at the
 // seventh: `weapon_grapple` is index 7 here and the Blaster is 7 there, and
 // every weapon and every ammo type after it is off by one or more.  A straight
 // memcpy therefore showed the brain an inventory in which
@@ -819,7 +816,7 @@ static void BotResolveInventoryMap(void)
         // The derived range is the brain's to write and nobody else's, so a
         // row that reached into it would be a silent corruption of
         // ENEMY_HORIZONTAL_DIST or a powerup timer rather than a wrong
-        // inventory.  Refused loudly instead (R-141).
+        // inventory.  Refused loudly instead.
         if (slot < 1 || slot >= BOTLIB_FIRST_DERIVED_SLOT)
         {
             gi.dprintf("botlib inventory map: slot %d for %s is out of range, "
@@ -841,8 +838,8 @@ static void BotResolveInventoryMap(void)
     // Said once, because a row this build genuinely does not have is legal and
     // a row MISSPELLED here looks exactly the same from the brain's side: it
     // reads a slot that is always zero and quietly stops using a weapon.
-    gi.dprintf("Colosseum: botlib inventory map -- %d of %d slots resolved "
-               "(R-141)\n", (int)q_countof(botinventory) - missing,
+    gi.dprintf("Colosseum: botlib inventory map -- %d of %d slots resolved\n",
+               (int)q_countof(botinventory) - missing,
                (int)q_countof(botinventory));
 
     botinvresolved = true;
@@ -875,8 +872,8 @@ static void BotFillInventory(int *out, const int *inventory)
 //===========================================================================
 // `sv botinv` -- what the brain SEES, in the brain's own numbering.
 //
-// R-141 is invisible to every other instrument, and that is the whole reason
-// this exists.  `sv inventory` prints the GAME's itemlist and its indices, which
+// This slot mismatch is invisible to every other instrument, and that is the
+// whole reason this exists.  `sv inventory` prints the GAME's itemlist and its indices, which
 // were never wrong.  `sv arenadump` prints the round machine.  The bot's own HUD
 // is a person's channel and a bot has none.  None of them can say that the slot
 // the brain reads for Bullets holds the answer to a different question -- so the
@@ -886,9 +883,9 @@ static void BotFillInventory(int *out, const int *inventory)
 // The two ammo lines are the ones that decide a fight: `fw_weap.c` zeroes a
 // weapon's weight when its ammo slot reads below the threshold, so a `brain`
 // row of ones under a `game` row of hundreds is a bot that has been left with
-// two or three weapons out of nine.  The arena columns are R-140's: `hold`
-// is 1 while the round is not being fought, and `asked`/`dropped` count what
-// the brain wanted to fire then and how much of it the gate took away.
+// two or three weapons out of nine.  The arena columns are the fire gate's:
+// `hold` is 1 while the round is not being fought, and `asked`/`dropped` count
+// what the brain wanted to fire then and how much of it the gate took away.
 //
 // Parameter:               -
 // Returns:                 -
@@ -904,11 +901,11 @@ void BotInventoryDump(void)
     };
     // The ammo rows carry the game's OWN classname beside the brain's slot, so
     // the dump can print the two answers next to each other: what the brain
-    // reads at slot 19, and how many bullets the client actually has.  One line
-    // under the other is R-141 in a form nobody has to reason about -- and
-    // the `game` line is also the record of what a countdown cost, because
-    // give_ammo() hands out a known figure and only firing takes it away
-    // (R-140).
+    // reads at slot 19, and how many bullets the client actually has.  One
+    // line under the other is the mismatch in a form nobody has to reason
+    // about -- and the `game` line is also the record of what a countdown
+    // cost, because give_ammo() hands out a known figure and only firing takes
+    // it away.
     static const struct { int slot; const char *name; const char *classname; } ammo[] = {
         { 18, "shells",   "ammo_shells" },
         { 19, "bullets",  "ammo_bullets" },
@@ -1040,15 +1037,15 @@ void BotLib_BotUpdateClient(edict_t *bot)
     //rdflags
     buc.rdflags = bot->client->ps.rdflags;
     //
-    // R-ENG-1 makes MAX_STATS 64 here and the contract's bot_updateclient_t
+    // MAX_STATS is 64 here and the contract's bot_updateclient_t
     // still carries the 1999 array, so the copy is bounded by the SMALLER of
     // the two.  A memcpy of MAX_STATS shorts into a 32-entry member is how a
     // struct that "obviously matches" overruns.
     memcpy(buc.stats, bot->client->ps.stats,
            min(q_countof(buc.stats), q_countof(bot->client->ps.stats)) * sizeof(short));
     //====================================
-    //inventory, translated into the brain's index space (R-141).  The
-    //bounded memcpy that was here answered R-100 -- two arrays of different
+    //inventory, translated into the brain's index space.  The
+    //bounded memcpy that was here answered a different question -- two arrays of different
     //LENGTHS -- and could not answer this one, which is two arrays of the same
     //length whose slots mean different things.
     BotFillInventory(buc.inventory, bot->client->pers.inventory);
@@ -1063,7 +1060,7 @@ void BotLib_BotUpdateClient(edict_t *bot)
 // Returns:                 -
 // Changes Globals:     -
 //===========================================================================
-// Defined beside BotInitLibrary, which is the other caller (R-144).
+// Defined beside BotInitLibrary, which is the other caller.
 static void BotRulesetLibVars(bot_library_t *lib);
 
 void BotLib_BotStartFrame(float time)
@@ -1077,14 +1074,14 @@ void BotLib_BotStartFrame(float time)
     {
         //set the dmflags
         lib->funcs.BotLibVarSet("dmflags", dmflags->string);
-        //...and everything else a person can change mid-map (R-144)
+        //...and everything else a person can change mid-map
         BotRulesetLibVars(lib);
         //start the server frame
         lib->funcs.BotStartFrame(time);
     } //end for
 } //end of the function BotLib_BotStartFrame
 //===========================================================================
-// R-BOT-29: the rune -> tech translation, expressed against a table whose size
+// The rune -> tech translation, expressed against a table whose size
 // is a runtime fact.  The brain has no concept of an OSP rune; it does know
 // CTF's techs, so a rune is shown to it wearing the matching tech's model.
 // Only under tourney, and only when runes are actually in play.
@@ -1104,7 +1101,7 @@ static int BotRuneModelindex(edict_t *ent)
     for (i = 0; i < 5; i++)
     {
         if (ent->item->quantity != rune_slots[i]) continue;
-        //R-184: a rune with no tech has a NULL row, and strcmp(x, NULL) is a
+        //A rune with no tech has a NULL row, and strcmp(x, NULL) is a
         //crash rather than a mismatch.  RUNE_VAMPIRE is that row: OSP has five
         //runes and Threewave four techs.
         if (!bot_tech_models[i]) break;
@@ -1181,7 +1178,7 @@ void BotLib_BotAddSound(edict_t *ent, int channel, int soundindex, float volume,
     int entnum;
 
     // The donor's bound is the 1999 constant 255.  It is the SOUND TABLE's
-    // bound, which R-BOT-11 makes a runtime fact, and the brain is handed the
+    // bound, which is a runtime fact, and the brain is handed the
     // whole table at BotLoadMap -- so clamping at 255 would hide every sound
     // above it on an extended server rather than reporting anything.
     if (soundindex < 0 || soundindex >= bot_max_soundindexes)
@@ -1306,7 +1303,7 @@ static void BotLibImport_Print(int type, char *fmt, ...)
 
     // Q_vsnprintf, not vsprintf: this is the brain's own format string and its
     // own arguments, and a 2 KiB stack buffer with no bound is how a brain bug
-    // becomes a server bug (R-SEC).
+    // becomes a server bug.
     va_start(ap, fmt);
     Q_vsnprintf(str, sizeof(str), fmt, ap);
     va_end(ap);
@@ -1407,7 +1404,7 @@ static void BotFillTrace(bsp_trace_t *out, vec3_t start, vec3_t mins, vec3_t max
     p = DF_NUMBERENT(passent);
     //
     trace = gi.trace(start, mins, maxs, end, p, contentmask);
-    // R-BOT-5: must tolerate a null trace.surface.  Q2PRO returns one for a
+    // Must tolerate a null trace.surface.  Q2PRO returns one for a
     // trace that hit nothing, and the donor memcpy'd through it unguarded.
     if (trace.surface)
     {
@@ -1424,7 +1421,7 @@ static void BotFillTrace(bsp_trace_t *out, vec3_t start, vec3_t mins, vec3_t max
     memcpy(&out->plane, &trace.plane, sizeof(cplane_t));
 }
 
-// R-BOT-5, and see the long comment on the Trace slot in botlib.h: BY VALUE on
+// See the long comment on the Trace slot in botlib.h: by value on
 // every target, which is the published contract's spelling and, since
 // gladiator-bot-restored 57ce85a3, the brain's on every target too.  No
 // q_gameabi -- the brain's side carries no attribute, and the two have to agree.
@@ -1444,9 +1441,9 @@ static bsp_trace_t BotLibImport_Trace(vec3_t start, vec3_t mins, vec3_t maxs,
 //==========================================================================
 
 //===========================================================================
-// R-BOT-6/7/8 and doc/botlib-contract.md.  The set is fixed -- no new libvar
+// See docs/botlib-contract.md.  The set is fixed -- no new libvar
 // may be invented, because the brain would ignore it -- and the ruleset chooses
-// among the existing ones.  Pushed BEFORE BotSetupLibrary.
+// among the existing ones.  Pushed before BotSetupLibrary.
 //
 // Parameter:               -
 // Returns:                 -
@@ -1459,7 +1456,7 @@ static void BotSetVarIfSet(bot_library_t *lib, const char *name, const char *val
     if (cvar && cvar->value) lib->funcs.BotLibVarSet((char *)name, (char *)value);
 }
 
-// R-BOT-8: basedir, gamedir and cddir must resolve under Q2PRO, where `gamedir`
+// Basedir, gamedir and cddir must resolve under Q2PRO, where `gamedir`
 // is CVAR_ROM|CVAR_SERVERINFO and `basedir` may not exist at all.  Where they
 // cannot be derived they come from FILESYSTEM_API_V1 and the library says so
 // once at load.
@@ -1479,14 +1476,14 @@ static void BotSetPathVars(bot_library_t *lib)
 
     if (!said)
     {
-        gi.dprintf("Colosseum: botlib paths -- basedir \"%s\", gamedir \"%s\" "
-                   "(R-BOT-8)\n", basedir, gamedir);
+        gi.dprintf("Colosseum: botlib paths -- basedir \"%s\", gamedir "
+                   "\"%s\"\n", basedir, gamedir);
         said = true;
     } //end if
 }
 
 //===========================================================================
-// R-144: the ruleset's own libvars, and they are asked EVERY FRAME.
+// The ruleset's own libvars, and they are asked every frame.
 //
 // This block used to run once, inside BotInitLibrary, which is right for the
 // four that cannot move (`ctf`, `ra`, `xatrix`, `rogue` are the resolved
@@ -1496,15 +1493,15 @@ static void BotSetPathVars(bot_library_t *lib)
 // cvars an operator sets, tourney's `usehook`/`teamplay`/`runes` follow
 // `hook_enable`, `match_mode` and `rune_stat`, and ctf's `techs` follows a
 // DMFLAG.  The game re-reads all of them every time it uses them -- CTFHook_f
-// tests the cvar itself, which is R-138's own note -- so the brain was the only
-// party still acting on the value the map started with.
+// tests the cvar itself -- so the brain was the only party still acting on the
+// value the map started with.
 //
 // `dmflags` was already pushed here every frame and is the precedent: the same
 // loop, four lines up.  The donor's answer was narrower and is the other half
-// of the same thought -- `ugladq2/src/p_botmenu.c` pushes `usehook` from the
-// bot menu's own hook row, through BotLib_BotLibVarSet, which this tree ported
-// and never called.  Refreshing on the frame covers that row and every other
-// way the cvar can move, so the wrapper goes.
+// of the same thought -- Gladiator's own `bl_main.c` pushes `usehook` once,
+// from its `#ifdef ZOID` block, through BotLib_BotLibVarSet.  Refreshing on
+// the frame covers that row and every other way the cvar can move, so the
+// wrapper goes.
 //
 // Parameter:               -
 // Returns:                 -
@@ -1513,17 +1510,16 @@ static void BotSetPathVars(bot_library_t *lib)
 static void BotRulesetLibVars(bot_library_t *lib)
 {
     //
-    // R-BOT-29's libvar block.  Under the OSP four these come from hook_enable
-    // and rune_stat; under ctf from Threewave's own `ctf_hook`, which R-CTF-3
-    // registers -- and NOT from `laserhook`, which is a cable rendering here and
-    // a movement model to the brain (see below); under arena from arena.cfg's
-    // `grapple:` key, which is the switch the item and the offhand think both
-    // obey (R-164).
+    // The libvar block.  Under the OSP four these come from hook_enable and
+    // rune_stat; under ctf from Threewave's own `ctf_hook` -- and not from
+    // `laserhook`, which is a cable rendering here and a movement model to the
+    // brain (see below); under arena from arena.cfg's `grapple:` key, which is
+    // the switch the item and the offhand think both obey.
     if (G_IsOspRuleset()) {
         lib->funcs.BotLibVarSet("usehook", BotTourneyHook() ? "1" : "0");
         lib->funcs.BotLibVarSet("laserhook", BotTourneyHook() ? "1" : "0");
-        // *** RULESET_TDM ALONE, AND NOT ANY OF THE THREE PREDICATES THAT LOOK
-        // *** LIKE IT.
+        // RULESET_TDM alone, and not any of the three predicates that look
+        // like it.
         //
         // This was `m_mode == MODE_TEAM` and the set of one mode it selected is
         // the set of one ruleset selected here.  `duel` is two teams of one, the
@@ -1533,7 +1529,7 @@ static void BotRulesetLibVars(bot_library_t *lib)
         // each other.
         //
         // G_IsOspRuleset() is true under `duel`.  So is OSP_IsTeams().  So is
-        // G_TeamplayEnabled(), which R-MODE-7 makes ruleset-derived precisely
+        // G_TeamplayEnabled(), which is ruleset-derived precisely
         // because `duel` IS team play -- to the game.  Not to the brain.
         lib->funcs.BotLibVarSet("teamplay",
                                 G_Ruleset() == RULESET_TDM ? "1" : "0");
@@ -1545,7 +1541,7 @@ static void BotRulesetLibVars(bot_library_t *lib)
     switch (G_Ruleset()) {
     case RULESET_CTF:
         lib->funcs.BotLibVarSet("usehook", ctf_hook && ctf_hook->value ? "1" : "0");
-        // *** ZERO, BECAUSE `laserhook` IS NOT ABOUT THE CABLE. ***
+        // Zero, because `laserhook` is not about the cable.
         //
         // botlib.h: `laserhook` is be_ai_move.c's, "0 = CTF hook, 1 = laser
         // hook" -- a MOVEMENT model, telling the brain whether the hook grabs
@@ -1556,23 +1552,22 @@ static void BotRulesetLibVars(bot_library_t *lib)
         // CTF_GRAPPLE_SPEED, same CTFGrappleTouch, same pull.  Pushing the
         // cvar through told the brain the hook was instantaneous whenever an
         // operator preferred the beam, and it would then aim and time for a
-        // grapple this ruleset does not have.  uGladQ2 agrees by omission: its
+        // grapple this ruleset does not have.  1999 agrees by omission: its
         // `#ifdef ZOID` block sets `usehook` and `runes` and never `laserhook`,
         // which it sets only under TOURNEY, where the hook really is a laser.
-        // doc/reconciliation.md R-179.
         lib->funcs.BotLibVarSet("laserhook", "0");
-        // *** ZERO, AND THAT IS WHAT GIVES CTF BOTS TEAMS. ***
+        // Zero, and that is what gives CTF bots teams.
         //
         // The donor sets no `teamplay` under ctf at all -- its `#ifdef ZOID`
         // block sets `ctf`, `usehook` and `runes` and stops -- and the omission
         // is load-bearing rather than an oversight.  BotSameTeam() tests
-        // `teamplay` FIRST, and when it is set it compares the two clients'
+        // `teamplay` first, and when it is set it compares the two clients'
         // whole skin strings; the `ctf` branch underneath it compares only the
         // half after the '/', which is exactly `ctf_r` against `ctf_b`.  So
         // `teamplay 1` here made a red in `male/ctf_r` and a red in
         // `female/ctf_r` enemies, and made two players who happened to share a
         // model team-mates -- the brain had no CTF teams at all.  It is the
-        // opposite of R-ARENA-2's answer for the same question and for the
+        // opposite of arena's answer for the same question and for the
         // stated reason: under arena the skin is a synthetic team id and a
         // whole-string compare is what is wanted, under ctf the skin's own
         // second half already IS the team.
@@ -1580,12 +1575,12 @@ static void BotRulesetLibVars(bot_library_t *lib)
         lib->funcs.BotLibVarSet("runes", "0");
         // CTFSetupTechSpawn gates the techs on DF_CTF_NO_TECH alone, so that
         // dmflag -- not the `runes` modifier -- is what the brain must be told
-        // about.  See doc/reconciliation.md R-88 and R-94.
+        // about.
         lib->funcs.BotLibVarSet("techs",
             ((int)dmflags->value & DF_CTF_NO_TECH) ? "0" : "1");
         break;
     case RULESET_ARENA:
-        // R-164's other side of the seam.  NOT `MOD_HOOK`, which is the
+        // The other side of the seam.  Not `MOD_HOOK`, which is the
         // Gladiator SDK's own `hook` cvar and knows nothing about this ruleset:
         // Rocket Arena's grapple switch is arena.cfg's `grapple:` key, which is
         // what give_ammo() hands the item out on and what RA_HookThink() fires
@@ -1595,14 +1590,14 @@ static void BotRulesetLibVars(bot_library_t *lib)
         // config told them to use a grapple they are not given.
         lib->funcs.BotLibVarSet("usehook", allow_grapple ? "1" : "0");
         lib->funcs.BotLibVarSet("laserhook", "0");
-        // R-ARENA-2: arena is ALWAYS teamplay to the brain, because RA2 is
+        // Arena is always teamplay to the brain, because RA2 is
         // always played in teams -- a 1v1 arena is two teams of one.  This is
         // the switch that makes BotSameTeam() consult the skin at all, and the
         // synthetic skin BotLib_BotClientSettings pushes is what it consults;
         // without the pair the brain has no teams and shoots its own side.
         //
-        // It is NOT the OSP four's answer and the difference is the skin.
-        // R-BOT-29 sets theirs from RULESET_TDM alone and says why: on real
+        // It is not the OSP four's answer and the difference is the skin.
+        // The OSP four set theirs from RULESET_TDM alone, and why: on real
         // skins, teamplay 1 in a duel gives both duellists an imaginary
         // team-mate the moment they wear the same one.  Here the skin is the
         // team, so a lone player's team has exactly one member and the
@@ -1633,7 +1628,7 @@ static int BotInitLibrary(bot_library_t *lib)
     char buf[144];
 
     //set the maxclients and maxentities library variables before calling BotSetupLibrary
-    // R-BOT-30: game.maxclients, not maxclients->value -- the cvar is what was
+    // Game.maxclients, not maxclients->value -- the cvar is what was
     // asked for and game.maxclients is what was allocated.
     lib->funcs.BotLibVarSet("maxclients", va("%d", game.maxclients));
     lib->funcs.BotLibVarSet("maxentities", va("%d", game.maxentities));
@@ -1653,12 +1648,12 @@ static int BotInitLibrary(bot_library_t *lib)
     Q_snprintf(buf, sizeof(buf), "DMFLAGS %s", dmflags->string);
     lib->funcs.BotDefine(buf);
 
-    // ---- the ruleset's own libvars (R-BOT-7) ------------------------------
+    // ---- the ruleset's own libvars ------------------------------
     //
     // The donor fenced these five with #ifdef ZOID / CH / ROCKETARENA / XATRIX
     // / ROGUE, which is one build per ruleset.  One library serves five, so the
-    // fences become the resolution's answer (sec 7 rule 6).  No libvar is
-    // invented and none is dropped: every name below is in R-BOT-6's fixed set
+    // fences become a runtime branch.  No libvar is invented and none is
+    // dropped: every name below is in the contract's fixed set
     // and every one is pushed on every ruleset, so the brain always sees the
     // same 32 names and only their values move.
     lib->funcs.BotLibVarSet("ctf", G_Ruleset() == RULESET_CTF ? "1" : "0");
@@ -1670,7 +1665,7 @@ static int BotInitLibrary(bot_library_t *lib)
     lib->funcs.BotLibVarSet("assimilation", "0");
     lib->funcs.BotLibVarSet("teamplay_shell", "0");
 
-    //log file.  R-BOT-30: the donor's port changed the default from 1 to 0 and
+    //log file.  The donor's port changed the default from 1 to 0 and
     //that is policy rather than correctness -- adopted deliberately, because a
     //public server should not write an AI trace by default.
     cvar = gi.cvar("log", "0", 0);
@@ -1684,8 +1679,7 @@ static int BotInitLibrary(bot_library_t *lib)
     //fastchat != 0 means "always chat".  Pushing "0" leaves the gate on, which
     //makes `fastchat 1` on the server unable to do the one thing it is named
     //for -- and every neighbour in this block pushes "1".  It is a donor typo,
-    //not a subtlety, and it is what made the chat half of Phase 6's exit
-    //unobservable (doc/reconciliation.md R-102).
+    //not a subtlety, and it is what made the chat half unobservable.
     BotSetVarIfSet(lib, "fastchat", "1");
     //alternative names
     BotSetVarIfSet(lib, "altnames", "1");
@@ -1744,7 +1738,7 @@ static void BotUnloadLibrary(bot_library_t *lib)
     gi.TagFree(lib);
 } //end of the function BotUnloadLibrary
 //===========================================================================
-// R-BOT-4: the 1999 binaries are not a target.  The brain is compiled from
+// The 1999 binaries are not a target.  The brain is compiled from
 // gladiator-bot-restored/botlib for whichever platform the game was built for,
 // so the default name follows the same CPUSTRING/SHLIBEXT convention the engine
 // uses for the game library itself rather than the 1999 "gladi386.so".
@@ -1752,7 +1746,7 @@ static void BotUnloadLibrary(bot_library_t *lib)
 const char *BotDefaultLibrary(void)
 {
     // The 1999 defaults were `gladiator.dll` and `gladi386.so`, and the second
-    // is a name for a 32-bit x86 object -- which R-BOT-4 says is not a target,
+    // is a name for a 32-bit x86 object, which is not a target here,
     // because gladiator-bot-restored compiles the brain for whichever platform
     // the game was built for.  The name it produces is `gladiator.so`, so that
     // is the default and the CPU does not appear in it: one gamedir holds one
@@ -1786,7 +1780,7 @@ static bot_library_t *BotLoadLibrary(const char *botlibdir)
     botlibhandle = LoadLibraryA(botlibdir);
     if (!botlibhandle)
     {
-        // R-BOT-4: report the reason AND the bitness of both sides, and refuse
+        // Report the reason and the bitness of both sides, and refuse
         // the bot rather than killing the server.  A mismatched brain is the
         // failure this message exists for, and "couldn't load" alone does not
         // say which of the two is 32-bit.
@@ -1852,9 +1846,9 @@ static bot_library_t *BotLoadLibrary(const char *botlibdir)
     //
     gi.dprintf("loaded %s (%s)\n", botlibdir,
                lib->funcs.BotVersion ? lib->funcs.BotVersion() : "no version");
-    // R-BOT-5, risk 6: a Test() round trip at load, which is the only check
-    // either side has that the by-value bsp_trace_t and the pointer-bearing
-    // tables agree.  botglobals.notest turns it off for a brain that has none.
+    // A Test() round trip at load, which is the only check either side has
+    // that the by-value bsp_trace_t and the pointer-bearing tables agree.
+    // botglobals.notest turns it off for a brain that has none.
     if (!botglobals.notest && lib->funcs.Test)
     {
         vec3_t a = { 1, 2, 3 }, b = { 4, 5, 6 };
@@ -1888,10 +1882,10 @@ bot_library_t *BotUseLibrary(const char *path)
     char botlibdir[BOT_MAX_PATH] = "";
     bot_library_t *lib;
 
-    // R-BOT-3's search order: the path as given, then basedir + gamedir.  The
+    // The search order: the path as given, then basedir + gamedir.  The
     // donor decides between them with `access(path, 4)`, and the obvious
     // modernisation -- ask the engine's filesystem whether it can read the
-    // file -- is WRONG and was wrong in the first run of tools/botmatrix.sh:
+    // file -- is wrong and was wrong in the first run of tools/botmatrix.sh:
     // the engine finds `gladiator.so` in the gamedir and answers yes, so the
     // bare name went to dlopen, which searches the LINKER's paths and not the
     // gamedir, and every bot failed to load with "cannot open shared object
@@ -1917,14 +1911,14 @@ bot_library_t *BotUseLibrary(const char *path)
             return lib;
         } //end if
     } //end for
-    // The donor refuses a SECOND library outright -- `if (firstbotlib) return
-    // NULL` -- which R-BOT-3's per-bot naming makes look like a bug and is not:
+    // The donor refuses a second library outright -- `if (firstbotlib) return
+    // NULL` -- which the per-bot naming makes look like a bug and is not:
     // one process cannot hold two AAS worlds, and the second brain would
     // silently share the first one's. Kept, with the refusal now reported.
     if (botglobals.firstbotlib)
     {
-        gi.dprintf("a bot library is already loaded (%s); one per server "
-                   "(R-BOT-3)\n", botglobals.firstbotlib->path);
+        gi.dprintf("a bot library is already loaded (%s); one per server\n",
+                   botglobals.firstbotlib->path);
         return NULL;
     } //end if
     lib = BotLoadLibrary(botlibdir);
@@ -2011,7 +2005,7 @@ static const char *Ptr2PathWithMaxSize(const char *path, int size)
     return bestptr;
 } //end of the function Ptr2PathWithMaxSize
 //===========================================================================
-// `sv clientdump` -- R-VER-3 reads this to prove no client slot leaked.
+// `sv clientdump` -- read to prove no client slot leaked.
 //
 // Parameter:               -
 // Returns:                 -
@@ -2109,14 +2103,14 @@ void BotSetup(void)
     botglobals.numbots = 0;
     //setup the bot library import structure
     BotSetupBotLibImport();
-    //R-BOT-11: the index tables, now that game.csr is chosen
+    //The index tables, now that game.csr is chosen
     BotIndexesAlloc();
-    //R-BOT-27: pick the debug-line implementation and say which one
+    //Pick the debug-line implementation and say which one
     BotDebugInit();
 
-    // R-BOT-22: FRAMETIME is 0.1 s and Colosseum does not advertise
-    // GMF_VARIABLE_FPS.  If the engine is running at another rate the bots'
-    // think time and the brain's physics libvars disagree, so say so once.
+    // FRAMETIME is 0.1 s and Colosseum does not advertise GMF_VARIABLE_FPS.
+    // If the engine is running at another rate the bots' think time and the
+    // brain's physics libvars disagree, so say so once.
     //
     // "Once" is now load-bearing: ReadGame calls BotSetup again after its
     // FreeTags(TAG_GAME), so this runs twice per savegame load and the warning
@@ -2124,15 +2118,15 @@ void BotSetup(void)
     if (!announced && gi.cvar("sv_fps", "10", 0)->value != 1.0f / FRAMETIME)
     {
         gi.dprintf("Colosseum: sv_fps is %s and the bot layer assumes %.0f "
-                   "(R-BOT-22); bot movement will be wrong\n",
+                   "; bot movement will be wrong\n",
                    gi.cvar("sv_fps", "10", 0)->string, 1.0f / FRAMETIME);
     } //end if
     announced = true;
 } //end of the function BotSetup
 //===========================================================================
-// ShutdownGame.  R-BOT-3 requires BotUnloadAllLibraries here; the bots
-// themselves go first, so that the brain sees a shutdown per client before its
-// library is closed rather than being unmapped underneath them.
+// ShutdownGame calls BotUnloadAllLibraries here; the bots themselves go first,
+// so that the brain sees a shutdown per client before its library is closed
+// rather than being unmapped underneath them.
 //===========================================================================
 void BotShutdown(void)
 {
@@ -2163,7 +2157,7 @@ void BotForgetGameMemory(void)
     bot_MenuForget();
 }
 //===========================================================================
-// R-BOT-20: the frame order, in one place.
+// The frame order, in one place.
 //
 //   1. AddQueuedBots()
 //   2. BotStartFrame(level.time)
@@ -2177,12 +2171,12 @@ void BotForgetGameMemory(void)
 // snapshot before any bot thinks.  Two loops, and this comment, are why.
 //===========================================================================
 //===========================================================================
-// R-BOT-23: "with 32 bots on a loaded map the bot section of G_RunFrame stays
-// under half a 100 ms frame on the reference machine, or the shortfall is
-// reported in doc/regression.md".  A requirement with a number in it needs a
-// measurement, and the measurement has to come from inside the library:
-// nothing outside it can tell the bot section apart from the rest of the
-// frame.  CLOCK_MONOTONIC because the number is a duration.
+// "with 32 bots on a loaded map the bot section of G_RunFrame stays under half
+// a 100 ms frame on the reference machine, or the shortfall is reported".  A
+// requirement with a number in it needs a measurement, and the measurement has
+// to come from inside the library: nothing outside it can tell the bot section
+// apart from the rest of the frame.  CLOCK_MONOTONIC because the number is a
+// duration.
 //===========================================================================
 static struct {
     int64_t frames;         // frames in which the bot section ran at all
@@ -2196,7 +2190,7 @@ static struct {
 // Microseconds off a monotonic clock, or 0 if there is not one.  Two
 // implementations because there are two: MinGW does not put `clock_gettime` in
 // the default link set -- it lives in libwinpthread -- and a game DLL that
-// drags in a threading runtime to time itself is the wrong trade.  The R-BUILD-5
+// drags in a threading runtime to time itself is the wrong trade.  The build
 // matrix is what found this: it links clean on five ELF targets and fails on
 // both PE ones, which is exactly the class of defect ten configurations exist
 // to catch.
@@ -2245,8 +2239,8 @@ void BotRunFrame(void)
     int64_t started;
 
     // Steps 4 and 5 cost a walk of every edict, so they are skipped entirely
-    // when no bot exists -- which is R-BOT-13's transparency for the frame
-    // loop, and what keeps a bot-free server paying nothing for the layer.
+    // when no bot exists, which keeps a bot-free server paying nothing for the
+    // layer.
     if (botglobals.numbots <= 0)
         return;
 

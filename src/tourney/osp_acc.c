@@ -19,15 +19,15 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 */
 // osp_acc.c -- the accuracy table's two entry points.
 //
-// WHY THIS FILE EXISTS.  R-OSP-1's accuracy report needs three numbers per
+// Why this file exists.  Tourney's accuracy report needs three numbers per
 // weapon per player: shots fired, shots that hit, and damage given and taken.
 // The donor collects them by writing `p_acc[client->resp.clientid]` inline at
 // **fifteen** sites across g_weapon.c and g_combat.c -- one per weapon, each
 // repeating the same five-line shape with a different ACC_ constant, and each
 // guarded by its own copy of `sync_stat > 2` (except three that forgot).
 //
-// Fifteen copies of a table write in shared files is what R-MODE-5 exists to
-// prevent, and the fifteen are not even consistent with each other.  So the
+// Fifteen copies of a table write in shared files is exactly what the gate
+// discipline avoids, and the fifteen are not even consistent with each other.  So the
 // concept is expressed once, here, and the spine calls two functions:
 //
 //   OSP_accShot(self, mod, count)             count shots left the weapon
@@ -37,7 +37,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 // the call sites one line: the spine already knows the MOD it is firing or
 // damaging with, and it should not have to know tourney's column numbering.
 //
-// WHAT THIS CHANGES, MEASURED.  Damage credit moves from fifteen scattered
+// What this changes, measured.  Damage credit moves from fifteen scattered
 // sites to the single choke point every one of them was feeding: T_Damage.
 // Rocket splash, grenade splash and BFG blast reached the donor's table twice
 // on a direct hit -- once inline and once through T_RadiusDamage's own block --
@@ -47,7 +47,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 // `sync_stat > 2` is "a match is running", and accuracy outside a match is not
 // a number the mod ever shows.
 //
-// TWO CONSEQUENCES THAT CHANGE THE NUMBERS, not only where they are written --
+// Two consequences that change the numbers, not only where they are written --
 // both improvements, both worth knowing before comparing a report with a 1999
 // one:
 //
@@ -68,14 +68,14 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 // a laser, the hook, a monster, a powerup.  Those have no accuracy column and
 // never had.
 //
-// THE SECOND HALF OF THE TABLE IS THE CONTENT LAYERS' (R-MODE-3, R-181).  The
-// donor stops at the BFG because osp-tourney's itemlist does; both layers are
-// valid with every ruleset here, so a `tdm` match on a Reckoning or Ground Zero
-// map was fought with weapons this function answered -1 about -- and the layer
-// fire functions called OSP_accShot from nowhere at all, so both halves had to
-// be added.  MOD_NUKE is deliberately absent: the A-M Bomb is `ammo_nuke`,
-// IT_POWERUP, and a powerup that does damage is not a weapon.  MOD_BLASTER2 too
-// -- that is the monsters' green blaster, not a player weapon.
+// The second half of the table is the content layers'.  The donor stops at the
+// BFG because osp-tourney's itemlist does; both layers are valid with every
+// ruleset here, so a `tdm` match on a Reckoning or Ground Zero map was fought
+// with weapons this function answered -1 about -- and the layer fire functions
+// called OSP_accShot from nowhere at all, so both halves had to be added.
+// MOD_NUKE is deliberately absent: the A-M Bomb is `ammo_nuke`, IT_POWERUP,
+// and a powerup that does damage is not a weapon.  MOD_BLASTER2 too -- that is
+// the monsters' green blaster, not a player weapon.
 static int acc_column(int mod)
 {
     switch (mod & ~MOD_FRIENDLY_FIRE) {
@@ -127,10 +127,10 @@ static bool accountable(edict_t *ent)
 }
 
 // `count` is pellets, not trigger pulls: the donor adds
-// DEFAULT_DEATHMATCH_SHOTGUN_COUNT for one shotgun blast and one per bullet for
-// the machinegun, because the hits it counts are per pellet too.  An accuracy
-// figure whose numerator and denominator disagree about what a shot is would
-// read as 8% for a shotgun that hit with every pellet.
+// DEFAULT_DEATHMATCH_SHOTGUN_COUNT for one shotgun blast and one per bullet
+// for the machinegun, because the hits it counts are per pellet too.  An
+// accuracy figure whose numerator and denominator disagree about what a shot
+// is would read as 8% for a shotgun that hit with every pellet.
 void OSP_accShot(edict_t *self, int mod, int count)
 {
     int col;

@@ -73,9 +73,9 @@ cvar_t *admin_password;
 cvar_t *allow_admin;
 cvar_t *warp_list;
 cvar_t *warn_unbalanced;
-// R-CTF-3.  ctf_hook selects the offhand hook (uGladQ2 v0.97u default: on);
+// Ctf_hook selects the offhand hook (the 1999 default: on);
 // laserhook selects the beam rendering and is what the `laserhook` libvar
-// reports to the brain in Phase 6.
+// reports to the brain.
 cvar_t *ctf_hook;
 cvar_t *laserhook;
 
@@ -95,8 +95,8 @@ int imageindex_sbfctf2;
 int imageindex_ctfsb1;
 int imageindex_ctfsb2;
 
-// Threewave's complete 130-item `ctf_statusbar` literal was here.  R-OSP-7a:
-// the bar is emitted at runtime from the active ruleset's slot map by
+// Threewave's complete 130-item `ctf_statusbar` literal was here.  The bar is
+// now emitted at runtime from the active ruleset's slot map by
 // g_stats.c's sb_ctf_tail(), item for item and in this order.  A literal is
 // what made slots 17/18/19 unresolvable in the first place.
 
@@ -107,8 +107,7 @@ static char *tnames[] = {
 };
 
 // stuffcmd() moved to g_utils.c: RA2 ships a byte-identical copy and needs it
-// too, and a generic engine helper should not live in one donor's file
-// (sec 7 rule 6).
+// too, and a generic engine helper should not live in one donor's file.
 
 /*--------------------------------------------------------------------------*/
 
@@ -238,7 +237,7 @@ void CTFInit(void)
     // top of InitGame, well before this, so the ruleset is resolved here.
     const int ctfinfo = (G_Ruleset() == RULESET_CTF) ? CVAR_SERVERINFO : 0;
 
-    // `ctf` is registered and reconciled by the ruleset dispatch (R-MODE-2):
+    // `ctf` is registered and reconciled by the ruleset dispatch:
     // it is a legacy alias that can select the ruleset, and once the ruleset is
     // resolved the dispatch forces the cvar to agree.  Registering it a second
     // time here would return the same cvar and re-assert a default that
@@ -257,15 +256,15 @@ void CTFInit(void)
     ctf_hook = gi.cvar("ctf_hook", "1", 0);
     laserhook = gi.cvar("laserhook", "0", 0);
 
-    // THESE TWO WERE NEVER REGISTERED BY ANY DONOR TREE.  g_main.c declares
+    // These two were never registered by any donor tree.  g_main.c declares
     // `cvar_t *capturelimit` and `cvar_t *instantweap` and nothing ever calls
     // gi.cvar for either, while CTFCheckRules reads capturelimit->value and
     // Weapon_Generic reads instantweap->value -- two null dereferences on the
-    // first frame of the first match.  See doc/reconciliation.md R-42; this is
-    // the same class of defect as CTFInit never being called at all.
+    // first frame of the first match -- the same class of defect as CTFInit
+    // never being called at all.
     //
     // Registered in every ruleset because a null pointer is what the fix is
-    // for; the SERVERINFO flag and the READ are both ruleset-gated instead --
+    // for; the SERVERINFO flag and the read are both ruleset-gated instead --
     // Weapon_Generic2 asks for `instantweap` under `ctf` only, so a deathmatch
     // operator who sets the cvar no longer gets Threewave's weapon switch in
     // baseq2.
@@ -279,36 +278,35 @@ void CTFInit(void)
 
 void CTFPrecache(void)
 {
-    // *** THE GRAPPLE IS NEVER SPAWNED, SO ITS PRECACHE LIST IS NEVER WALKED.
-    // ***
+    // The grapple is never spawned, so its precache list is never walked.
     //
     // `PrecacheItem` is reached only from `SpawnItem` and worldspawn's explicit
     // `Blaster` call, and `weapon_grapple` is always owned and never stands in
     // a map -- so its six sounds, its hook model, its view model, its icon and
-    // its pickup sound were registered on FIRST USE instead, one configstring
+    // its pickup sound were registered on first use instead, one configstring
     // at a time, mid-round, with the HUD icon missing until then.  The engine
     // allows a late precache rather than erroring on it, which is why this was
     // a hitch and not a crash, and why nothing could see it.
     //
     // The Gladiator donor carries the fix as `PrecacheCTFItems()` under
-    // `#ifdef BOT` -- the same fence R-CTF-4 found around `ctfteam` and
-    // R-137 found around the team skin -- and RA2 upstream fixed the identical
-    // pattern in its own copy (`rocketarena2@ddba883`).  The flags and the four
-    // techs are in the donor's list too and are belt-and-braces here: both do
-    // spawn in the world, so SpawnItem already reaches them, and PrecacheItem
-    // is idempotent and NULL-safe.
+    // `#ifdef BOT` -- the same fence that hid `ctfteam` and the team skin --
+    // and RA2 upstream fixed the identical pattern in its own copy
+    // (`rocketarena2@ddba883`).  The flags and the four techs are in the
+    // donor's list too and are belt-and-braces here: both do spawn in the
+    // world, so SpawnItem already reaches them, and PrecacheItem is idempotent
+    // and NULL-safe.
     //
-    // *** AND THE GATE, which this function did not have. ***  Threewave calls
+    // And the gate, which this function did not have.  Threewave calls
     // it from inside `if (deathmatch->value) if (ctf->value)` in SP_worldspawn;
     // here it was called unconditionally from SpawnEntities, so every single
     // player, coop, deathmatch, arena and tourney map registered 38
     // configstrings of CTF assets -- 9 models, 13 sounds, 16 images, measured
     // off a client on `dm`/q2dm1 and `sp`/base1.  Same class as the tech
     // spawner CTFSpawn() gates below, and invisible to the edict census that
-    // caught that one, because a precache is not an entity (R-173).
+    // caught that one, because a precache is not an entity.
     //
-    // The GRAPPLE is the one row that is not ctf's alone: sec 7 rule 6 gave
-    // RA2's fork away and RA_HookThink() fires Threewave's hook, while
+    // The grapple is the one row that is not ctf's alone: RA2's fork was
+    // dropped and RA_HookThink() fires Threewave's hook, while
     // give_ammo() puts the Grapple ITEM straight into the inventory rather than
     // through SpawnItem -- so PrecacheItem is never reached under arena either,
     // and gating the whole function on `ctf` would move this defect one ruleset
@@ -377,7 +375,7 @@ int CTFOtherTeam(int team)
 
 /*--------------------------------------------------------------------------*/
 
-// R-195.5 threaded the client being placed through all three; under `ctf` the
+// The client being placed is threaded through all three; under `ctf` the
 // exclusions it enables are off, so passing `ent` here changes nothing and
 // keeps one signature rather than two.
 edict_t *SelectRandomDeathmatchSpawnPoint(edict_t *ent);
@@ -403,22 +401,22 @@ void CTFAssignSkin(edict_t *ent, char *s)
     } else
         Q_strlcpy(t, "male/", sizeof(t));
 
-    // *** THE TEAM SKIN GOES INTO `pers.userinfo` AS WELL AS ON THE WIRE. ***
+    // The team skin goes into `pers.userinfo` as well as on the wire.
     //
     // Threewave writes only the configstring, because a client is the only
-    // thing that needs to know.  `gladq2_src/g_ctf.c` adds the userinfo write
-    // at all three arms under `#ifdef BOT` -- the same fence R-CTF-4 found
-    // around `ctfteam` -- and the reason is `bl_main.c`: the brain is told a
+    // thing that needs to know.  Gladiator's g_ctf.c adds the userinfo write
+    // at all three arms under `#ifdef BOT` -- the same fence that hid
+    // `ctfteam` -- and the reason is `bl_main.c`: the brain is told a
     // client's skin from `Info_ValueForKey(pers.userinfo, "skin")`, and
-    // `clientsettings[].skin` is the ONLY thing it has to answer "whose side is
+    // `clientsettings[].skin` is the only thing it has to answer "whose side is
     // this player on" with.  Both of its readers are string tests on that
     // field: `BotCTFTeam()` is `strstr(skin, "ctf_r") ? RED : BLUE`, and
     // `BotSameTeam()` compares the half after the '/'.  Left at the player's
     // own choice of skin, every bot reads itself as BLUE -- so it defends the
     // wrong flag -- and reads a team-mate wearing a different skin as an enemy,
-    // which is bots shooting their own side.  R-ARENA-2 answered the identical
-    // question for RA2's teams in 1.29; this is CTF's, and unlike RA2's it is
-    // the donor's own answer rather than a new one.
+    // which is bots shooting their own side.  The identical question is
+    // answered for RA2's teams elsewhere; this is CTF's, and unlike RA2's it
+    // is the donor's own answer rather than a new one.
     switch (ent->client->resp.ctf_team) {
     case CTF_TEAM1:
         gi.configstring(game.csr.playerskins + playernum, va("%s\\%s%s",
@@ -444,7 +442,7 @@ void CTFAssignSkin(edict_t *ent, char *s)
 // Split from CTFAssignTeam, which is how the Gladiator donor has it and why:
 // the balancing body is the answer to "which team is short a player", and a bot
 // needs that answer whether or not DF_CTF_FORCEJOIN is set -- a bot has no join
-// menu to be sent to instead (R-CTF-4).  Threewave 1.09 has the same pair.
+// menu to be sent to instead.  Threewave 1.09 has the same pair.
 void CTFForceAssignTeam(gclient_t *who)
 {
     edict_t     *player;
@@ -489,12 +487,12 @@ void CTFAssignTeam(gclient_t *who)
 
 /*
 =================
-`botfill` UNDER CTF -- THE COUNT FOLLOWS THE MAP AND THE TWO BASES
+`botfill` under CTF -- the count follows the map and the two bases
 
-R-CTF-8, and R-RA-7's argument a second ruleset over.  Threewave declares no
+The same argument a second ruleset over.  Threewave declares no
 capacity at all: there is no `team_maxplayers` here and never was, `matchlock`
 locks a match rather than sizing one, and `warn_unbalanced` only warns.  So the
-map is the only signal -- and unlike deathmatch there are THREE pools, because a
+map is the only signal -- and unlike deathmatch there are three pools, because a
 CTF client draws from a different one on its first spawn than on every one after
 it.  `SelectCTFSpawnPoint` sends a player to its own base while
 `resp.ctf_state` is 0 and to `info_player_deathmatch` for ever after, which is
@@ -502,9 +500,8 @@ the line that decides this rule: a side seats the smallest of its base and half
 the shared pool, and the target is twice that, because a capture game with
 uneven sides is not the game.
 
-**Taking the base pools alone would be wrong, and it is written down because it
-is the obvious thing to try** -- the same trap R-RA-7 recorded for a non-pickup
-arena.  Threewave's mappers put spawn points in a base for variety: `q2ctf1`
+Taking the base pools alone would be wrong, and it is written down because it
+is the obvious thing to try -- the same trap as a non-pickup arena.  Threewave's mappers put spawn points in a base for variety: `q2ctf1`
 carries 14 and 16, which read as capacity would say 28 players on a map that is
 played 8v8.  Measured across the eight shipped maps, pools after
 `G_SpawnPointPool`, `2 * min(shared/2, base1, base2)`:
@@ -553,11 +550,11 @@ CTFBotFillName
 
 Which bot the fill should throw out when people arrive, and it is not "any".
 
-`removebot` with no name takes the LOWEST CLIENT SLOT, which under `ctf` is a
+`removebot` with no name takes the lowest CLIENT SLOT, which under `ctf` is a
 bot on whichever side happened to connect first -- so a server filling to an
 even target could still be shrunk 4v4 -> 4v3 -> 4v2, and an even target is the
 whole reason this fill exists.  Take a bot off the LARGER side, and where
-the sides are level take one off either (R-CTF-8).  RA_ArenaBotName is the same
+the sides are level take one off either.  RA_ArenaBotName is the same
 function for the same reason one ruleset over.
 
 NULL falls through to the caller's "any bot", which is right when the only bots
@@ -985,7 +982,7 @@ void CTFDropFlagTouch(edict_t *ent, edict_t *other, cplane_t *plane, csurface_t 
 {
     // owner (who dropped us) can't touch for two secs
     //
-    // *** THE CONSTANT IS IN FRAMES, and it had been left in seconds. ***
+    // The constant is in frames, and it had been left in seconds.
     // Threewave writes `nextthink - level.time > CTF_AUTO_FLAG_RETURN_TIMEOUT-2`
     // where `nextthink` is SECONDS and counts 30 down to 0, so `> 28` is true
     // for exactly the first two.  The q2pro port converted `nextthink` to a
@@ -997,7 +994,7 @@ void CTFDropFlagTouch(edict_t *ent, edict_t *other, cplane_t *plane, csurface_t 
     //
     // `tools/units.py` cannot see this class -- there is no `level.time` in the
     // expression for its two greps to key on -- so it is a `nextthink` DELTA
-    // compared against a bare literal, which is a third form (R-177).
+    // compared against a bare literal, which is a third form.
     if (other == ent->owner &&
         ent->nextthink - level.framenum >
         (CTF_AUTO_FLAG_RETURN_TIMEOUT - 2) * BASE_FRAMERATE)
@@ -1478,7 +1475,7 @@ void CTFGrappleDrawCable(edict_t *self)
     // adjust end z for end spot since the monster is currently dead
 //  end[2] = self->absmin[2] + self->size[2] / 2;
 
-    // R-CTF-3's laserhook.  Threewave shipped both renderings and chose between
+    // The laserhook.  Threewave shipped both renderings and chose between
     // them with `#if 1 //def USE_GRAPPLE_CABLE`; the choice is a runtime cvar
     // here because the brain has to be told which one is in play (the
     // `laserhook` libvar) and a compile-time switch cannot be reported.
@@ -1517,12 +1514,12 @@ void CTFGrapplePull(edict_t *self)
     float vlen;
 
     // `pers.weapon` is checked for NULL, which Threewave does not do: this is
-    // R-46's defect in the second of the two functions that has it, and the
+    // the same defect in the second of the two functions that has it, and the
     // offhand hook makes it reachable in a way 1999 was not -- the grapple can
     // now be out while the player is holding anything at all, or nothing.  A
     // client between InitClientPersistant and its first ChangeWeapon has no
     // weapon; the answer for it is "the grapple is not what I am holding", so
-    // the whole test is false and the hook stays out (R-178).
+    // the whole test is false and the hook stays out.
     if (self->owner->client->pers.weapon &&
         strcmp(self->owner->client->pers.weapon->classname, "weapon_grapple") == 0 &&
         !self->owner->client->newweapon &&
@@ -1668,7 +1665,7 @@ void CTFGrappleFire(edict_t *ent, const vec3_t g_offset, int damage, int effect)
     PlayerNoise(ent, start, PNOISE_WEAPON);
 }
 
-// The offhand hook (R-CTF-3), uGladQ2 v0.97u.  Fired from ClientThink rather
+// The offhand hook, as 1999 shipped it.  Fired from ClientThink rather
 // than from a weapon think, so it costs no weapon slot and does not interrupt
 // whatever the player is holding.  The FIRED bit is what makes `+hook` a hold
 // rather than a machine gun: one grapple per press.
@@ -1680,17 +1677,17 @@ void CTFHook_Fire(edict_t *ent)
     ent->client->ctf_hookstate |= CTF_HOOK_STATE_FIRED;
 }
 
-// R-CTF-3: neither an observer nor a corpse fires it.
+// Neither an observer nor a corpse fires it.
 //
-// uGladQ2 asks `ent->solid != SOLID_NOT`, and the note that used to stand here
-// said that also excluded a dead player.  IT DOES NOT, in this tree or in that
+// 1999's guard asks `ent->solid != SOLID_NOT`, and the note that used to stand here
+// said that also excluded a dead player.  IT DOES not, in this tree or in that
 // one: player_die leaves `self->solid` alone -- the assignment is commented out
 // in id's own source -- so a corpse is still SOLID_BBOX and `+hook` on the
 // respawn screen fired a grapple out of the body and winched it around the map.
 // So the two questions are asked separately: G_IsObserver() because "watching
-// rather than playing" has three spellings in this library (R-CTF-5), and
-// `deadflag` because being dead has one and the donor's proxy for it was wrong
-// (doc/reconciliation.md R-178).
+// rather than playing" has three spellings in this library, and
+// `deadflag` because being dead has one and the donor's proxy for it was
+// wrong.
 static bool CTFHookAllowed(edict_t *ent)
 {
     return ctf_hook->value && !G_IsObserver(ent) && !ent->deadflag;
@@ -1714,7 +1711,7 @@ void CTFUnhook_f(edict_t *ent)
 // CTFHookIsOffhand() was here.  It had no callers -- the weapon code its
 // comment named asks `ctf_hook` directly and so does bl_main.c's libvar push --
 // and a predicate nothing consults is a second answer waiting to disagree with
-// the first (R-178).  CTFHookAllowed() above is the one this file needed.
+// the first.  CTFHookAllowed() above is the one this file needed.
 
 // Called every frame from ClientThink for a client with the hook out.
 void CTFHookThink(edict_t *ent)
@@ -1903,7 +1900,7 @@ void CTFScoreboardMessage(edict_t *ent, edict_t *killer)
 
     // team one
     // The two team headers and the two capture counts, by slot id rather than by
-    // literal number.  R-OSP-7a is not only about the statusbar: a LAYOUT reads
+    // literal number.  The slot map is not only about the statusbar: a layout reads
     // stats[] by number too, and Threewave wrote 18, 20, 24 and 25 in here as
     // literals -- a second place where CTF's numbering lived, and the one the
     // slot audit would have kept reporting.
@@ -2435,9 +2432,9 @@ struct {
     {   "item_armor_body",          6 },
     {   "item_armor_combat",        6 },
     {   "item_armor_jacket",        6 },
-    // R-183: the content layers' weapons, at the same priority Threewave gives
+    // The content layers' weapons, at the same priority Threewave gives
     // baseq2's, so `say_team %l` can say "near the Ion Ripper" on a map that has
-    // one.  R-MODE-3 makes both layers valid under ctf, and this table decides
+    // one.  Both content layers are valid under ctf, and this table decides
     // what a player is able to describe -- an omission here is a location a
     // team-mate is told is somewhere else.
     {   "weapon_disintegrator",     3 },    // with the BFG: ends fights
@@ -3017,7 +3014,7 @@ void CTFEndMatch(void)
     else
         gi.bprintf(PRINT_CHAT, "TIE GAME!\n");
 
-    EndDMLevel();
+    G_EndLevel();
 }
 
 bool CTFNextMap(void)
@@ -3051,7 +3048,7 @@ void CTFWinElection(void)
         gi.bprintf(PRINT_HIGH, "%s is warping to level %s.\n",
                    ctfgame.etarget->client->pers.netname, ctfgame.elevel);
         Q_strlcpy(level.forcemap, ctfgame.elevel, sizeof(level.forcemap));
-        EndDMLevel();
+        G_EndLevel();
         break;
         default:
             break;
@@ -3528,7 +3525,7 @@ bool CTFStartClient(edict_t *ent)
     if (ent->client->resp.ctf_team != CTF_NOTEAM)
         return false;
 
-    // R-CTF-4.  A bot is always forced onto a team, because the alternative
+    // A bot is always forced onto a team, because the alternative
     // branch below opens a join menu and a bot has nothing to press it with:
     // without this arm a `ctf` server with DF_CTF_FORCEJOIN clear spawns every
     // bot as a noclipping CTF_NOTEAM observer that never fires a shot, which is
@@ -3537,7 +3534,7 @@ bool CTFStartClient(edict_t *ent)
     // now it was written by the bot layer and read by nobody.
     //
     // The donor's arm is #ifdef BOT and sits exactly here, ahead of the
-    // FORCEJOIN test.  The `ctfgame.match` half of that test is NOT the donor's
+    // FORCEJOIN test.  The `ctfgame.match` half of that test is not the donor's
     // -- Threewave 1.09 has no match system, so it cannot decide this -- and
     // gating the bot on it would leave the bot an observer holding a menu.
     // Joining mid-match is not the thing the menu branch prevents anyway:
@@ -3590,10 +3587,9 @@ void CTFObserver(edict_t *ent)
     // The port lost this guard's braces, message and return, so the test covered
     // only the grapple reset -- and covered it for the client that was *already*
     // an observer rather than the one becoming one, leaving a player who types
-    // `observer` mid-swing winched around the map.  Phase 3 fixed that by
-    // dropping the guard; q2pro fixed it by restoring what the 1.52 release
-    // actually had, which is this, and §7 rule 1 gives it the decision
-    // (doc/reconciliation.md R-51).
+    // `observer` mid-swing winched around the map.  One fix was to drop the
+    // guard; q2pro fixed it by restoring what the 1.52 release
+    // actually had, which is this, and that gives it the decision.
     if (ent->movetype == MOVETYPE_NOCLIP) {
         gi.cprintf(ent, PRINT_HIGH, "You are already an observer.\n");
         return;
@@ -3610,7 +3606,7 @@ void CTFObserver(edict_t *ent)
     ent->client->resp.ctf_team = CTF_NOTEAM;
     ent->client->ps.gunindex = 0;
     ent->client->resp.score = 0;
-    // R-EXTRA-6: `observer` stays THREEWAVE's verb under ctf -- it drops the
+    // `observer` stays THREEWAVE's verb under ctf -- it drops the
     // flag, drops the tech and resets the score, none of which the Gladiator
     // toggle knows about -- and the Gladiator CAMERAS come with it.  Setting
     // the flag is what puts DoObserver in the frame, so a CTF spectator gets
@@ -4387,7 +4383,7 @@ void CTFWarp(edict_t *ent)
     // G_CopyString, not strdup: the frees below are gi.TagFree, and the pair has
     // to match.  An earlier pass here converted the frees to the game import and
     // left the allocation on libc, which is undefined behaviour on the first
-    // `warp` -- introduced by this phase, not inherited (reconciliation.md R-55).
+    // `warp` -- introduced by the merge, not inherited.
     mlist = G_CopyString(warp_list->string);
 
     token = strtok(mlist, seps);
@@ -4410,7 +4406,7 @@ void CTFWarp(edict_t *ent)
         gi.bprintf(PRINT_HIGH, "%s is warping to level %s.\n",
                    ent->client->pers.netname, gi.argv(1));
         Q_strlcpy(level.forcemap, gi.argv(1), sizeof(level.forcemap));
-        EndDMLevel();
+        G_EndLevel();
         return;
     }
 
@@ -4470,14 +4466,14 @@ void CTFSetPowerUpEffect(edict_t *ent, int def)
 
 /*--------------------------------------------------------------------------*/
 //
-// The ctf row of the ruleset dispatch (R-MODE-5/6).  Four rows filled, two
-// inherited.  Everything else CTF changes about a shared function is a gated
-// inline test at the site, per R-MODE-5: a hook is for where a ruleset
-// *replaces* the implementation, and these four are the places it does.
+// The ctf row of the ruleset dispatch.  Four rows filled, two inherited.
+// Everything else CTF changes about a shared function is a gated inline test
+// at the site: a hook is for where a ruleset *replaces* the implementation,
+// and these four are the places it does.
 //
 
 // CheckRules.  CTF's own rules run first and can end the level on their own
-// (capturelimit -- R-CTF-2, and the match state machine); a running match
+// (capturelimit, and the match state machine); a running match
 // suppresses fraglimit and timelimit entirely, which is why this is a replaced
 // row rather than an extra test inside CheckDMRules.
 static void ctf_CheckRules(void)
@@ -4486,16 +4482,16 @@ static void ctf_CheckRules(void)
         return;
 
     if (CTFCheckRules()) {
-        EndDMLevel();
+        G_EndLevel();
         return;
     }
 
     if (CTFInMatch())
         return;         // no fraglimit or timelimit in match mode
 
-    // R-CTF-2, mechanically: capturelimit is checked above, unconditionally,
+    // Mechanically: capturelimit is checked above, unconditionally,
     // before this line -- so it ends a match whether or not fraglimit is set.
-    // The uGladQ2 v0.97u fix is structural here rather than a patched `if`.
+    // The 1999 fix is structural here rather than a patched `if`.
     CheckDMRules();
 }
 
@@ -4507,14 +4503,14 @@ static bool ctf_SelectSpawnPoint(edict_t *ent, vec3_t origin, vec3_t angles)
 
     if (!spot) {
         // A CTF map with no team spawn points, or a DM map loaded under ctf.
-        // Falling back is better than gi.error: R-VER-2's boot matrix runs ctf
+        // Falling back is better than gi.error: the boot matrix runs ctf
         // on maps that have never seen a flag.
         return SelectSpawnPoint(ent, origin, angles);
     }
 
     VectorCopy(spot->s.origin, origin);
     VectorCopy(spot->s.angles, angles);
-    // Threewave never refuses a spot: R-OSP-1's refusal is tourney's alone, and
+    // Threewave never refuses a spot: the refusal is tourney's alone, and
     // the fall-through above can only reach it under a ruleset that is not this
     // one.
     return true;

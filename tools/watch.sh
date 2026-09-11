@@ -4,7 +4,7 @@
 # Every other check in this tree is a program looking at a program.  Ten build
 # configurations, twenty-three audits, a twenty-row boot matrix, a hundred and
 # eighty-seven client assertions and a bot matrix, and not one of them can say
-# whether what a player sees looks like a game.  Phase 7 recorded that plainly:
+# whether what a player sees looks like a game.  Recorded plainly:
 # "no person has watched a bot play".  This is what closes it, and it closes it
 # by handing the judgement to you rather than by asserting something weaker.
 #
@@ -25,8 +25,8 @@
 #
 # EXAMPLES
 #   tools/watch.sh                                  # four bots on q2dm1
-#   tools/watch.sh doors -r sp -m base1             # R-VER-20's door half
-#   tools/watch.sh ctf-skin -r ctf -m q2ctf1        # R-CTF-7's v0.93 half
+#   tools/watch.sh doors -r sp -m base1             # the door half
+#   tools/watch.sh ctf-skin -r ctf -m q2ctf1        # the v0.93 skin half
 #
 # The server keeps running until the client quits.  In the client, `quit` at
 # the console (or the menu) ends both.
@@ -36,7 +36,18 @@ ROOT=$(cd "$(dirname "$0")/.." && pwd)
 Q2PRO_BUILD=${Q2PRO_BUILD:-$ROOT/../q2pro/builddir-native}
 Q2DATA=${Q2DATA:-/usr/share/games/quake2/baseq2}
 CTFDATA=${CTFDATA:-/usr/share/games/quake2/ctf}
-GLADDIR=${GLADDIR:-$ROOT/../gladiator-bot-restored}
+# GLADDIR -- the brain, its assets and bspc.  `vendor/gladiator-bot-restored`
+# is the submodule and the documented place; a sibling checkout beside the
+# repository still works, because that is where it lived before the submodule
+# existed.  An explicit GLADDIR wins over both, and a directory holding a BUILT
+# brain is preferred over one that does not, so neither layout stops working.
+if [ -z "${GLADDIR:-}" ]; then
+  for _g in "$ROOT/vendor/gladiator-bot-restored" \
+            "$ROOT/../gladiator-bot-restored"; do
+    [ -f "$_g/release/gladiator.so" ] && GLADDIR=$_g && break
+  done
+  GLADDIR=${GLADDIR:-$ROOT/vendor/gladiator-bot-restored}
+fi
 TREE=${COLOSSEUM_WATCH_DIR:-$HOME/.colosseum-watch}
 CPU=$(uname -m | sed -e 's/^aarch64$/arm64/' -e 's/^i.86$/i386/')
 LIB=${LIB:-$ROOT/release/game$CPU.so}
@@ -126,8 +137,8 @@ if [ -f "$GLADDIR/release/gladiator.so" ]; then
   # game destroys every bot that wanted it, and the scene runs with an empty
   # server.  The assets ship 16 -- q2dm1-8 and q2ctf1-8 -- so any other map
   # needs one made first, and there is no auto-bspc to fall back on
-  # (doc/reconciliation.md R-126).  Not under `sp`, where G_BotsAllowed() is
-  # false and the ruleset is what decides rather than the mesh (R-MODE-7).
+  #.  Not under `sp`, where G_BotsAllowed() is
+  # false and the ruleset is what decides rather than the mesh.
   if [ "$BOTS" -gt 0 ] && [ "$RULESET" != sp ] \
      && [ ! -f "$TREE/colosseum/maps/$MAP.aas" ]; then
     echo "watch.sh: no $MAP.aas in $GLADDIR/assets/maps -- there will be NO BOTS."
