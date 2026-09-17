@@ -58,6 +58,23 @@
 #   rows are required; creating a new team correctly leaves the client in the
 #   lobby and is not a spawn-placement failure.
 #
+#     ra2nullattacker
+#                  does a damage event that carries NO attacker take the server
+#                  down (R-SEC-10)?  Nothing ever assigns `activator` on a
+#                  `func_door`, and a `func_clock` that is not START_OFF never
+#                  has one either; both hand what they hold to G_UseTargets,
+#                  which passes it to every target it fires, and a
+#                  `target_explosion` among them uses it as the attacker of its
+#                  radius damage.  Two phases for the two reads it reaches:
+#                  `message` needs no clients at all -- an empty server dies by
+#                  itself -- and `damage` puts two fighters on an arena's spawn
+#                  pads and asserts one of them LOST HEALTH, because an
+#                  explosion that reached nobody proves nothing.  It writes the
+#                  producer into the map's own entity string and re-serves it
+#                  through `map_override_path`, so no BSP is edited.  Wants the
+#                  arena gamedir, which it is given as `-ref`; no mesh, because
+#                  no bot is involved.
+#
 #     ra2botvote   the per-arena `bots` switch and the fill
 #                  scheduler: 16 checks in six phases, every one in both signs.
 #                  Routing: `bots: 1` seats bots in the arena, `bots: 0` seats
@@ -78,6 +95,33 @@
 #                  the bots to navigate by, which it looks for and takes
 #                  `-aas <file>` for.  Without either it is skipped and says
 #                  which was missing, rather than being silently subtracted.
+#
+#     ospbotvote   can the people playing vote the FILL's bots out, under the
+#                  OSP four (R-OSP-16)?  The same question `ra2botvote` asks of
+#                  an arena's `bots` switch, one ruleset family over, and the
+#                  answer was no in two independent ways: the cap counted the
+#                  bots a VOTE had added (zero on any server whose bots came
+#                  from `botfill` or `bots_minplayers`), and what a vote did
+#                  remove the fill seated again within 32 frames.  Four phases:
+#                  the console `vote rembot` and that the count HOLDS where the
+#                  vote left it, down to none; the bot menu's own "Remove
+#                  random bots" row stepping off zero, with `vote_enable_bots 0`
+#                  as its control; the flat-count arm, which takes the cut in a
+#                  different place; and the gate refusing by name.  Needs
+#                  $GLADDIR and a q2dm1 mesh; it dies without one rather than
+#                  skipping, because every phase here is about bots.
+#
+#     ra2botkeep   does the fill take apart a game it has no reason to touch
+#                  (R-RA-11)?  Six checks on one server: bots stage in
+#                  ra2map27's pickup arena, one person joins a ppt=1 arena, and
+#                  the pickup game has to survive both the visit and the
+#                  departure.  Asserted on `sv arenadump`'s `want=`/`here=`
+#                  pair, per arena, sampled until it stops moving -- a count
+#                  taken once cannot tell a server that settled from one still
+#                  draining.  Wants the same `-ra2ref` as ra2botvote, plus an
+#                  `ra2map27.aas`; it extracts the .bsp out of the pak itself,
+#                  because the brain does its own file I/O and cannot see
+#                  inside one.  Needs $GLADDIR.
 #
 #     samelevel    does `dmflags` "same map" outrank the ruleset's own map
 #                  rotation (R-RA-12)?  Four arms on empty servers, 65 seconds
@@ -529,8 +573,17 @@ if supports_flag lib; then
   LIB=$(cd "$(dirname "$LIB")" && pwd)/$(basename "$LIB")
 fi
 
+# `-ref` is the read-only install a scenario copies its paks and cfg from, and
+# for one scenario that is not baseq2: `ra2nullattacker` serves an RA2 map and
+# reads its arena keys, so its reference install is the arena gamedir.  Spelled
+# as the default rather than as an override because the generic block below
+# supplies `-ref` before any per-scenario section is reached, and a flag passed
+# twice is a flag whose value depends on the parser.
+REFDATA=$Q2DATA
+[ "$SCENARIO" = ra2nullattacker ] && REFDATA=$ARENADATA
+
 if supports_flag ref && ! has_option ref "$@"; then
-  [ -d "$Q2DATA" ] || die "no baseq2 paks at $Q2DATA (set Q2DATA)"
+  [ -d "$REFDATA" ] || die "no reference install at $REFDATA (set Q2DATA, or ARENADATA for ra2nullattacker)"
 fi
 
 GLAD=""
@@ -555,7 +608,7 @@ if supports_flag lib && ! has_option lib "$@"; then
   set -- "$@" -lib "$LIB"
 fi
 if supports_flag ref && ! has_option ref "$@"; then
-  set -- "$@" -ref "$Q2DATA"
+  set -- "$@" -ref "$REFDATA"
 fi
 if supports_flag dir && ! has_option dir "$@"; then
   set -- "$@" -dir "$PLAYTEST_DIR/$SCENARIO"
@@ -632,6 +685,16 @@ if [ "$SCENARIO" = ra2botchat ] && ! has_option aas "$@"; then
   aas_for ra2botchat ra2map7
   set -- "$@" -aas "$AAS"
 fi
+# `ra2botkeep` wants the arena gamedir for ra2map27, and a mesh for it.
+if [ "$SCENARIO" = ra2botkeep ]; then
+  if ! has_option ra2ref "$@"; then
+    set -- "$@" -ra2ref "$ARENADATA"
+  fi
+  if ! has_option aas "$@"; then
+    aas_for ra2botkeep ra2map27
+    set -- "$@" -aas "$AAS"
+  fi
+fi
 # `nextlevel`'s arena and ctf phases need a mesh, and SKIP rather than die
 # without one: its dm phase is independent of the brain and is worth running
 # alone.
@@ -639,6 +702,14 @@ if [ "$SCENARIO" = nextlevel ] && ! has_option aas "$@"; then
   if [ -n "$GLAD" ] && [ -f "$GLAD/assets/maps/q2dm1.aas" ]; then
     set -- "$@" -aas "$GLAD/assets/maps/q2dm1.aas"
   fi
+fi
+# `ospbotvote` is `ra2botvote`'s opposite number under the OSP four and every
+# one of its phases needs bots that think, so it DIES without a mesh rather
+# than skipping: a phase that never ran prints the same "0 check(s) failed" as
+# one that passed.
+if [ "$SCENARIO" = ospbotvote ] && ! has_option aas "$@"; then
+  aas_for ospbotvote q2dm1
+  set -- "$@" -aas "$AAS"
 fi
 # `ra2reachscore` also wants the arena gamedir, and its mesh must be COMPLETE:
 # it empties the second map's reachability lump itself to open the window it

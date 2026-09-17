@@ -15,4 +15,4 @@ libq2 is pinned to an upstream release -- [packetflinger/libq2 `v1.0.335`](https
 
 ## Paths
 
-Scenarios that compare Colosseum against a reference build (`ospfixes`, `ospreconnect`, `ospthink`) default to sibling checkouts of the repository -- `../../../q2pro`, `../../../yquake2` -- and every one of those defaults is a `-flag` you can override. `ra2botvote` finds its `.aas` by glob, or from `$RA2AAS`.
+Scenarios that compare Colosseum against a reference build (`ospfixes`, `ospreconnect`, `ospthink`) default to sibling checkouts of the repository -- `../../../q2pro`, `../../../yquake2` -- and every one of those defaults is a `-flag` you can override. `ra2botvote` finds its `.aas` by glob, or from `$RA2AAS`; `botfill` and `ospbotvote` take a `-aas` directory or file and fall back to `$Q2AAS` and the places a run of this tree leaves one.

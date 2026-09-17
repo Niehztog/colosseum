@@ -90,6 +90,11 @@ int BotTourneyVotedIn(void)
     return G_IsOspRuleset() ? bots_votedin : 0;
 }
 
+int BotTourneyVotedOut(void)
+{
+    return G_IsOspRuleset() ? bots_votedout : 0;
+}
+
 const char *BotMinPlayersCvar(void)
 {
     // The cvar names stay PER RULESET.  tourney's readme, its configs

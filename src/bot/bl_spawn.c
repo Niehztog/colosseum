@@ -805,6 +805,30 @@ void BotRemoveDeathmatch(edict_t *ent)
     else gi.cprintf(ent, PRINT_HIGH, "No bots found to remove!\n");
 } //end of the functoin BotRemoveDeathmatch
 //===========================================================================
+// What a passed `vote rembot` took off, subtracted from whatever number is the
+// target (R-OSP-16).
+//
+// Applied BELOW the two-sides clamp and below the ceilings, and that ordering
+// is the decision: those three answer "how many does this GAME hold", and the
+// vote answers "how many do the people playing it want", which is allowed to
+// be fewer than a game -- and allowed to be none, the way an arena that has
+// voted its own `bots` switch off keeps none.
+//
+// Zero outside the OSP four, because the vote system is tourney's and
+// BotTourneyVotedOut() is the accessor that says so.  `arena` takes bots out
+// through its per-arena switch and RA_BotsVotedOut(), never through this.
+//
+// Parameter:               want: the target before the vote
+// Returns:                 the target the fill will actually ask for
+// Changes Globals:     -
+//===========================================================================
+static int BotVotedOutTarget(int want)
+{
+    want -= BotTourneyVotedOut();
+    if (want < 0) want = 0;
+    return want;
+} //end of the function BotVotedOutTarget
+//===========================================================================
 // What `botfill` asks for, or 0 when the switch is off -- and 0 is the only
 // value that means off, which is why the clamp to two lives here: a map with
 // nothing to count still gets a game.
@@ -872,7 +896,9 @@ int BotFillTarget(void)
     if (botfill_ceiling && want > botfill_ceiling) want = botfill_ceiling;
     if (want > game.maxclients) want = game.maxclients;
 
-    return want;
+    // ...and what the people playing voted off it, last, so that `sv ruleset`
+    // and the fill read one number.
+    return BotVotedOutTarget(want);
 } //end of the function BotFillTarget
 //===========================================================================
 // Where the number in BotFillTarget() came from, for `sv ruleset`.
@@ -920,10 +946,16 @@ void BotFillDescribe(char *buf, size_t len)
                 break;
             } //end if
 
-            Q_snprintf(buf, len, "arena %d, %d here, %s", n,
+            // `staging` is the arena the fill holds while nobody is on the
+            // map -- the one thing this row cannot be read off the numbers
+            // beside it, because an arena with a target and nobody in it looks
+            // exactly like the arena a person has just walked out of, and the
+            // second of those wants nobody.
+            Q_snprintf(buf, len, "arena %d, %d here, %s%s", n,
                        RA_ArenaPlayers(n, NULL),
                        RA_ArenaIsPickup(n) ? "pickup: by spawn points"
-                                           : "duel: by playersperteam");
+                                           : "duel: by playersperteam",
+                       RA_ArenaIsStaging(n) ? ", staging" : "");
             break;
         }
         default:
@@ -979,7 +1011,7 @@ void CheckMinimumPlayers(void)
     edict_t *cl_ent;
     queuedbot_t *bot;
     int i, numplayers, numbots, pending, totalbots, want, votedin;
-    int fillarena, fill;
+    int fillarena, fill, seated, queued;
     bool fillon;
     char buf[32];
 
@@ -1027,9 +1059,19 @@ void CheckMinimumPlayers(void)
     numplayers = 0;
     numbots = 0;
     pending = 0;
+    seated = 0;
+    queued = 0;
     for (i = 0; i < game.maxclients; i++)
     {
         cl_ent = DF_CLIENTENT(i);
+        // Seats taken, by G_SpawnClient()'s own predicate rather than by a
+        // second opinion about what a client is: `!inuse` is the slot that
+        // function hands out, so a count made any other way could say there
+        // is room where the allocator finds none.  Counted for every client,
+        // above the player test, because a client that is not a player still
+        // occupies the seat -- an observer, a bot on its way in, somebody
+        // still at the team menu.
+        if (cl_ent->inuse) seated++;
         if (!BotCountsAsPlayer(cl_ent))
         {
             // A bot that is not yet a player is still a bot on its way in, and
@@ -1058,6 +1100,9 @@ void CheckMinimumPlayers(void)
     for (bot = queuedbots; bot; bot = bot->next)
     {
         pending++;
+        //...but it holds no seat yet either, and will need one, so it is the
+        //other half of "is there room" and cannot come out of `seated`.
+        queued++;
     } //end for
     //
     // The arena arithmetic replaces the two counts and the target, and leaves
@@ -1083,7 +1128,21 @@ void CheckMinimumPlayers(void)
     // back to the flat count there would answer a per-arena question with a
     // server-wide census and re-add the bots the removal arm had just drained.
     if (fillarena) want = fill;
-    else want = fill ? fill : (int)minplayers->value;
+    // ...and the same distinction, one ruleset over, which the vote is what
+    // made reachable.  `fill ? fill : minplayers` reads a 0 from
+    // BotFillTarget() as "this ruleset has no target" -- true of every ruleset
+    // that could produce one before, because with the switch on and a map
+    // loaded the target was at least two.  A vote can now cut it to zero, and
+    // that zero is an ANSWER: falling back to the flat count there would seat
+    // bots again out of a cvar the vote was never about (R-OSP-16).
+    else if (fillon) want = fill;
+    // The flat count takes the vote's cut HERE rather than in BotFillTarget(),
+    // which never sees it: the switch being off is exactly the arm that does
+    // not go through that function.  Subtracted rather than written back into
+    // `bots_minplayers` the way the roster-exhausted clamp writes its count,
+    // because that cvar is the operator's setting and a vote lasts until the
+    // level does.
+    else want = BotVotedOutTarget((int)minplayers->value);
     votedin = BotTourneyVotedIn();
     // `totalbots` is the donor's `numbots`: it counted the queue into the same
     // variable.  They are separate here because the removal arm needs a bot
@@ -1100,11 +1159,28 @@ void CheckMinimumPlayers(void)
         } //end if
         old_botcount = totalbots;
     } //end if
+    // `seated + queued < game.maxclients` is the OSP arm's `numplayers <
+    // game.maxclients`, asked in the terms this arm has.  The OSP one works
+    // because its census is the SERVER's; this arm's is not, under `arena`,
+    // where `numplayers` was replaced above by the head count of ONE arena.  A
+    // map whose other arenas hold the clients therefore reads as short here
+    // while the server is full, and the fill asks for a bot every 32 frames
+    // that AddQueuedBots then refuses -- G_SpawnClient finds no free edict and
+    // the console says `can't create bot, maxclients = N` until a seat frees.
+    // Nothing runs away, because nothing is created; what it costs is a
+    // request made in the knowledge it cannot be met, and a console saying so.
+    //
+    // `want` is already clamped to `game.maxclients` (BotFillTarget), and that
+    // is a different question: how many the fill may ASK FOR against how many
+    // the engine can SEAT right now.  `ctf` and the flat count reach this arm
+    // too and their census is server-wide, so for them this is the guard the
+    // OSP arm has always had, spelled the same way.
     else if (G_IsOspRuleset()
              ? ((numplayers - votedin - 1) < want &&
                 numplayers < game.maxclients && totalbots < want &&
                 old_botcount != totalbots)
-             : (numplayers + pending < want))
+             : (numplayers + pending < want &&
+                seated + queued < game.maxclients))
     {
         if (!AddRandomBot(NULL))
         {

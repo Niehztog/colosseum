@@ -126,14 +126,19 @@ extern  cvar_t  *client_hud;
 #define ENTERED_INEYES          8   // chasing in-eyes: no free-look, no zoom
 #define ENTERED_AUTOCAM         16  // the camera picks its own subject
 
-// The three the BOT LAYER reads through its ruleset-neutral accessors
+// The four the BOT LAYER reads through its ruleset-neutral accessors
 //They are tourney's own globals; bl_main.c must never see them
-// except behind BotTourneyHook()/BotTourneyVotedIn(), because an extern here
-// resolves in every ruleset and answers with tourney's state whether or not
-// tourney is running.
+// except behind BotTourneyHook()/BotTourneyVotedIn()/BotTourneyVotedOut(),
+// because an extern here resolves in every ruleset and answers with tourney's
+// state whether or not tourney is running.
 extern  cvar_t  *damage_railgun;
 extern  cvar_t  *hook_enable;
 extern  int      bots_votedin;
+// ...and its mirror.  `bots_votedin` is what a vote ADDED and the fill treats
+// as nobody's business but the voters'; this is what a vote took AWAY, and the
+// fill subtracts it from its own target so that the bots a vote removed do not
+// come back on the next fill tick (R-OSP-16).
+extern  int      bots_votedout;
 
 // The chase camera's two settings, read by g_chase.c -- `camera_depth`
 // is the distance a new target is watched from and `camera_pitch` the free-look

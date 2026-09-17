@@ -686,6 +686,12 @@ static bool RA_ArenaHasHuman(int arenanum)
     return false;
 }
 
+// The bot half of the question was RA_ArenaHasBot() here.  RA_StagingArena()
+// was its only caller and now needs the COUNT and not the predicate -- which
+// arena has most of them, rather than whether this one has any -- so it asks
+// RA_ArenaPlayers() and this is gone rather than being kept beside a second
+// walk of the same list.
+
 // A bot-only team in this arena with room left on it, or NULL.
 //
 // An arena whose `playersperteam` is above one is a TEAM arena, and a bot that
@@ -806,9 +812,92 @@ static bool RA_BotFollowsPeople(edict_t *ent)
     return n < 1 || n > num_arenas;
 }
 
+// Where the bots belong when there is nobody to follow, or 0 -- there are
+// people here, and following them is the answer instead.
+//
+// This is RA_AutoArena's staging tail, asked as its own question because the
+// FILL has to ask it too.  `botfill` exists to give people opponents and an
+// arena with nobody in it wants none (RA_BotFillTarget), and those two together
+// said that an EMPTY SERVER wants no bots at all: every arena's target was 0
+// until somebody arrived, so `botfill 1` stood the server empty and waited,
+// while the flat `minimumplayers` beside it seats its four 3.2 seconds into
+// the level and has since 1999.  One of the two sizing the server to the game
+// and the other leaving it empty is a difference nobody asked for: the number
+// is the arena's, but "which arena" is answerable with nobody on the map, and
+// it has always been answered -- this is the same staging arena RA_AutoArena
+// sends a bot to when it is added before anybody else has joined.  So the
+// staging arena, and only it, has a target while the map is empty.
+//
+// The moment anybody is on a team anywhere this is 0 again and the question
+// goes back to "follow the people": their arena is the one with a target and
+// every other arena, this one included, wants nobody.  Which is what leaves
+// the refusal above untouched -- people on the map with every arena they are
+// in refusing bots is still 0 and not "some empty arena, then", because that
+// answer was about a map with people on it and this is about one without.
+//
+// The arena the bots are ALREADY in comes first, and that is the last person
+// leaving rather than the first arriving: the game they left keeps its players
+// instead of being drained one bot per fill tick and rebuilt somewhere else.
+static int RA_StagingArena(void)
+{
+    int i, nbots, best = 0, bestbots = 0;
+
+    // There are people on this map, so they are what the bots follow and an
+    // arena they are not in has nobody to give them to.  RA_AutoArena's own
+    // `return 0` below, reached from the other side.
+    if (RA_HumanArena(false))
+        return 0;
+
+    // The arena the bots are already in -- and when they are in more than one,
+    // the arena that has MOST of them, because that is the game.  It was the
+    // lowest-numbered one holding any bot at all, which is a coin toss a
+    // visitor gets to decide: a person who joins a small arena pulls one bot
+    // after them (RA_BotFollowPeople), and when they leave that stray is in
+    // arena 1 while the game everybody else was playing is in arena 8.  Lowest
+    // wins, the stray's arena becomes the staging arena, its ppt=1 target is
+    // all the server will hold, and the ten-bot game is never rebuilt.
+    // Measured live: a server stuck at two bots for the rest of the map.
+    //
+    // A strict `>` keeps the lowest-numbered arena on a tie, which is the old
+    // answer everywhere the counts are equal -- one arena holding bots, the
+    // case this loop was written for, included.
+    //
+    // RA_ArenaPlayers' transit accounting cannot disagree with a plain count
+    // here: it remaps a bot to the arena it is walking to only when there is
+    // somebody to follow, and the guard above has already established there is
+    // not.
+    for (i = 1; i <= num_arenas; i++) {
+        if (!arenas[i].bots)
+            continue;
+        RA_ArenaPlayers(i, &nbots);
+        if (nbots > bestbots) {
+            bestbots = nbots;
+            best = i;
+        }
+    }
+    if (best)
+        return best;
+
+    // A pickup arena is the one a lone bot can be joined to without inventing a
+    // team, and it is where a person arriving later will be offered a place
+    // opposite it.
+    for (i = 1; i <= num_arenas; i++)
+        if (arenas[i].idarena && arenas[i].bots)
+            return i;
+
+    // The donor ended at `return 1`, an unconditional fallback that predates
+    // any arena being able to refuse.  It is a search now, because arena 1 is
+    // exactly as able to say no as any other.
+    for (i = 1; i <= num_arenas; i++)
+        if (arenas[i].bots)
+            return i;
+
+    return 0;
+}
+
 static int RA_AutoArena(void)
 {
-    int     i, human;
+    int     human;
 
     // Every answer below is qualified by the arena's own `bots` switch,
     // and 0 -- "nowhere the bots should be" -- becomes a possible answer where
@@ -836,21 +925,11 @@ static int RA_AutoArena(void)
     // Nobody to follow at all.  This is a STAGING answer, not a destination:
     // `minimumplayers` adds its first bot 3.2 seconds into a level, while the
     // person who typed `map` is still loading, and RA_BotFollowPeople moves it
-    // to them when they arrive.  A pickup arena is the one a lone bot can be
-    // joined to without inventing a team, and it is where a person arriving
-    // later will be offered a place opposite it.
-    for (i = 1; i <= num_arenas; i++)
-        if (arenas[i].idarena && arenas[i].bots)
-            return i;
-
-    // The donor ended at `return 1`, an unconditional fallback that predates
-    // any arena being able to refuse.  It is a search now, because arena 1 is
-    // exactly as able to say no as any other.
-    for (i = 1; i <= num_arenas; i++)
-        if (arenas[i].bots)
-            return i;
-
-    return 0;
+    // to them when they arrive.  RA_StagingArena() is the one answer, and one
+    // is what it has to be: the fill asks it "does this arena want bots with
+    // nobody on the map" and this asks it "where does this bot go", and two
+    // copies could send a bot somewhere the fill was not counting.
+    return RA_StagingArena();
 }
 
 void RA_BotJoinArena(edict_t *ent)
@@ -995,7 +1074,7 @@ void RA_BotJoinArena(edict_t *ent)
 // there or it adds a replacement for a bot that has not moved yet.  The
 // target-is-open test stays in the caller -- that is one question about the
 // arena, not one per bot.
-static bool RA_BotBoundFor(edict_t *e, int target)
+static bool RA_BotFreeToFollow(edict_t *e, int target)
 {
     if (!e->inuse || !e->client || !(e->flags & FL_BOT))
         return false;
@@ -1011,6 +1090,76 @@ static bool RA_BotBoundFor(edict_t *e, int target)
         return false;
 
     return true;
+}
+
+// Who is standing in this arena, counted where they ARE.
+//
+// RA_ArenaPlayers() is the same walk with the transit remap applied, and that
+// is exactly why this one exists: the remap is defined in terms of
+// RA_BotBoundFor, and RA_BotBoundFor now needs a head count to answer with.  A
+// count that went through the remap would be asking the question of its own
+// answer.
+static int RA_ArenaResidents(int arenanum)
+{
+    edict_t *e;
+    int     i, n = 0;
+
+    for (i = 0; i < game.maxclients; i++) {
+        e = &g_edicts[i + 1];
+        if (!e->inuse || !e->client)
+            continue;
+        if (e->client->resp.teamnum < 0 || !teams[e->client->resp.teamnum].it)
+            continue;
+        if (TEAM(&teams[e->client->resp.teamnum])->arenanum == arenanum)
+            n++;
+    }
+
+    return n;
+}
+
+// ...and how many of the free may actually go: AS MANY AS THE ARENA WANTS, and
+// no more.
+//
+// Being free to follow was the whole of it, and every bot that was free went,
+// in one tick.  RA_BotFollowPeople asked RA_BotArenaOpen once -- a question
+// about the arena, asked before the loop and true for the first bot -- and then
+// moved all of them through a door that shut after the first.  Measured on
+// ra2map27 with seven bots staged in the pickup arena and one person joining
+// arena 1, whose `playersperteam` is 1 and whose `maxteams` is 2: SIX of them
+// followed, created six teams of their own in a two-team arena, and the fill
+// then disconnected five to get back to a target of two.  The pickup game was
+// gone, and what the server had instead was two bots in a duel arena.  That is
+// the state the live report describes, reproduced by scenarios/ra2botkeep.
+//
+// The cap is the fill's own target, so "how many bots does this arena want" has
+// one answer and the mover and the census read the same one.  RANK IN CLIENT
+// ORDER decides which of them go, because both readers must pick the same bots:
+// the census has to count a bot against the arena it is about to be in, and it
+// can only do that if "about to" is a fact and not a race.
+//
+// RA_BotFillTarget() cannot recurse back into here.  Its only path to
+// RA_ArenaPlayers() is RA_StagingArena(), which it reaches solely when the
+// arena has no human on a team -- and `target` is RA_HumanArena()'s answer, so
+// it always has one.
+static bool RA_BotBoundFor(edict_t *e, int target)
+{
+    int i, room, rank = 0;
+
+    if (!RA_BotFreeToFollow(e, target))
+        return false;
+
+    room = RA_BotFillTarget(target) - RA_ArenaResidents(target);
+    if (room <= 0)
+        return false;
+
+    for (i = 0; i < game.maxclients; i++) {
+        if (&g_edicts[i + 1] == e)
+            break;
+        if (RA_BotFreeToFollow(&g_edicts[i + 1], target))
+            rank++;
+    }
+
+    return rank < room;
 }
 
 static void RA_BotFollowPeople(void)
@@ -1040,6 +1189,14 @@ static void RA_BotFollowPeople(void)
 
         if (!RA_BotBoundFor(e, target))
             continue;
+
+        // Re-asked per bot, not once above: the door shuts as they go through
+        // it.  RA_BotBoundFor's cap is the fill's target and this is the
+        // arena's own admission rule -- a lock, a team queue at `maxteams`, a
+        // pickup side already full -- and the two are different refusals.  The
+        // check above stays so that a shut arena costs no client scan at all.
+        if (!RA_BotArenaOpen(target))
+            return;
 
         gi.dprintf("%s follows the players to arena %d\n",
                    e->client->pers.netname, target);
@@ -1705,6 +1862,30 @@ int RA_BotFillArena(void)
 //                          means it is carrying that many too many
 // Returns:                 the arena to work, or 0 -- nothing to do anywhere
 // Changes Globals:     -
+// Is there a client slot the fill could put a NEW bot in?
+//
+// The question a drain has to answer before it takes a bot out of a game: with
+// a seat free the roster serves the shortage and the game is left alone, and
+// without one those bots are the only ones there are.  `inuse` is
+// G_SpawnClient()'s own predicate, so this cannot say there is room where the
+// allocator finds none -- the same reckoning bl_spawn.c's `seated` makes.
+//
+// A bot still in the creation queue holds no edict yet and is not counted, so
+// this can say `free` about a seat that is already spoken for.  That errs
+// toward NOT draining, which is the direction a wrong answer should fall in:
+// the cost is one tick of a shortage going unserved, against taking a bot out
+// of a running game for nothing.
+static bool RA_SeatsFree(void)
+{
+    int i, seated = 0;
+
+    for (i = 0; i < game.maxclients; i++)
+        if (g_edicts[i + 1].inuse)
+            seated++;
+
+    return seated < game.maxclients;
+}
+
 static int RA_NeediestArena(int *gapout)
 {
     int i, here, want, gap, nbots;
@@ -1737,11 +1918,34 @@ static int RA_NeediestArena(int *gapout)
         }
     }
 
-    // The surplus first; see the block above for why that way round.
-    if (gapout)
-        *gapout = spare ? sparegap : bestgap;
+    // The surplus first; see the block above for why that way round -- but only
+    // when draining it is the only way to serve the shortage.
+    //
+    // A drain is not a MOVE.  The removal arm disconnects the bot and the add
+    // arm creates another from the roster, so "the bots go where the people
+    // are" is an eviction followed by an unrelated arrival -- and the two do
+    // not take turns, because a surplus stays a surplus until the arena is
+    // EMPTY.  One person joining an arena that is short by one therefore
+    // emptied an arena of ten: every tick found the same surplus, took another
+    // bot out of a game that was running, and never once added to the arena
+    // that was short.
+    //
+    // Measured on the live arena server, ra2map27: ten bots playing the pickup
+    // arena, one person joined a ppt=1 arena elsewhere, and 32 frames apart
+    // the removal arm took all nine bots that had not followed them.  The map
+    // spent the rest of its life with that arena looping `It was a tie!` and
+    // nobody in it to fight.  Reproduced by scenarios/ra2botkeep.
+    //
+    // So the shortage is served from the ROSTER while the server has a seat
+    // for one, and a running game is taken apart only when it has not -- which
+    // is the one case where those bots really are the only ones available.
+    if (RA_SeatsFree())
+        spare = 0;
 
-    return spare ? spare : best;
+    if (gapout)
+        *gapout = (spare && best) ? sparegap : bestgap;
+
+    return (spare && best) ? spare : best;
 }
 
 // ...and which arena the bot it is about to add must be told to join.
@@ -1812,13 +2016,32 @@ int RA_BotFillTarget(int arenanum)
     //
     // `botfill` exists to give people opponents.  An arena's capacity is what
     // it can seat; what it wants is that number only while somebody is in it.
-    if (!RA_ArenaHasHuman(arenanum))
+    //
+    // ...or while there is nobody on the MAP, which is not a hole in that rule
+    // but the same rule asked where it has no people to point at.  With the
+    // server empty the staging arena is where a bot goes, where the bots
+    // already here are, and where a person arriving will find them, so it is
+    // the arena that wants them -- and RA_StagingArena() is 0 the moment
+    // anybody is on a team anywhere, which hands every arena straight back to
+    // the line above.  This is what `botfill 1` was missing against the flat
+    // `minimumplayers` beside it: see RA_StagingArena() for the whole of it.
+    if (!RA_ArenaHasHuman(arenanum) && arenanum != RA_StagingArena())
         return 0;
 
     if (arenas[arenanum].idarena)
         return 2 * (ArenaSpawnCount("info_player_deathmatch", arenanum) / 2);
 
     return arenas[arenanum].numteams * arenas[arenanum].playersperteam;
+}
+
+// Is this the arena the fill is holding for people who have not arrived yet?
+// A diagnostic, for the same reason RA_ArenaIsPickup() below is one: `sv
+// ruleset`'s botfill row reads "arena 1 want=4" whether four people are in that
+// arena or nobody is on the map at all, and an operator wondering why a server
+// nobody has joined has bots in it deserves to be told which of the two it is.
+bool RA_ArenaIsStaging(int arenanum)
+{
+    return arenanum >= 1 && arenanum == RA_StagingArena();
 }
 
 // Is this a pickup arena -- one whose size comes from the map rather than from
@@ -1847,7 +2070,14 @@ bool RA_ArenaIsPickup(int arenanum)
 int RA_ArenaPlayers(int arenanum, int *bots)
 {
     edict_t *e;
-    int     i, n, players = 0, nbots = 0;
+    int     i, n, follow, players = 0, nbots = 0;
+
+    // Where a bot in transit is going, asked once for the whole scan rather
+    // than once per bot: RA_BotFollowPeople moves bots to the arena the people
+    // are in and nowhere else, and not at all when there is nobody to follow.
+    // That is a question about the arena, which is the half RA_BotBoundFor
+    // leaves to its caller.
+    follow = RA_HumanArena(true);
 
     for (i = 0; i < game.maxclients; i++) {
         e = &g_edicts[i + 1];
@@ -1858,7 +2088,21 @@ int RA_ArenaPlayers(int arenanum, int *bots)
             continue;
 
         n = TEAM(&teams[e->client->resp.teamnum])->arenanum;
-        if (n != arenanum && !RA_BotBoundFor(e, arenanum))
+
+        // A bot in transit is counted ONCE, against the arena it is going to
+        // rather than the one it is leaving.  Counting it in both -- which is
+        // what asking only "is it bound for HERE" did -- costs a bot the moment
+        // staging ends: the first person to arrive joins an arena, the staging
+        // bots are still standing where they were on this tick because
+        // CheckMinimumPlayers runs before G_CheckRules, and the arena they are
+        // walking out of reads as a surplus while the one they are walking into
+        // reads as filled.  So the removal arm throws one of them out and the
+        // fill adds a replacement a tick later, in the arena they were already
+        // on their way to.
+        if (follow && RA_BotBoundFor(e, follow))
+            n = follow;
+
+        if (n != arenanum)
             continue;
 
         players++;
@@ -1875,10 +2119,97 @@ int RA_ArenaPlayers(int arenanum, int *bots)
 // A bot to take out of this arena, named rather than left to `removebot`'s own
 // scan -- which takes the lowest client slot, and that bot may be playing in an
 // arena nobody asked to shrink.
+//
+// ...and off the team that is carrying ONE TOO MANY, which is the other half of
+// the same sentence and was missing.  Scoping the name to the arena keeps the
+// fill from shrinking somebody else's game; it says nothing about which of this
+// arena's sides gives the bot up, and the first bot in client-slot order is not
+// a neutral answer to that.  RA_BotJoinArena seats every bot on the SMALLER
+// pickup team, so slot order and side order are one alternation -- an odd
+// number of removals therefore takes one more off whichever side holds the
+// lowest slot, and a person in the arena is never counted against his own side
+// at all.
+//
+// Measured, `ra2map18` -> `ra2map2` with `botfill 1`: arena 6 of the outgoing
+// map seats 14 (15 info_player_deathmatch, R-RA-7's `2 * (spawns / 2)`) and
+// arena 5 of the incoming one seats 8 (9), so the level change drains seven
+// bots.  They came off Red, Blue, Red, Blue, Red, Blue, Red -- four and three
+// -- and the person who picked Blue in the middle of it left the arena 3v5 at
+// its correct total of 8.  Nothing corrects it afterwards, which is what makes
+// this worth a scan of its own rather than a tick's inaccuracy: the arena is AT
+// its target, so RA_NeediestArena() scores it 0 and neither arm of the fill
+// selects it again for the rest of the map.
+//
+// So the team with the most members gives the bot up, which is
+// CTFBotFillName()'s rule one ruleset over -- R-CTF-8's consequence block names
+// this function as its twin, and until now only the arena half of it was here.
+// It is asked per TEAM rather than per side because that is one question in
+// both kinds of arena: a pickup arena's two sides ARE its two teams, and a real
+// arena map's teams have no `side` until sidepick at the whistle.  A team with
+// no bot on it is passed over -- the fill cannot remove a person -- which is
+// the same fall-through CTF's NULL gets when the only bots left are on the
+// smaller side.
+//
+// A TIE is broken by team slot, and NOT by returning NULL.  CTF returns NULL
+// and lets the caller fall through to a bare `sv removebot`, which is the whole
+// server under `ctf` and is the one thing that must not happen here:
+// `bl_spawn.c` passes this straight into BotServerCommand, where a NULL
+// terminates the vararg list (bl_redirgi.c) and the engine's own scan then
+// takes the lowest client slot ON THE SERVER -- a bot out of some other arena's
+// running round.
+//
+// The same reckoning of where a bot in transit belongs as RA_ArenaPlayers
+// above, and by the same two lines, because this names the bot that census
+// counted: an arena over its target that was handed the name of a bot counted
+// somewhere else would still be over it on the next tick, and ask again.  It
+// governs both halves here.  A bot on its way OUT is on this arena's team and
+// in the other arena's census, so it is left out of the tally and out of the
+// pick.  A bot on its way IN is in this arena's census and on no team of it, so
+// no tally can hold it -- which is what the second loop is for, unchanged: when
+// the arena's own teams have no bot to give, the bot walking towards it is the
+// one it can.
 char *RA_ArenaBotName(int arenanum)
 {
-    edict_t *e;
-    int     i, n;
+    qmenu_t *mnode;
+    edict_t *e, *cand, *pick = NULL;
+    int     i, n, follow, members, most = 0;
+
+    follow = RA_HumanArena(true);
+
+    for (i = 0; i < MAX_TEAMS; i++) {
+        if (!teams[i].it)
+            continue;
+        if (TEAM(&teams[i])->arenanum != arenanum)
+            continue;
+
+        // Counted here rather than by count_queue(), because the members this
+        // arena HAS and the members standing in its queue are not the same set
+        // while a bot is walking out of it -- and one walk answers both halves.
+        members = 0;
+        cand = NULL;
+        mnode = &teams[i];
+        while (mnode->next) {
+            mnode = mnode->next;
+            e = (edict_t *)mnode->it;
+            if (!e)
+                continue;
+            if (follow && RA_BotBoundFor(e, follow))
+                continue;
+
+            members++;
+            if (!cand && (e->flags & FL_BOT))
+                cand = e;
+        }
+
+        if (!cand || members <= most)
+            continue;
+
+        most = members;
+        pick = cand;
+    }
+
+    if (pick)
+        return pick->client->pers.netname;
 
     for (i = 0; i < game.maxclients; i++) {
         e = &g_edicts[i + 1];
@@ -1889,7 +2220,11 @@ char *RA_ArenaBotName(int arenanum)
             continue;
 
         n = TEAM(&teams[e->client->resp.teamnum])->arenanum;
-        if (n != arenanum && !RA_BotBoundFor(e, arenanum))
+
+        if (follow && RA_BotBoundFor(e, follow))
+            n = follow;
+
+        if (n != arenanum)
             continue;
 
         return e->client->pers.netname;

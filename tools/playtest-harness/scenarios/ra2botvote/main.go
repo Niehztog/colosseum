@@ -714,6 +714,28 @@ func follows(port int, q2, baseq2, ra2ref, lib, glad, root string) (followResult
 	if err := a.Start(60 * time.Second); err != nil {
 		return r, fmt.Errorf("first client: %w", err)
 	}
+
+	// The SECOND person connects now too, and sits in the lobby until the
+	// first one leaves.  BOTH SLOTS HAVE TO BE TAKEN BEFORE THE FILL TAKES
+	// THEM: `botfill` seats bots on a server with nobody on it, up to the
+	// arena's own target, and ra2map9's two pickup arenas want 10 and 12
+	// against the six slots this phase runs -- so between the first person
+	// disconnecting and the second connecting the fill grabs the freed slot
+	// within a tick and the second client is refused by a full server.
+	// Measured: "player connected" one line under "first disconnected", and
+	// `second: never spawned in`.
+	//
+	// It costs the phase nothing.  A client that has not picked a team is in
+	// no arena -- RA_ArenaPlayers counts team members, and BotCountsAsPlayer
+	// under `arena` asks the same question -- so a lobby client is invisible
+	// to both the census and the fill, and arena 1 is still "the only arena
+	// with a person in it" until the join below.
+	b := playtest.NewBot("second", "127.0.0.1", port)
+	if err := b.Start(60 * time.Second); err != nil {
+		return r, fmt.Errorf("second client: %w", err)
+	}
+	defer b.Disconnect()
+
 	if err := ra2.JoinTeam(a, ra2.PickupTeam(1, "Red")); err != nil {
 		return r, fmt.Errorf("first join: %w", err)
 	}
@@ -731,15 +753,11 @@ func follows(port int, q2, baseq2, ra2ref, lib, glad, root string) (followResult
 	}
 	r.a2Before = arenaHere(srv, 2)
 
-	// The person leaves for arena 2.
+	// The person leaves for arena 2 -- as the person already waiting in the
+	// lobby, which is the same state and needs no slot to become free.
 	a.Disconnect()
 	time.Sleep(2 * time.Second)
 
-	b := playtest.NewBot("second", "127.0.0.1", port)
-	if err := b.Start(60 * time.Second); err != nil {
-		return r, fmt.Errorf("second client: %w", err)
-	}
-	defer b.Disconnect()
 	if err := ra2.JoinTeam(b, ra2.PickupTeam(2, "Red")); err != nil {
 		return r, fmt.Errorf("second join: %w", err)
 	}

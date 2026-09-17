@@ -179,6 +179,11 @@ void BotPerfReport(void);
 int  BotTourneyRunes(void);         // rune_stat, or 0
 bool BotTourneyHook(void);          // hook_enable, or false
 int  BotTourneyVotedIn(void);       // bots_votedin, or 0
+// ...and what a passed `vote rembot` took OFF the bot count, which the fill
+// subtracts from its target so the vote holds (R-OSP-16).  Zero outside the
+// OSP four: the vote system is tourney's, and `arena` takes bots out through
+// its own per-arena `bots` switch instead.
+int  BotTourneyVotedOut(void);      // bots_votedout, or 0
 // The cvar names are per ruleset: the OSP four use tourney's own
 // `bots_minplayers` and `bots_botfile`, ctf and arena `minimumplayers` and
 // `botfile`.

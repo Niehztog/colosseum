@@ -526,6 +526,33 @@ void OSP_ffajoin_cmd(edict_t *ent)
     OSP_Stats_PlayerEnter(ent);
 }
 
+// The bots on the server, walked rather than read off `botglobals.numbots`.
+//
+// That global is a CACHE with a dozen writers, and across a REMOVAL it is
+// wrong in a way that matters here: BotDestroy() calls ClientDisconnect()
+// before its own `numbots--`, tourney's disconnect path recounts the clients,
+// and the departing bot is already gone from that count -- so each removal
+// takes the cache down by two and it sits one below the truth until the next
+// recount corrects it.  A before-and-after difference read from it therefore
+// counts one removal too many, which is a bot the fill would never seat again
+// (R-OSP-16).  The cache is left alone: it self-corrects on the next frame,
+// and a vote is not the place to change what every ruleset reads.
+int OSP_botCount(void)
+{
+    edict_t *e;
+    int     i;
+    int     n;
+
+    for (n = 0, i = 1; i <= game.maxclients; i++) {
+        e = g_edicts + i;
+        if (e->inuse && e->client && e->client->pers.connected &&
+            (e->flags & FL_BOTCLIENT))
+            n++;
+    }
+
+    return n;
+}
+
 // "vote <what> <value>".  Two calling conventions: with mode 0 the command
 // reads its own arguments (and is rate-limited through resp.osp_r010); with
 // mode non-zero the caller supplies argc/what/value directly, which is how the
@@ -862,15 +889,25 @@ void OSP_vote_cmd(edict_t *ent, int mode, int nargs, char *what, char *value)
             return;
         }
 
+        // The bots this vote may take out are the bots that are THERE, and
+        // the cap was `bots_votedin` -- the ones a vote had put there.  On
+        // every server that actually runs bots that number is 0: `botfill` and
+        // `bots_minplayers` seat them, not a vote, so the one configuration
+        // the row exists for was the one it refused, with "You can remove only
+        // 0 more bots."  `arena` has had the other half of this since its
+        // per-arena `bots` switch became votable, and this is the OSP four's
+        // (R-OSP-16).  The bot COUNT is the loop's own, taken at the top of
+        // this function from the connected clients carrying FL_BOTCLIENT.
         if (argc == 2)
             gi.cprintf(ent, PRINT_HIGH,
-                       "voted bots in the game: %d (max=%d).\n",
-                       bots_votedin, (int)vote_bots_max->value);
-        else if (!botglobals.numbots)
+                       "bots in the game: %d, of which %d voted in (max=%d).\n",
+                       OSP_botCount(), bots_votedin,
+                       (int)vote_bots_max->value);
+        else if (!OSP_botCount())
             gi.cprintf(ent, PRINT_HIGH, "Sorry, no more bots to remove!\n");
-        else if (Q_atoi(a2) > bots_votedin)
+        else if (Q_atoi(a2) > OSP_botCount())
             gi.cprintf(ent, PRINT_HIGH, "You can remove only %d more bots.\n",
-                       bots_votedin);
+                       OSP_botCount());
         else if (Q_atoi(a2) < 0)
             gi.cprintf(ent, PRINT_HIGH, "Cannot remove less than 0 bots!\n");
         else
@@ -1168,8 +1205,19 @@ void OSP_kick_vote(void)
             gi.WriteByte(svc_disconnect);
             gi.unicast(cli, true);
             ClientDisconnect(cli);
-        } else
+        } else {
             BotServerCommand("sv", "removebot", cli->client->pers.netname, 0);
+            // A bot kicked by vote is a bot the people playing decided they
+            // did not want, and the fill has to be told or it seats a
+            // replacement within 32 frames -- the same failure the `rembot`
+            // vote had, reached through the other row that removes a bot
+            // (R-OSP-16).  Voted-in first, for the reason spelled out in
+            // OSP_removebots_vote.
+            if (bots_votedin > 0)
+                bots_votedin--;
+            else
+                bots_votedout++;
+        }
     }
 }
 
@@ -1228,6 +1276,7 @@ void OSP_addbots_vote(void)
 void OSP_removebots_vote(void)
 {
     int         i;
+    int         removed;
 
     OSP_Stats_Vote("Pass", "removebots", vote_value);
     if (server_log)
@@ -1235,8 +1284,33 @@ void OSP_removebots_vote(void)
 
     OSP_clearVotes();
 
+    // What the loop below actually takes off, which is not always what it was
+    // asked for: a bot can leave between a vote being put and passing, and the
+    // cut is a subtraction from the fill's target that nothing corrects until
+    // the level ends.  Counted either side of the loop through OSP_botCount(),
+    // for the reason that function's comment gives.
+    removed = OSP_botCount();
+
     for (i = 0; i < Q_atoi(vote_value); i++)
         BotServerCommand("sv", "removebot", NULL);
+
+    removed -= OSP_botCount();
+
+    // The vote HOLDS, which is the half the removal alone does not buy: with
+    // `botfill` on -- or any flat count set -- CheckMinimumPlayers reads the
+    // server as short on the next 32-frame tick and puts back exactly what was
+    // just taken out, so the bots return while the passing vote is still on
+    // the screen.  The fill subtracts this counter from its target (R-OSP-16).
+    //
+    // Only the bots BEYOND the voted-in ones count against it, and the order
+    // is the one the two counters already imply: a bot a vote put there is
+    // outside the fill's target to begin with -- that is what `bots_votedin`
+    // means in CheckMinimumPlayers' arithmetic -- so taking it back out asks
+    // the fill for nothing.  Anything past that is a bot the FILL seated, and
+    // the target has to come down by one for each of them or the next tick
+    // undoes it.  Computed before the line below moves `bots_votedin`.
+    if (removed > bots_votedin)
+        bots_votedout += removed - bots_votedin;
 
     bots_votedin -= Q_atoi(vote_value);
     if (bots_votedin < 0)

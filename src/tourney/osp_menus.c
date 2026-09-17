@@ -2017,9 +2017,18 @@ void OSP_removeBots_menu(edict_t *ent, osp_pmenu_t *p)
     else
         ent->client->resp.osp_r294++;
 
+    // Stepped against the bots that are THERE, not against the ones a vote
+    // put there.  `bots_votedin` is 0 on every server whose bots came from
+    // `botfill` or `bots_minplayers`, so this row could not leave 0 and the
+    // menu half of the feature was unreachable on exactly the servers that
+    // have bots to remove -- while "Total active bots" two rows below it
+    // showed eight of them.  OSP_vote_cmd's own cap is the authority and it
+    // asks OSP_botCount() the same question, so the row and the refusal cannot
+    // disagree -- which they would if this read the cache and that walked the
+    // clients (R-OSP-16).
     if (ent->client->resp.osp_r294 < 0)
-        ent->client->resp.osp_r294 = bots_votedin;
-    else if (ent->client->resp.osp_r294 > bots_votedin)
+        ent->client->resp.osp_r294 = OSP_botCount();
+    else if (ent->client->resp.osp_r294 > OSP_botCount())
         ent->client->resp.osp_r294 = 0;
 
     if (!ent->client->resp.osp_r294)

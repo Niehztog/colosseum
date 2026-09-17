@@ -703,17 +703,30 @@ void G_Svcmd_Ruleset_f(void)
         // `want` is what survives the ceilings and the source text is where the
         // number came from -- printing only the first hides a clamp, which is
         // the reason this line exists at all.
+        // What a passed `vote rembot` took off, on whichever of the two rows
+        // is printed, because neither can say it for itself: `want=` already
+        // has the cut subtracted and does not say how it got there, and the
+        // flat count printed beside `off` is the cvar's value and not the
+        // number in force (R-OSP-16).  Appended rather than spliced in, so
+        // that a reader -- and a play test's regex -- finds the row it knew.
+        char cut[32];
+
+        cut[0] = 0;
+        if (BotTourneyVotedOut())
+            Q_snprintf(cut, sizeof(cut), ", %d voted out",
+                       BotTourneyVotedOut());
+
         if (BotFillEnabled()) {
             char src[96];
 
             BotFillDescribe(src, sizeof(src));
             gi.cprintf(NULL, PRINT_HIGH,
-                       "botfill      %s want=%d from %s\n",
-                       G_RulesetName(G_Ruleset()), BotFillTarget(), src);
+                       "botfill      %s want=%d from %s%s\n",
+                       G_RulesetName(G_Ruleset()), BotFillTarget(), src, cut);
         } else {
             gi.cprintf(NULL, PRINT_HIGH,
-                       "botfill      off -- %s %d is the target\n",
-                       BotMinPlayersCvar(), (int)BotMinPlayers()->value);
+                       "botfill      off -- %s %d is the target%s\n",
+                       BotMinPlayersCvar(), (int)BotMinPlayers()->value, cut);
         }
     }
 

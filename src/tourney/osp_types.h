@@ -908,6 +908,9 @@ void     OSP_showParams(void);
 void     OSP_showScores(int *list, int count, edict_t *ent);
 void     OSP_showPlayer(edict_t *ent);
 int      OSP_teamCount(int team);
+// The bots on the server, counted rather than read off `botglobals.numbots`,
+// which is a cache that sits one low across a removal (R-OSP-16).
+int      OSP_botCount(void);
 int      OSP_teamReady(int team);
 bool OSP_1v1Team(edict_t *ent);
 void     OSP_1v1Add(edict_t *ent);

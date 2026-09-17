@@ -41,6 +41,11 @@ int conf_size = 0;
 int blink_on_count = 9;
 int blink_off_count = 0;
 int bots_votedin = 0;
+// The bots a passed vote took out, which is not the same question as the one
+// above and cannot be read off it: `bots_votedin` counts bodies the voters put
+// on top of whatever the server wanted, and this counts the ones they took out
+// of it.  The fill reads it through BotTourneyVotedOut() (R-OSP-16).
+int bots_votedout = 0;
 int bots_delaytime = 15;
 int bots_loadstat = 0;
 int client_maxframes = 0;
@@ -768,6 +773,7 @@ void OSP_gameInit(void)
     p_order[27] = 0;
     botglobals.numbots = 0;
     bots_votedin = 0;
+    bots_votedout = 0;
     bots_delaytime = (int)bots_delayload->value * 125 + 15;
     bots_loadstat = (int)bots_autoload->value;
 
@@ -847,6 +853,13 @@ void OSP_endClean(void)
     p_order[26] = 0;
     p_order[27] = 0;
     bots_votedin = 0;
+    // One lifetime for both counters, because they are two halves of one
+    // arithmetic: OSP_exitLevel has just called OSP_serverbotsRemove(), so the
+    // bots a vote decided about are gone and the next match sizes itself from
+    // the configuration again.  `vote_carryover` above governs the SETTINGS a
+    // vote moved -- timelimit, fraglimit, the hook -- and the donor does not
+    // put the bot count among them (R-OSP-16).
+    bots_votedout = 0;
     old_botcount = -1;
 
     if (OSP_IsTeams())

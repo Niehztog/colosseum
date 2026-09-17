@@ -214,18 +214,27 @@ botfill 1            // hold the server at the optimal number for the current ma
 
 `bots_minplayers` is one flat count for the whole server. **It goes by two names**, depending on the ruleset: `bots_minplayers` under the four OSP rulesets (`dm`, `dmpro`, `tdm`, `duel`), and `minimumplayers` under `ctf` and `arena`. Both names are registered under every ruleset, so setting the wrong one is accepted at the console and then quietly ignored - which is the one thing to get right here.
 
-`botfill 1` works the target player amount out for itself instead of taking a number from you, and each ruleset works it out from something different:
+`botfill 1` determines the ideal target player count based on ruleset and map instead of taking a number from you. Each ruleset determines the bot count in its own way:
 
-* `dm` and `dmpro` - how many spawn points the map has.
+* `dm` and `dmpro` - The number of bots depend on how many spawn points the map has.
 * `ctf` - half the spawn points the whole map shares, or one of the two bases if a base has fewer, then doubled so the two sides come out even.
 * `tdm` and `duel` - a full team on each side, `2 * team_maxplayers`. Under `duel` that is 2.
-* `arena` - the arena the bots are being sent to: a full team on each side, or that arena's own spawn points where it is a pickup arena.
+* `arena` - For non-pickup arenas: a full team on each side as configured in `arena.cfg` (`playersperteam`), for pickup arenas: the amount of the arena's own spawn points. With nobody on the server yet the bots always wait in the pickup arena.
 
 One switch, then, and a count that follows the map instead of one you have to guess again after every map change. It defaults to `0`, which leaves the flat count above in charge.
 
 Two things cap both settings: `maxclients`, and how many bots `bots.cfg` lists. Neither setting can seat more than the smaller of the two. To check that yours took effect, run `sv ruleset` - it prints a `botfill` line naming the ruleset, the target in force, and where that number came from.
 
+**Leave room for people.** The target is the game's number rather than yours, so a `maxclients` at or below it means the bots take every slot on an empty server and somebody arriving finds it full - the fill only gives a seat back to a player who is already on the server. Set `maxclients` above the target that `sv ruleset` prints, and the seats above it stay open.
+
 Every shipped config that takes bots already carries both lines the same way: `botfill 1`, with the flat count zeroed beside it, so the server sizes itself to whatever it is running - all six of `dm`, `dmpro`, `tdm`, `duel`, `ctf` and `arena`. `sp` has no bots and sets neither. Under `duel` that target is exactly 2, so a duel server left alone bot-duels itself and a person arriving joins the queue behind them; `sv removebot all`, or `botfill 0` with a flat count beside it, is the way back to a fixed number.
+
+**Letting the players decide.** Both settings are yours, but the people on the server can be given a say in them, and each ruleset family has its own way of asking:
+
+* `dm`, `dmpro`, `tdm`, `duel` - `set vote_enable_bots 1` opens the three bot rows of the vote menu (`vote addbot <n>`, `vote rembot <n>`, `vote specbot <n>` at the console). A passed `rembot` takes bots off the server *and* lowers the target by the same number for the rest of the level, so the fill does not put them back a few seconds later. It can go all the way to none. The next level starts from your settings again.
+* `arena` - the arena's own `bots` switch, votable where `arena.cfg` says `allowvotingbots: 1`, or where `set ra_allowvotingbots 1` says so for every arena whatever the file carries. The bots leave that arena and no more are sent to it.
+
+Both are off by default, because a vote that can empty the server of opponents is a bigger lever than one that changes the fraglimit.
 
 Then `~` again to close the console, and play.
 
@@ -315,6 +324,7 @@ The inventories are kept with the code rather than written from memory - the fir
 * **Under `API=old`, `ctf` loses the second powerup timer.** Threewave already uses 0..30 of the classic 32 stat slots; the pair lives at 32/33 and is reachable only on the new game API.
 * **`sp` on a dedicated server is co-op.** A dedicated server cannot run single player at all - that is the engine's rule, not this library's.
 * **The content layers do not gate spawning.** With `rogue 0`, a Ground Zero map still spawns its own monsters. What the layer decides is narrower than that: for a monster *both* packs have, it picks whose version of the behaviour is used.
+* **A stock engine does not count the bots as players.** A bot is a client of the *game*, not of the engine: nothing ever connects, so no engine client slot exists for it and the server browser lists none of them - eight bots playing, and the server advertises itself as empty. It is not a Q2PRO defect; id's 1997 server, yquake2 and q2repro all report players the same way. The scoreboard, `players` and `sv clientdump` show them, because those are the game's. If you run your own engine build, [`server/`](server/README.md) carries a patch that fixes it.
 
 ## Releases
 

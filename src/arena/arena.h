@@ -502,7 +502,7 @@ void        remove_from_team(edict_t *ent);
 edict_t     *SelectRandomArenaSpawnPoint(char *classn, int arenanum, int side, edict_t *ignore);
 edict_t     *SelectFarthestArenaSpawnPoint(char *classn, int arenanum, edict_t *ignore);
 
-// The four the bot layer asks for, and `sv arenadump`/`sv ruleset`
+// The ones the bot layer asks for, and `sv arenadump`/`sv ruleset`
 // report; see the block above RA_BotFillArena() in arena.c for why the answer
 // comes from `arena.cfg` for one kind of arena and from the map for the other.
 int         RA_BotFillArena(void);
@@ -514,6 +514,11 @@ int         RA_BotFillTarget(int arenanum);     // unclamped -- BotFillTarget()
                                                 // owns the ceilings for every
                                                 // ruleset now
 bool        RA_ArenaIsPickup(int arenanum);
+// Is this the arena the fill is holding for people who have not arrived yet?
+// A diagnostic only: `sv ruleset`'s botfill row says the same sentence --
+// "arena 1 wants 4" -- whether four people are in it or the map is empty, and
+// those are different servers.
+bool        RA_ArenaIsStaging(int arenanum);
 int         RA_ArenaPlayers(int arenanum, int *bots);
 char        *RA_ArenaBotName(int arenanum);
 

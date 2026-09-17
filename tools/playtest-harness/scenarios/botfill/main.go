@@ -12,7 +12,7 @@
 // declared size, or `team_maxplayers` -- and `sv ruleset`'s `botfill` row is
 // the only place it is written down.
 //
-// Five servers, because the interesting claims are different:
+// Six servers, because the interesting claims are different:
 //
 //   A  dm / q2dm1 / maxclients 12 / botfill 1
 //      The arithmetic AND the fill reaching it: q2dm1 carries 10
@@ -51,6 +51,21 @@
 //      point: it is the one row where the map and the ruleset disagree and the
 //      ruleset has to win.
 //
+//   F  arena / q2dm1 / maxclients 12 / botfill 1
+//      THE EMPTY SERVER, which is the one thing a flat count did and this
+//      switch did not.  `minimumplayers 4` seats four bots on a server nobody
+//      has joined; `botfill 1` under `arena` sizes each arena to the people in
+//      it, found none in any of them, and asked for nobody -- so the two
+//      settings disagreed about the same empty server and the one that sizes
+//      itself to the game was the one that left it empty.  q2dm1 under `arena`
+//      is ONE pickup arena covering the whole map, so the target is its ten
+//      `info_player_deathmatch` rounded down to even, and the row says
+//      `staging` to mark a target being held for people who have not arrived.
+//      Then two people arrive: the bots give two seats back, the row stops
+//      saying `staging`, and NOBODY IS THROWN OUT AND RE-ADDED while they are
+//      walking over -- which is the half a client count alone cannot see, so
+//      the connect/disconnect lines are counted as well.
+//
 // Exit 0 every check passed, 1 a check failed, 2 the scenario could not run.
 package main
 
@@ -66,6 +81,7 @@ import (
 
 	"q2playtest/colosseum"
 	"q2playtest/playtest"
+	"q2playtest/ra2"
 )
 
 // The two rows this scenario is about, out of `sv ruleset`:
@@ -73,9 +89,11 @@ import (
 //	botfill      dm want=8 from seats=8, spawns=8
 //	botfill      ctf want=4 from seats=16, shared=17 base=12+14
 //	botfill      tdm want=6 from 2 * team_maxplayers 3
+//	botfill      arena want=10 from arena 1, 0 here, pickup: by spawn points, staging
 //	botfill      off -- bots_minplayers 4 is the target
 //	bots         8 bot(s) of 8 client(s) in 12 slot(s), at 0,1,2,3,4,5,6,7
 //	botplace     ctf red=2 blue=2 noteam=0 teamskin=4, FL_BOTCLIENT=4
+//	botplace     arena in-arena=8 (arena1=8) on-team=8 fighting=3, FL_BOTCLIENT=8
 //
 // ONE shape, where there were three.  Four arms printing four layouts is how a
 // reader of this file ends up maintaining three regexes and a gap between them,
@@ -86,6 +104,11 @@ var (
 	reBots    = regexp.MustCompile(`^bots\s+(\d+)\s+bot\(s\)\s+of\s+(\d+)\s+client\(s\)`)
 	rePlace   = regexp.MustCompile(`^botplace\s+ctf\s+red=(\d+)\s+blue=(\d+)\s+noteam=(\d+)`)
 	reSeats   = regexp.MustCompile(`seats=(\d+)`)
+	// The arena ruleset's own placement row.  `in-arena` and `on-team` are
+	// separate numbers on purpose: a bot is put in arena 0 as an observer
+	// before it is on anybody's team, and under `arena` only the second of
+	// those counts as a player (BotCountsAsPlayer).
+	reArena = regexp.MustCompile(`^botplace\s+arena\s+in-arena=(\d+)\s+\(arena1=(\d+)\)\s+on-team=(\d+)`)
 )
 
 type row struct {
@@ -97,10 +120,12 @@ type row struct {
 	offCvar  string
 	offValue int
 
-	bots, clients   int
+	bots, clients     int
 	red, blue, noteam int
-	haveBots        bool
-	havePlace       bool
+	inArena, onTeam   int
+	haveBots          bool
+	havePlace         bool
+	haveArena         bool
 }
 
 // One `sv ruleset` block's bot rows.  Read from the LAST `ruleset ` line in the
@@ -144,6 +169,12 @@ func read(srv *playtest.Server) (row, error) {
 			r.red, _ = strconv.Atoi(m[1])
 			r.blue, _ = strconv.Atoi(m[2])
 			r.noteam, _ = strconv.Atoi(m[3])
+			continue
+		}
+		if m := reArena.FindStringSubmatch(l); m != nil {
+			r.haveArena = true
+			r.inArena, _ = strconv.Atoi(m[1])
+			r.onTeam, _ = strconv.Atoi(m[3])
 		}
 	}
 	if !r.haveBots {
@@ -176,7 +207,14 @@ func settle(srv *playtest.Server, want int, ticks int, placed bool, d time.Durat
 		}
 		hist = append(hist, r)
 		ok := r.clients == want
-		if placed && r.red+r.blue != r.bots {
+		if placed && r.havePlace && r.red+r.blue != r.bots {
+			ok = false
+		}
+		// The same requirement one ruleset over: under `arena` a bot is a
+		// player when it is ON A TEAM, not when it is standing in the arena --
+		// RA_BotJoinArena runs from the deferred ClientBegin, so a server can
+		// reach its client count with every bot still an observer in arena 0.
+		if placed && r.haveArena && (r.onTeam != r.bots || r.inArena != r.bots) {
 			ok = false
 		}
 		if ok {
@@ -190,10 +228,15 @@ func settle(srv *playtest.Server, want int, ticks int, placed bool, d time.Durat
 		time.Sleep(4 * time.Second)
 	}
 	last := hist[len(hist)-1]
-	if placed && last.clients == want {
+	if placed && last.clients == want && last.havePlace {
 		return hist, fmt.Errorf("settled at %d client(s) but %d of %d bot(s) never "+
 			"reached a side (red=%d blue=%d noteam=%d)", want,
 			last.bots-last.red-last.blue, last.bots, last.red, last.blue, last.noteam)
+	}
+	if placed && last.clients == want && last.haveArena {
+		return hist, fmt.Errorf("settled at %d client(s) but %d of %d bot(s) never "+
+			"reached a team (in-arena=%d on-team=%d)", want,
+			last.bots-last.onTeam, last.bots, last.inArena, last.onTeam)
 	}
 	return hist, fmt.Errorf("never settled at %d client(s) -- last was %d", want,
 		last.clients)
@@ -229,13 +272,31 @@ type phase struct {
 	cvars      map[string]string
 }
 
-func boot(q2, ref, ctf, lib, glad, dir string, port int, p phase) (*playtest.Server, error) {
+func boot(q2, ref, ctf, lib, glad, aas, dir string, port int, p phase) (*playtest.Server, error) {
 	os.RemoveAll(dir)
 	if err := colosseum.Install(dir, ref, ctf, lib); err != nil {
 		return nil, err
 	}
 	if err := colosseum.InstallBrain(dir, glad); err != nil {
 		return nil, err
+	}
+	// InstallBrain copies whatever meshes $GLADDIR carries, which on a checkout
+	// that keeps them elsewhere is none: the eight OSP ones are not in this
+	// tree (R-LIC-7) and `.github/aas.sh` puts them where a package wants them.
+	// Without the map's mesh the brain answers "no AAS file available" and
+	// destroys every bot that wanted it, so a fill measured there is measuring
+	// the mesh.  Resolved once in run() and named for THIS phase's map.
+	if aas != "" {
+		if src, err := os.ReadFile(aas); err == nil {
+			maps := filepath.Join(dir, "colosseum", "maps")
+			if err := os.MkdirAll(maps, 0o755); err != nil {
+				return nil, err
+			}
+			if err := os.WriteFile(filepath.Join(maps, p.mapname+".aas"),
+				src, 0o644); err != nil {
+				return nil, err
+			}
+		}
 	}
 	cv := map[string]string{
 		"g_ruleset": p.ruleset, "skill": "1", "admincode": "0",
@@ -268,6 +329,8 @@ func main() {
 	ctf := flag.String("ctf", "/usr/share/games/quake2/ctf", "Threewave paks")
 	lib := flag.String("lib", "", "game library under test")
 	glad := flag.String("gladdir", "", "gladiator-bot-restored checkout (the brain)")
+	aas := flag.String("aas", "", "directory holding <map>.aas, or one file; "+
+		"searched for if unset")
 	dir := flag.String("dir", "/tmp/q2playtest/botfill", "scratch install root")
 	port := flag.Int("port", 27994, "first server port")
 	secs := flag.Int("settle", 180, "seconds to wait for a fill to settle")
@@ -278,7 +341,7 @@ func main() {
 		fmt.Fprintln(os.Stderr, "need -q2proded, -lib and -gladdir")
 		os.Exit(2)
 	}
-	bad, err := run(*q2, *ref, *ctf, *lib, *glad, *dir, *port, *secs, *only)
+	bad, err := run(*q2, *ref, *ctf, *lib, *glad, *aas, *dir, *port, *secs, *only)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "ERROR:", err)
 		os.Exit(2)
@@ -293,14 +356,39 @@ func want(p string, only string) bool {
 	return only == "" || strings.Contains(only, p)
 }
 
-func run(q2, ref, ctf, lib, glad, root string, port, secs int, only string) (int, error) {
+// The reachability mesh for one map, from -aas, from $Q2AAS, or from the two
+// places this tree's own runs leave them.  A directory is taken as holding
+// `<map>.aas`; anything else is taken as the file itself.  "" means there is
+// none, which every caller reports rather than works around.
+func findAAS(explicit, mapname string) string {
+	cand := []string{explicit, os.Getenv("Q2AAS"), "/tmp/osp-aas",
+		"colosseum/maps", "/tmp/q2playtest/*/colosseum/maps"}
+	for _, c := range cand {
+		if c == "" {
+			continue
+		}
+		ms, _ := filepath.Glob(c)
+		for _, m := range ms {
+			if fi, err := os.Stat(m); err == nil && fi.IsDir() {
+				m = filepath.Join(m, mapname+".aas")
+			}
+			if fi, err := os.Stat(m); err == nil && !fi.IsDir() && fi.Size() > 0 {
+				return m
+			}
+		}
+	}
+	return ""
+}
+
+func run(q2, ref, ctf, lib, glad, aasarg, root string, port, secs int, only string) (int, error) {
 	settleFor := time.Duration(secs) * time.Second
 	bad := 0
 
 	// ---- A: dm, the fill reaching the map's own number --------------------
 	if want("A", only) {
 		fmt.Println("== A. dm / q2dm1 / maxclients 12 / botfill 1 ==")
-		srv, err := boot(q2, ref, ctf, lib, glad, filepath.Join(root, "a"), port,
+		srv, err := boot(q2, ref, ctf, lib, glad, findAAS(aasarg, "q2dm1"),
+			filepath.Join(root, "a"), port,
 			phase{ruleset: "dm", mapname: "q2dm1", maxclients: 12,
 				cvars: map[string]string{"botfill": "1"}})
 		if err != nil {
@@ -402,7 +490,8 @@ func run(q2, ref, ctf, lib, glad, root string, port, secs int, only string) (int
 	// ---- B: the control.  Off means off. ----------------------------------
 	if want("B", only) {
 		fmt.Println("\n== B. dm / q2dm1 / maxclients 12 / botfill 0 / bots_minplayers 4 (control) ==")
-		srv, err := boot(q2, ref, ctf, lib, glad, filepath.Join(root, "b"), port,
+		srv, err := boot(q2, ref, ctf, lib, glad, findAAS(aasarg, "q2dm1"),
+			filepath.Join(root, "b"), port,
 			phase{ruleset: "dm", mapname: "q2dm1", maxclients: 12,
 				cvars: map[string]string{"botfill": "0", "bots_minplayers": "4"}})
 		if err != nil {
@@ -424,7 +513,8 @@ func run(q2, ref, ctf, lib, glad, root string, port, secs int, only string) (int
 	// ---- C: ctf's arithmetic on a big map, and the maxclients clamp -------
 	if want("C", only) {
 		fmt.Println("\n== C. ctf / q2ctf1 / maxclients 4 / botfill 1 ==")
-		srv, err := boot(q2, ref, ctf, lib, glad, filepath.Join(root, "c"), port,
+		srv, err := boot(q2, ref, ctf, lib, glad, findAAS(aasarg, "q2ctf1"),
+			filepath.Join(root, "c"), port,
 			phase{ruleset: "ctf", mapname: "q2ctf1", maxclients: 4,
 				cvars: map[string]string{"botfill": "1"}})
 		if err != nil {
@@ -452,7 +542,8 @@ func run(q2, ref, ctf, lib, glad, root string, port, secs int, only string) (int
 	// ---- D: the shared pool binding, and what an even target is FOR -------
 	if want("D", only) {
 		fmt.Println("\n== D. ctf / q2ctf4 / maxclients 12 / botfill 1 ==")
-		srv, err := boot(q2, ref, ctf, lib, glad, filepath.Join(root, "d"), port,
+		srv, err := boot(q2, ref, ctf, lib, glad, findAAS(aasarg, "q2ctf4"),
+			filepath.Join(root, "d"), port,
 			phase{ruleset: "ctf", mapname: "q2ctf4", maxclients: 12,
 				cvars: map[string]string{"botfill": "1"}})
 		if err != nil {
@@ -541,7 +632,8 @@ func run(q2, ref, ctf, lib, glad, root string, port, secs int, only string) (int
 	// look perfectly healthy.
 	if want("E", only) {
 		fmt.Println("\n== E. tdm / q2dm1 / maxclients 12 / botfill 1 / team_maxplayers 3 ==")
-		srv, err := boot(q2, ref, ctf, lib, glad, filepath.Join(root, "e"), port,
+		srv, err := boot(q2, ref, ctf, lib, glad, findAAS(aasarg, "q2dm1"),
+			filepath.Join(root, "e"), port,
 			phase{ruleset: "tdm", mapname: "q2dm1", maxclients: 12,
 				cvars: map[string]string{
 					"botfill": "1", "team_maxplayers": "3",
@@ -565,9 +657,208 @@ func run(q2, ref, ctf, lib, glad, root string, port, secs int, only string) (int
 				fmt.Sprintf("clients=%d bots=%d, want 6", last.clients, last.bots)},
 		})
 		srv.Stop()
+		port++
+	}
+
+	// ---- F: the server nobody has joined yet ------------------------------
+	//
+	// `minimumplayers` fills an empty server and `botfill` did not, and under
+	// `arena` that is the whole of the difference between them: the fill asks
+	// the ARENA how many it wants, an arena with nobody in it wants none, and
+	// with nobody on the map that was every arena.  So a server started from
+	// `configs/arena.cfg` -- which sets `botfill 1` and zeroes the flat count
+	// beside it -- stood empty until somebody arrived, and the first person to
+	// arrive found the empty room the fill exists to prevent.
+	//
+	// q2dm1 under `arena` is an idmap: ONE pickup arena covering the map, whose
+	// target is its `info_player_deathmatch` count rounded down to even.  Ten,
+	// under a `maxclients` of 12 that does not clamp it and leaves two seats
+	// for the people who arrive in the second half.
+	if want("F", only) {
+		fmt.Println("\n== F. arena / q2dm1 / maxclients 12 / botfill 1 (nobody on the server) ==")
+		aas := findAAS(aasarg, "q2dm1")
+		if aas == "" {
+			fmt.Println("  [skip] no q2dm1.aas -- pass -aas <dir|file> or set $Q2AAS. " +
+				"The brain refuses a map without one and destroys every bot that " +
+				"wanted it, so this would be measuring the mesh and not the fill.")
+			// F is the last phase, so this is run()'s own return.  A phase
+			// added after it goes ABOVE this one, or this becomes an else.
+			return bad, nil
+		}
+		srv, err := boot(q2, ref, ctf, lib, glad, aas,
+			filepath.Join(root, "f"), port,
+			phase{ruleset: "arena", mapname: "q2dm1", maxclients: 12,
+				cvars: map[string]string{"botfill": "1"}})
+		if err != nil {
+			return bad, err
+		}
+		mark := srv.Len()
+		hist, serr := settle(srv, 10, 3, true, settleFor)
+		var cs []check
+		if len(hist) == 0 {
+			srv.Stop()
+			return bad, fmt.Errorf("F: no sample at all: %v", serr)
+		}
+		last := hist[len(hist)-1]
+		cs = append(cs,
+			check{"arena/the row is present, on, and names this ruleset",
+				last.on && last.ruleset == "arena",
+				fmt.Sprintf("on=%v ruleset=%q", last.on, last.ruleset)},
+			check{"arena/the target is the pickup arena's, and it names the arena",
+				last.want == 10 && strings.Contains(last.detail, "arena 1"),
+				fmt.Sprintf("want=%d detail=%q, want 10 from arena 1 (q2dm1 carries 10 spawns)",
+					last.want, last.detail)},
+			// The marker is the whole point of the row here: "arena 1 want=10"
+			// says the same thing about an arena with ten people in it.
+			check{"arena/...and says it is a STAGING target, with nobody on the map",
+				strings.Contains(last.detail, "staging"),
+				fmt.Sprintf("detail=%q", last.detail)},
+			check{"arena/the server filled to it with nobody on it",
+				serr == nil && last.clients == 10,
+				fmt.Sprintf("clients=%d bots=%d over %d sample(s)",
+					last.clients, last.bots, len(hist))},
+			// Being IN the arena is not being on a team, and under `arena` only
+			// the second is a player -- a bot that never got a team is a
+			// spectator in arena 0 that the fill would keep asking to replace.
+			check{"arena/every bot reached a team in that arena",
+				last.haveArena && last.bots > 0 && last.onTeam == last.bots &&
+					last.inArena == last.bots,
+				fmt.Sprintf("in-arena=%d on-team=%d of %d bot(s)",
+					last.inArena, last.onTeam, last.bots)},
+			// Reaching the number is half of it; the add and the remove arms
+			// agreeing on it is the other half, and a count taken once cannot
+			// tell them apart from a server oscillating around it.
+			check{"arena/nobody was added and thrown out again on the way",
+				len(srv.GrepFrom(mark, `disconnected`)) == 0,
+				fmt.Sprintf("%d disconnect(s) while filling",
+					len(srv.GrepFrom(mark, `disconnected`)))},
+		)
+
+		// ...and then people arrive, which is what the staging was for.  The
+		// pickup teams are the mod's own -- `#1 Pickup Red` and `#1 Pickup
+		// Blue`, created at map load and already in the arena -- and joining
+		// one is a menu pick, because RA2 has no console command for it.
+		//
+		// BOTH of them join BLUE, and that is the half this phase used to miss.
+		// One person a side is symmetric, so a removal arm that never looks at
+		// the sides passes it by luck: the bots alternate by client slot
+		// because RA_BotJoinArena seats each on the smaller team, so taking the
+		// lowest slot takes one off each side and the arena stays level.  Put
+		// both people on ONE side and that luck runs out -- the arena is still
+		// two over its target, but the two it must give up are both Blue's.
+		// See the `sides are still level` pair below; ctf-small is the same
+		// check one ruleset over and has had it since the fill was written.
+		joinside := []string{"Blue", "Blue"}
+		if serr == nil {
+			var people []*playtest.Bot
+			joinerr := ""
+			mark2 := srv.Len()
+			for i, side := range joinside {
+				b := playtest.NewBot(fmt.Sprintf("person%d", i), "127.0.0.1", port)
+				if err := b.Start(60 * time.Second); err != nil {
+					joinerr = err.Error()
+					break
+				}
+				people = append(people, b)
+				if err := ra2.JoinTeam(b, ra2.PickupTeam(1, side)); err != nil {
+					joinerr = err.Error()
+					break
+				}
+			}
+			if joinerr != "" {
+				cs = append(cs, check{"arena/two people can join the pickup teams",
+					false, joinerr})
+			} else {
+				h2, e2 := settle(srv, 10, 2, false, settleFor)
+				l2 := h2[len(h2)-1]
+				cs = append(cs,
+					// The arena's target has not moved -- it is the map's, not
+					// the people's -- so two people cost two bots.  This is the
+					// non-OSP removal arm, which removes down to `want` and not
+					// to `want + 1`; phase A is the control for that asymmetry.
+					check{"arena/two people arriving cost two bots",
+						e2 == nil && l2.bots == 8 && l2.clients == 10,
+						fmt.Sprintf("bots=%d clients=%d (want 8 and 10)",
+							l2.bots, l2.clients)},
+					check{"arena/...and the row stops calling the target a staging one",
+						!strings.Contains(l2.detail, "staging"),
+						fmt.Sprintf("detail=%q", l2.detail)},
+					check{"arena/...with the people and the bots in the same arena",
+						l2.haveArena && l2.onTeam == l2.bots,
+						fmt.Sprintf("in-arena=%d on-team=%d of %d bot(s)",
+							l2.inArena, l2.onTeam, l2.bots)})
+
+				// WHICH two bots, which is a different question from how many
+				// and the one `sv ruleset` cannot answer: its arena row counts
+				// bots and the sides are a fact about everybody in the arena.
+				// add_to_team and remove_from_team are the only two places
+				// that print a pickup team by name, so the log is the census.
+				red, blue := arenaSides(srv, 1)
+				took := sideTally(srv.GrepFrom(mark2,
+					`has been removed from team .*Pickup`))
+				cs = append(cs,
+					// Both people are on Blue, so Blue is the side carrying two
+					// too many and Blue is the side that pays for them.  Before
+					// the fill named the bot by TEAM this took one off each,
+					// and the arena sat two apart at its correct total for the
+					// rest of the map -- an arena AT its target is never
+					// selected again, so nothing came back for it.
+					check{"arena/the bots removed came off the side the people joined",
+						took["Red"] == 0 && took["Blue"] == 2,
+						fmt.Sprintf("removed red=%d blue=%d (want 0 and 2)",
+							took["Red"], took["Blue"])},
+					check{"arena/...and the sides are still level",
+						red == 5 && blue == 5,
+						fmt.Sprintf("red=%d blue=%d, everybody counted (want 5v5)",
+							red, blue)})
+			}
+			for _, b := range people {
+				b.Disconnect()
+			}
+		}
+		bad += report(cs)
+		srv.Stop()
 	}
 
 	return bad, nil
+}
+
+// Who is on each pickup side of an arena, PEOPLE INCLUDED, replayed from the
+// log because nothing on the wire carries it: `sv ruleset`'s arena row counts
+// bots, and the whole point of a side check is that a person on a side is one
+// of its members.  add_to_team and remove_from_team are the only two places
+// that name a pickup team (`#N Pickup Red`), and they are printed for a person
+// and a bot alike, so adds minus removes is the membership.
+func arenaSides(srv *playtest.Server, arena int) (red, blue int) {
+	side := map[string]*int{"Red": &red, "Blue": &blue}
+	for _, ln := range srv.Grep(fmt.Sprintf(
+		`has been (added to|removed from) team .*#%d Pickup`, arena)) {
+		for name, n := range side {
+			if !strings.Contains(ln, "Pickup "+name) {
+				continue
+			}
+			if strings.Contains(ln, "added to team") {
+				*n++
+			} else {
+				*n--
+			}
+		}
+	}
+	return red, blue
+}
+
+// The same lines counted by side rather than summed, for "which side did the
+// fill take them off".
+func sideTally(lines []string) map[string]int {
+	t := map[string]int{"Red": 0, "Blue": 0}
+	for _, ln := range lines {
+		for name := range t {
+			if strings.Contains(ln, "Pickup "+name) {
+				t[name]++
+			}
+		}
+	}
+	return t
 }
 
 func abs(n int) int {
