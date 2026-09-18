@@ -410,23 +410,59 @@ RUN set -eu; \
 #
 # CC is the shim rather than `gcc -m32` for the same reason the game library
 # uses it: `botlib:` re-enters make, and a CC carrying a space does not survive
-# that intact.
+# that intact.  GLAD_SERVERFIX survives that re-entry unaided -- a variable set
+# on make's command line is handed to sub-makes through MAKEFLAGS.
+#
+# GLAD_SERVERFIX=1 is not optional for a SERVER.  That submodule is a
+# reconstruction of the 1999 binaries, so its DEFAULT build reproduces them
+# bugs and all -- that is the build its two ASM-matching oracles measure, and
+# it is the right default there.  The gate is how the original bugs that are
+# fatal or simply wrong on a live server are built out, each replaced by
+# Quake III's own later fix of the same code rather than by anything invented
+# (Mr. Elusive wrote both bot libraries).  Four of the five reach THIS object:
+#
+#   aas-linkstack-overflow       AAS_AASLinkEntity's BSP traversal queue is a bare
+#                                int[64] with no bound on the push, and linkstack[64]
+#                                is exactly the return-address slot.  Stock maps peak
+#                                at 40; densely subdivided custom maps do exceed 64.
+#   route-start-areatraveltimes  AAS_UpdateAreaRoutingCache seeds the start node with
+#                                reachability row 0 of the goal area, which an area
+#                                with no reachabilities does not have: the row array
+#                                is zero-length, `[0]` reads past the blob, and where
+#                                that read is a 0 the link loop dereferences NULL.
+#   bot-item-stale-iteminfo      BotUpdateEntityItems re-links a level item through a
+#                                stale index, so a bot navigates to one item using
+#                                another item's bounding box.
+#   script-lu-suffix-guard       PS_ReadNumber's l/u numeric-suffix guard, an operator
+#                                precedence slip in the original.
+#
+# The fifth (ctf-grapple-stale-pointer, in G_FreeEdict) is game.so's, which
+# this stage does not build.  The submodule's own release workflow sets the same
+# flag for the same reason: a release is for playing, not for measuring.
 RUN set -eu; \
     cd /src-colosseum/vendor/gladiator-bot-restored; \
     [ -f Makefile ] || { echo 'the gladiator-bot-restored submodule is not checked out in the build context - run: git -C <clone> submodule update --init'; exit 1; }; \
-    make botlib CC=i686-linux-gnu-gcc YQ2_ARCH=i386; \
+    make botlib GLAD_SERVERFIX=1 CC=i686-linux-gnu-gcc YQ2_ARCH=i386; \
     install -Dm755 release/gladiator.so /out-colosseum/gladiator.so; \
     install -Dm644 assets/pak7.pak     /out-colosseum/pak7.pak; \
     install -Dm644 assets/bots.cfg     /out-colosseum/bots.cfg; \
     install -Dm755 tools/vendor/bspc/bspc-linux-x86 /out-colosseum/bspc
 
+# The GLAD_SERVERFIX check is that one string.  It is the PRT_ERROR text of the
+# overflow guard Q3 added, so it exists in the preprocessed source only on the
+# gated arm: no gate, no string.  Checking the flag any other way would only
+# prove it was typed on the command line, not that it reached the object -- and
+# a silently faithful botlib is exactly the failure this has to catch, because
+# it runs perfectly until a map subdivides densely enough to smash the frame.
 RUN set -eu; \
     readelf -h /out-colosseum/gladiator.so | grep -q 'ELF32' \
         || { echo 'gladiator.so is not ELF32 - YQ2_ARCH did not take'; exit 1; }; \
     readelf --dyn-syms -W /out-colosseum/gladiator.so | grep -q ' GetBotAPI$' \
         || { echo 'gladiator.so does not export GetBotAPI - the game could dlopen it and find nothing'; exit 1; }; \
+    strings -a /out-colosseum/gladiator.so | grep -q 'AAS_LinkEntity: stack overflow' \
+        || { echo 'gladiator.so carries no GLAD_SERVERFIX code - the faithful 1999 bugs are built in'; exit 1; }; \
     readelf -h /out-colosseum/bspc | grep -q 'ELF32' || { echo 'bspc is not ELF32'; exit 1; }; \
-    echo "botlib OK (ELF32, exports GetBotAPI); pak7.pak $(stat -c%s /out-colosseum/pak7.pak) bytes, bots.cfg $(grep -c . /out-colosseum/bots.cfg) lines, bspc staged"
+    echo "botlib OK (ELF32, exports GetBotAPI, GLAD_SERVERFIX in); pak7.pak $(stat -c%s /out-colosseum/pak7.pak) bytes, bots.cfg $(grep -c . /out-colosseum/bots.cfg) lines, bspc staged"
 
 # ---------------------------------------------------------------------------
 # The colosseum runtime                                      (--target colosseum)

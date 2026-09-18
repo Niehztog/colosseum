@@ -63,11 +63,17 @@
 # the rest of the distribution and its source is the submodule pin, which
 # travels with the tag this package was cut from.
 #
-# THE BRAIN CHECK is the mesh check's argument in another format.  A brain
-# built for the HOST instead of the target is a perfectly well-formed shared
-# object that no operator's engine can load, and nothing about the package
-# would look wrong -- so the staged copy is read back and the fields that name
-# its target compared against the library it will sit beside.
+# THE BRAIN CHECK is the mesh check's argument in another format, and it asks
+# two questions of the bytes.  A brain built for the HOST instead of the target
+# is a perfectly well-formed shared object that no operator's engine can load,
+# and nothing about the package would look wrong -- so the staged copy is read
+# back and the fields that name its target compared against the library it will
+# sit beside.  A brain built without `GLAD_SERVERFIX=1` looks wrong in even
+# fewer ways: it is the submodule's faithful default, the 1999 bugs included,
+# and it plays perfectly until a map subdivides densely enough for
+# AAS_AASLinkEntity to walk off its `int[64]` and over the return address.  The
+# packaging job passes the gate (R-BUILD-11) and the same read-back proves it
+# reached the object, because a flag on a command line is not a flag in a binary.
 #
 # WHAT DOES NOT: game assets of any kind, the brain's own assets (`pak7.pak`
 # and the `bots.cfg` bot list are the Gladiator distribution's, R-LIC-2) and a
@@ -176,10 +182,11 @@ esac
 [ -f "$GLADDIR/release/$BRAIN_BUILT" ] || {
   echo "package.sh: no $BRAIN_BUILT in $GLADDIR/release -- was the brain built?" >&2
   echo "  Every package carries one, for its own platform; see the header." >&2
-  echo "  Build it with: make -C vendor/gladiator-bot-restored botlib" >&2
-  echo "  A cross-compiled target needs its own CC= there, as the release" >&2
-  echo "  workflow passes; a submodule that was never checked out has no" >&2
-  echo "  Makefile at all." >&2
+  echo "  Build it with: make -C vendor/gladiator-bot-restored botlib GLAD_SERVERFIX=1" >&2
+  echo "  That flag is not optional for a package -- see the header, and the" >&2
+  echo "  gate check below.  A cross-compiled target needs its own CC= there," >&2
+  echo "  as the release workflow passes; a submodule that was never checked" >&2
+  echo "  out has no Makefile at all." >&2
   exit 1
 }
 cp "$GLADDIR/release/$BRAIN_BUILT" "$STAGE/colosseum/$BRAIN"
@@ -278,6 +285,23 @@ if [ "$want" != "$got" ]; then
   echo "package.sh: colosseum/$BRAIN is not built for the same target as $LIB." >&2
   echo "  library header $want, brain header $got." >&2
   echo "  A brain built for the host loads on nobody's server; see the header." >&2
+  exit 1
+fi
+
+# The second question, and this one has the same answer on all three platforms.
+# `AAS_LinkEntity: stack overflow` is the PRT_ERROR text of the overflow guard
+# Quake III added, so the preprocessor emits it on the gated arm and nowhere
+# else: no gate, no string.  `server/Dockerfile` checks its own build the same
+# way, and strings(1) reads a PE and a Mach-O as willingly as an ELF.
+if ! command -v strings >/dev/null 2>&1; then
+  echo "package.sh: strings(1) is missing -- the gate check cannot run." >&2
+  echo "  This job stops here rather than ship an unverified brain." >&2
+  exit 1
+fi
+if ! strings -a "$STAGE/colosseum/$BRAIN" | grep -q 'AAS_LinkEntity: stack overflow'; then
+  echo "package.sh: colosseum/$BRAIN carries no GLAD_SERVERFIX code." >&2
+  echo "  It is the faithful 1999 reconstruction, fatal bugs and all; see the header." >&2
+  echo "  Build it with: make -C vendor/gladiator-bot-restored botlib GLAD_SERVERFIX=1" >&2
   exit 1
 fi
 

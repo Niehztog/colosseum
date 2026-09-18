@@ -75,6 +75,25 @@
 # produces, and a brain that needs a mingw runtime beside it is as unshippable
 # as a game library that does.
 #
+# AND IT IS BUILT WITH THE FIXES IN.  `GLAD_SERVERFIX=1` is that submodule's
+# deviation gate, and a package is on the far side of its default: the tree is a
+# reconstruction of the 1999 binaries, so its DEFAULT build reproduces them bugs
+# and all -- that is the build its two ASM-matching oracles measure, and the
+# right default there.  A download is for playing, so every job here asks for
+# the other build.  The gate replaces the original bugs that are fatal or simply
+# wrong in play with Quake III's own later fix of the same code rather than with
+# anything invented -- Mr. Elusive wrote both bot libraries -- and four of the
+# five are in this object: AAS_AASLinkEntity pushing unbounded into an `int[64]`
+# whose 65th slot is the return address, AAS_UpdateAreaRoutingCache seeding the
+# start node with a reachability row an area without reachabilities does not
+# have, BotUpdateEntityItems re-linking a level item through a stale index so a
+# bot navigates to one item using another one's bounding box, and
+# PS_ReadNumber's l/u suffix guard.  The submodule's own release workflow and
+# `server/Dockerfile` pass the flag for the same reason, and `package.sh` reads
+# the staged brain back for the one string only the gated arm can put there -- a
+# flag typed on a command line is not a flag that reached the object, and a
+# faithful brain plays perfectly right up to the first densely subdivided map.
+#
 # Checking the submodule out has one further effect and it is wanted: `make
 # check` runs `tools/botabi.py` for real instead of skipping itself, so the
 # game<->brain ABI is compared at release time, against the pin the brain
@@ -134,9 +153,11 @@ jobs:
         run: make ${{ matrix.target }} API=old
       # The same compiler the library was built with, and YQ2_ARCH with it on
       # the cross row: the submodule reads the architecture off `uname -m`,
-      # which on that row is the host's and not the target's.
+      # which on that row is the host's and not the target's.  GLAD_SERVERFIX=1
+      # crosses `botlib:`'s re-entry into make unaided -- a variable set on
+      # make's command line is handed to sub-makes through MAKEFLAGS.
       - name: Build the bot brain
-        run: make -C vendor/gladiator-bot-restored botlib ${{ matrix.botmake }}
+        run: make -C vendor/gladiator-bot-restored botlib GLAD_SERVERFIX=1 ${{ matrix.botmake }}
       - name: Fetch the navigation meshes
         run: .github/aas.sh
       - name: Package
@@ -169,8 +190,9 @@ jobs:
       # A mingw CC is also what makes the submodule build a PE at all: with the
       # runner's own compiler it would emit an ELF `gladiator.so`, and
       # package.sh would fail this job for want of a `gladiator.dll`.
+      # GLAD_SERVERFIX=1 -- see the header and the linux job.
       - name: Build the bot brain
-        run: make -C vendor/gladiator-bot-restored botlib ${{ matrix.botmake }}
+        run: make -C vendor/gladiator-bot-restored botlib GLAD_SERVERFIX=1 ${{ matrix.botmake }}
       - name: Check what the brain imports (R-SEC-6a, for the DLL that ships)
         run: sh tools/pedeps.sh vendor/gladiator-bot-restored/release/gladiator.dll
       - name: Fetch the navigation meshes
@@ -216,9 +238,10 @@ jobs:
       # No CC and no arch to pass: the runner is the target here, which is the
       # same reason these two jobs are the ones that are not cross-compiled.
       # The submodule emits `gladiator.dylib`; package.sh ships it under the
-      # name the game dlopens.
+      # name the game dlopens.  GLAD_SERVERFIX=1 -- see the header and the
+      # linux job.
       - name: Build the bot brain
-        run: make -C vendor/gladiator-bot-restored botlib
+        run: make -C vendor/gladiator-bot-restored botlib GLAD_SERVERFIX=1
       - name: Fetch the navigation meshes
         run: .github/aas.sh
       - name: Package
