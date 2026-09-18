@@ -1,0 +1,76 @@
+# An EXAMPLE, and deliberately not a working deployment: every value below is a
+# choice, and the ones that matter -- which gamedir, which port, where the game
+# data lives, what the server calls itself -- belong to whoever is running it,
+# not to this repository.  Copy it somewhere private, fill it in, keep it there.
+#
+# What is NOT an example, and should survive the copy intact:
+#
+#   init: true          without it, `docker stop` takes the full 10s grace
+#                       period and then SIGKILLs the game (exit 137).  A shell
+#                       running `cmd | filter | tee` as PID 1 does not forward
+#                       SIGTERM to its children; Docker's bundled tini signals
+#                       the whole process group, which reaches the game.
+#                       Measured: 143 and under a second with it, 137 and
+#                       ~10.5s without.
+#
+#   the log cap         `tee -a` inside the container has no size cap of its
+#                       own, and neither does the json-file driver by default.
+#
+#   one image, many     GAME_ABI_HACK is a WHOLE-BINARY compile-time switch, so
+#   servers             an engine and the game library it loads must agree on
+#                       it.  One image can serve any number of servers that
+#                       share that setting -- what is per-server is the
+#                       ENVIRONMENT, not the image.  If one mod ever needs the
+#                       opposite setting, build it a SECOND image rather than
+#                       flipping the arg: getting it backwards gives a server
+#                       that starts fine and dies on the first map, inside the
+#                       mod's own physics code, looking like a mod bug.
+#
+# The game LIBRARY is not in this image and is not installed by it: it lives in
+# the bind-mounted gamedir, because q2admin dlopens it from there, and writing
+# it from an entrypoint on every start would overwrite the operator's
+# deliberate version choice.  scripts/deploy-colosseum-live.sh installs it.
+
+x-build: &build
+  # This directory -- the one holding the Dockerfile and the q2pro/ patches.
+  context: /path/to/colosseum/server
+  dockerfile: Dockerfile
+  # The engine-and-q2admin target, and the default.  `--target colosseum`
+  # builds the game library instead, and needs a `colosseum-src` named context;
+  # this one does not.
+  target: server
+  args:
+    # 'disabled' is right for any game library built with a modern gcc, which
+    # includes colosseum.  'enabled' is for old binaries that expect i386's
+    # callee-pops struct-return convention for gi.trace().
+    GAME_ABI_HACK: 'disabled'
+
+services:
+  q2pro-example:
+    build: *build
+    image: q2pro-server
+    environment:
+      # The gamedir under the mounted game data, the address to advertise, the
+      # port, and a cfg exec'd AFTER server1.cfg so it wins.  A command-line
+      # `+set` cannot do that last one: q2pro applies every +set in an early
+      # phase, before any +exec, whatever the argument order.
+      Q2_GAMEDIR: 'baseq2'
+      Q2_IP: 'localhost'
+      Q2_PORT: '27910'
+      Q2_OVERRIDE_CFG: 'q2pro-override.cfg'
+    restart: always
+    init: true
+    ports:
+      - "27910:27910/udp"
+      - "27910:27910/tcp"
+    volumes:
+      # The game DATA, bind-mounted.  The engine is in the image; this is not.
+      # Editing a .cfg in here and running `docker compose up -d` does nothing
+      # -- compose sees no image change and reports "Running" while the old
+      # values stay live in memory.  Use `docker compose restart`.
+      - /path/to/quake2:/opt/quake2
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"

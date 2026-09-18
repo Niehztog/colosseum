@@ -1,0 +1,57 @@
+Pass the edict to gi.cprintf, not to a variadic format argument
+
+Applies to q2admin at commit 15b7a7b5f727aa3de303ab9660d4f195aea4f506.
+`server/enginepatch.sh` checks that it still does.
+
+Carried rather than forked: upstream `packetflinger/q2admin` is the build's
+source and stays that way, because one line is not a fork's worth of divergence
+-- and a fork pinned for one line is a fork somebody has to remember to unpin.
+This project ran on `Niehztog/q2admin` until it did, and the pin went stale
+within days: the branch was rebased, the pinned SHA stopped being reachable
+from any branch, and `git clone` + `git checkout --detach` -- which is exactly
+what the Dockerfile does -- failed with "reference is not a tree".
+
+WHAT IT FIXES
+
+`q2a_printf` is `void q2a_printf(char *fmt, ...)` (`g_util.h:34`): a console
+printer whose first argument is the format string.  `c78b84c "Added q2a_printf
+for console output"` swapped a `gi.cprintf` call in `reloadWhoisFileRun` for it
+WITHOUT dropping the two arguments that belonged to the old signature, so the
+`edict_t *` is passed as the format and `PRINT_HIGH` and the real message
+follow it as varargs:
+
+    q2a_printf(ent, PRINT_HIGH, "whois file reloaded.\n");
+
+The other twenty-one `q2a_printf` calls in the tree are correct; this is the
+only site, and it is the only one that had an `ent` to get wrong.
+
+TWO CONSEQUENCES, and the build hits the first one.
+
+  * `-Wincompatible-pointer-types` is an ERROR from GCC 14, so Debian trixie
+    refuses the file outright -- `g_whois.c:324:16: error`, Makefile:206,
+    exit 2.  Confirmed by building upstream tip here before writing this.
+  * On an older compiler it is a warning, and the call reads an `edict_t` as a
+    format string: undefined behaviour waiting for somebody to type the
+    command.
+
+WHY gi.cprintf AND NOT A CORRECTED q2a_printf
+
+The message is addressed to whoever typed the command, which is what the `ent`
+was for; `c78b84c` replaced `gi.cprintf(ent, PRINT_HIGH, "Whois file
+reloaded.\n")` and the console printer cannot say that.  `g_checkvar.c:171` is
+the same sentence for the same kind of command and still spells it
+`gi.cprintf(ent, PRINT_HIGH, "Check-Variables reloaded.\n")`.  So this restores
+the call and keeps upstream's re-worded message, which makes it one token wide
+and gives the next bump the smallest possible thing to conflict with.
+
+diff --git a/g_whois.c b/g_whois.c
+index e364c13..03ab9e2 100644
+--- a/g_whois.c
++++ b/g_whois.c
+@@ -321,5 +321,5 @@ void whois_read_file(void) {
+  */
+ void reloadWhoisFileRun(int startarg, edict_t *ent, int client) {
+     whois_read_file();
+-    q2a_printf(ent, PRINT_HIGH, "whois file reloaded.\n");
++    gi.cprintf(ent, PRINT_HIGH, "whois file reloaded.\n");
+ }
