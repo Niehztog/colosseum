@@ -932,6 +932,49 @@ static int RA_AutoArena(void)
     return RA_StagingArena();
 }
 
+// A placement is not a resurrection.
+//
+// Every arena placement ends in SetObserverMode() writing `movetype` straight
+// at the edict: a fighter walks (OMODE_NORMAL), and so does a lounge observer
+// on a map whose arenas have an observer area of their own -- `active` false,
+// which is every real RA2 map.  Neither arm consults `deadflag`, and nothing
+// else on the round-start path does either: give_ammo() restores the health
+// and the inventory, not the death.
+//
+// player_die() holds the respawn back a full second -- `respawn_framenum =
+// level.framenum + 1.0f * BASE_FRAMERATE`, which is the death animation -- and
+// a placement inside that second leaves a client walking and still dead.
+// ClientBeginServerFrame's arena arm then respawns it on the frame the timer
+// expires and pulls it straight back out of the round it has just been put in,
+// leaving its team in `activeteams` with nobody in the arena, which
+// fight_done() reads as a wipe and ends the round on.  It used to do worse:
+// the respawn queued a WALKING corpse and the next G_RunEntity() ended the
+// game library with "SV_Physics: bad movetype 4" (see CopyToBodyQue,
+// p_client.c, which is where that stopped being fatal).
+//
+// So finish the previous life before starting the next one -- the call the
+// timer would have made, made now.  The corpse is left where the client died
+// rather than where it is being sent, and PutClientInServer clears everything
+// player_die() stamped, which is more of it than a hand-written list would
+// remember: `svflags & SVF_DEADMONSTER`, the death animation, the blanked
+// weapon model, `pm_type`.  It is the sequence an ordinary round already runs
+// -- die, respawn into the lounge, be placed by the next fill -- with the
+// frames between it removed, and it cannot recurse, because respawn() clears
+// `deadflag` before PutClientInServer's own tail re-enters move_to_arena().
+//
+// Two callers, and only two place a client that may have been alive a moment
+// ago: SendTeamToArena is every fill and every team join, and RA_BotJoinArena
+// is the bot arm RA_BotFollowPeople reaches with a bot it has taken out of a
+// round in another arena -- which is the sequence that found this, live on
+// `ra2map27`.  Before the caller's own state writes, because
+// PutClientInServer runs ClientUserinfoChanged and reinit_player and would
+// otherwise undo the skin and the FIGHT_ALIVE they had just set.
+static void RA_ResolvePendingDeath(edict_t *ent)
+{
+    if (ent->deadflag)
+        respawn(ent);
+}
+
 void RA_BotJoinArena(edict_t *ent)
 {
     int     arenanum, k;
@@ -944,6 +987,12 @@ void RA_BotJoinArena(edict_t *ent)
         return;
     if (num_arenas <= 0)
         return;
+
+    // Ahead of the three refusals below as well as the three placements: a bot
+    // that stays in arena 0 has still been taken off a team mid-round by
+    // RA_BotFollowPeople, and leaving it dead there is the same unresolved
+    // death one room over.
+    RA_ResolvePendingDeath(ent);
 
     arenanum = Q_atoi(Info_ValueForKey(ent->client->pers.userinfo, "arena"));
     if (arenanum < 1 || arenanum > num_arenas)
@@ -2761,6 +2810,8 @@ void SendTeamToArena(qmenu_t *team, int arenanum, bool observer, bool announce)
     while (mnode->next) {
         mnode = mnode->next;
         ent = (edict_t *)mnode->it;
+
+        RA_ResolvePendingDeath(ent);
 
         if (TEAM(team)->skin != -1)
             setteamskin(ent, ent->client->pers.userinfo, TEAM(team)->skin);

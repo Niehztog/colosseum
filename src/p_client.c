@@ -1681,7 +1681,37 @@ static void CopyToBodyQue(edict_t *ent)
     body->solid = ent->solid;
     body->clipmask = ent->clipmask;
     body->owner = ent->owner;
-    body->movetype = ent->movetype;
+    // A corpse is a dropped object, and MOVETYPE_TOSS is the only physics it
+    // ever wants.  baseq2 copies the player's instead -- `body->movetype =
+    // ent->movetype`, `baseq2:p_client.c:915` -- and gets away with it because
+    // the copy is a tautology there: respawn() is this function's only caller,
+    // it skips a MOVETYPE_NOCLIP spectator, and player_die() stamps
+    // MOVETYPE_TOSS on everybody else as its third statement.  So
+    // `ent->movetype` IS MOVETYPE_TOSS at this line in every case baseq2 can
+    // reach, and the copy is baseq2 spelling a constant the long way.
+    //
+    // Under `arena` it is not a tautology.  RA2 re-places a client by writing
+    // at the edict -- SetObserverMode() inside move_to_arena() -- and hands out
+    // MOVETYPE_WALK to a fighter and, on a map whose arenas have an observer
+    // area of their own, to a lounge observer as well.  A client placed while
+    // its death is still pending is therefore WALKING and dead at once, and the
+    // respawn that follows queues a `bodyque` edict carrying MOVETYPE_WALK.
+    // G_RunEntity() has no case for it, so the next frame ends the game:
+    // `SV_Physics: bad movetype 4`, gi.error(), ShutdownGame, a server that
+    // answers no status query while its container reads healthy.  Seen live on
+    // `ra2map27` (2026-09-18): seven bots followed a player into arena 1 and
+    // the round filled on top of one that had died in the arena it came from.
+    //
+    // RA_ResolvePendingDeath() (arena.c) is where that state is now prevented,
+    // and this line is where it stops being fatal -- the donor answers it here
+    // too.  RA2 does not carry baseq2's copy: it writes `ent->movetype =
+    // MOVETYPE_TOSS` (`port_ra2:p_client.c`), the player and not the body,
+    // which respawn()'s own PutClientInServer overwrites at once, so what RA2
+    // ships is a body left holding whatever its `bodyque` slot last had --
+    // MOVETYPE_NONE out of InitBodyQue.  The intent is plain and the side is a
+    // slip.  Spelled on the body it is both donors at once: the value baseq2
+    // always computed, and a defined one for the states only arena produces.
+    body->movetype = MOVETYPE_TOSS;
     body->groundentity = ent->groundentity;
 
     body->die = body_die;

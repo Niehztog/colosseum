@@ -948,7 +948,22 @@ void G_RunEntity(edict_t *ent)
         SV_Physics_NewToss(ent);
         break;
     default:
-        gi.error("SV_Physics: bad movetype %i", ent->movetype);
+        // The donor's message names the movetype and nothing else, which is
+        // the whole of what a `gi.error` here tells you: the game library is
+        // gone, the engine stays up answering no status query, and the only
+        // fact recovered from the console log is a number that is already in
+        // the source.  The one time this fired -- a `bodyque` slot carrying a
+        // walking player's movetype (CopyToBodyQue, p_client.c) -- WHICH edict
+        // was never established from the log at all, and the chain had to be
+        // read out of the source instead.  The edict is in hand at the point of
+        // the abort, so it is said out loud; `maxclients` and `body_que` are
+        // there because the index alone does not say which side of the client
+        // range the edict is on, and that is the first question asked of it.
+        gi.error("SV_Physics: bad movetype %i (edict %d, classname %s, "
+                 "maxclients %d, body_que %d)",
+                 ent->movetype, (int)(ent - g_edicts),
+                 ent->classname ? ent->classname : "(null)",
+                 game.maxclients, level.body_que);
     }
 
 //PGM

@@ -699,3 +699,32 @@ WORKDIR /opt/quake2
 # cheap way to enforce one mid-stream. logrotate with `copytruncate` is the
 # working answer, because tee holds the file open for the container's life.
 CMD mkdir -p /opt/quake2/$Q2_GAMEDIR/logs && script -qefc "stty -onlcr; /opt/q2pro/q2proded +set basedir /opt/quake2 +set libdir /opt/quake2 +set homedir /opt/quake2 +set dedicated 1 +set game $Q2_GAMEDIR +set ip $Q2_IP +set port $Q2_PORT +set net_port $Q2_PORT +set map_override_path maps +exec server1.cfg +exec $Q2_OVERRIDE_CFG" /dev/null 2>&1 | /bin/sh /opt/filter-rcon-status.sh | tee -a /opt/quake2/$Q2_GAMEDIR/logs/console.log
+
+# ...and "the process is alive" is not "the server is serving".
+#
+# `gi.error()` ends the GAME, not the engine. q2proded prints ShutdownGame,
+# drops `sv_running` and keeps running: the container stays up, RestartCount
+# stays 0, `restart: always` never fires, `docker ps` reads `Up N hours` -- and
+# the server answers no out-of-band status at all, so it is gone from every
+# browser. Measured 2026-09-18: 25 minutes of silence that looked healthy from
+# outside, after an arena round killed the game library (SPECS R-RA-9).
+#
+# So the probe is the thing a browser asks: a real UDP status query on the
+# port this container serves. It is the only check that distinguishes the two,
+# because every cheaper one -- the PID, the port being bound, the log file
+# growing -- is still true of a dead game.
+#
+# bash's /dev/udp rather than a netcat: it connects the socket, so the reply
+# comes back on the same descriptor, and it needs no package the runtime image
+# does not already have. A live server answers `\xff\xff\xff\xffprint\n` plus
+# the serverinfo string, which is far more than the 64 bytes read here; a dead
+# one answers nothing and `head` blocks until --timeout ends it.
+#
+# WHAT THIS DOES NOT DO. Docker's restart policy does not act on health --
+# `restart: always` restarts a container that EXITS, and this one does not.
+# The healthcheck makes the failure visible (`docker ps` says `unhealthy`, and
+# `docker inspect` carries the failing output); acting on it is the operator's,
+# with a watcher or an orchestrator that understands health. The compose
+# example says so beside `restart: always`.
+HEALTHCHECK --interval=30s --timeout=5s --start-period=60s --retries=3 \
+    CMD bash -c 'exec 3<>/dev/udp/127.0.0.1/${Q2_PORT} && printf "\377\377\377\377status\n" >&3 && head -c 64 <&3 | grep -q print'

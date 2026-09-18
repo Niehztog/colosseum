@@ -16,6 +16,19 @@
 #   the log cap         `tee -a` inside the container has no size cap of its
 #                       own, and neither does the json-file driver by default.
 #
+#   restart is not      `restart: always` restarts a container that EXITS.  A
+#   the whole answer    game library that calls gi.error() does not exit: the
+#                       engine stays up, drops `sv_running`, and answers no UDP
+#                       status query, so the server is gone from every browser
+#                       while `docker ps` still reads `Up`.  The image carries
+#                       a HEALTHCHECK that asks the port the same question a
+#                       browser does, and that is what makes the state VISIBLE
+#                       -- `docker ps` says `unhealthy`.  Docker's restart
+#                       policy does not act on health, so ACTING on it is
+#                       yours: a watcher, or an orchestrator that understands
+#                       health.  Measured 2026-09-18: 25 minutes of silence
+#                       that looked healthy from outside.
+#
 #   one image, many     GAME_ABI_HACK is a WHOLE-BINARY compile-time switch, so
 #   servers             an engine and the game library it loads must agree on
 #                       it.  One image can serve any number of servers that
