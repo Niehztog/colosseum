@@ -769,17 +769,17 @@ func modeCheck(port int, mode, matchType, banner string, accepts, rejects []stri
 
 	// A command this mode does not have must be REFUSED, not silently ignored:
 	// the mod tells the player which mode they are in.
+	//
+	// WAITED FOR, NOT SLEPT FOR.  The refusal is a print the server sends in
+	// answer, so the question is "did one arrive", and a fixed window answers a
+	// different one -- "did it arrive within 1.5s of a busy host" -- which is how
+	// this row read "0 print(s) back" once on a CPU-starved machine and passed
+	// 204 of 204 on the same library an hour later.  Same test as before, the
+	// word "mode" or "not " in any print, asked until it is true or 8s pass.
 	if len(rejects) > 0 {
-		refused := b.Prints()
-		saidNo := false
-		for _, p := range refused {
-			if strings.Contains(strings.ToLower(p), "mode") ||
-				strings.Contains(strings.ToLower(p), "not ") {
-				saidNo = true
-			}
-		}
-		check("mode "+mode+"/refuses foreign commands", saidNo,
-			"%d print(s) back", len(refused))
+		_, err := b.WaitPrint(`(?i)mode|not `, 8*time.Second)
+		check("mode "+mode+"/refuses foreign commands", err == nil,
+			"%d print(s) back", len(b.Prints()))
 	}
 }
 

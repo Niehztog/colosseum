@@ -16,6 +16,9 @@
 #   Q2PRO_BUILD   ../q2pro/builddir-native
 #   Q2DATA        /usr/share/games/quake2/baseq2
 #   CTFDATA       /usr/share/games/quake2/ctf
+#   SPMAP         base1 -- the campaign map. base1 is retail pak0's; a tree
+#                 holding only id's free demo has the same level as demo1,
+#                 which is what CI runs on (.github/workflows/ci.yml)
 #   LIB           release/game<cpu>.so
 set -u
 
@@ -26,6 +29,7 @@ ROOT=$(cd "$(dirname "$0")/.." && pwd)
 Q2PRO_BUILD=${Q2PRO_BUILD:-$ROOT/../q2pro/builddir-native}
 Q2DATA=${Q2DATA:-/usr/share/games/quake2/baseq2}
 CTFDATA=${CTFDATA:-/usr/share/games/quake2/ctf}
+SPMAP=${SPMAP:-base1}
 CPU=$(uname -m | sed -e 's/^aarch64$/arm64/' -e 's/^i.86$/i386/')
 LIB=${LIB:-$ROOT/release/game$CPU.so}
 FRAMES=${FRAMES:-100}
@@ -138,7 +142,7 @@ printf '%-9s %-7s %-6s %-9s %-7s %s\n' ruleset xatrix rogue map frames verdict
 for rs in dm dmpro tdm duel ctf arena sp; do
   case $rs in
     ctf) map=q2ctf1; dm=1; coop=0 ;;
-    sp)  map=base1;  dm=0; coop=0 ;;
+    sp)  map=$SPMAP; dm=0; coop=0 ;;
     *)   map=q2dm1;  dm=1; coop=0 ;;
   esac
   for xatrix in 0 1; do

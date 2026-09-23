@@ -32,6 +32,10 @@ CONTROL=0
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 Q2PRO_BUILD=${Q2PRO_BUILD:-$ROOT/../q2pro/builddir-native}
 Q2DATA=${Q2DATA:-/usr/share/games/quake2/baseq2}
+# The campaign map runs 2 and 3 use.  base1 is retail pak0's; id's free demo
+# carries the same level as demo1, and CI -- which has only the demo and the
+# point release to hand -- sets SPMAP=demo1.
+SPMAP=${SPMAP:-base1}
 CPU=$(uname -m | sed -e 's/^aarch64$/arm64/' -e 's/^i.86$/i386/')
 LIB=${LIB:-$ROOT/release/game$CPU.so}
 
@@ -100,20 +104,20 @@ note "deathmatch q2dm1" "${dm_inh:-no} entities inhibited"
 
 # ---- 2. campaign, through co-op.  base1 is booted in deathmatch too, because
 #         the count only means something against the same map's other mode.
-serve "$DIR/b1dm.log" 1 0 base1 status
+serve "$DIR/b1dm.log" 1 0 "$SPMAP" status
 b1dm_inh=$(inhibited "$DIR/b1dm.log")
-serve "$DIR/coop.log" 0 1 base1 status
+serve "$DIR/coop.log" 0 1 "$SPMAP" status
 co_inh=$(inhibited "$DIR/coop.log")
-note "base1 in deathmatch" "${b1dm_inh:-no} entities inhibited"
+note "$SPMAP in deathmatch" "${b1dm_inh:-no} entities inhibited"
 grep -q "Game supports Q2PRO enhanced savegames." "$DIR/coop.log" || \
   bad "campaign/enhanced savegames" "banner not printed"
 grep -q "disabling Coop" "$DIR/coop.log" && bad "campaign/coop" "the server disabled coop"
-note "campaign base1 (coop)" "${co_inh:-no} entities inhibited"
+note "campaign $SPMAP (coop)" "${co_inh:-no} entities inhibited"
 [ "${co_inh:-0}" -gt 0 ] 2>/dev/null || bad "campaign/inhibited" "expected non-zero, got ${co_inh:-none}"
 
 # ---- 3. savegame round-trip, across two processes
-serve "$DIR/save.log" 0 1 base1 "save smoke"
-serve "$DIR/load.log" 0 1 base1 "load smoke" status
+serve "$DIR/save.log" 0 1 "$SPMAP" "save smoke"
+serve "$DIR/load.log" 0 1 "$SPMAP" "load smoke" status
 s_map=$(sed -n 's/^SpawnServer: \(.*\)/\1/p' "$DIR/save.log" | tail -1)
 l_map=$(sed -n 's/^SpawnServer: \(.*\)/\1/p' "$DIR/load.log" | tail -1)
 l_inh=$(inhibited "$DIR/load.log")
@@ -152,7 +156,7 @@ if [ "$CONTROL" = 1 ]; then
   # The campaign's inhibited count must DIFFER from deathmatch's; asserting
   # they are equal must fail, or the comparison is not happening.
   echo
-  echo "control: base1's two inhibited counts compared for EQUALITY"
+  echo "control: $SPMAP's two inhibited counts compared for EQUALITY"
   if [ "${b1dm_inh:-0}" = "${co_inh:-1}" ]; then
     echo "  control did NOT fire -- $b1dm_inh == $co_inh, the spawnflag filter is not running"
     exit 1
@@ -163,7 +167,7 @@ fi
 
 # The two counts must differ, on the same map.
 [ "${b1dm_inh:-0}" != "${co_inh:-0}" ] || \
-  bad "campaign/filter" "base1 inhibits the same count in both modes ($b1dm_inh)"
+  bad "campaign/filter" "$SPMAP inhibits the same count in both modes ($b1dm_inh)"
 
 echo
 if [ "$fails" -eq 0 ]; then echo "smoke test passed"; else echo "$fails check(s) failed"; fi

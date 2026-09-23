@@ -1,0 +1,211 @@
+# Continuous integration, on every push to main and every pull request.
+#
+# WHAT A RUNNER CAN CHECK, AND WHAT IT CANNOT.  Nearly everything, because nearly
+# everything this tree checks is static or needs only a server -- never a client
+# and never the retail game.  `release.yml` proved the first half before this
+# file existed: every one of its build jobs runs `make check` on a fresh runner
+# with nothing beside the repository, and prints "42 audit(s) clean, 3 not
+# applicable yet".  The three are the whole list of what stays out of reach:
+# `assets` needs the retail paks, and `auditems` and `dsweep` need the local
+# `q2pro/src` replay tree, which is a workspace branch and not a download.
+#
+# THE SERVER-DRIVEN CHECKS RUN ON FREE DATA.  A dedicated server reads maps and
+# nothing else -- textures, models and sounds are the client's -- and id made
+# two archives free to download that between them carry every map the checks
+# boot: the 3.20 point release (q2dm1..q2dm8, and with CTF, q2ctf1..q2ctf5) and
+# the 3.14 demo (demo1..demo3, which is `base1` under the demo's name).
+# `.github/q2data.sh` fetches them into a runner's cache, verifies six members
+# by SHA-256 and lays them out; nothing it writes is committed, packaged or
+# uploaded, and its header states the terms.  On that tree, measured before
+# this file was committed, against the engine the next job builds: the boot
+# matrix is 28 rows of 28 with `SPMAP=demo1`, `smoke.sh` passes whole including
+# the savegame round trip, both scripts' positive controls fire, and the
+# play-test battery passes 204 of 204.
+#
+# THE BOT ROWS DO NOT RUN, and the battery records that as a skip rather than
+# subtracting it.  A bot needs a navigation mesh per map; the eight OSP computed
+# for q2dm1..q2dm8 are fetchable (`aas.sh`), but nothing free exists for
+# q2ctf1, so the ctf bot rows would fail for want of data rather than of code.
+# `GLADDIR` is pointed at nothing on purpose, so every bot row skips the same
+# way instead of some running and some failing.  `botmatrix.sh`, `extras.sh`
+# and `osprunes.sh` stay local for the same reason and because they need
+# `base1` by name.
+#
+# NO macOS.  It is the one 10x runner, `release.yml` already builds natively on
+# both Mac architectures at every tag, and a Mac leg would put forty minutes in
+# front of every pull request's answer.  This file costs nothing while the
+# repository is public; the day it is not, the Linux legs here are 1x and the
+# Windows legs are cross-compiled on Linux, so still 1x.
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# A commit that has been superseded on the same ref is not worth finishing --
+# least of all here, where main is folded and force-pushed.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # Every target the release builds, both game ABIs, and a second compiler.
+  # `make <target>` runs the audits itself, so each leg is also a `make check`.
+  build:
+    name: build ${{ matrix.name }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # R-VER-8 asks for zero warnings under BOTH gcc and clang on the native
+          # target.  The release builds with gcc only, so this leg is the one
+          # place the second compiler is asked.
+          - {name: native gcc,   target: native,  packages: '',                     make: ''}
+          - {name: native clang, target: native,  packages: 'clang',                make: 'CC_NATIVE=clang'}
+          - {name: linux32,      target: linux32, packages: 'gcc-i686-linux-gnu',   make: ''}
+          - {name: win32,        target: win32,   packages: 'gcc-mingw-w64-i686',   make: ''}
+          - {name: win64,        target: win64,   packages: 'gcc-mingw-w64-x86-64', make: ''}
+    steps:
+      # The submodule, so `tools/botabi.py` compares the game<->brain ABI for
+      # real instead of skipping itself.
+      - uses: actions/checkout@v7
+        with:
+          submodules: true
+      - name: Install the compiler
+        if: matrix.packages != ''
+        run: sudo apt-get update && sudo apt-get install -y ${{ matrix.packages }}
+      - name: Build, new game ABI (the audits run inside this)
+        run: make ${{ matrix.target }} ${{ matrix.make }}
+      - name: Build, classic game ABI
+        run: make ${{ matrix.target }} ${{ matrix.make }} API=old
+
+  tools:
+    name: tools and carried patches
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: tools/playtest-harness/go.mod
+          cache-dependency-path: tools/playtest-harness/go.sum
+      # Its dependencies are vendored, so this needs no network.
+      - name: Build and vet the play-test harness
+        working-directory: tools/playtest-harness
+        run: go build ./... && go vet ./...
+      # By each script's own shebang: `sh -n` on a bash script reports its arrays
+      # and `mapfile < <(...)` as syntax errors that are not there.
+      - name: Shell syntax
+        run: |
+          n=0 bad=0
+          for f in $(git ls-files '*.sh'); do
+            case "$(head -n1 "$f")" in *bash*) chk='bash' ;; *) chk='sh' ;; esac
+            if ! $chk -n "$f"; then echo "::error file=$f::$chk -n failed"; bad=$((bad+1)); fi
+            n=$((n+1))
+          done
+          echo "$n script(s), $bad with a syntax error"
+          [ "$bad" -eq 0 ]
+      # The patches under server/ must apply to the commits the Dockerfile pins,
+      # and exactly those are fetched: a patch whose header names any other
+      # commit fails here with "has no commit", which is "bump the pin and
+      # refresh its patches in the same commit" made mechanical.
+      - name: Carried patches apply to the pinned upstreams
+        run: |
+          pin() { sed -n "s/^ARG $1=//p" server/Dockerfile; }
+          for up in Q2PRO Q2ADMIN; do
+            case $up in
+              Q2PRO)   repo=https://github.com/q2pro/q2pro ;;
+              Q2ADMIN) repo=$(pin Q2ADMIN_REPO) ;;
+            esac
+            dir=$RUNNER_TEMP/$(echo "$up" | tr '[:upper:]' '[:lower:]')
+            git init -q "$dir"
+            git -C "$dir" fetch -q --depth=1 "$repo" "$(pin ${up}_COMMIT)"
+          done
+          Q2PRO_SRC=$RUNNER_TEMP/q2pro Q2ADMIN_SRC=$RUNNER_TEMP/q2admin sh server/enginepatch.sh
+
+  server-checks:
+    name: server-driven checks on free data
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    env:
+      SPMAP: demo1
+    steps:
+      - uses: actions/checkout@v7
+      # Outside the checkout, so nothing here can reach an audit that walks the
+      # tree or show up as untracked.  Set as a step because the `runner`
+      # context does not exist at job level.
+      - name: Paths
+        run: |
+          {
+            echo "Q2PRO_BUILD=$RUNNER_TEMP/q2proded"
+            echo "Q2DATA=$RUNNER_TEMP/q2data/baseq2"
+            echo "CTFDATA=$RUNNER_TEMP/q2data/ctf"
+            # Nothing there, on purpose: see the header.
+            echo "GLADDIR=$RUNNER_TEMP/no-brain"
+          } >> "$GITHUB_ENV"
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: tools/playtest-harness/go.mod
+          cache-dependency-path: tools/playtest-harness/go.sum
+
+      # STOCK q2pro at the commit the server image pins, dedicated server only.
+      # Stock because these checks test the game library and the engine is only
+      # their harness; the carried patches are the `tools` job's and the image
+      # build's to check.  Cached on the pin, so it is built once per bump.
+      - name: Read the engine pin
+        id: pin
+        run: echo "q2pro=$(sed -n 's/^ARG Q2PRO_COMMIT=//p' server/Dockerfile)" >> "$GITHUB_OUTPUT"
+      - uses: actions/cache@v6
+        id: engine
+        with:
+          path: ${{ runner.temp }}/q2proded
+          key: q2proded-${{ runner.os }}-${{ runner.arch }}-${{ steps.pin.outputs.q2pro }}-dedicated-v1
+      - name: Build q2proded
+        if: steps.engine.outputs.cache-hit != 'true'
+        run: |
+          sudo apt-get update && sudo apt-get install -y meson ninja-build zlib1g-dev
+          src=$RUNNER_TEMP/q2pro-src
+          git init -q "$src"
+          git -C "$src" fetch -q --depth=1 https://github.com/q2pro/q2pro "${{ steps.pin.outputs.q2pro }}"
+          git -C "$src" checkout -q --detach FETCH_HEAD
+          cd "$src"
+          meson setup build --buildtype=release \
+            -Dclient-ui=false -Dclient-gtv=false -Dtests=false \
+            -Dlibcurl=disabled -Dlibjpeg=disabled -Dlibpng=disabled \
+            -Dsdl2=disabled -Dopenal=disabled -Davcodec=disabled \
+            -Dx11=disabled -Dwayland=disabled
+          ninja -C build q2proded
+          mkdir -p "$Q2PRO_BUILD" && cp build/q2proded "$Q2PRO_BUILD/"
+
+      # Verified member by member on every run, cache hit or not: the script
+      # re-hashes what it finds and only fetches when that fails.
+      - uses: actions/cache@v6
+        with:
+          path: ${{ runner.temp }}/q2data
+          key: q2data-${{ hashFiles('.github/q2data.sha256') }}
+      - name: Lay out the free data
+        run: .github/q2data.sh "$(dirname "$Q2DATA")"
+
+      - name: Build the game library
+        run: make native
+
+      # Each script prints its own total, which is the figure to quote; each
+      # `--control` run is a check whose verdict MUST be a failure, and exits 0
+      # only when every one of them fired.
+      - name: Boot matrix
+        run: sh tools/bootmatrix.sh
+      - name: Boot matrix, positive controls
+        run: sh tools/bootmatrix.sh --control
+      - name: Smoke test
+        run: sh tools/smoke.sh
+      - name: Smoke test, positive controls
+        run: sh tools/smoke.sh --control
+      - name: Play-test battery (bot rows skip -- no brain)
+        run: sh tools/playtest.sh

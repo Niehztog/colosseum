@@ -1,0 +1,51 @@
+# The server image -- `server/Dockerfile`'s `server` target: q2pro and q2admin,
+# each cloned at its pinned commit, patched, cross-compiled to i386 and checked
+# with readelf before a layer is kept.
+#
+# WHY IT IS ITS OWN WORKFLOW.  It is the heaviest thing here and it reads nothing
+# outside `server/` -- the Dockerfile says so and its COPY lines agree -- so a
+# push that does not touch that directory cannot change its answer, and it runs
+# on those pushes only.
+#
+# WHY IT ALSO RUNS EVERY WEEK, which is the part that matters.  This image can
+# break with no commit in this repository at all: it clones two upstreams by
+# SHA and installs Debian trixie packages, and either can move underneath it.
+# That is not hypothetical.  The q2admin pin once named a commit on a fork
+# branch, the branch was rebased, the SHA stopped being reachable from any
+# branch, and the Dockerfile's own `git clone` + `git checkout --detach` failed
+# with "reference is not a tree" -- while every path-filtered check stayed green,
+# because nothing under `server/` had changed.  Only a clock catches a failure
+# that arrives from outside.  (GitHub stops scheduling a public repository's
+# workflows after sixty days without activity, which is a silence worth
+# noticing rather than a pass.)
+#
+# The `colosseum` target is not built here: it takes the game source as a named
+# build context and duplicates what `ci.yml` and `release.yml` already build.
+name: server-image
+
+on:
+  push:
+    branches: [main]
+    paths: ['server/**', '.github/workflows/server-image.yml']
+  pull_request:
+    paths: ['server/**', '.github/workflows/server-image.yml']
+  schedule:
+    - cron: '23 5 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: server-image-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  image:
+    name: server image (engine + q2admin)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v7
+      - name: Build the server target
+        run: docker build --target server -t q2pro-server server/

@@ -66,9 +66,21 @@ func IsTeams(name string) bool {
 	return false
 }
 
+// Find returns the named ruleset.
+//
+// `sp`'s map honours $SPMAP, the same override tools/bootmatrix.sh and
+// tools/smoke.sh read.  base1 is retail pak0's; id's free demo carries the same
+// level as demo1, and CI -- which has only the demo and the 3.20 point release
+// to hand -- runs on that.  The multiplayer maps need no such knob: q2dm1 is in
+// the point release's pak1 and q2ctf1 in its ctf/pak0.
 func Find(name string) (Ruleset, bool) {
 	for _, r := range All {
 		if r.Name == name {
+			if name == "sp" {
+				if m := os.Getenv("SPMAP"); m != "" {
+					r.Map = m
+				}
+			}
 			return r, true
 		}
 	}

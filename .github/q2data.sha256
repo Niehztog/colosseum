@@ -1,0 +1,18 @@
+# The free Quake II data the CI runs its server-driven checks on, member by
+# member, in the layout `q2data.sh` writes it to.  id's two freely downloadable
+# archives are the source: the 3.20 point release with CTF
+# (`q2-3.20-x86-full-ctf.exe`) and the 3.14 demo (`q2-314-demo-x86.exe`).
+#
+# The paks are the ones yquake2's installation notes publish MD5s for
+# (`doc/020_installation.md`), and they were checked against those before these
+# SHA-256s were recorded -- 2026-09-23, from deponie.yamagi.org, whose Wayback
+# copy was byte-identical on the same day.  The two licence texts ride along
+# because the demo's grant of free electronic distribution holds "so long as
+# this Agreement accompanies the Software at all times", and a tree that is
+# only ever used, never shipped, might as well carry its terms too.
+678210ecd1b27dde1c645660333a1a7b139d849425793859657f804d379b62ad  baseq2/pak1.pak
+cb88d584ef939d08e24433a6cf86274737303fac2bbd94415927a75e6b269dd8  baseq2/pak2.pak
+cae257182f34d3913f3d663e1d7cf865d668feda6af393d4ecf3e9e408b48d09  baseq2/pak0.pak
+04b4aab58c68a39f6ee59c47460f2c4e1bb9e4821d07df3f949d7706c919e16a  ctf/pak0.pak
+4e550f681863c5d2cfd376d0bae855fccd557aacab5dfc7f5efec673f1e1438b  DOCS/q2-3.20-license.txt
+5d23d6248e292d810d4925a6ec32ca5b179a20d4273a73638b11fbd12e4c11d0  DOCS/q2-demo-license.txt

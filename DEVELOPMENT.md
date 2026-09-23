@@ -107,7 +107,7 @@ The two PE artifacts are checked for what they **import** the moment they are li
 
 The contract audits run as part of the build, not on request, and a finding fails it the way a warning does. Release packages are built by that same Makefile, so a finding stops a release too - and that is rehearsable without cutting one: `gh workflow run release.yml -f version=<name> --ref <ref>` runs every build and packaging job of `.github/workflows/release.yml` and leaves the seven packages as run artifacts, because the publish job is conditioned on the ref being a tag. Nothing is published and no tag is created; `gh run watch` follows it. Most of them ship a positive control that makes them fail, and each control is a run of its own. **`audit.py` prints the count when it finishes and that is the figure to quote** - the figures that used to be written down here had drifted by the time anything re-read them, so they are gone rather than corrected into the next stale pair. Section 9 of `SPECS.md` says what each check is for.
 
-`make check` is static. Six scripts drive a real `q2proded`, and none of them is part of the build because each needs a built engine, retail paks and a minute or more. **Every one of them prints its own total when it finishes, and that is the figure to quote.**
+`make check` is static. Six scripts drive a real `q2proded`, and none of them is part of the build because each needs a built engine, game data and a minute or more -- the retail paks locally, or for three of them the free data CI runs on (below). **Every one of them prints its own total when it finishes, and that is the figure to quote.**
 
 ```sh
 tools/bootmatrix.sh   # every ruleset x xatrix x rogue boots and reports back
@@ -140,10 +140,33 @@ All of them read the same environment, all defaulted:
 | `XATRIXDATA`, `ROGUEDATA` | beside `Q2DATA` | mission-pack data, for the layer scenarios |
 | `GLADDIR` | `vendor/gladiator-bot-restored`, else a sibling checkout | the botlib, its assets and its bot list |
 | `LIB` | `release/game<cpu>.so` | the library under test |
+| `SPMAP` | `base1` | the campaign map `sp` boots on. `base1` is retail `pak0`'s; id's free demo carries the same level as `demo1` |
 
 `tools/playtest.sh` drives the Go harness in `tools/playtest-harness/`, which ships more scenarios than the six scripts run; `docs/playtest.md` lists them. One thing they need that this project does not carry is the Rocket Arena map pack: the `ra2map*` maps and the team skins are RA2's own distribution, and a scenario that wants one says so rather than failing silently. **OSP Tourney is not in that category**: it ships no assets at all, every path its code names is baseq2's, and the gamedir its scenarios run in - `colosseum`, the same one every other scenario uses - needs nothing in it but the library.
 
 `tools/playtest.sh` cannot make a monster fight, so monster-AI changes are verified by donor comparison and must say so rather than implying a scenario covered them.
+
+
+### Continuous integration
+
+`.github/workflows/ci.yml` runs on every push to `main` and every pull request, on Linux runners only:
+
+| job | what it asks |
+|---|---|
+| `build` | every target the release builds -- native with **gcc and clang**, `linux32`, `win32`, `win64` -- each under both game ABIs. Every leg runs `make check` itself, with the submodule checked out so `botabi` compares for real |
+| `tools` | the play-test harness builds and vets; every tracked shell script parses, by its own shebang; the carried patches apply to exactly the commits `server/Dockerfile` pins |
+| `server-checks` | `bootmatrix.sh`, `smoke.sh`, both of their `--control` runs, and the `playtest.sh` battery, against stock q2pro at the image's pin |
+
+**The server-driven checks run on free data, not the retail game.** A dedicated server reads maps and nothing else, and id's two free downloads carry every map these checks boot: the 3.20 point release (`q2dm1`..`q2dm8`, and `q2ctf1`..`q2ctf5` in its CTF variant) and the 3.14 demo (`demo1`, which is `base1` under the demo's name). `.github/q2data.sh` fetches them, verifies six members against `.github/q2data.sha256` and lays them out; its header states the terms, and nothing it writes is committed, packaged or uploaded. `SPMAP=demo1` points `sp` at the demo's level. The same tree works locally:
+
+```sh
+.github/q2data.sh /tmp/q2data
+Q2DATA=/tmp/q2data/baseq2 CTFDATA=/tmp/q2data/ctf SPMAP=demo1 tools/bootmatrix.sh
+```
+
+**What CI does not cover, so a green run does not claim it:** the three audits `make check` reports as not applicable without the workspace (`assets`, `auditems`, `dsweep`); every bot row, because a bot needs a navigation mesh per map and no free one exists for `q2ctf1` -- `GLADDIR` points at nothing, so the battery records one `bots/skipped` rather than failing some rows and passing others; `botmatrix.sh`, `extras.sh` and `osprunes.sh`; and macOS, which `release.yml` builds at every tag and which would be the one 10x runner here.
+
+`.github/workflows/server-image.yml` builds the server image's `server` target when `server/` changes **and every Monday**, because the image clones two upstreams by SHA and installs Debian packages, and either can break it with no commit here -- which a check that only runs when `server/` changes cannot see.
 
 ## Source layout
 
