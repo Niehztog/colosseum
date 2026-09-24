@@ -28,7 +28,7 @@
 # header states the rule: the game library, the default gamedir config set, the
 # OPERATOR documentation and the eight navigation meshes of the paragraph after
 # next.  It also states WHERE, which is the same decision: everything an engine
-# loads -- both libraries, the brain, the configs, the meshes -- is staged
+# loads -- both libraries, the botlib, the configs, the meshes -- is staged
 # inside the package's `colosseum/`, so installing a release is copying that
 # one directory beside the engine.  Never game assets, which are id's and the
 # mods' and are not ours to ship -- and never the DEVELOPER documentation.
@@ -60,19 +60,19 @@
 # skipped, or half-succeeding all fail the job rather than producing a package
 # whose `maps/` is quietly empty.  Every OTHER map still needs a mesh made.
 #
-# THE BOT BRAIN IS BUILT HERE TOO, once per job and for that job's own target,
+# THE BOTLIB IS BUILT HERE TOO, once per job and for that job's own target,
 # out of the `vendor/gladiator-bot-restored` submodule -- which is why every
 # build job now checks submodules out.  It is a separate repository and a
 # separate build and stays one; what changed is only who runs it.  Eight meshes
 # are half a bot feature, and the other half was an operator fetching a C tree
 # and cross-compiling it for a platform this workflow already has a runner and
 # a toolchain standing ready for, having just built the game library for that
-# exact target.  So each job hands the brain the same compiler it used for the
+# exact target.  So each job hands the botlib the same compiler it used for the
 # library, `package.sh` stages it into `colosseum/` under the name the game
-# dlopens, and that script's BRAIN CHECK compares the two artifacts' headers so
-# a brain built for the host cannot ship.  The Windows jobs additionally run
+# dlopens, and that script's BOTLIB CHECK compares the two artifacts' headers so
+# a botlib built for the host cannot ship.  The Windows jobs additionally run
 # `tools/pedeps.sh` over the DLL: R-SEC-6a is about every PE this release
-# produces, and a brain that needs a mingw runtime beside it is as unshippable
+# produces, and a botlib that needs a mingw runtime beside it is as unshippable
 # as a game library that does.
 #
 # AND IT IS BUILT WITH THE FIXES IN.  `GLAD_SERVERFIX=1` is that submodule's
@@ -91,13 +91,13 @@
 # bot navigates to one item using another one's bounding box, and
 # PS_ReadNumber's l/u suffix guard.  The submodule's own release workflow and
 # `server/Dockerfile` pass the flag for the same reason, and `package.sh` reads
-# the staged brain back for the one string only the gated arm can put there -- a
+# the staged botlib back for the one string only the gated arm can put there -- a
 # flag typed on a command line is not a flag that reached the object, and a
-# faithful brain plays perfectly right up to the first densely subdivided map.
+# faithful botlib plays perfectly right up to the first densely subdivided map.
 #
 # Checking the submodule out has one further effect and it is wanted: `make
 # check` runs `tools/botabi.py` for real instead of skipping itself, so the
-# game<->brain ABI is compared at release time, against the pin the brain
+# game<->botlib ABI is compared at release time, against the pin the botlib
 # shipping in the package was built from.
 #
 # A MANUAL RUN IS A REHEARSAL, NOT A RELEASE.  `workflow_dispatch` builds,
@@ -157,7 +157,7 @@ jobs:
       # which on that row is the host's and not the target's.  GLAD_SERVERFIX=1
       # crosses `botlib:`'s re-entry into make unaided -- a variable set on
       # make's command line is handed to sub-makes through MAKEFLAGS.
-      - name: Build the bot brain
+      - name: Build the botlib
         run: make -C vendor/gladiator-bot-restored botlib GLAD_SERVERFIX=1 ${{ matrix.botmake }}
       - name: Fetch the navigation meshes
         run: .github/aas.sh
@@ -192,9 +192,9 @@ jobs:
       # runner's own compiler it would emit an ELF `gladiator.so`, and
       # package.sh would fail this job for want of a `gladiator.dll`.
       # GLAD_SERVERFIX=1 -- see the header and the linux job.
-      - name: Build the bot brain
+      - name: Build the botlib
         run: make -C vendor/gladiator-bot-restored botlib GLAD_SERVERFIX=1 ${{ matrix.botmake }}
-      - name: Check what the brain imports (R-SEC-6a, for the DLL that ships)
+      - name: Check what the botlib imports (R-SEC-6a, for the DLL that ships)
         run: sh tools/pedeps.sh vendor/gladiator-bot-restored/release/gladiator.dll
       - name: Fetch the navigation meshes
         run: .github/aas.sh
@@ -241,7 +241,7 @@ jobs:
       # The submodule emits `gladiator.dylib`; package.sh ships it under the
       # name the game dlopens.  GLAD_SERVERFIX=1 -- see the header and the
       # linux job.
-      - name: Build the bot brain
+      - name: Build the botlib
         run: make -C vendor/gladiator-bot-restored botlib GLAD_SERVERFIX=1
       - name: Fetch the navigation meshes
         run: .github/aas.sh
@@ -288,8 +288,8 @@ jobs:
             --title "Colosseum $VERSION" \
             --notes "One Quake II game library: baseq2, both mission packs, Threewave CTF, Rocket Arena 2 and OSP Tourney DM, with Gladiator bots.
 
-          **Installing is copying this package's \`colosseum/\` folder beside the engine** -- on Windows always, and on Linux unless your Q2PRO is a distribution package, which looks in \`~/.q2pro/colosseum/\` instead. The library is already in it, and so is everything else an engine loads. The bots need the brain, its pak, a bot list and one navigation mesh per map. **The brain for this platform is in that folder too**, as \`colosseum/gladiator.so\` (\`.dll\` on Windows), and so are the meshes for the eight retail deathmatch maps, under \`colosseum/maps/\`; what is left to install is \`pak7.pak\` and \`bots.cfg\` out of the 1999 Gladiator release, which go in beside them. \`README.md\` has both halves.
+          **Installing is copying this package's \`colosseum/\` folder beside the engine** -- on Windows always, and on Linux unless your Q2PRO is a distribution package, which looks in \`~/.q2pro/colosseum/\` instead. The library is already in it, and so is everything else an engine loads. The bots need the botlib, its pak, a bot list and one navigation mesh per map. **The botlib for this platform is in that folder too**, as \`colosseum/gladiator.so\` (\`.dll\` on Windows), and so are the meshes for the eight retail deathmatch maps, under \`colosseum/maps/\`; what is left to install is \`pak7.pak\` and \`bots.cfg\` out of the 1999 Gladiator release, which go in beside them. \`README.md\` has both halves.
 
           Each package carries **two builds of the library**: the one in \`colosseum/\` is for Q2PRO built with \`USE_NEW_GAME_API\`, which is the recommended engine, and \`colosseum/oldapi/\` holds the same library against the classic game ABI for R1Q2, Yamagi Quake II, id's own 3.20 or a Q2PRO without that switch. Same name, different struct layouts -- if your engine wants the second one, copy it over the first and delete that directory, renaming it to whatever your engine looks for (Yamagi wants a flat \`game.so\`). \`colosseum/oldapi/README.md\` says what the choice costs.
 
-          Packages carry the library, the bot brain built for the same platform, the default gamedir config set and the operator documentation -- \`README.md\` and the cvar, command and entity inventories under \`docs/\`. The first three are inside \`colosseum/\`, which is the directory to copy; the documentation is beside it, for reading rather than installing. The config set holds one ready-to-exec file per ruleset, so a match is one line: \`q2pro +set game colosseum +set maxclients 32 +exec configs/ctf.cfg +map q2ctf1\`, and the same for \`dm\`, \`dmpro\`, \`tdm\`, \`duel\`, \`arena\` and \`sp\` -- \`README.md\` lists all seven. Game assets are not included and never will be: they are id's and the mods'. The one exception is data rather than an asset -- the eight navigation meshes for q2dm1..q2dm8, precomputed by OSP Tourney DM in 1999, which ride along under \`colosseum/maps/\` so the bots have somewhere to walk on the stock deathmatch maps without a \`bspc\` run. Any other map still needs one made. The brain is not an asset either: it is a build of the [\`gladiator-bot-restored\`](https://github.com/Niehztog/gladiator-bot-restored) submodule, GPL like everything else here, from the commit this tag pins. The specification, the contributor guide and the rest of \`docs/\` live in the repository, at the tag this release was cut from."
+          Packages carry the library, the botlib built for the same platform, the default gamedir config set and the operator documentation -- \`README.md\` and the cvar, command and entity inventories under \`docs/\`. The first three are inside \`colosseum/\`, which is the directory to copy; the documentation is beside it, for reading rather than installing. The config set holds one ready-to-exec file per ruleset, so a match is one line: \`q2pro +set game colosseum +set maxclients 32 +exec configs/ctf.cfg +map q2ctf1\`, and the same for \`dm\`, \`dmpro\`, \`tdm\`, \`duel\`, \`arena\` and \`sp\` -- \`README.md\` lists all seven. Game assets are not included and never will be: they are id's and the mods'. The one exception is data rather than an asset -- the eight navigation meshes for q2dm1..q2dm8, precomputed by OSP Tourney DM in 1999, which ride along under \`colosseum/maps/\` so the bots have somewhere to walk on the stock deathmatch maps without a \`bspc\` run. Any other map still needs one made. The botlib is not an asset either: it is a build of the [\`gladiator-bot-restored\`](https://github.com/Niehztog/gladiator-bot-restored) submodule, GPL like everything else here, from the commit this tag pins. The specification, the contributor guide and the rest of \`docs/\` live in the repository, at the tag this release was cut from."

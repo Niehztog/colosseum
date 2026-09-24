@@ -45,6 +45,13 @@
 # genptr.py scratch (tools/audit.py and the Makefile's check-ptrs target)
 src/.g_ptrs.gen*
 
+# The botlib build's mutex.  It is a directory (mkdir is the atomic operation),
+# it is held only while a botlib is being built, and a trap removes it -- so one
+# seen here outside a build is the remains of a SIGKILL and is safe to delete.
+# It sits in this tree rather than the submodule's for the reason the Makefile
+# gives beside BOTLIB_LOCK.
+/.botlib-lock/
+
 __pycache__/
 *.pyc
 

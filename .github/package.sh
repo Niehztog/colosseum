@@ -20,7 +20,7 @@
 # THE LIBRARIES GO INSIDE `colosseum/`, because that is the directory the
 # engine loads one from: `<enginedir>/colosseum/game<cpu><suffix>`, which is
 # R-BUILD-8's finding.  The `colosseum/` this script stages IS that gamedir --
-# configs, brain, meshes and now the library too -- so installing a release is
+# configs, botlib, meshes and now the library too -- so installing a release is
 # copying one folder into place rather than copying a folder and then being
 # told, in a different section of the README, to go back for a file left at the
 # top of the archive.
@@ -49,8 +49,8 @@
 # whose fetch step was skipped or half-finished fails here instead of shipping
 # a gamedir that looks complete.  `README.md` says where they came from.
 #
-# AND THE BOT BRAIN, which is the other half of that same argument: eight
-# meshes and no brain to walk them is no bots either.  `gladiator.so` is a
+# AND THE BOTLIB, which is the other half of that same argument: eight
+# meshes and no botlib to walk them is no bots either.  `gladiator.so` is a
 # separate build of a separate repository -- the `vendor/gladiator-bot-restored`
 # submodule -- and leaving it out asked every operator to fetch a C tree and
 # cross-compile it for their own platform, which is the one step the packaging
@@ -63,19 +63,19 @@
 # the rest of the distribution and its source is the submodule pin, which
 # travels with the tag this package was cut from.
 #
-# THE BRAIN CHECK is the mesh check's argument in another format, and it asks
-# two questions of the bytes.  A brain built for the HOST instead of the target
+# THE BOTLIB CHECK is the mesh check's argument in another format, and it asks
+# two questions of the bytes.  A botlib built for the HOST instead of the target
 # is a perfectly well-formed shared object that no operator's engine can load,
 # and nothing about the package would look wrong -- so the staged copy is read
 # back and the fields that name its target compared against the library it will
-# sit beside.  A brain built without `GLAD_SERVERFIX=1` looks wrong in even
+# sit beside.  A botlib built without `GLAD_SERVERFIX=1` looks wrong in even
 # fewer ways: it is the submodule's faithful default, the 1999 bugs included,
 # and it plays perfectly until a map subdivides densely enough for
 # AAS_AASLinkEntity to walk off its `int[64]` and over the return address.  The
 # packaging job passes the gate (R-BUILD-11) and the same read-back proves it
 # reached the object, because a flag on a command line is not a flag in a binary.
 #
-# WHAT DOES NOT: game assets of any kind, the brain's own assets (`pak7.pak`
+# WHAT DOES NOT: game assets of any kind, the botlib's own assets (`pak7.pak`
 # and the `bots.cfg` bot list are the Gladiator distribution's, R-LIC-2) and a
 # mesh for any map but those eight -- made per map, and far larger than
 # everything else here put together.
@@ -165,22 +165,22 @@ sed -e "s#](\(DEVELOPMENT\.md\|SPECS\.md\)#](${REPO}/blob/${VERSION}/\1#g" \
     -e "s#](\.github/banner\.png)#](${REPO}/raw/${VERSION}/.github/banner.png)#g" \
     README.md > "$STAGE/README.md"
 
-# The roster is the brain's file and is installed from the brain's own
+# The roster is the botlib's file and is installed from the botlib's own
 # distribution; the directory ships empty so the layout is visible.
 mkdir -p "$STAGE/colosseum/botcfg"
 
-# The brain itself, built for this target by the job that called this script.
+# The botlib itself, built for this target by the job that called this script.
 # FOUND under the name the submodule's Makefile gives it on this platform and
 # SHIPPED under the name the game dlopens; the two differ only on macOS.
 # $GLADDIR moves the submodule exactly as it does for tools/botabi.py.
 GLADDIR=${GLADDIR:-$ROOT/vendor/gladiator-bot-restored}
 case $OS in
-  windows) BRAIN_BUILT=gladiator.dll   BRAIN=gladiator.dll ;;
-  macos)   BRAIN_BUILT=gladiator.dylib BRAIN=gladiator.so  ;;
-  *)       BRAIN_BUILT=gladiator.so    BRAIN=gladiator.so  ;;
+  windows) BOTLIB_BUILT=gladiator.dll   BOTLIB=gladiator.dll ;;
+  macos)   BOTLIB_BUILT=gladiator.dylib BOTLIB=gladiator.so  ;;
+  *)       BOTLIB_BUILT=gladiator.so    BOTLIB=gladiator.so  ;;
 esac
-[ -f "$GLADDIR/release/$BRAIN_BUILT" ] || {
-  echo "package.sh: no $BRAIN_BUILT in $GLADDIR/release -- was the brain built?" >&2
+[ -f "$GLADDIR/release/$BOTLIB_BUILT" ] || {
+  echo "package.sh: no $BOTLIB_BUILT in $GLADDIR/release -- was the botlib built?" >&2
   echo "  Every package carries one, for its own platform; see the header." >&2
   echo "  Build it with: make -C vendor/gladiator-bot-restored botlib GLAD_SERVERFIX=1" >&2
   echo "  That flag is not optional for a package -- see the header, and the" >&2
@@ -189,7 +189,7 @@ esac
   echo "  out has no Makefile at all." >&2
   exit 1
 }
-cp "$GLADDIR/release/$BRAIN_BUILT" "$STAGE/colosseum/$BRAIN"
+cp "$GLADDIR/release/$BOTLIB_BUILT" "$STAGE/colosseum/$BOTLIB"
 
 # Two files of the same name in one package need a note beside them, and it has
 # to be here rather than in `docs/`: the operator reading it is standing in the
@@ -257,7 +257,7 @@ if ! "$ROOT/.github/aas.sh" --verify "$STAGE/colosseum/maps"; then
   exit 1
 fi
 
-# The brain check.  See the header: the question has to be asked of the bytes,
+# The botlib check.  See the header: the question has to be asked of the bytes,
 # because every wrong answer is still a valid shared object.  The two files are
 # object code for one target, so their headers agree in the fields that name it
 # -- ELF's magic, class and machine at 0..4 and 18..19, Mach-O's magic and
@@ -267,9 +267,9 @@ fi
 hdr() { od -An -tx1 -j"$2" -N"$3" "$1" | tr -d ' \n'; }
 case $OS in
   linux) want="$(hdr "$STAGE/colosseum/$LIB" 0 5)$(hdr "$STAGE/colosseum/$LIB" 18 2)"
-         got="$(hdr "$STAGE/colosseum/$BRAIN" 0 5)$(hdr "$STAGE/colosseum/$BRAIN" 18 2)" ;;
+         got="$(hdr "$STAGE/colosseum/$BOTLIB" 0 5)$(hdr "$STAGE/colosseum/$BOTLIB" 18 2)" ;;
   macos) want=$(hdr "$STAGE/colosseum/$LIB" 0 8)
-         got=$(hdr "$STAGE/colosseum/$BRAIN" 0 8) ;;
+         got=$(hdr "$STAGE/colosseum/$BOTLIB" 0 8) ;;
   *)     want= got= ;;
 esac
 # Two empty answers compare equal, which would be this check passing because it
@@ -278,13 +278,13 @@ esac
 # nothing either.
 if [ "$OS" != windows ] && [ -z "$want" ]; then
   echo "package.sh: read no header from $LIB -- is od(1) missing?" >&2
-  echo "  The brain check cannot run, so this job stops here; see the header." >&2
+  echo "  The botlib check cannot run, so this job stops here; see the header." >&2
   exit 1
 fi
 if [ "$want" != "$got" ]; then
-  echo "package.sh: colosseum/$BRAIN is not built for the same target as $LIB." >&2
-  echo "  library header $want, brain header $got." >&2
-  echo "  A brain built for the host loads on nobody's server; see the header." >&2
+  echo "package.sh: colosseum/$BOTLIB is not built for the same target as $LIB." >&2
+  echo "  library header $want, botlib header $got." >&2
+  echo "  A botlib built for the host loads on nobody's server; see the header." >&2
   exit 1
 fi
 
@@ -295,11 +295,11 @@ fi
 # way, and strings(1) reads a PE and a Mach-O as willingly as an ELF.
 if ! command -v strings >/dev/null 2>&1; then
   echo "package.sh: strings(1) is missing -- the gate check cannot run." >&2
-  echo "  This job stops here rather than ship an unverified brain." >&2
+  echo "  This job stops here rather than ship an unverified botlib." >&2
   exit 1
 fi
-if ! strings -a "$STAGE/colosseum/$BRAIN" | grep -q 'AAS_LinkEntity: stack overflow'; then
-  echo "package.sh: colosseum/$BRAIN carries no GLAD_SERVERFIX code." >&2
+if ! strings -a "$STAGE/colosseum/$BOTLIB" | grep -q 'AAS_LinkEntity: stack overflow'; then
+  echo "package.sh: colosseum/$BOTLIB carries no GLAD_SERVERFIX code." >&2
   echo "  It is the faithful 1999 reconstruction, fatal bugs and all; see the header." >&2
   echo "  Build it with: make -C vendor/gladiator-bot-restored botlib GLAD_SERVERFIX=1" >&2
   exit 1

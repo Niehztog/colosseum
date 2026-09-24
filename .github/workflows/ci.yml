@@ -73,7 +73,7 @@ jobs:
           - {name: win32,        target: win32,   packages: 'gcc-mingw-w64-i686',   make: ''}
           - {name: win64,        target: win64,   packages: 'gcc-mingw-w64-x86-64', make: ''}
     steps:
-      # The submodule, so `tools/botabi.py` compares the game<->brain ABI for
+      # The submodule, so `tools/botabi.py` compares the game<->botlib ABI for
       # real instead of skipping itself.
       - uses: actions/checkout@v7
         with:
@@ -148,7 +148,7 @@ jobs:
             echo "Q2DATA=$RUNNER_TEMP/q2data/baseq2"
             echo "CTFDATA=$RUNNER_TEMP/q2data/ctf"
             # Nothing there, on purpose: see the header.
-            echo "GLADDIR=$RUNNER_TEMP/no-brain"
+            echo "GLADDIR=$RUNNER_TEMP/no-botlib"
           } >> "$GITHUB_ENV"
       - uses: actions/setup-go@v7
         with:
@@ -207,5 +207,5 @@ jobs:
         run: sh tools/smoke.sh
       - name: Smoke test, positive controls
         run: sh tools/smoke.sh --control
-      - name: Play-test battery (bot rows skip -- no brain)
+      - name: Play-test battery (bot rows skip -- no botlib)
         run: sh tools/playtest.sh

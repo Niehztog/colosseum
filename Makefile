@@ -345,6 +345,83 @@ OBJS = $(addprefix $(BUILDDIR)/,$(GAME_SRC:.c=.o))
 
 TARGET = $(BUILDDIR)/game$(CPU).$(SHLIBEXT)
 
+# ---------------------------------------------------------------- the botlib
+#
+# THE BOTLIB IS BUILT HERE, for the same target and into the same directory as
+# the library.  It is still a separate repository and a separate build --
+# nothing in `src/` includes a line of it, and `docs/botlib-contract.md` is the
+# only thing that crosses -- and what changed is only who runs that build.
+# Leaving it to the caller meant `make win32` produced half of what an engine
+# needs to load this mod with bots, and the other half came from a command the
+# build itself never named.
+#
+# AN ABSENT SUBMODULE IS A SKIP, NOT A FAILURE, and that is load-bearing rather
+# than polite.  `ci.yml`'s server-checks job checks this tree out WITHOUT
+# submodules and then runs `make native`, and DEVELOPMENT.md states the property
+# that rests on: the library builds, and the audits pass, in a tree where the
+# submodule was never checked out.  A missing `$(GLADDIR)/Makefile` therefore
+# prints one line and succeeds.
+#
+# THE SUBMODULE HAS ONE BUILD DIRECTORY AND ONE OUTPUT PATH whatever it is
+# building -- objects in its own `build/`, the artifact at
+# `release/gladiator.<ext>`, and no target named anywhere in either.  So a win32
+# build followed by a win64 build in the same tree hands the second link the
+# first one's objects, which is measured rather than theoretical:
+# `build/botlib_debug.o: file format not recognized`.  The stamp records what
+# that tree currently holds and cleans when it is about to change, which is also
+# what keeps an unchanged target from paying for a rebuild.
+#
+# ...and the lock is that same collision under `-j`.  `everything` names five
+# targets as prerequisites and make runs prerequisites in parallel, so five
+# compilers would drive that one directory at once.  The mutex is `mkdir`,
+# atomic on every filesystem this builds on, and a trap releases it rather than
+# the recipe reaching its end.  Serialised this way, two targets alternating
+# still rebuild the botlib each time they trade places: slower than it looks
+# written down, and correct, which is the right way round.
+#
+# THE PUBLISHED NAME IS THE ONE THE GAME dlopens, which is not always the one
+# the submodule emits: `BotDefaultLibrary()` asks for `gladiator.dll` on Windows
+# and `gladiator.so` everywhere else INCLUDING macOS, where the submodule
+# produces a `.dylib`.  `.github/package.sh` renames it for that same reason.
+#
+# `GLAD_SERVERFIX=1` IS THE DEFAULT HERE, and it is the far side of the
+# submodule's own default, for the reason R-BUILD-11 gives: that tree is a
+# reconstruction of the 1999 binaries, so a plain `make` there reproduces them
+# bugs and all -- the build its two ASM-matching oracles measure, and the right
+# default in that repository.  A library built to be played wants the other one.
+GLADDIR        ?= vendor/gladiator-bot-restored
+GLAD_SERVERFIX ?= 1
+
+# The lock lives in THIS tree and not in the submodule's, and both halves of
+# that matter.  The submodule is a git repository of its own, so a directory
+# left in its working tree is reported here as `modified:
+# vendor/gladiator-bot-restored (untracked content)` -- a tree that looks
+# changed when nothing has been.  And the two directories inside it that are
+# already ignored, `build/` and `release/`, are exactly the two its own `clean`
+# removes, which this step runs WHILE HOLDING the lock.
+BOTLIB_LOCK = .botlib-lock
+
+# The submodule is built with those variables CLEARED, and that is correctness
+# rather than hygiene.  `_build` receives `CFLAGS` on make's command line, so it
+# travels on in `MAKEFLAGS` and beats an ordinary assignment in every sub-make
+# below it -- the submodule's own included.  That tree is a reconstruction of
+# 1999 code and does not compile under this one's warning set: the first file it
+# reaches stops on ten `-Werror=strict-prototypes` errors for declarations like
+# `int AAS_Initialized();`, which are the originals' own and are not this
+# project's to correct.  This is also why the packaging workflow could run that
+# build as a separate step and never see it.  `CC` is cleared with them and
+# handed straight back, because choosing it is the whole point of the step.
+BOTLIB_MAKE = env -u CFLAGS -u CC -u MAKEFLAGS $(MAKE)
+
+# The submodule reads the target architecture off `uname -m` unless the compiler
+# names one.  A mingw triple decides it there -- its own Makefile keys on
+# `x86_64-w64-mingw32` and `i686-w64-mingw32` -- so the two PE rows need nothing
+# from here; the two ELF cross rows would otherwise take the HOST's, which is
+# aarch64 on the reference machine and x86_64 on a runner, neither of them the
+# target.
+BOTLIB_ARCH = $(if $(findstring i686-linux-gnu,$(CC)),YQ2_ARCH=i386)\
+$(if $(findstring x86_64-linux-gnu,$(CC)),YQ2_ARCH=x86_64)
+
 # ---------------------------------------------------------------- goals
 
 .PHONY: all everything native linux64 linux32 win32 win64 windows macos \
@@ -421,6 +498,36 @@ _build: check
 		$(BUILDDIR)/ctf $(BUILDDIR)/arena $(BUILDDIR)/tourney $(BUILDDIR)/bot
 	$(MAKE) $(TARGET) BUILDDIR=$(BUILDDIR) CC=$(CC) CPU=$(CPU) \
 		SHLIBEXT=$(SHLIBEXT) CFLAGS="$(CFLAGS)" KIND=$(KIND)
+	@if [ ! -f $(GLADDIR)/Makefile ]; then \
+		echo "botlib: $(GLADDIR) is not checked out -- no botlib built (DEVELOPMENT.md)"; \
+	else \
+		set -e; \
+		case $(KIND) in \
+		PE)    built=gladiator.dll;   name=gladiator.dll ;; \
+		MACHO) built=gladiator.dylib; name=gladiator.so  ;; \
+		*)     built=gladiator.so;    name=gladiator.so  ;; \
+		esac; \
+		lock=$(BOTLIB_LOCK); waited=0; \
+		while ! mkdir $$lock 2>/dev/null; do \
+			waited=$$((waited + 1)); \
+			if [ $$waited -gt 600 ]; then \
+				echo "botlib: $$lock has been held for ten minutes." >&2; \
+				echo "  If no build owns it, remove it and run this again." >&2; \
+				exit 1; \
+			fi; \
+			sleep 1; \
+		done; \
+		trap 'rmdir $$lock 2>/dev/null || true' EXIT INT TERM; \
+		want="$(CC) GLAD_SERVERFIX=$(GLAD_SERVERFIX) $(BOTLIB_ARCH)"; \
+		stamp=$(GLADDIR)/release/.built-for; \
+		[ -f $$stamp ] && [ "$$(cat $$stamp)" = "$$want" ] \
+			|| $(BOTLIB_MAKE) -C $(GLADDIR) clean; \
+		$(BOTLIB_MAKE) -C $(GLADDIR) botlib GLAD_SERVERFIX=$(GLAD_SERVERFIX) \
+			CC=$(CC) $(BOTLIB_ARCH); \
+		printf '%s\n' "$$want" > $$stamp; \
+		cp $(GLADDIR)/release/$$built $(BUILDDIR)/$$name; \
+		[ $(KIND) != PE ] || $(SHELL) tools/pedeps.sh $(BUILDDIR)/$$name; \
+	fi
 
 # A PE artifact is checked for what it IMPORTS the moment it is
 # linked.  The failure it catches is invisible from a Linux host -- the DLL
@@ -514,6 +621,14 @@ help:
 	@echo "  windows     win32 + win64"
 	@echo "  everything  all five, debug + release"
 	@echo "  check       the audits and the g_ptrs.c freshness check only"
+	@echo
+	@echo "Every target above also builds the botlib out of $(GLADDIR)"
+	@echo "for that same target and puts it beside the library it just built,"
+	@echo "under the name the game dlopens: gladiator.dll on Windows,"
+	@echo "gladiator.so everywhere else.  A tree whose submodule is not checked"
+	@echo "out says so and builds the library anyway."
+	@echo "  GLAD_SERVERFIX=0  the submodule's own default -- the 1999 bugs kept"
+	@echo "  GLADDIR=<path>    build the botlib from another checkout"
 	@echo
 	@echo "This host builds all five and can execute only 'native'."
 	@echo
