@@ -753,18 +753,28 @@ void plat2_operate(edict_t *ent, edict_t *other)
 
     platCenter = (trigger->absmin[2] + trigger->absmax[2]) / 2;
 
+    // `other` is Use_Plat2's activator, and it is NULL when the entity that
+    // fired the plat never had one -- a func_clock, or a func_door reversing
+    // on a blocker.  Its position only decides whether the plat was CALLED
+    // (the flag and the short pause below); the plat moves either way, so with
+    // nobody to call it towards it keeps its own state and moves on the normal
+    // pause.  The one R-SEC-10 guard beyond the donors' list: their sweeps
+    // looked for parameters named `activator`, and this one arrives as
+    // `other`.
     if (ent->moveinfo.state == STATE_TOP) {
         otherState = STATE_TOP;
-        if (ent->spawnflags & PLAT2_BOX_LIFT) {
-            if (platCenter > other->s.origin[2])
-                otherState = STATE_BOTTOM;
-        } else {
-            if (trigger->absmax[2] > other->s.origin[2])
-                otherState = STATE_BOTTOM;
+        if (other) {
+            if (ent->spawnflags & PLAT2_BOX_LIFT) {
+                if (platCenter > other->s.origin[2])
+                    otherState = STATE_BOTTOM;
+            } else {
+                if (trigger->absmax[2] > other->s.origin[2])
+                    otherState = STATE_BOTTOM;
+            }
         }
     } else {
         otherState = STATE_BOTTOM;
-        if (other->s.origin[2] > platCenter)
+        if (other && other->s.origin[2] > platCenter)
             otherState = STATE_TOP;
     }
 

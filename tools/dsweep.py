@@ -9,9 +9,38 @@ survive a reload anyway -- q2pro's F_EDICT/F_ITEM/F_POINTER machinery exists to
 relocate those.  Losing a pointer member is not a regression; losing plain
 scalar/vector/string state is.
 """
-import os, re, sys
+import os, re, subprocess, sys
 
-def read(p): return open(p, encoding='latin-1').read()
+# A reference is a file on disk, or `git:<repo>@<sha>:<path>` -- a donor read at
+# the commit this tree pins, whatever its checkout happens to have on disk.
+def _git(p):
+    repo, rest = p[4:].split('@', 1)
+    sha, path = rest.split(':', 1)
+    return repo, sha, path
+
+def read(p):
+    if p.startswith('git:'):
+        repo, sha, path = _git(p)
+        return subprocess.run(['git', '-C', repo, 'show', '%s:%s' % (sha, path)],
+                              capture_output=True, check=True).stdout.decode('latin-1')
+    return open(p, encoding='latin-1').read()
+
+def exists(p):
+    if p.startswith('git:'):
+        repo, sha, path = _git(p)
+        return os.path.isdir(repo) and subprocess.run(
+            ['git', '-C', repo, 'cat-file', '-e', '%s:%s' % (sha, path)],
+            capture_output=True).returncode == 0
+    return os.path.exists(p)
+
+def ref(d, f):
+    return d + ':' + f if d.startswith('git:') else os.path.join(d, f)
+
+def pinned(repo, header, donor):
+    """The donor tree at the commit the tree's own file header says it came from."""
+    m = re.search(r'from %s@([0-9a-f]{7,40})\b' % re.escape(donor),
+                  open(header, encoding='utf-8').read())
+    return 'git:%s@%s' % (repo, m.group(1)) if m else 'git:%s@unpinned' % repo
 
 def struct_body(text, name):
     """Body of `typedef struct {...} NAME;` or `struct NAME {...};`, found by
@@ -94,10 +123,19 @@ if __name__ == '__main__':
         os.path.dirname(os.path.abspath(__file__)))))
     Q = os.path.join(WS, 'q2pro'); B = Q + '/src/game/g_local.h'
     v = '-v' in sys.argv
+    # The two mod donors are read AT THEIR PINS, through git, and the pin is the
+    # one this tree's own file header names (R-LIC-5), so there is one source of
+    # truth for it.  Not the working tree: `rocketarena2` keeps `main` checked
+    # out -- the 1999 reconstruction, whose g_save.c has no descriptor tables at
+    # all -- and reading that would trip the extractor's own assertion below.
+    # Which branch a checkout has on disk must not decide what this compares.
+    SRC = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'src')
     ROWS = [('ctf', Q + '/src/ctf'), ('xatrix', Q + '/src/xatrix'),
             ('rogue', Q + '/src/rogue'),
-            ('RA2', os.path.join(WS, 'rocketarena2-public')),
-            ('OSP', os.path.join(WS, 'osp-tourney'))]
+            ('RA2', pinned(os.path.join(WS, 'rocketarena2'),
+                           os.path.join(SRC, 'arena', 'arena.c'), 'rocketarena2')),
+            ('OSP', pinned(os.path.join(WS, 'osp-tourney'),
+                           os.path.join(SRC, 'tourney', 'osp_main.c'), 'osp-tourney'))]
 
     # A MISSING INPUT IS A SKIP AND NOT A FINDING.  Every tree this sweep reads
     # is the WORKSPACE's rather than this repository's, and `q2pro/src/{ctf,
@@ -113,13 +151,15 @@ if __name__ == '__main__':
     # rewrites.
     need = [B]
     for _, d in ROWS:
-        need += [d + '/g_local.h', d + '/g_save.c']
-    missing = [p for p in need if not os.path.exists(p)]
+        need += [ref(d, 'g_local.h'), ref(d, 'g_save.c')]
+    missing = [p for p in need if not exists(p)]
     if missing:
+        first = missing[0] if missing[0].startswith('git:') else \
+            os.path.relpath(missing[0], WS)
         print('dsweep.py: SKIP -- %d of the %d reference files are not in the '
               'workspace beside this repository (first: %s), so the mod-added '
               'members have nothing to be swept against'
-              % (len(missing), len(need), os.path.relpath(missing[0], WS)))
+              % (len(missing), len(need), first))
         sys.exit(0)
 
     # sanity: the extractor must find the three members the method already named
@@ -133,4 +173,4 @@ if __name__ == '__main__':
     print('mechanism (d) -- mod-added members of saved structs with no descriptor row')
     print('-' * 78)
     for lbl, d in ROWS:
-        run(lbl, B, os.path.join(d, 'g_local.h'), os.path.join(d, 'g_save.c'), v)
+        run(lbl, B, ref(d, 'g_local.h'), ref(d, 'g_save.c'), v)

@@ -17,7 +17,7 @@ along with this program; if not, write to the Free Software
 Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 */
-// The Gladiator Bot SDK's headers, from osp-tourney@1d8427e -- which carries a
+// The Gladiator Bot SDK's headers, from osp-tourney@1895f8e -- which carries a
 // working Q2PRO port of the 1999 glue.  src/tourney/ is written against these,
 // and botglobals must be declared exactly once and included.  Donor-only:
 // baseq2 has no counterpart, so it lives in src/tourney/ rather than being

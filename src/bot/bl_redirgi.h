@@ -17,7 +17,7 @@ along with this program; if not, write to the Free Software
 Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 */
-// Game-import redirection, from osp-tourney@1d8427e.  The reconstruction's
+// Game-import redirection, from osp-tourney@1895f8e.  The reconstruction's
 // asm-matching address comments are stripped.
 //===========================================================================
 //

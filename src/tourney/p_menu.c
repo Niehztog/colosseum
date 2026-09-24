@@ -17,7 +17,7 @@ along with this program; if not, write to the Free Software
 Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 */
-// OSP Tourney DM v2.75, from osp-tourney@1d8427e.
+// OSP Tourney DM v2.75, from osp-tourney@1895f8e.
 // Donor-only: baseq2 has no counterpart, so it lives in src/tourney/ rather
 // than being merged into a spine file.  The reconstruction's asm-matching
 // address comments are stripped -- those oracles are meaningless here, and
@@ -60,11 +60,15 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 //
 //  3. The redraw is rate-limited.  The donor rebuilds and unicasts
 //     ~1300 reliable bytes on every cursor keypress.  Update() now marks the
-//     menu dirty and ClientThink flushes at the engine's cadence, which is
-//     what CTF's copy of this engine does and what the shared
-//     `menutime`/`menudirty` pair in gclient_t is for -- one menu is open at a
-//     time, so one pair of fields answers for whichever engine owns
-//     it.
+//     menu dirty and ClientEndServerFrame flushes at the engine's cadence,
+//     which is what the shared `menutime`/`menudirty` pair in gclient_t is
+//     for -- one menu is open at a time, so one pair of fields answers for
+//     whichever engine owns it.  It flushes there rather than at the tail of
+//     ClientThink because that tail is skipped by several early returns, an
+//     OSP autocam observer's among them (see p_view.c).
+//
+// `osp-tourney@bfbba7d`, past the pin, makes the same three departures on the
+// donor's own branch.
 //
 #include "g_local.h"
 #include "tourney/osp_types.h"
@@ -159,8 +163,8 @@ void osp_PMenu_Close(edict_t *ent)
     ent->client->osp_menu = NULL;
     ent->client->showscores = false;
     // A redraw this menu earned but never got is not owed to the next one.
-    // The flush in ClientThink checks the owner and would skip it anyway; this
-    // is so the two forks of the engine say the same thing.
+    // The flush in ClientEndServerFrame checks the owner and would skip it
+    // anyway; this is so the two forks of the engine say the same thing.
     ent->client->menudirty = false;
 
     // The same argument ctf/p_menu.c writes out: osp_menus.c closes its own
@@ -310,8 +314,8 @@ void osp_PMenu_Do_Update(edict_t *ent)
 }
 
 // The flush cadence.  The donor composed and unicast ~1300 reliable bytes here
-// on every keypress; this defers to ClientThink, which flushes at most five
-// times a second and forces one through after a second of silence.
+// on every keypress; this defers to ClientEndServerFrame, which flushes at most
+// five times a second and forces one through after a second of silence.
 void osp_PMenu_Update(edict_t *ent)
 {
     if (!ent->client->osp_menu) {

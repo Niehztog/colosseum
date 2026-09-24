@@ -9,7 +9,7 @@ Two categories of difference in the RA2 reconstruction are not RA2's feature
 and must not reach the merge, because `git merge-file` would otherwise offer
 each one as a conflict to resolve by hand:
 
-  * the asm-matching address comments.  `rocketarena2-public` is byte-matched
+  * the asm-matching address comments.  `rocketarena2` is byte-matched
     against the shipped 1999 binaries and annotates every function with the
     address range it matched.  Those oracles are meaningless in
     this tree.  1,563 lines of them across the donor.
@@ -22,8 +22,8 @@ import sys
 
 # The two reconstructions annotate differently and BOTH have to be matched, or
 # the pass reports zero on one of them and leaves 1,910 lines in the merge:
-#   rocketarena2-public   /* gamei386.so 0x0001ddf8-0x0001de8a */
-#   osp-tourney           // gamei386.so: 00014EE8..00014FC5
+#   rocketarena2   /* gamei386.so 0x0001ddf8-0x0001de8a */
+#   osp-tourney    // gamei386.so: 00014EE8..00014FC5
 ASM = re.compile(r'^[ \t]*(?:/\*[ \t]*game[a-z0-9_]*\.(?:dll|so|exe)[ :][^\n]*\*/'
                  r'|//[ \t]*game[a-z0-9_]*\.(?:dll|so|exe):[^\n]*)\n', re.M)
 HDR = re.compile(r'\A/\*\nCopyright \(C\) 1997-2001 Id Software, Inc\..*?\n\*/\n', re.S)

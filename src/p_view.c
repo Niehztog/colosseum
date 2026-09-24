@@ -233,12 +233,14 @@ static void SV_CalcViewOffset(edict_t *ent)
     // Nothing kicks an arena camera.
     //
     // The run and bob terms below are computed from ent->velocity, and
-    // track_think() parks the whole camera-to-goal offset there every frame --
-    // `velocity = (goal - origin) * 10`, which at 0.1s a frame is "arrive next
-    // frame", except that a client edict gets no physics and so never arrives.
-    // The leftover is hundreds of units per second of standing velocity, and
+    // track_think() aims the whole camera-to-goal offset there every usercmd --
+    // `velocity = (goal - origin) * 10` -- for pmove to cover, which it does:
+    // the camera runs as PM_GIB (ClientThink says why), and PM_GIB integrates
+    // like any other type.  So a following camera carries hundreds of units
+    // per second of velocity that is the camera's motion and nothing else, and
     // run_roll turns it into ps.kick_angles[ROLL], which the client ADDS to the
     // view: turn the mouse and the horizon tilts, further the faster you turn.
+    // The velocity has to stay; it is only kept out of the view here.
     // Measured at 7 degrees of roll over one slow circle, and kick_angles are a
     // signed char at quarter-degree steps, so it saturates at 32.
     //
@@ -1310,48 +1312,63 @@ void ClientEndServerFrame(edict_t *ent)
         return;
     }
 
-    // if the scoreboard is up, update it.  `scoremode` is RA2's replacement for
-    // baseq2's `showscores` bool and the merged struct keeps both, so this
-    // asks whichever field the running ruleset writes.
-    if (G_ScoreboardUp(ent) &&
-        (!(level.framenum & 31) ||
-         (G_IsOspRuleset() && match_paused &&
-          !G_MenuActive(ent) &&
-          pause_time - (int)pause_time < FRAMETIME &&
-          !((int)pause_time % 3)))) {
-        // The menu shares the layout channel with the scoreboard -- which is
-        // exactly why every engine sets showscores when it opens --
-        // so the owner decides which of the two is redrawn.  MENU_ARENA is the
-        // exception and does not contend: it draws by overwriting CS_STATUSBAR
-        // for the one client (arena/menu.c SendMenu), on its own cadence, out
-        // of MenuThink() above.  Treating it as a layout owner here suppressed
-        // the arena board's 32-frame redraw for as long as the observer menu
-        // was up, which is all the time.
-        if (G_MenuActive(ent) && ent->client->menu_owner != MENU_ARENA) {
-            // Composing is what makes this a redraw.  MENU_TOURNEY reached
-            // here and composed nothing before 1.31, so the unicast below sent
-            // an EMPTY message every 32 frames -- the branch was claiming the
-            // channel off the scoreboard and then not drawing on it.  It now
-            // repaints the same way MENU_CTF does.  MENU_BOT still composes
-            // nothing: p_botmenu.c drives its own repaint off `redrawmenu`.
-            //
-            // This is a REPAINT, not a refresh.  Both engines redraw the
-            // client's private copy of the rows, and only a builder plus
-            // osp_PMenu_Sync() changes what is in that copy, so Team_Menu's
-            // "*(%d players)" is still the count from when the menu was opened
-            // or last acted on.  RA2 is the only one of the three that closes
-            // that gap (RA_RefreshMenuCounts out of MenuThink), and it
-            // can because a qmenu_t knows how to rebuild itself; a pmenu_t
-            // handle does not record which builder made it.
+    // The menu shares the layout channel with the scoreboard -- which is
+    // exactly why every engine sets showscores when it opens -- so while a
+    // CTF or tourney menu is open this block draws the menu and never the
+    // board.  Those two engines share one `menutime`/`menudirty` pair, because
+    // one menu is open at a time and a per-engine pair would be a second answer
+    // to the question `menu_owner` already answers; their Update() marks the
+    // menu dirty rather than sending ~1300 reliable bytes per keypress, and
+    // this is where the dirty menu is flushed.
+    //
+    // HERE, and not at the tail of ClientThink: that tail is skipped by every
+    // early return above it -- the client police, the bot detector, and every
+    // OSP autocam observer, whose OSP_clientThink answers for the whole
+    // frame and who can have a menu open -- and a deferred redraw that is only
+    // sometimes flushed is worse than none.  Every client passes this point
+    // once per frame.  `osp-tourney@bfbba7d` moved its flush here for that
+    // reason, keyed on the menu alone.
+    //
+    // Two reasons to compose: a keypress marked the menu dirty and its 0.2 s
+    // has run out, or the 32-frame repaint came round.  The flush goes
+    // reliably, as it always has; the repaint stays unreliable, as Threewave's
+    // is, because it redraws what the client already holds and the next one is
+    // 3.2 s away.  It is a REPAINT, not a refresh: both engines redraw the
+    // client's private copy of the rows, and only a builder plus
+    // osp_PMenu_Sync() changes what is in that copy, so Team_Menu's
+    // "*(%d players)" is still the count from when the menu was opened or last
+    // acted on.  RA2 is the only one of the three that closes that gap
+    // (RA_RefreshMenuCounts out of MenuThink), and it can because a qmenu_t
+    // knows how to rebuild itself; a pmenu_t handle does not record which
+    // builder made it.
+    //
+    // MENU_ARENA does not contend: it draws by overwriting CS_STATUSBAR for the
+    // one client (arena/menu.c SendMenu), on its own cadence, out of MenuThink()
+    // above, so the arena board keeps its 32-frame redraw below while the
+    // observer menu is up, which is all the time.  MENU_BOT returned above.
+    if (G_MenuActive(ent) && (ent->client->menu_owner == MENU_CTF ||
+                              ent->client->menu_owner == MENU_TOURNEY)) {
+        bool flush = ent->client->menudirty &&
+                     ent->client->menutime <= level.time;
+
+        if (flush || !(level.framenum & 31)) {
             if (ent->client->menu_owner == MENU_CTF)
                 ctf_PMenu_Do_Update(ent);
-            else if (ent->client->menu_owner == MENU_TOURNEY)
+            else
                 osp_PMenu_Do_Update(ent);
-            ent->client->menudirty = false;
+            gi.unicast(ent, flush);
             ent->client->menutime = level.time;
-        } else {
-            G_ScoreboardMessage(ent, ent->enemy);
+            ent->client->menudirty = false;
         }
+    } else if (G_ScoreboardUp(ent) &&
+               (!(level.framenum & 31) ||
+                (G_IsOspRuleset() && match_paused &&
+                 pause_time - (int)pause_time < FRAMETIME &&
+                 !((int)pause_time % 3)))) {
+        // if the scoreboard is up, update it.  `scoremode` is RA2's
+        // replacement for baseq2's `showscores` bool and the merged struct
+        // keeps both, so this asks whichever field the running ruleset writes.
+        G_ScoreboardMessage(ent, ent->enemy);
         gi.unicast(ent, false);
     }
 

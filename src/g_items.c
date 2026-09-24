@@ -1916,7 +1916,7 @@ const gitem_t itemlist[] = {
             "weapons/grapple/grhurt.wav",
             // CTFGrappleFire() takes this model index at the moment it fires,
             // so the hook was runtime-only in every donor.  RA2 upstream added
-            // it to the list in `rocketarena2@ddba883`; the same reasoning
+            // it to the list in `rocketarena2@906107f`; the same reasoning
             // applies here, and now that CTFPrecache() walks this list it is
             // registered at map load like the rest of the row.
             "models/weapons/grapple/hook/tris.md2",

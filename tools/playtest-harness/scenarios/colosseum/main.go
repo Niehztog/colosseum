@@ -731,6 +731,9 @@ func modeCheck(port int, mode, matchType, banner string, accepts, rejects []stri
 		Cvars: map[string]string{
 			"g_ruleset": mode, "cheats": "1", "deathmatch": "1",
 			"coop": "0",
+			// The command rows below read chat echoes, several of them in a
+			// few seconds; FloodProtect returns early on < 1.
+			"flood_msgs": "0",
 		},
 	}
 	if err := srv.Start(); err != nil {
@@ -752,35 +755,94 @@ func modeCheck(port int, mode, matchType, banner string, accepts, rejects []stri
 	check("mode "+mode+"/match_type", strings.Contains(info, matchType),
 		firstMatch(info, "match_type"))
 
-	b := playtest.NewBot("mode"+mode, "127.0.0.1", port)
+	// The name must not be able to satisfy anything asserted below, which it
+	// did: `modedm` matched a pattern looking for the word "mode".
+	name := "guard" + mode
+	b := playtest.NewBot(name, "127.0.0.1", port)
 	if err := b.Start(30 * time.Second); err != nil {
 		check("mode "+mode+"/client", false, err.Error())
 		return
 	}
 	defer b.Disconnect()
 
+	// A command this mode does not have is not REFUSED under the OSP four:
+	// OSP_ClientCommand returns false for it, the bot command table passes,
+	// and ClientCommand's tail makes it chat -- the donor's own dispatcher. So
+	// the guard is read in both signs off the chat echo: a foreign command
+	// comes back as `<name>: <command>`, and a command the mode owns is
+	// consumed by its handler and never does.  A guard that stopped guarding
+	// would swallow `captain` in a duel, and that echo would be missing.  The
+	// two rows are each other's control: every command in the table is owned
+	// by one mode and foreign to another, so a harness that saw every echo, or
+	// none, fails one of them.
+	//
+	// THE CHANNEL FIRST.  A command sent in the first frames after a connect
+	// can be lost before the game sees it, and a row that read that as a
+	// verdict failed for a reason that had nothing to do with the guard. So a
+	// `say` is repeated until its echo comes back; only then is anything sent
+	// that is judged.
+	open := false
+	for try := 0; try < 10 && !open; try++ {
+		b.Cmd("say ready")
+		if _, err := b.WaitPrint(echoRe(name, "ready"), time.Second); err == nil {
+			open = true
+		}
+	}
+	if !check("mode "+mode+"/commands reach the game", open,
+		"a `say` echoed back within ten tries") {
+		return
+	}
+
+	// ...then the commands, then a marker.  The game runs them in the order
+	// they arrive and the echoes come back in that order, so once the marker
+	// is back, every echo the commands will ever produce has arrived: no
+	// window to guess.
 	for _, c := range append(append([]string{}, accepts...), rejects...) {
 		b.Cmd(c)
 	}
-	time.Sleep(1500 * time.Millisecond)
-	unknown := srv.Grep(`Unknown command`)
-	check("mode "+mode+"/no unknown command", len(unknown) == 0,
-		strings.Join(unknown, " | "))
-
-	// A command this mode does not have must be REFUSED, not silently ignored:
-	// the mod tells the player which mode they are in.
-	//
-	// WAITED FOR, NOT SLEPT FOR.  The refusal is a print the server sends in
-	// answer, so the question is "did one arrive", and a fixed window answers a
-	// different one -- "did it arrive within 1.5s of a busy host" -- which is how
-	// this row read "0 print(s) back" once on a CPU-starved machine and passed
-	// 204 of 204 on the same library an hour later.  Same test as before, the
-	// word "mode" or "not " in any print, asked until it is true or 8s pass.
-	if len(rejects) > 0 {
-		_, err := b.WaitPrint(`(?i)mode|not `, 8*time.Second)
-		check("mode "+mode+"/refuses foreign commands", err == nil,
-			"%d print(s) back", len(b.Prints()))
+	b.Cmd("say done")
+	if _, err := b.WaitPrint(echoRe(name, "done"), 8*time.Second); err != nil {
+		check("mode "+mode+"/commands reach the game", false,
+			"the marker after the commands never echoed back")
+		return
 	}
+	echoed := func(c string) bool {
+		re := regexp.MustCompile(echoRe(name, c))
+		for _, p := range b.Prints() {
+			if re.MatchString(p) {
+				return true
+			}
+		}
+		return false
+	}
+	if len(accepts) > 0 {
+		var chat []string
+		for _, c := range accepts {
+			if echoed(c) {
+				chat = append(chat, c)
+			}
+		}
+		check("mode "+mode+"/accepts its own commands", len(chat) == 0,
+			"%s consumed by a handler; came back as chat: %v",
+			strings.Join(accepts, ", "), chat)
+	}
+	if len(rejects) > 0 {
+		var lost []string
+		for _, c := range rejects {
+			if !echoed(c) {
+				lost = append(lost, c)
+			}
+		}
+		check("mode "+mode+"/refuses foreign commands", len(lost) == 0,
+			"%s fell through to chat; swallowed by a handler: %v",
+			strings.Join(rejects, ", "), lost)
+	}
+}
+
+// echoRe is the chat line a client's `say <text>` -- or a command that fell
+// through to chat -- comes back as: `<name>: <text>`.
+func echoRe(name, text string) string {
+	return `^` + regexp.QuoteMeta(name) + `: ` + regexp.QuoteMeta(text) + `\s*$`
 }
 
 // boot brings a server up, asks it both diagnostics, and returns the parsed

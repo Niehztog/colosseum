@@ -183,7 +183,7 @@ void MoveClientToIntermission(edict_t *ent)
     //
     // `close_menus` rather than the donor's `clear_menus`: it does the same two
     // things -- drop the queue, repaint through the arbiter -- and FREES the
-    // nodes on the way, which `rocketarena2@28a8af7` established is this tree's
+    // nodes on the way, which `rocketarena2@5f017dc` established is this tree's
     // one teardown.  clear_menus() could afford to forget because the level was
     // about to end; there is no reason to.
     //

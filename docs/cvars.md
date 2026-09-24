@@ -90,7 +90,7 @@ Registered unconditionally so that a config naming one is not rejected, but only
 | `logname` | `stdlog.log` | the StdLog file name, under the same root as `arenacfg` |
 | `logfile` | `0` | the engine's own console-logging cvar, re-obtained: RA2 gates its stdlog on it rather than adding a second switch |
 | `hostname`, `port` | engine's | re-obtained for the round log's header |
-| `public` | `1` | a private server clears `netlog` rather than forwarding |
+| `public` | `1` | re-obtained because the round log's header counts it. `netlog` forwards nothing, so a private server has nothing to clear |
 | `ra_allowvotingbots` | `0` | Colosseum's own, and a **floor under `arena.cfg`, not a second switch**: non-zero offers the `Allow Bots` row in every arena's settings menu whatever the file's `allowvotingbots` key says, `0` leaves the file deciding. Read in `set_config()` after all three of the file's layers -- global, per-map, per-arena -- so no block can withdraw it, which is the point: a server that runs `botfill` wants "may the people here vote the bots away" answered by the server and not by the map rotation it happens to be running (R-RA-13). It cannot turn the vote off, only on |
 
 `statsfile` / `statsname` are the shared pair and arrive with tourney, where the collision with tourney's is resolved.
@@ -276,7 +276,7 @@ What the server requires of, or does for, a connected client.
 | `client_deathweapdrop` | `1` | drop the held weapon on death |
 | `client_muzzlemode` | `0` | muzzle-flash policy |
 | `client_hud` | `0` | where the match timer sits: `0` middle right, `1` bottom middle. Per-CLIENT in the donor and one statusbar here, which is what `g_stats.c` reconciles |
-| `client_highscores` | `1` | highscore tracking, **FFA modes only** |
+| `client_highscores` | `1` | highscore tracking, **FFA modes only** -- `dm` and `dmpro`, and only with a `timelimit` or `fraglimit`. Anything else sets it to `0`, and it stays `0` on later maps until it is set again: after `tdm` or `duel` an FFA map keeps no table unless its config sets this back, which `configs/dm.cfg` does |
 | `client_highscoredir` | `highscores` | where |
 | `flood_msgs`, `flood_persecond` | `4`, `4` | that many messages inside that many seconds gets a client muzzled. **Shared with baseq2**, same names and defaults |
 | `flood_waitdelay` | `10` | seconds the muzzle lasts |
@@ -411,7 +411,7 @@ None is a collision: each is either an engine cvar re-obtained for a handle, or 
 
 ## The bot layer
 
-Every cvar the Gladiator SDK's `bl_*.c` names, measured against `osp-tourney@1d8427e`'s six files: **28**, all reachable here. Eighteen are literals at a `gi.cvar` call, eight arrive through `BotSetVarIfSet`'s name parameter, and two -- `minimumplayers` and `botfile` -- through the per-ruleset accessor below. `python3 tools/counts.py --tree ../osp-tourney --duplicates` is the tool that says so; nothing in the donor's set is absent.
+Every cvar the Gladiator SDK's `bl_*.c` names, measured against `osp-tourney@1895f8e`'s six files: **28**, all reachable here. Eighteen are literals at a `gi.cvar` call, eight arrive through `BotSetVarIfSet`'s name parameter, and two -- `minimumplayers` and `botfile` -- through the per-ruleset accessor below. `python3 tools/counts.py --tree ../osp-tourney --duplicates` is the tool that says so; nothing in the donor's set is absent.
 
 | cvar | default | meaning |
 |---|---|---|

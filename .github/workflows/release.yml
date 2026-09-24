@@ -83,7 +83,8 @@
 # the other build.  The gate replaces the original bugs that are fatal or simply
 # wrong in play with Quake III's own later fix of the same code rather than with
 # anything invented -- Mr. Elusive wrote both bot libraries -- and four of the
-# five are in this object: AAS_AASLinkEntity pushing unbounded into an `int[64]`
+# eight at the pinned commit are in this object (the rest are in the
+# submodule's own game tree, which nothing here builds): AAS_AASLinkEntity pushing unbounded into an `int[64]`
 # whose 65th slot is the return address, AAS_UpdateAreaRoutingCache seeding the
 # start node with a reachability row an area without reachabilities does not
 # have, BotUpdateEntityItems re-linking a level item through a stale index so a

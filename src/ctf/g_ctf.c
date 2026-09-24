@@ -291,7 +291,7 @@ void CTFPrecache(void)
     // The Gladiator donor carries the fix as `PrecacheCTFItems()` under
     // `#ifdef BOT` -- the same fence that hid `ctfteam` and the team skin --
     // and RA2 upstream fixed the identical pattern in its own copy
-    // (`rocketarena2@ddba883`).  The flags and the four techs are in the
+    // (`rocketarena2@906107f`).  The flags and the four techs are in the
     // donor's list too and are belt-and-braces here: both do spawn in the
     // world, so SpawnItem already reaches them, and PrecacheItem is idempotent
     // and NULL-safe.

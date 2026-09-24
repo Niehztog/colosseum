@@ -17,7 +17,7 @@ along with this program; if not, write to the Free Software
 Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 */
-// The Gladiator Bot SDK's headers, from osp-tourney@1d8427e -- which carries a
+// The Gladiator Bot SDK's headers, from osp-tourney@1895f8e -- which carries a
 // working Q2PRO port of the 1999 glue.  The reconstruction's asm-matching
 // address comments are stripped.
 // The SDK's own library interface.  The donor pulls it in from its g_local.h;

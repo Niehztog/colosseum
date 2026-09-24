@@ -259,30 +259,6 @@ void G_UseTargets(edict_t *ent, edict_t *activator)
     edict_t     *master;
     bool    done = false;
 
-    // R-SEC-10's SECOND boundary, and it is a second one rather than an
-    // extension of the first because nothing on this path has reached
-    // `T_Damage` yet: a `func_door` whose `activator` was never assigned, or a
-    // `func_clock` that is not START_OFF and therefore never had one, hands
-    // what it holds straight to here, and the message arm below reads
-    // `activator->svflags` eleven lines down.  An empty server dies by itself
-    // -- no client, no damage, no bot -- a few seconds into a map carrying a
-    // `target_explosion` with a `message` on it.
-    //
-    // The normalisation is the same one for the same reason: `world` is the
-    // tree's idiom for "nobody", `world->client` is NULL, and `menu_centerprint`
-    // below already answers a non-client activator by falling through to
-    // `gi.centerprintf`, which the engine drops for a non-client with a
-    // developer-only note.  So a message with nobody to tell goes nowhere,
-    // which is what it meant.
-    //
-    // The donor's `Think_Delay with no activator` dprintf goes with it.  It
-    // warned about the one path here that could NOT crash -- a delayed use,
-    // where the NULL is only stored -- and the boundary above it now makes the
-    // condition unreachable; a diagnostic that can never fire is worse than no
-    // diagnostic, because a reader takes its silence for evidence.
-    if (!activator)
-        activator = world;
-
 //
 // check for a delay
 //
@@ -293,6 +269,8 @@ void G_UseTargets(edict_t *ent, edict_t *activator)
         t->nextthink = level.framenum + ent->delay * BASE_FRAMERATE;
         t->think = Think_Delay;
         t->activator = activator;
+        if (!activator)
+            gi.dprintf("Think_Delay with no activator\n");
         t->message = ent->message;
         t->target = ent->target;
         t->killtarget = ent->killtarget;
@@ -302,7 +280,18 @@ void G_UseTargets(edict_t *ent, edict_t *activator)
 //
 // print the message
 //
-    if ((ent->message) && !(activator->svflags & SVF_MONSTER)) {
+    // R-SEC-10, the donors' way: the activator is legitimately NULL on some
+    // paths -- the delay arm above warns about exactly that -- and it is
+    // guarded where it is read rather than replaced where it enters.  Nothing
+    // ever assigns `activator` on a `func_door`, and a `func_clock` that is
+    // not START_OFF never has one either; both hand what they hold to here,
+    // and target_explosion_explode calls back in with the one it was handed.
+    // Without this test an empty server dies by itself a few seconds into a
+    // map carrying a `target_explosion` with a `message` on it.  Every `use`
+    // callback that reads its activator carries the same kind of test, and
+    // tools/nullattacker.py sweeps them all (rocketarena2@99f8bb2,
+    // osp-tourney@a8d1725, q2pro's feature/mission-packs@02857024).
+    if ((ent->message) && activator && !(activator->svflags & SVF_MONSTER)) {
         // RA2 routes entity messages through its menu so one does not wipe an
         // open arena menu.  menu_centerprint falls back to gi.centerprintf when
         // no menu is open, so it WOULD be transparent everywhere -- but "it

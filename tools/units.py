@@ -135,7 +135,7 @@ SELFTESTS = [
      'pm_time written without PM_TIME_SHIFT'),
     # ...and the copy that crosses the ABI, which the exemption used to wave
     # through.  The mutation restores the line as it stood before
-    # `osp-tourney@11563de`.
+    # `osp-tourney@81429c0`.
     ('copied pm_time', 'bl_main.c',
      ('buc.pm_time = min(bot->client->ps.pmove.pm_time >> (3 - PM_TIME_SHIFT), 255);',
       'buc.pm_time = bot->client->ps.pmove.pm_time;'),
@@ -217,7 +217,7 @@ def run(tree, files):
                     # saw ran eight times long, and the old wording here -- "it
                     # COPIES a value that was already shifted where it was set"
                     # -- is exactly the reasoning that let it stand
-                    # (`osp-tourney@11563de`).  So a copy is exempt only between
+                    # (`osp-tourney@81429c0`).  So a copy is exempt only between
                     # two fields of the SAME kind.
                     if ('ps.pmove.pm_time' in rhs) != ('ps.pmove.pm_time' in lhs):
                         shift.append((name, i, line.strip()[:70]))

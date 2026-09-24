@@ -945,7 +945,7 @@ void SpawnEntities(const char *mapname, const char *entities, const char *spawnp
         // exists.  MoveClientToIntermission nulls them on the way out of a
         // level, so an ordinary map change arrives here with nothing to do; a
         // console `map` runs no intermission, and close_menus() would then walk
-        // freed nodes.  `rocketarena2@28a8af7` puts it here for that reason:
+        // freed nodes.  `rocketarena2@5f017dc` puts it here for that reason:
         // the free is what invalidates them, so the free is what clears them.
         //
         // Gated, and the gate is safe rather than merely quiet:

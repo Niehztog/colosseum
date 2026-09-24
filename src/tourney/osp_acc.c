@@ -56,10 +56,12 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 //     inline sites carried `damage`, the amount the weapon set out to do.  A
 //     rail through body armour counted 100 there and counts what it actually
 //     removed here.  T_Damage is the only place the difference is known.
-//   * the donor leaves the RUNNING totals ungated at two sites: fire_lead adds
-//     `dgiven`/`dtaken` outside its own `sync_stat > 2` test, and fire_rail
-//     gates only the hit counter.  Here everything is gated together, so a
-//     warmup shot cannot land in a match's damage total.
+//   * the donor leaves the damage totals ungated at two sites: fire_lead and
+//     fire_rail put only the per-weapon HIT counter behind `sync_stat > 2`,
+//     so a warmup shot still adds to that weapon's `given`/`taken` and to the
+//     running `dgiven`/`dtaken` (`osp-tourney@1895f8e`, g_weapon.c).  Here
+//     everything is gated together, so a warmup shot cannot land in a match's
+//     damage total.
 
 #include "g_local.h"
 #include "tourney/osp_types.h"

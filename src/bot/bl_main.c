@@ -17,7 +17,7 @@ along with this program; if not, write to the Free Software
 Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 */
-// Bot setup and the botlib handshake, from osp-tourney@1d8427e.  The
+// Bot setup and the botlib handshake, from osp-tourney@1895f8e.  The
 // reconstruction's asm-matching address comments are stripped.
 //===========================================================================
 //
@@ -1014,7 +1014,7 @@ void BotLib_BotUpdateClient(edict_t *bot)
     // `3 - PM_TIME_SHIFT` is the inverse: 0 on a plain server, 3 on an extended
     // one.  The clamp is not decoration -- extended pm_time is a uint16_t and
     // the engine's own waterjump hold is 2040 ms, which does not survive the
-    // byte on its own.  From `osp-tourney@11563de`.
+    // byte on its own.  From `osp-tourney@81429c0`.
     buc.pm_time = min(bot->client->ps.pmove.pm_time >> (3 - PM_TIME_SHIFT), 255);
     //gravity
     buc.gravity = sv_gravity->value;

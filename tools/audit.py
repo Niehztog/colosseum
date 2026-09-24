@@ -233,7 +233,9 @@ def main():
     # first time a blocked door fires a target_explosion.  id's own code
     # survives the same NULL by accident (its single read sits behind
     # !(dflags & DAMAGE_RADIUS)); six donors' arms merged into one function is
-    # what spends that accident.  R-SEC-10.
+    # what spends that accident.  And the use path, which the donors guard at
+    # the read rather than normalise: every `use` callback and every pointer
+    # one hands on is swept for a dereference no NULL test covers.  R-SEC-10.
     results.append(run('nullattacker.py', ['--tree', tree], 'nullattacker'))
     results.append(run('nullattacker.py', ['--selftest'], 'nullattacker/controls'))
     # encoding: every source file is valid UTF-8.  Trivial, and it has bitten

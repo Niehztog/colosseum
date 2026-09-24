@@ -17,7 +17,7 @@ along with this program; if not, write to the Free Software
 Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 */
-// Rocket Arena 2 v2.25, from rocketarena2-public@d20e1ce.
+// Rocket Arena 2 v2.25, from rocketarena2@358b325.
 // Donor-only: baseq2 has no counterpart, so it lives in src/arena/ rather than
 // being merged into a spine file.  The reconstruction's asm-matching
 // address comments are stripped.
@@ -337,7 +337,7 @@ AddMenuItem makes three allocations per row (the qmenu_t node, the menuitem_t,
 and its text) and the teardown released two: `node->it`, the menuitem_t itself,
 was never freed.  That is one block leaked per row every time anybody closes a
 menu by picking a row, which on a Rocket Arena server is how menus normally
-close.  Taken from `rocketarena2@28a8af7`.
+close.  Taken from `rocketarena2@5f017dc`.
 ================
 */
 static void free_menu(qmenu_t *menu)
@@ -508,7 +508,7 @@ the arbiter's close repaints the statusbar and frees nothing.  The repaint is
 still its job and still goes through it -- nothing here may call G_MenuClose's
 engine row directly -- and the freeing is this function's.
 
-Taken from `rocketarena2@28a8af7`.  RA2's own version tests its `showmenu` bool
+Taken from `rocketarena2@5f017dc`.  RA2's own version tests its `showmenu` bool
 to decide whether a repaint is owed; this tree does not carry that field
 and `menu_owner == MENU_ARENA` is the same question -- a menu
 built with FinishMenu(show=false) has never claimed the channel.

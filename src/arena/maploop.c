@@ -17,7 +17,7 @@ along with this program; if not, write to the Free Software
 Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 */
-// Rocket Arena 2 v2.25, from rocketarena2-public@d20e1ce.
+// Rocket Arena 2 v2.25, from rocketarena2@358b325.
 // Donor-only: baseq2 has no counterpart, so it lives in src/arena/ rather than
 // being merged into a spine file.  The reconstruction's asm-matching
 // address comments are stripped.

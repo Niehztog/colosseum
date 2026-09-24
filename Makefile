@@ -1,6 +1,6 @@
 # Colosseum -- one Quake II game library, many rulesets.
 #
-# Shape inherited from osp-tourney/Makefile and rocketarena2-public/Makefile:
+# Shape inherited from osp-tourney/Makefile and rocketarena2/Makefile:
 # the same debug/release split, the same $(BUILDDIR)/game$(CPU).$(SHLIBEXT)
 # target, the same one-rule-per-TU tail.  Three deliberate departures:
 #

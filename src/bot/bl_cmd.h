@@ -17,7 +17,7 @@ along with this program; if not, write to the Free Software
 Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 */
-// Bot commands, from osp-tourney@1d8427e.
+// Bot commands, from osp-tourney@1895f8e.
 //===========================================================================
 //
 // Name:         bl_cmd.h

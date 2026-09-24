@@ -17,7 +17,7 @@ along with this program; if not, write to the Free Software
 Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 */
-// Rocket Arena 2 v2.25, from rocketarena2-public@d20e1ce.  RA2 has no baseq2
+// Rocket Arena 2 v2.25, from rocketarena2@358b325.  RA2 has no baseq2
 // counterpart, so it lives in src/arena/ rather than being merged into a spine
 // file.  The reconstruction's asm-matching address comments are stripped.
 #include "g_local.h"
@@ -1418,7 +1418,7 @@ void remove_from_team(edict_t *ent)
 // point, so counting it chooses spawns by where the audience stood.  That is
 // answered inside `PlayersRangeFromSpot`, which the shared deathmatch
 // selectors also use.  RA2 upstream reached the same finding later
-// (`rocketarena2@6b8d058`) and answered all three at once.  The other two are
+// (`rocketarena2@2db7452`) and answered all three at once.  The other two are
 // still open here, and both are cheap:
 //
 //   * the scan covers every client on the server, so a fight in another arena
@@ -1433,8 +1433,6 @@ void remove_from_team(edict_t *ent)
 // `PlayersRangeFromSpot` keeps the observer arm because `PutClientInServer`
 // still reaches the shared deathmatch selectors under `arena`, before this
 // file's placement runs.
-// reaches the shared deathmatch selectors under `arena`, before this file's
-// placement runs.
 static bool ArenaLiveBody(edict_t *e, edict_t *ignore)
 {
     if (e == ignore)
@@ -1514,7 +1512,7 @@ static bool ArenaRangeFromSpot(const vec3_t place, int arenanum, edict_t *ignore
 //
 // The score remains fighter-first: an observer must not make a candidate rank
 // farther from the fight.  Candidate safety is a separate question, answered
-// below without changing this measure.  Taken from `rocketarena2@811af42`.
+// below without changing this measure.  Taken from `rocketarena2@97d0027`.
 static float ArenaFightersRangeFromSpot(const vec3_t place, int arenanum,
                                        edict_t *ignore)
 {

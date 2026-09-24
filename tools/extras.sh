@@ -179,7 +179,15 @@ bindings_in_layout() {
         +set basedir "$b" +set homedir "$b/home" +set game colosseum \
         +set vid_geometry 640x480 +set s_enable 0 +set allow_download 0 \
         +set logfile 1 +set logfile_flush 2 +set logfile_prefix "" \
-        +bindlist +quit >/dev/null 2>&1 )
+        +bindlist +quit >"$b/client.out" 2>&1 )
+    # A client that never ran wrote no console log at all, and that is a
+    # different answer from a client that ran and was given no bindings: the
+    # first is the display or the client failing to start, the second is the
+    # finding.  Reading both as 0 made this row accuse the gamedir when Xvfb
+    # had not come up, and would have let the control below "fire" on a
+    # client that never started.  So no log is `none`, and only a log is a
+    # count.
+    [ -f "$b/home/colosseum/logs/console.log" ] || { echo none; return; }
     # `grep -c` prints 0 AND exits 1 when nothing matches, so a `|| echo 0`
     # fallback appends a SECOND line and every numeric test downstream then
     # fails on "0\n0" rather than on the count.  It cost one confusing control
@@ -188,6 +196,24 @@ bindings_in_layout() {
     c=$(grep -cE '^\S+ "' "$b/home/colosseum/logs/console.log" 2>/dev/null)
     printf '%s\n' "${c:-0}"
 }
+
+# The transient is retried and the answer is not.  `xvfb-run -a` picks the
+# first free display and two picking at once lose one of them, which is a
+# client that never starts -- seen inside long runs, never alone.  A count, any
+# count, is final: retrying a real 0 until it passed would retry the finding
+# away.
+bindings_retry() {
+    for try in 1 2 3; do
+        n=$(bindings_in_layout "$@")
+        [ "$n" != none ] && break
+        sleep 2
+    done
+    printf '%s\n' "$n"
+}
+
+# The first line the client printed, for a row that has to say why it did
+# not start.
+client_said() { head -1 "$DIR/bind/client.out" 2>/dev/null | cut -c1-120; }
 
 # ------------------------------------------------------------------ controls
 if [ "$CONTROL" = 1 ]; then
@@ -220,8 +246,10 @@ if [ "$CONTROL" = 1 ]; then
   # 4. the shipped gamedir set: a `default.cfg` in the gamedir must be reported, because id's own is
   #    what a client's keyboard comes from.  Manufactured rather than hoped for.
   if [ -x "$Q2PRO_BUILD/q2pro" ] && command -v xvfb-run >/dev/null; then
-    n=$(bindings_in_layout default.cfg)
-    if [ "${n:-0}" -lt 60 ] 2>/dev/null; then
+    n=$(bindings_retry default.cfg)
+    if [ "$n" = none ]; then
+      bad "control/shadowed default.cfg" "the client never wrote a console log in three tries, so the control could not fire: $(client_said)"
+    elif [ "${n:-0}" -lt 60 ] 2>/dev/null; then
       ok "control/shadowed default.cfg" "$n binding(s) with a default.cfg in the gamedir"
     else
       bad "control/shadowed default.cfg" "$n bindings -- the shadowing did not bite"
@@ -470,8 +498,10 @@ fi
 if [ ! -x "$Q2PRO_BUILD/q2pro" ] || ! command -v xvfb-run >/dev/null; then
   ok "gamedir/a client has bindings" "SKIPPED: no q2pro client or no xvfb-run"
 else
-  n=$(bindings_in_layout)
-  if [ "${n:-0}" -ge 60 ] 2>/dev/null; then
+  n=$(bindings_retry)
+  if [ "$n" = none ]; then
+    bad "gamedir/a client has bindings" "the client never wrote a console log in three tries, so nothing was measured: $(client_said)"
+  elif [ "${n:-0}" -ge 60 ] 2>/dev/null; then
     ok "gamedir/a client has bindings" "$n bindings, so id's default.cfg was reached"
   else
     bad "gamedir/a client has bindings" "only ${n:-0} binding(s) -- something in the gamedir shadows id's default.cfg"

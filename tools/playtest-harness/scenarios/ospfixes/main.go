@@ -75,14 +75,21 @@ import (
 
 var (
 	engine = flag.String("engine", "q2pro", "q2pro | yq2")
-	binary = flag.String("bin", "", "dedicated server binary")
-	ref    = flag.String("ref", "../../../yquake2/release_", "read-only reference install")
-	lib    = flag.String("lib", "", "game library to test")
-	dir    = flag.String("dir", "", "scratch dir")
-	port   = flag.Int("port", 27930, "base UDP port")
-	label  = flag.String("label", "run", "label for output")
-	only   = flag.String("only", "", "run only rows whose name contains this")
-	keep   = flag.Bool("keep", false, "keep the scratch dir")
+	// -q2proded is the name tools/playtest.sh supplies to every scenario that
+	// declares it, so `tools/playtest.sh -s ospfixes` runs the q2pro arm with
+	// nothing added; -bin names the server for the other engine, or overrides.
+	q2proded = flag.String("q2proded", "", "q2pro dedicated server (used when -bin is empty and -engine is q2pro)")
+	binary   = flag.String("bin", "", "dedicated server binary")
+	// Either retail baseq2 itself -- what the wrapper passes -- or a root that
+	// holds baseq2/ and, optionally, an OSP distribution in tourney/.  Every
+	// row writes the configs it needs into the staged gamedir itself.
+	ref   = flag.String("ref", "/usr/share/games/quake2/baseq2", "retail baseq2, or a root holding baseq2/ (and optionally tourney/)")
+	lib   = flag.String("lib", "", "game library to test")
+	dir   = flag.String("dir", "", "scratch dir")
+	port  = flag.Int("port", 27930, "base UDP port")
+	label = flag.String("label", "run", "label for output")
+	only  = flag.String("only", "", "run only rows whose name contains this")
+	keep  = flag.Bool("keep", false, "keep the scratch dir")
 )
 
 var pass, fail int
@@ -244,13 +251,20 @@ func stage(d string, extra map[string]string) error {
 			return err
 		}
 	}
-	for _, p := range []string{"pak0.pak", "pak1.pak", "pak2.pak"} {
-		os.Symlink(filepath.Join(*ref, "baseq2", p), filepath.Join(d, "baseq2", p))
+	paks := *ref
+	if _, err := os.Stat(filepath.Join(*ref, "baseq2")); err == nil {
+		paks = filepath.Join(*ref, "baseq2")
 	}
-	ents, err := os.ReadDir(filepath.Join(*ref, "tourney"))
-	if err != nil {
-		return err
+	found, _ := filepath.Glob(filepath.Join(paks, "pak*.pak"))
+	if len(found) == 0 {
+		return fmt.Errorf("no pak*.pak in %s: -ref is retail baseq2 or a root holding it", paks)
 	}
+	for _, p := range found {
+		os.Symlink(p, filepath.Join(d, "baseq2", filepath.Base(p)))
+	}
+	// An OSP distribution beside it is carried when there is one, and a root
+	// without one is not an error: nothing below reads a file it ships.
+	ents, _ := os.ReadDir(filepath.Join(*ref, "tourney"))
 	for _, e := range ents {
 		n := e.Name()
 		if strings.HasPrefix(n, "game") || strings.Contains(n, "oracle") ||
@@ -478,8 +492,11 @@ func row2(base string, p int) {
 	d := base + "-r2"
 	must(stage(d, map[string]string{"maps.txt": "q2dm1\nq2dm5\n"}))
 	s, err := startServer(d, p, map[string]string{
-		"maxclients":      "8",
-		"match_mode":      "3", // 1v1: the arm that re-got the cvar NOSET
+		"maxclients": "8",
+		// duel, the arm that re-got the cvar NOSET.  It is a g_ruleset value
+		// here (R-MODE-1): this tree has no `match_mode`, and setting one
+		// selects nothing.
+		"g_ruleset":       "duel",
 		"team_maxplayers": "4",
 		"timelimit":       "0",
 	}, "q2dm1")
@@ -774,7 +791,9 @@ func must(err error) {
 func main() {
 	flag.Parse()
 	if *binary == "" {
-		if *engine == "q2pro" {
+		if *engine == "q2pro" && *q2proded != "" {
+			*binary = *q2proded
+		} else if *engine == "q2pro" {
 			*binary = "../../../q2pro/builddir-test/q2proded"
 		} else {
 			*binary = "../../../yquake2/release/q2ded"

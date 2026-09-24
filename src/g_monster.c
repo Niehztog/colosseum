@@ -686,6 +686,11 @@ void monster_use(edict_t *self, edict_t *other, edict_t *activator)
         return;
     if (self->health <= 0)
         return;
+    // G_UseTargets hands on the activator it was given, and a func_door or a
+    // func_clock that never had one hands on NULL; with no activator there is
+    // nobody for this monster to get angry at (R-SEC-10, the donors' guard)
+    if (!activator)
+        return;
     if (activator->flags & FL_NOTARGET)
         return;
     if (!(activator->client) && !(activator->monsterinfo.aiflags & AI_GOOD_GUY))
@@ -739,7 +744,8 @@ void monster_triggered_spawn_use(edict_t *self, edict_t *other, edict_t *activat
     // we have a one frame delay here so we don't telefrag the guy who activated us
     self->think = monster_triggered_spawn;
     self->nextthink = level.framenum + 1;
-    if (activator->client)
+    // NULL when the entity that fired us never had an activator of its own
+    if (activator && activator->client)
         self->enemy = activator;
     self->use = monster_use;
 }
@@ -1020,7 +1026,8 @@ void stationarymonster_triggered_spawn_use(edict_t *self, edict_t *other, edict_
     // we have a one frame delay here so we don't telefrag the guy who activated us
     self->think = stationarymonster_triggered_spawn;
     self->nextthink = level.framenum + 1;
-    if (activator->client)
+    // NULL when the entity that fired us never had an activator of its own
+    if (activator && activator->client)
         self->enemy = activator;
     self->use = monster_use;
 }

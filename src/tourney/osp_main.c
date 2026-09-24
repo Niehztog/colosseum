@@ -17,7 +17,7 @@ along with this program; if not, write to the Free Software
 Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 */
-// OSP Tourney DM v2.75, from osp-tourney@1d8427e.
+// OSP Tourney DM v2.75, from osp-tourney@1895f8e.
 // Donor-only: baseq2 has no counterpart, so it lives in src/tourney/ rather
 // than being merged into a spine file.  The reconstruction's asm-matching
 // address comments are stripped.
@@ -655,9 +655,17 @@ void OSP_gameInit(void)
         }
     }
 
-    // The per-map high score table needs a limit to measure against.
-    if (!OSP_IsTeams() && (int)client_highscores->value &&
-        !(int)timelimit->value && !(int)fraglimit->value) {
+    // The per-map high score table is FFA-only and needs a limit to measure
+    // against; anything else turns it off, by writing 0 into
+    // `client_highscores`.  Condition and write are `osp-tourney@1895f8e`'s,
+    // where the reconstruction is byte-identical to the 1999 Linux image, and
+    // OSP_initHighScores() reads the cvar to set hs_mode.  The write is the
+    // donor's and it persists: `g_ruleset` changes with a restart of the game
+    // and the cvar does not, so after `tdm` or `duel` it stays 0 on the maps
+    // that follow until something sets it again -- the shipped
+    // `configs/dm.cfg` does.
+    if (OSP_IsTeams() || !(int)client_highscores->value ||
+        (!(int)timelimit->value && !(int)fraglimit->value)) {
         gi.dprintf("High score tracking disabled!\n");
         gi.cvar_set("client_highscores", "0");
     } else
@@ -1514,9 +1522,14 @@ void OSP_clearStats(edict_t *ent)
         G_SetStat(ent, SID_OSP_STATUS2, 0);
         G_SetStat(ent, SID_OSP_STATUS3, 0);
         G_SetStat(ent, SID_OSP_STATUS4, 0);
-        G_SetStat(ent, SID_OSP_MATCHSTATE, 0);
-        G_SetStat(ent, SID_CHASE, 0);
     }
+    // Every mode, not only the team ones: the FFA bar draws the match-state
+    // line and the ID line from these two as well, so an intermission or a
+    // dead player's board that left them set would keep both on screen.
+    // `osp-tourney@1895f8e` clears stats[16] and [17] after the if/else, and
+    // the OSP column of g_stats.h maps those two slots to these two ids.
+    G_SetStat(ent, SID_OSP_MATCHSTATE, 0);
+    G_SetStat(ent, SID_CHASE, 0);
 }
 
 void OSP_restartStats(edict_t *ent)

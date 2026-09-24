@@ -2,7 +2,7 @@
 //
 // Q2PRO's engine build generates this with meson; a standalone game library
 // only needs the switches that shape the vendored headers under inc/.  Same
-// role as osp-tourney/config.h and rocketarena2-public/config.h, which is
+// role as osp-tourney/config.h and rocketarena2/config.h, which is
 // where this shape comes from.
 //
 // USE_NEW_GAME_API is on by default, so the library targets

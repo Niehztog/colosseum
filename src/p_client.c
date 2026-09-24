@@ -789,15 +789,20 @@ void player_die(edict_t *self, edict_t *inflictor, edict_t *attacker, int damage
         CTFFragBonuses(self, inflictor, attacker);
 
         // Both logs record the death, and only while a match is live
-        // -- a warmup death is not a statistic.
-        if (G_IsOspRuleset()) {
-            if (sync_stat > 2)
-                sl_WriteStdLogDeath(&gi, level, self, inflictor, attacker);
+        // -- a warmup death is not a statistic.  One `sync_stat > 2` covers
+        // both logs and the weapon toss below, as `osp-tourney@1895f8e`'s
+        // player_die does: the reconstruction is byte-identical to the 1999
+        // Linux image there, and that image logs nothing and drops nothing
+        // during a warmup or a countdown.  `dm` is always live (sync_stat 8),
+        // so the gate only ever bites `dmpro`, `tdm` and `duel`.
+        if (G_IsOspRuleset() && sync_stat > 2) {
+            sl_WriteStdLogDeath(&gi, level, self, inflictor, attacker);
             OSP_Stats_Death(self, inflictor, attacker);
         }
 
         // `client_deathweapdrop` decides whether a tourney player drops the
-        // weapon they were holding; everywhere else it is unconditional --
+        // weapon they were holding, and only a live match drops one (the gate
+        // above); everywhere else it is unconditional --
         // except under arena, which does not drop weapons at all.  RA2's own
         // TossClientWeapon is `static q_unused`, and the reconstruction's note
         // against the shipped DLL is "no real counterpart -- confirmed dead
@@ -808,7 +813,7 @@ void player_die(edict_t *self, edict_t *inflictor, edict_t *attacker, int damage
         if (G_Ruleset() == RULESET_ARENA) {
             // nothing: the body keeps what it was holding
         } else if (!G_IsOspRuleset() ||
-                   (int)client_deathweapdrop->value) {
+                   (sync_stat > 2 && (int)client_deathweapdrop->value)) {
             TossClientWeapon(self);
         }
 
@@ -1012,7 +1017,7 @@ void InitClientPersistant(gclient_t *client, bool full)
     }
 
     // The motd flag survives the wipe on both arms, which is the donor's own
-    // shape (`rocketarena2-public/p_client.c` saves and restores it around the
+    // shape (`rocketarena2/p_client.c` saves and restores it around the
     // memset unconditionally).  ClientConnect sets it once and init_player()
     // consumes it; anything that re-initialises `pers` in between -- and
     // PutClientInServer does, whenever `pers.health <= 0` -- would otherwise
@@ -1708,7 +1713,9 @@ static void CopyToBodyQue(edict_t *ent)
     // MOVETYPE_TOSS` (`port_ra2:p_client.c`), the player and not the body,
     // which respawn()'s own PutClientInServer overwrites at once, so what RA2
     // ships is a body left holding whatever its `bodyque` slot last had --
-    // MOVETYPE_NONE out of InitBodyQue.  The intent is plain and the side is a
+    // MOVETYPE_NONE out of InitBodyQue for a fresh slot, and MOVETYPE_BOUNCE
+    // for one whose last occupant was gibbed, which body_die()'s
+    // ThrowClientHead() gave it.  The intent is plain and the side is a
     // slip.  Spelled on the body it is both donors at once: the value baseq2
     // always computed, and a defined one for the states only arena produces.
     body->movetype = MOVETYPE_TOSS;
@@ -2008,7 +2015,7 @@ void PutClientInServer(edict_t *ent)
     // every one of these, because this function ends in move_to_arena(..., 1)
     // and that reopens the observer menu -- so each respawn orphaned the menu
     // the previous respawn had opened, for the rest of the map.
-    // `rocketarena2@28a8af7` reports 15 blocks and 819 bytes per respawn.
+    // `rocketarena2@5f017dc` reports 15 blocks and 819 bytes per respawn.
     if (G_Ruleset() == RULESET_ARENA)
         close_menus(ent);
 
@@ -3892,26 +3899,10 @@ void ClientThink(edict_t *ent, usercmd_t *ucmd)
             UpdateChaseCam(other);
     }
 
-    // A menu redraw this frame's input earned, rate-limited by the
-    // engine rather than by how fast the player presses the key.
-    if (client->menudirty && client->menutime <= level.time) {
-        // Two engines share the pair, because one menu is open at a time
-        // and a per-engine `menutime` would be a second answer to
-        // the question `menu_owner` already answers.  MENU_ARENA is absent on
-        // purpose: it repaints CS_STATUSBAR from its own MenuThink cadence and
-        // never marks this flag.
-        if (G_MenuActive(ent)) {
-            if (client->menu_owner == MENU_CTF) {
-                ctf_PMenu_Do_Update(ent);
-                gi.unicast(ent, true);
-            } else if (client->menu_owner == MENU_TOURNEY) {
-                osp_PMenu_Do_Update(ent);
-                gi.unicast(ent, true);
-            }
-        }
-        client->menutime = level.time;
-        client->menudirty = false;
-    }
+    // A menu redraw this frame's input earned is flushed by
+    // ClientEndServerFrame, not here: this tail is skipped by every early
+    // return above it, and that function is reached once per frame by every
+    // client.
 }
 
 /*

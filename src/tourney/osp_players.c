@@ -17,12 +17,13 @@ along with this program; if not, write to the Free Software
 Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 */
-// OSP Tourney DM v2.75, from osp-tourney@1d8427e.
+// OSP Tourney DM v2.75, from osp-tourney@1895f8e.
 // Donor-only: baseq2 has no counterpart, so it lives in src/tourney/ rather
 // than being merged into a spine file.  The reconstruction's
 // asm-matching address comments are stripped.
 // osp_players.c -- filename assigned by this tree.  The three scoreboard renderers and
-// the team-chat command.
+// the team-chat command.  At the pin the donor carries these functions in its
+// osp_teams.c, where the reconstruction's object layout put them.
 //
 // Four named functions plus four file-statics that have no symbol and whose
 // names here are therefore reconstructed: sayteam_location (id CTF's
@@ -751,8 +752,13 @@ void OSP_show1v1Scores(edict_t *ent)
     basey = 0;
 
     for (sideno = 0; sideno < 2; sideno++) {
+        // An empty seat skips its own card and the other is still drawn, as at
+        // `osp-tourney@1895f8e`.  A `break` would draw no card at all once the
+        // seat-0 player has gone, the remaining player's included.  `basey`
+        // does not advance past the empty seat, so the survivor's card takes
+        // the top position, which is the donor's layout too.
         if (cids[sideno] == -1)
-            break;
+            continue;
 
         cl = game.clients + cids[sideno];
         // Computed and never read again within the loop -- dead, but

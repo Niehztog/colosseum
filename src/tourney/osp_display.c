@@ -17,7 +17,7 @@ along with this program; if not, write to the Free Software
 Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 */
-// OSP Tourney DM v2.75, from osp-tourney@1d8427e.
+// OSP Tourney DM v2.75, from osp-tourney@1895f8e.
 // Donor-only: baseq2 has no counterpart, so it lives in src/tourney/ rather
 // than being merged into a spine file.  The reconstruction's
 // asm-matching address comments are stripped.
@@ -966,11 +966,17 @@ void OSP_ScoreboardMessage(edict_t *ent, edict_t *killer)
         return;
     }
 
-    // At intermission the hi-score table and the deathmatch board alternate:
-    // 4 seconds on the board, 10 on the table, flipped by osp_r034.
-    if (hs_mode && (int)client_highscores->value &&
-        level.intermission_framenum) {
-        if (level.framenum > ent->client->resp.osp_r244) {
+    // The hi-score table is the page whenever osp_r034 is clear -- the
+    // `highscores` command clears it, `score` sets it -- and only the
+    // ALTERNATION is intermission's: 4 seconds on the board, 10 on the table.
+    // That is `osp-tourney@1895f8e`'s shape, where the reconstruction is
+    // byte-identical to the 1999 Linux image; a gate on the intermission around
+    // the whole block would make `highscores` a dead command during play.
+    // osp_r034 is 0 from connect until the first `score`, so a client who has
+    // never pressed it is shown the table, which is also the image's answer.
+    if (hs_mode && (int)client_highscores->value) {
+        if (level.intermission_framenum &&
+            level.framenum > ent->client->resp.osp_r244) {
             ent->client->resp.osp_r244 = level.framenum +
                                          (ent->client->resp.osp_r034 ? 40 : 100);
             ent->client->resp.osp_r034 = 1 - ent->client->resp.osp_r034;

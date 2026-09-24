@@ -203,7 +203,7 @@ VERDICTS = {
     "Fix broken viewangles with 'spectator 1'":
         ('superseded', 'RA2 applied it later as its own commit -- section 3.1 names '
                        'that commit by name. Verify it is present in '
-                       'rocketarena2-public; do not re-apply on top'),
+                       'rocketarena2; do not re-apply on top'),
 
     # Found by this tool and absent from the enumerated
     # sets: the spec listed skips for RA2, tourney and CTF but recorded none for
