@@ -419,7 +419,9 @@ RUN set -eu; \
 # it is the right default there.  The gate is how the original bugs that are
 # fatal or simply wrong on a live server are built out, each replaced by
 # Quake III's own later fix of the same code rather than by anything invented
-# (Mr. Elusive wrote both bot libraries).  Four of the five reach THIS object:
+# (Mr. Elusive wrote both bot libraries).  Six of the twelve reach THIS object;
+# this stage is a 32-bit build, so the pin's 64-bit fixes and its Windows-only
+# zipped-AAS working-directory fix do not apply here:
 #
 #   aas-linkstack-overflow       AAS_AASLinkEntity's BSP traversal queue is a bare
 #                                int[64] with no bound on the push, and linkstack[64]
@@ -435,9 +437,14 @@ RUN set -eu; \
 #                                another item's bounding box.
 #   script-lu-suffix-guard       PS_ReadNumber's l/u numeric-suffix guard, an operator
 #                                precedence slip in the original.
+#   moveresult-uninit-vectors    BotClearMoveResult zeroes only the scalar fields, so an
+#                                AI node can aim along an uninitialised move direction.
+#   bot-move-stale-clientnum     a bot moved to a free client slot kept its old client
+#                                and entity numbers, so it stopped moving.
 #
-# The fifth (ctf-grapple-stale-pointer, in G_FreeEdict) is game.so's, which
-# this stage does not build.  The submodule's own release workflow sets the same
+# The other six are game.so's (ctf-grapple-stale-pointer, the three null-* ones,
+# bot-move-edict-copy) or Windows-only (aaszip-cwd-leak), neither of which this
+# stage builds.  The submodule's own release workflow sets the same
 # flag for the same reason: a release is for playing, not for measuring.
 RUN set -eu; \
     cd /src-colosseum/vendor/gladiator-bot-restored; \
