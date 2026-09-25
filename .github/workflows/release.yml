@@ -289,13 +289,43 @@ jobs:
       - name: Publish
         env:
           GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
         run: |
+          # The per-release notes are the ANNOTATED tag's message, read through the API
+          # rather than from the checkout, because actions/checkout rewrites a fetched tag
+          # into a lightweight one, which has no message. A lightweight or empty tag stops
+          # the release instead of silently publishing the distribution overview with
+          # nothing release-specific in it -- the seven packages stay available as run
+          # artifacts. Create the tag with:
+          #   git tag -a --cleanup=verbatim -F whatsnew.md vX.Y.Z <commit>
+          # (git's default cleanup deletes lines starting with '#', so pass --cleanup=verbatim).
+          ref=$(gh api "repos/$GH_REPO/git/ref/tags/$VERSION" --jq '.object.type + " " + .object.sha')
+          if [ "${ref%% *}" != "tag" ]; then
+            echo "::error::$VERSION is a lightweight tag. Release notes come from an annotated tag's message: git tag -a --cleanup=verbatim -F whatsnew.md $VERSION <commit>"
+            exit 1
+          fi
+          gh api "repos/$GH_REPO/git/tags/${ref##* }" --jq .message \
+            | sed '/^-----BEGIN PGP SIGNATURE-----$/,$d' > whatsnew.md
+          if ! grep -q '[^[:space:]]' whatsnew.md; then
+            echo "::error::$VERSION has an empty tag message."
+            exit 1
+          fi
+          {
+            printf "## What's new in %s\n\n" "$VERSION"
+            cat whatsnew.md
+          } > notes.md
+          cat >> notes.md <<'ABOUT'
+
+          ## About this distribution
+
+          One Quake II game library: baseq2, both mission packs, Threewave CTF, Rocket Arena 2 and OSP Tourney DM, with Gladiator bots.
+
+          **Installing is copying this package's `colosseum/` folder beside the engine** -- on Windows always, and on Linux unless your Q2PRO is a distribution package, which looks in `~/.q2pro/colosseum/` instead. The library is already in it, and so is everything else an engine loads. The bots need the botlib, its pak, a bot list and one navigation mesh per map. **The botlib for this platform is in that folder too**, as `colosseum/gladiator.so` (`.dll` on Windows), and so are the meshes for the eight retail deathmatch maps, under `colosseum/maps/`; what is left to install is `pak7.pak` and `bots.cfg` out of the 1999 Gladiator release, which go in beside them. `README.md` has both halves.
+
+          Each package carries **two builds of the library**: the one in `colosseum/` is for Q2PRO built with `USE_NEW_GAME_API`, which is the recommended engine, and `colosseum/oldapi/` holds the same library against the classic game ABI for R1Q2, Yamagi Quake II, id's own 3.20 or a Q2PRO without that switch. Same name, different struct layouts -- if your engine wants the second one, copy it over the first and delete that directory, renaming it to whatever your engine looks for (Yamagi wants a flat `game.so`). `colosseum/oldapi/README.md` says what the choice costs.
+
+          Packages carry the library, the botlib built for the same platform, the default gamedir config set and the operator documentation -- `README.md` and the cvar, command and entity inventories under `docs/`. The first three are inside `colosseum/`, which is the directory to copy; the documentation is beside it, for reading rather than installing. The config set holds one ready-to-exec file per ruleset, so a match is one line: `q2pro +set game colosseum +set maxclients 32 +exec configs/ctf.cfg +map q2ctf1`, and the same for `dm`, `dmpro`, `tdm`, `duel`, `arena` and `sp` -- `README.md` lists all seven. Game assets are not included and never will be: they are id's and the mods'. The one exception is data rather than an asset -- the eight navigation meshes for q2dm1..q2dm8, precomputed by OSP Tourney DM in 1999, which ride along under `colosseum/maps/` so the bots have somewhere to walk on the stock deathmatch maps without a `bspc` run. Any other map still needs one made. The botlib is not an asset either: it is a build of the [`gladiator-bot-restored`](https://github.com/Niehztog/gladiator-bot-restored) submodule, GPL like everything else here, from the commit this tag pins. The specification, the contributor guide and the rest of `docs/` live in the repository, at the tag this release was cut from.
+          ABOUT
           gh release create "$VERSION" dist/* \
             --title "Colosseum $VERSION" \
-            --notes "One Quake II game library: baseq2, both mission packs, Threewave CTF, Rocket Arena 2 and OSP Tourney DM, with Gladiator bots.
-
-          **Installing is copying this package's \`colosseum/\` folder beside the engine** -- on Windows always, and on Linux unless your Q2PRO is a distribution package, which looks in \`~/.q2pro/colosseum/\` instead. The library is already in it, and so is everything else an engine loads. The bots need the botlib, its pak, a bot list and one navigation mesh per map. **The botlib for this platform is in that folder too**, as \`colosseum/gladiator.so\` (\`.dll\` on Windows), and so are the meshes for the eight retail deathmatch maps, under \`colosseum/maps/\`; what is left to install is \`pak7.pak\` and \`bots.cfg\` out of the 1999 Gladiator release, which go in beside them. \`README.md\` has both halves.
-
-          Each package carries **two builds of the library**: the one in \`colosseum/\` is for Q2PRO built with \`USE_NEW_GAME_API\`, which is the recommended engine, and \`colosseum/oldapi/\` holds the same library against the classic game ABI for R1Q2, Yamagi Quake II, id's own 3.20 or a Q2PRO without that switch. Same name, different struct layouts -- if your engine wants the second one, copy it over the first and delete that directory, renaming it to whatever your engine looks for (Yamagi wants a flat \`game.so\`). \`colosseum/oldapi/README.md\` says what the choice costs.
-
-          Packages carry the library, the botlib built for the same platform, the default gamedir config set and the operator documentation -- \`README.md\` and the cvar, command and entity inventories under \`docs/\`. The first three are inside \`colosseum/\`, which is the directory to copy; the documentation is beside it, for reading rather than installing. The config set holds one ready-to-exec file per ruleset, so a match is one line: \`q2pro +set game colosseum +set maxclients 32 +exec configs/ctf.cfg +map q2ctf1\`, and the same for \`dm\`, \`dmpro\`, \`tdm\`, \`duel\`, \`arena\` and \`sp\` -- \`README.md\` lists all seven. Game assets are not included and never will be: they are id's and the mods'. The one exception is data rather than an asset -- the eight navigation meshes for q2dm1..q2dm8, precomputed by OSP Tourney DM in 1999, which ride along under \`colosseum/maps/\` so the bots have somewhere to walk on the stock deathmatch maps without a \`bspc\` run. Any other map still needs one made. The botlib is not an asset either: it is a build of the [\`gladiator-bot-restored\`](https://github.com/Niehztog/gladiator-bot-restored) submodule, GPL like everything else here, from the commit this tag pins. The specification, the contributor guide and the rest of \`docs/\` live in the repository, at the tag this release was cut from."
+            --notes-file notes.md
