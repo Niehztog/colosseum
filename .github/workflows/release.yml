@@ -82,19 +82,23 @@
 # right default there.  A download is for playing, so every job here asks for
 # the other build.  The gate replaces the original bugs that are fatal or simply
 # wrong in play with Quake III's own later fix of the same code rather than with
-# anything invented -- Mr. Elusive wrote both bot libraries -- and seven of the
-# twelve at the pinned commit are in this object (the rest are in the
+# anything invented -- Mr. Elusive wrote both bot libraries -- and ten of the
+# fifteen at the pinned commit are in this object (the rest are in the
 # submodule's own game tree, which nothing here builds): AAS_AASLinkEntity pushing unbounded into an `int[64]`
 # whose 65th slot is the return address, AAS_UpdateAreaRoutingCache seeding the
 # start node with a reachability row an area without reachabilities does not
 # have, BotUpdateEntityItems re-linking a level item through a stale index so a
 # bot navigates to one item using another one's bounding box, PS_ReadNumber's
 # l/u suffix guard, the uninitialised move-direction and view angles an AI node
-# aims along, a moved bot keeping its old client number, and the zipped-AAS
+# aims along, a moved bot keeping its old client number, AAS_Optimize indexing
+# its face remap with a back-side ladder face's negative number, the standing
+# and crouching presence boxes the wrong way round, AAS_AASLinkEntity taking
+# the wrong side of a plane that faces down its axis, and the zipped-AAS
 # working-directory leak (Windows only).  Independently of the gate the pin also
 # carries the 64-bit port-correctness fixes -- the Win64 no-AAS crash, the
 # truncated team-chat checkpoint pointer, the per-removal character leak, the
-# lost side-band on a bot move -- which ship whatever the flag is set to.  The
+# lost side-band on a bot move -- and AAS_TraceBSPModel reading its second box
+# offset from beside the first, all of which ship whatever the flag is set to.  The
 # submodule's own release workflow and
 # `server/Dockerfile` pass the flag for the same reason, and `package.sh` reads
 # the staged botlib back for the one string only the gated arm can put there -- a

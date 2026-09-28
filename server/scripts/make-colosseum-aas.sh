@@ -13,26 +13,26 @@
 # meshes have ever been distributed -- q2dm1..q2dm8, which OSP Tourney DM
 # shipped in 1999 -- and neither of these servers runs a stock q2dm map.  The
 # `autolaunchbspc` libvar looks like the answer and is not: that code path
-# exists only on Windows, wants a winbspc.exe in the gamedir, and the rebuilt
-# botlib's SpawnProcess is an empty stub.  So it is the two documented steps,
-# per map, and this script is those two steps in a loop:
+# exists only on Windows, where it starts a winbspc.exe out of the gamedir, and
+# this host is Linux.  So it is the two documented steps, per map, and this
+# script is those two steps in a loop:
 #
 #   1. `bspc -bsp2aas <map>.bsp` computes the geometry.
 #
-#      *** USE bspc.exe v1.4, NOT THE BUNDLED LINUX bspc v1.2. ***
+#      *** USE v1.4, NEVER v1.2. ***
 #
-#      The submodule ships both, and its own README says the Linux binary is
-#      the older of the two: `bspc-linux-x86` is v1.2 of 1999-05-20, `bspc.exe`
-#      is v1.4 of 1999-07-18 -- the opposite direction from the botlib, where
-#      the Linux drop is the newer.  That version gap is not cosmetic.  v1.2
-#      fails `FloodEntities` with "WARNING: entity reached from outside" and
-#      "**** leaked ****" on most of these maps and writes no .aas at all:
-#      measured at 9 of 28 RA2 maps and 2 of 7 Reckoning maps meshed, and 3 of
-#      all 25 maps in The Reckoning's pak.  `-nocsg` rescues almost none of
-#      them, and neither does `-noliquids`, `-freetree`, `-nobrushmerge`,
-#      `-breath`, reading the .bsp out of the pak the documented way, going via
-#      `bsp2map` + `map2aas`, stripping the point entities, or running the
-#      binary under buster or stretch glibc instead of trixie.
+#      The image's bspc is v1.4: `bspci386`, the Linux build the botlib
+#      submodule ships out of its 1999 Linux release.  So is `bspc.exe`, of
+#      1999-07-18.  The version is not cosmetic.  v1.2, the older stand-alone
+#      Linux release of 1999-05-20, fails `FloodEntities` with "WARNING: entity
+#      reached from outside" and "**** leaked ****" on most of these maps and
+#      writes no .aas at all: measured at 9 of 28 RA2 maps and 2 of 7 Reckoning
+#      maps meshed, and 3 of all 25 maps in The Reckoning's pak.  `-nocsg`
+#      rescues almost none of them, and neither does `-noliquids`, `-freetree`,
+#      `-nobrushmerge`, `-breath`, reading the .bsp out of the pak the
+#      documented way, going via `bsp2map` + `map2aas`, stripping the point
+#      entities, or running the binary under buster or stretch glibc instead of
+#      trixie.
 #
 #      It is not the maps.  v1.2 leaks on q2dm1 and q2dm2 -- two maps OSP
 #      Tourney DM shipped precomputed meshes for in 1999, made with this same
@@ -40,13 +40,12 @@
 #      q2dm1 in one second with no leak at all, and 35 of 35 maps across both
 #      rotations.
 #
-#      v1.4 is a Windows binary, so THE GEOMETRY STEP RUNS OFF THIS HOST -- on
-#      a Windows machine, or WSL, where `bspc.exe -bsp2aas <map>.bsp` runs
-#      directly.  Drop the resulting .aas files into <gamedir>/maps/ and this
-#      script picks them up: a map that already has a mesh skips bspc entirely
-#      and goes straight to step 2.  Only when there is no mesh does it fall
-#      back to the bundled v1.2, which is better than nothing and worse than
-#      v1.4.
+#      Both rotations were meshed with bspc.exe, OFF THIS HOST -- on a Windows
+#      machine, or WSL, where `bspc.exe -bsp2aas <map>.bsp` runs directly
+#      (`make-aas-geometry.sh`).  Drop the resulting .aas files into
+#      <gamedir>/maps/ and this script picks them up: a map that already has a
+#      mesh skips bspc entirely and goes straight to step 2.  Only when there
+#      is no mesh does it run the image's own bspc.
 #   2. ONE LOAD OF THAT MAP with the botlib in the game, which computes
 #      reachability and clustering itself and rewrites the file.  Minutes, not
 #      seconds, and it is why this script drives the running server rather than
@@ -377,10 +376,9 @@ for name in "${MAPS[@]}"; do
 
     if [ "$mesh" = "$name" ]; then log "$name"; else log "$name (mesh: $mesh)"; fi
 
-    # A mesh already in maps/ is taken as the geometry pass, done elsewhere --
-    # which is the normal case now, because the bundled Linux bspc is v1.2 and
-    # leaks on most of these maps (see the header).  Only its ABSENCE makes
-    # this script reach for bspc at all.
+    # A mesh already in maps/ is taken as the geometry pass, done elsewhere
+    # (see the header).  Only its ABSENCE makes this script reach for bspc at
+    # all.
     if [ -f "$GAMEDIR/maps/$mesh.aas" ]; then
         geom=$(stat -c%s "$GAMEDIR/maps/$mesh.aas")
         info "  geometry mesh already present ($geom bytes) -- skipping bspc"

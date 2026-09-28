@@ -419,7 +419,7 @@ RUN set -eu; \
 # it is the right default there.  The gate is how the original bugs that are
 # fatal or simply wrong on a live server are built out, each replaced by
 # Quake III's own later fix of the same code rather than by anything invented
-# (Mr. Elusive wrote both bot libraries).  Six of the twelve reach THIS object;
+# (Mr. Elusive wrote both bot libraries).  Nine of the fifteen reach THIS object;
 # this stage is a 32-bit build, so the pin's 64-bit fixes and its Windows-only
 # zipped-AAS working-directory fix do not apply here:
 #
@@ -441,6 +441,21 @@ RUN set -eu; \
 #                                AI node can aim along an uninitialised move direction.
 #   bot-move-stale-clientnum     a bot moved to a free client slot kept its old client
 #                                and entity numbers, so it stopped moving.
+#   aas-optimize-signed-facenum  AAS_Optimize remaps each reachability's face number
+#                                through its face table as it stands, and a ladder
+#                                link from the area behind a face stores it negative,
+#                                so the lookup reads in front of the table.  The Rocket
+#                                Arena 2 maps have such faces; a server building a mesh
+#                                can crash on the read, and otherwise saves garbage.
+#   aas-presence-bbox-swapped    AAS_PresenceTypeBoundingBox gives the standing
+#                                presence the crouching box, so a standing bot checks
+#                                for blockers in a slab at knee height and for
+#                                collisions with a body 24 units too short.
+#   aas-link-axial-sign          AAS_AASLinkEntity's shortcut side test assumes an
+#                                axial plane faces up its axis; at a node facing down
+#                                it the walk takes the wrong side, so a box goes
+#                                missing from areas it is in and five RA2 teleporters
+#                                get no route onto them.
 #
 # The other six are game.so's (ctf-grapple-stale-pointer, the three null-* ones,
 # bot-move-edict-copy) or Windows-only (aaszip-cwd-leak), neither of which this
@@ -453,7 +468,7 @@ RUN set -eu; \
     install -Dm755 release/gladiator.so /out-colosseum/gladiator.so; \
     install -Dm644 assets/pak7.pak     /out-colosseum/pak7.pak; \
     install -Dm644 assets/bots.cfg     /out-colosseum/bots.cfg; \
-    install -Dm755 tools/vendor/bspc/bspc-linux-x86 /out-colosseum/bspc
+    install -Dm755 tools/vendor/bspc/bspci386 /out-colosseum/bspc
 
 # The GLAD_SERVERFIX check is that one string.  It is the PRT_ERROR text of the
 # overflow guard Q3 added, so it exists in the preprocessed source only on the
@@ -461,6 +476,9 @@ RUN set -eu; \
 # prove it was typed on the command line, not that it reached the object -- and
 # a silently faithful botlib is exactly the failure this has to catch, because
 # it runs perfectly until a map subdivides densely enough to smash the frame.
+# bspc is checked by its own version banner rather than by its file name: v1.2
+# is a Linux bspc too, and it leaks on most maps v1.4 meshes (README.md,
+# "Navigation meshes").
 RUN set -eu; \
     readelf -h /out-colosseum/gladiator.so | grep -q 'ELF32' \
         || { echo 'gladiator.so is not ELF32 - YQ2_ARCH did not take'; exit 1; }; \
@@ -469,7 +487,9 @@ RUN set -eu; \
     strings -a /out-colosseum/gladiator.so | grep -q 'AAS_LinkEntity: stack overflow' \
         || { echo 'gladiator.so carries no GLAD_SERVERFIX code - the faithful 1999 bugs are built in'; exit 1; }; \
     readelf -h /out-colosseum/bspc | grep -q 'ELF32' || { echo 'bspc is not ELF32'; exit 1; }; \
-    echo "botlib OK (ELF32, exports GetBotAPI, GLAD_SERVERFIX in); pak7.pak $(stat -c%s /out-colosseum/pak7.pak) bytes, bots.cfg $(grep -c . /out-colosseum/bots.cfg) lines, bspc staged"
+    strings -a /out-colosseum/bspc | grep -q '^BSPC version 1\.4,' \
+        || { echo 'bspc is not v1.4 - v1.2 leaks on most maps'; exit 1; }; \
+    echo "botlib OK (ELF32, exports GetBotAPI, GLAD_SERVERFIX in); pak7.pak $(stat -c%s /out-colosseum/pak7.pak) bytes, bots.cfg $(grep -c . /out-colosseum/bots.cfg) lines, bspc 1.4 staged"
 
 # ---------------------------------------------------------------------------
 # The colosseum runtime                                      (--target colosseum)

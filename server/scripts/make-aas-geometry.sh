@@ -7,13 +7,11 @@
 # clustering -- is `make-colosseum-aas.sh`, which runs ON THE GAME HOST and
 # picks up whatever this leaves in each gamedir's `maps/`.
 #
-# *** THIS SCRIPT DOES NOT RUN ON THE GAME HOST, AND THAT IS THE POINT. ***
+# *** THIS SCRIPT DOES NOT RUN ON THE GAME HOST. ***
 #
-# The colosseum submodule ships two builds of bspc and its own README says the
-# Linux one is the OLDER: `bspc-linux-x86` is v1.2 of 1999-05-20, `bspc.exe` is
-# v1.4 of 1999-07-18 -- the opposite direction from the botlib, where the Linux
-# drop is the newer one.  That gap is not cosmetic.  v1.2 fails FloodEntities
-# with "WARNING: entity reached from outside" / "**** leaked ****" and writes no
+# It runs bspc.exe, v1.4 of 1999-07-18, and the version is not cosmetic.  v1.2,
+# the older stand-alone Linux release of 1999-05-20, fails FloodEntities with
+# "WARNING: entity reached from outside" / "**** leaked ****" and writes no
 # .aas at all on most of these maps: measured at 9 of 28 RA2 maps meshed, 2 of
 # the 7 Reckoning deathmatch maps, and 3 of all 25 maps in The Reckoning's pak.
 #
@@ -32,10 +30,12 @@
 # meshes q2dm1 in about a second with no leak, and 35 of 35 maps across both
 # rotations.
 #
-# v1.4 is a Win32 binary.  Under WSL it runs directly through interop, which is
-# why this script lives on the workstation and ships its output to the host.
-# Wine would do as well; a Linux build of bspc >= 1.4 would be better than
-# either, and does not appear to exist.
+# bspc.exe is a Win32 binary.  Under WSL it runs directly through interop, which
+# is why this script lives on the workstation and ships its output to the host;
+# Wine would do as well.  The botlib submodule ships v1.4 for Linux too --
+# `bspci386`, the build its 1999 Linux release carried -- and the `colosseum`
+# image stages it as the bspc `make-colosseum-aas.sh` falls back to on the host.
+# The 35 above were made with bspc.exe, not with it.
 
 set -euo pipefail
 
@@ -68,7 +68,7 @@ fi
 [ -n "$BSPC" ] && [ -f "$BSPC" ] || die "bspc.exe not found. Set BSPC=/path/to/bspc.exe
        It is in a colosseum checkout at
        vendor/gladiator-bot-restored/tools/vendor/bspc/bspc.exe
-       Use bspc.exe (v1.4), NOT bspc-linux-x86 (v1.2) -- see the header."
+       Use v1.4, NEVER v1.2 -- see the header."
 
 # It has to be reachable as a Windows path, so the work directory has to be on a
 # Windows drive.  Under WSL that means somewhere under /mnt/<drive>/.

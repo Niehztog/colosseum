@@ -199,22 +199,23 @@ line discarded, in the game, where nobody testing the deployment sees it.
 Bots need one `.aas` mesh per map and there is no way around it: only eight
 precomputed meshes have ever been distributed (q2dm1–q2dm8, shipped by OSP
 Tourney DM in 1999). The `autolaunchbspc` libvar looks like the answer and is
-not — that path is Windows-only, wants a `winbspc.exe` in the gamedir, and the
-rebuilt botlib's `SpawnProcess` is an empty stub.
+not — that path is Windows-only: it starts a `winbspc.exe` out of the gamedir,
+and this server is Linux.
 
 It is two passes:
 
-1. **Geometry** — `bspc -bsp2aas`. Use **bspc.exe v1.4, never the bundled Linux
-   `bspc-linux-x86` v1.2.** The submodule ships both and its own README notes
-   the Linux one is *older* (v1.2 of 1999-05-20 against v1.4 of 1999-07-18).
-   v1.2 fails `FloodEntities` with `**** leaked ****` and writes no `.aas` at
-   all on most maps — 9 of 28 in one rotation here — and nothing rescues it:
-   not `-nocsg`, `-noliquids`, `-freetree`, `-nobrushmerge` or `-breath`, not
-   reading the `.bsp` out of the pak, not `bsp2map` + `map2aas`, not an older
-   glibc. It is not the maps either: v1.2 leaks on `q2dm1` and `q2dm2`, two of
-   the maps it shipped meshes for in 1999, which v1.4 meshes in about a second.
-   v1.4 is a Win32 binary, so this pass runs off-host under WSL interop or
-   Wine: `make-aas-geometry.sh`.
+1. **Geometry** — `bspc -bsp2aas`, **v1.4, never v1.2.** The submodule ships
+   v1.4 for both platforms: `bspc.exe` (1999-07-18), and the Linux `bspci386`
+   (1999-08-02) that the `colosseum` image stages as its `bspc`. v1.2, the
+   older stand-alone Linux release (1999-05-20), fails `FloodEntities` with
+   `**** leaked ****` and writes no `.aas` at all on most maps — 9 of 28 in
+   one rotation here — and nothing rescues it: not `-nocsg`, `-noliquids`,
+   `-freetree`, `-nobrushmerge` or `-breath`, not reading the `.bsp` out of
+   the pak, not `bsp2map` + `map2aas`, not an older glibc. It is not the maps
+   either: v1.2 leaks on `q2dm1` and `q2dm2`, two of the maps it shipped
+   meshes for in 1999, which v1.4 meshes in about a second. Both rotations
+   here were meshed with `bspc.exe`, off-host under WSL interop or Wine:
+   `make-aas-geometry.sh`.
 2. **Reachability and clustering** — one load of each map with the botlib in
    the game, which rewrites the mesh in place. `make-aas-reachability.py`
    drives a local win32 `q2proded.exe` (~14–20 s/map); `make-colosseum-aas.sh`

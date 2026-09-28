@@ -30,6 +30,12 @@
 // `ra->value` directly at three sites and those are the three edits of
 // substance below.
 //
+// Like every file imported into this tree it has been through all of the
+// mechanical passes.  Where a comment below says a literal must stay a double,
+// it describes the reconstruction's match against the 1999 binaries, which is
+// not a property this tree keeps: `floatsuffix` has suffixed the literal all
+// the same, and `qrand` renamed rand to Q_rand in comments as well as code.
+//
 #include "g_local.h"
 #include "bot/p_observer.h"
 
@@ -39,8 +45,6 @@
 #ifndef OBSERVER_TRACE_MASK
 #define OBSERVER_TRACE_MASK 0x2010003
 #endif
-
-
 
 // --- sub_10077d50 -----------------------------------------------------------
 // Step `from` toward `to` by at most `maxstep` degrees, taking the shorter
@@ -59,9 +63,9 @@ float ChangeAngle(float from, float to, float maxstep)
 
     diff = to - from;
     if (to > from) {
-        if (diff >  180.0) diff -= 360.0;
+        if (diff >  180.0f) diff -= 360.0f;
     } else {
-        if (diff < -180.0) diff += 360.0;
+        if (diff < -180.0f) diff += 360.0f;
     }
 
     if (diff > 0) {
@@ -124,9 +128,9 @@ float AngleDifference(float ang1, float ang2)
 
     diff = ang1 - ang2;
     if (ang1 > ang2) {
-        if (diff >  180.0) diff -= 360.0;
+        if (diff >  180.0f) diff -= 360.0f;
     } else {
-        if (diff < -180.0) diff += 360.0;
+        if (diff < -180.0f) diff += 360.0f;
     }
     return diff;
 } //end of the function AngleDifference
@@ -428,7 +432,7 @@ void Cam_UpdateView(edict_t *ent, float speed, usercmd_t *ucmd)
        vec3_origin, and every other trace in this file passes NULL. */
     tr = gi.trace(ent->s.origin, NULL, NULL, cam->dest,
                   ent, OBSERVER_TRACE_MASK);
-    if (tr.fraction < 1.0) {
+    if (tr.fraction < 1.0f) {
         SetClientOrigin(ent, cam->dest);
         goto angles_phase;
     }
@@ -598,7 +602,6 @@ void  Cam_GetFlyByTarget(edict_t *target, vec3_t spot);                         
 void  Cam_EnterFlyByMode(edict_t *ent, edict_t *target, usercmd_t *ucmd);      /* sub_10079acf */
 // (sub_10085904 = q_shared.c VectorCompare, declared in q_shared.h)
 
-
 // --- sub_1007897a -----------------------------------------------------------
 // OnTargetDeath: announce score, then drop into bodyque-chase (state 7)
 // for 2 seconds with a 5-second search timeout.
@@ -652,6 +655,10 @@ void Cam_GetFollowSpot(edict_t *ent, vec3_t out)
     /* build a horizontal forward, re-tilted so it's perpendicular to up */
     horizfwd[0] = fwd[0];
     horizfwd[1] = fwd[1];
+    /* `-1.0`, a DOUBLE: the whole expression is then double and its store to a
+       float costs gcc 2.7 a float_truncate stack temp -- the never-referenced
+       4-byte slot at the bottom of gamei386.so's frame (0x94, ours was 0x90).
+       The x87 code is identical either way. */
     horizfwd[2] = (horizfwd[0] * up[0] + horizfwd[1] * up[1]) * -1.0f / up[2];
     VectorNormalize(horizfwd);
 
@@ -713,29 +720,26 @@ void Cam_GetFollowTarget(edict_t *ent, vec3_t out)
 //   * If the resulting trace contents include water, require that we hit a
 //     translucent surface (SURF_TRANS33|SURF_TRANS66 = 0x30); otherwise
 //     reject.
-//   * Reject anything farther than 50 units from the target.
+//   * Reject anything CLOSER than 50 units to the target.
 //   * Returns 1111 for any rejection (well above the 1000-init); otherwise
-//     returns sqrt(333 - dist).  Lower scores correspond to *larger* (but
-//     <= 50) distances from the target, so callers minimise.
+//     returns fabs(333 - dist), so callers, which minimise, prefer a spot
+//     about 333 units from the target.
+//   * Both originals test `dist < 50` (gamex86.dll: fcomp 50.0; test ah,1;
+//     je accept -- gamei386.so: fld 50.0; fcomp st(1); je reject).  An
+//     earlier draft had the test inverted, rejecting everything farther than
+//     50 units, i.e. almost every candidate.
+//   * Locals: gamei386.so's frame is viewfrom, unit5, diff, start, end,
+//     mins, maxs, tr from the top down, and the second water re-trace copies
+//     tr.endpos into `end` (not into a second temporary).
 //===========================================================================
 float Cam_TryFlyByVector(edict_t *ent, vec3_t ofs, vec3_t out_endpos)
 {
+    vec3_t    viewfrom, unit5, diff, start, end;
+    vec3_t    mins = {-8, -8, -8}, maxs = {8, 8, 8};
+    trace_t   tr;
     camera_t *cam = &ent->client->camera;
-    vec3_t    mins, maxs;
-    vec3_t    unit5;            /* [ebp - 0x6c] = unit_ofs * 5 */
-    vec3_t    viewfrom;         /* [ebp - 0x78] */
-    vec3_t    end;              /* [ebp - 0x50] */
-    vec3_t    diff;             /* [ebp - 0x9c] */
-    trace_t   tr;               /* [ebp - 0xd4] / copied to [ebp - 0x38] */
     int       cv_view, cv_end;
     float     dist;
-
-    mins[0] = -8.0f;
-    mins[1] = -8.0f;
-    mins[2] = -8.0f;
-    maxs[0] = 8.0f;
-    maxs[1] = 8.0f;
-    maxs[2] = 8.0f;
 
     VectorNormalize(ofs);
     VectorScale(ofs, 5.0f,   unit5);
@@ -767,20 +771,14 @@ float Cam_TryFlyByVector(edict_t *ent, vec3_t ofs, vec3_t out_endpos)
     cv_end  = gi.pointcontents(out_endpos) & MASK_WATER;
 
     if (cv_view && !cv_end) {
-        vec3_t start2;
-        start2[0] = tr.endpos[0];
-        start2[1] = tr.endpos[1];
-        start2[2] = tr.endpos[2];
         /* disasm @ 0x10078e09 / 0x10078e62: push 0x201003b
            = MASK_PLAYERSOLID | MASK_WATER. */
-        tr = gi.trace(start2, NULL, NULL, viewfrom, cam->ent,
+        VectorCopy(tr.endpos, start);
+        tr = gi.trace(start, NULL, NULL, viewfrom, cam->ent,
                       MASK_PLAYERSOLID | MASK_WATER);
     } else if (!cv_view && cv_end) {
-        vec3_t start2;
-        start2[0] = tr.endpos[0];
-        start2[1] = tr.endpos[1];
-        start2[2] = tr.endpos[2];
-        tr = gi.trace(viewfrom, NULL, NULL, start2, cam->ent,
+        VectorCopy(tr.endpos, end);
+        tr = gi.trace(viewfrom, NULL, NULL, end, cam->ent,
                       MASK_PLAYERSOLID | MASK_WATER);
     }
 
@@ -795,14 +793,10 @@ float Cam_TryFlyByVector(edict_t *ent, vec3_t ofs, vec3_t out_endpos)
     diff[1] = cam->ent->s.origin[1] - out_endpos[1];
     diff[2] = cam->ent->s.origin[2] - out_endpos[2];
     dist = VectorLength(diff);
-    if (dist > 50.0f)
-        return 1111.0f;
+    if (dist < 50)
+        return 1111;
 
-    /* disasm @ 0x10078f27..0x10078f36: fld [0x100925d8]=333.0; fsub dist;
-       call 0x10087ba7 -- this is _CIfabs (clears the sign bit at
-       0x10087c3f), not sqrt.  Since dist<=50 here, 333-dist>=283 is
-       always non-negative and the fabs() is identity. */
-    return (float)fabs(333.0 - (double)dist);
+    return fabs(333 - dist);
 }
 
 #define TRY_CANDIDATE(ofs_expr) { \
@@ -957,7 +951,7 @@ void Cam_EnterFlyByMode(edict_t *ent, edict_t *target, usercmd_t *ucmd)
 
     /* disasm @ 0x10079aea: fadd qword [0x100921a8]=0.4 -- double-precision
        add, so the literal must be a double (no `f` suffix) to match. */
-    cam->pause_time = level.time + 0.4;
+    cam->pause_time = level.time + 0.4f;
 
     if (cam->ent != target) {
         cam->ent = target;
@@ -990,7 +984,7 @@ void Cam_EnterFlyByMode(edict_t *ent, edict_t *target, usercmd_t *ucmd)
        floor check (disasm @ 0x10079bed stores, then reloads at 0x10079bf6
        and compares against [0x10092184]=500.0f).  The clamp fires when
        the stored value is < 500, enforcing a FLOOR (not a ceiling). */
-    cam->maxflybydist = VectorLength(diff) * 1.5;
+    cam->maxflybydist = VectorLength(diff) * 1.5f;
     if (cam->maxflybydist < 500.0f) cam->maxflybydist = 500.0f;
 
     Cam_UpdateView(ent, 0, ucmd);
@@ -1035,7 +1029,7 @@ void Cam_DeathThink(edict_t *ent, usercmd_t *ucmd)
         diff[2] = ent->s.origin[2] - cam->dest[2];
         dist = VectorLength(diff);
         if (dist > 10.0f) {
-            dist = level.time + 1.5;
+            dist = level.time + 1.5f;
             if (cam->pause_time < dist)
                 cam->pause_time = dist;
         }
@@ -1256,7 +1250,9 @@ void Cam_IdleThink(edict_t *ent, usercmd_t *ucmd)
     vec3_t    diff;         // [-0x90..-0x88]: scratch for VectorLength
     vec3_t    angles;       // [-0x70..-0x68]: random angles → fwd*2000 → block-1 scratch
     // (overwritten in block 1 with delta+cam->dest; block 2 reads
-    // whichever value it currently holds)
+    // whichever value it currently holds), and the search_time
+    // block's backtrack point: gamei386.so works that block in this
+    // slot, not in diff's
     vec3_t    delta;        // [-0x64..-0x5c]: pos diff → vectoangles result → trace target
     // → trace endpoint.  Both blocks pass &delta to gi.trace.
     vec3_t    out_ang;      // vectoangles destination; declared HERE, not in the
@@ -1273,7 +1269,7 @@ void Cam_IdleThink(edict_t *ent, usercmd_t *ucmd)
         chosen = cam->lastent;
 
     best = -1.0f;
-    rnd  = (float)(rand() & 0x7FFF) / 32767.0f * 5.0f;   // 0x10092164 = 5.0
+    rnd  = (float)(Q_rand() & 0x7FFF) / 32767.0f * 5.0f;   // 0x10092164 = 5.0
 
     // cam->goalent shortcut
     if (cam->goalent) {
@@ -1328,10 +1324,11 @@ void Cam_IdleThink(edict_t *ent, usercmd_t *ucmd)
     if (best <= 0.0f)
         goto install_target;
 
-    /* Grouped `(best / 32767) * rand`, and the rand result stays an INT:
-       ref is `fld <1/32767>; fmul best; and eax,0x7fff; push eax; fimul [esp]`,
-       so the reciprocal multiplies `best` before the integer is folded in. */
-    best = best / 32767.0f * (rand() & 0x7FFF);
+    /* g_local.h's random(), as Mr Elusive wrote it: gcc's -ffast-math fold of
+       best * ((Q_rand() & 0x7fff) / 32767.0f) gives the .so's exact
+       `fld <1/32767>; fmul best; and eax,0x7fff; push eax; fimul [esp]`,
+       masking the rand result only after the reciprocal multiplied best. */
+    best *= random();
 
     it = NULL;
     for (;;) {
@@ -1368,12 +1365,12 @@ install_target:
     /* No `angle_pitch` temp: the reference's group-2 block has eight slots and
        ours had nine, the extra one referenced exactly twice -- assigned once and
        read once, which is all this variable ever was. */
-    angles[PITCH] = (float)(rand() & 0x7FFF) / 32767.0f * 40.0f - 20.0f;
+    angles[PITCH] = (float)(Q_rand() & 0x7FFF) / 32767.0f * 40.0f - 20.0f;
     /* Chained with angles[YAW] INNERMOST: ref stores it first and keeps the
        value on the x87 stack (`fst [esp+0xa8]`), sets angles[ROLL], and only
        then pops into yaw_random.  Assigning yaw_random first instead makes gcc
        reload the slot and copy it as an integer dword. */
-    angles[YAW]   = (float)(rand() & 0x7FFF) / 32767.0f * 360.0f;
+    angles[YAW]   = (float)(Q_rand() & 0x7FFF) / 32767.0f * 360.0f;
     angles[ROLL]  = 0.0f;
     /* Read back rather than chained: ref keeps the value on the x87 stack across
        the integer store to angles[ROLL] and pops it here
@@ -1422,7 +1419,7 @@ install_target:
        The first trace itself targets &delta (still the vectoangles
        output at this point, treated as raw coordinates) -- this matches
        disasm @ 0x1007a7c2 (lea eax,[ebp-0x64]; push eax) exactly. */
-    if (fabs((double)anglemod(yaw_random - yaw_to_target)) > 60.0) {
+    if (fabs((double)anglemod(yaw_random - yaw_to_target)) > 60.0f) {
         /* cam->dest first: ref is `fld [ecx+0x40]; fadd [esp+0x7c]`. */
         angles[0] = cam->dest[0] + delta[0];
         angles[1] = cam->dest[1] + delta[1];
@@ -1456,7 +1453,7 @@ install_target:
        pushes the rvalue straight off the x87 stack. */
     yaw_random = yaw_random + 180.0f;                 // 0x100922f0 = 180
     yaw_random = anglemod(yaw_random);
-    if (fabs((double)anglemod(yaw_random - yaw_to_target)) > 60.0) {
+    if (fabs((double)anglemod(yaw_random - yaw_to_target)) > 60.0f) {
         delta[0] = cam->dest[0] - angles[0];
         delta[1] = cam->dest[1] - angles[1];
         delta[2] = cam->dest[2] - angles[2];
@@ -1482,7 +1479,7 @@ install_target:
     // pause_time elapsed: bump it [3, 5] seconds and resync viewtarget.
     if (cam->pause_time < level.time) {
         cam->pause_time = level.time + 3.0f               // 0x10092140 = 3
-                          + 2.0f * ((float)(rand() & 0x7FFF) / 32767.0f);
+                          + 2.0f * ((float)(Q_rand() & 0x7FFF) / 32767.0f);
         cam->viewtarget[0] = cam->dest2[0];
         cam->viewtarget[1] = cam->dest2[1];
         cam->viewtarget[2] = cam->dest2[2];
@@ -1491,42 +1488,34 @@ install_target:
     // search_time elapsed: backtrack along viewtarget->dest by a random
     // distance, and trace from ent toward that new point.
     if (cam->search_time < level.time) {
-        float scale;
+        VectorSubtract(cam->dest, cam->viewtarget, angles);
+        VectorNormalize(angles);
+        VectorScale(angles, random() * 50 + 5, angles);
 
-        diff[0] = cam->dest[0] - cam->viewtarget[0];
-        diff[1] = cam->dest[1] - cam->viewtarget[1];
-        diff[2] = cam->dest[2] - cam->viewtarget[2];
-        VectorNormalize(diff);
-
-        /* disasm @ 0x1007aa68 fmul [0x100923a4]=50.0; @ 0x1007aa6e fadd
-           [0x10092164]=5.0 (not 10.0) -- scale range is [5, 55]. */
-        scale = (float)(rand() & 0x7FFF) / 32767.0f * 50.0f + 5.0f;
-        VectorScale(diff, scale, diff);
-
-        diff[0] += cam->viewtarget[0];
-        diff[1] += cam->viewtarget[1];
-        diff[2] += cam->viewtarget[2];
+        angles[0] += cam->viewtarget[0];
+        angles[1] += cam->viewtarget[1];
+        angles[2] += cam->viewtarget[2];
 
         tr = gi.trace(ent->s.origin, NULL, NULL,
-                      diff, ent, OBSERVER_TRACE_MASK);
+                      angles, ent, OBSERVER_TRACE_MASK);
 
         if (tr.fraction >= 1.0f) {                        // 0x10092178 = 1.0
             // Trace got all the way: commit the backtracked dest.
-            cam->dest[0]  = diff[0];
-            cam->dest[1]  = diff[1];
-            cam->dest[2]  = diff[2];
+            cam->dest[0]  = angles[0];
+            cam->dest[1]  = angles[1];
+            cam->dest[2]  = angles[2];
             cam->dest2[0] = cam->viewtarget[0];
             cam->dest2[1] = cam->viewtarget[1];
             cam->dest2[2] = cam->viewtarget[2];
             cam->search_time = level.time + 8.0f          // 0x1009215c = 8
-                               + ((float)(rand() & 0x7FFF) / 32767.0f) * 5.0f;
+                               + ((float)(Q_rand() & 0x7FFF) / 32767.0f) * 5.0f;
         } else {
             // Trace blocked: pin dest2 to dest and retry soon.
             cam->dest2[0] = cam->dest[0];
             cam->dest2[1] = cam->dest[1];
             cam->dest2[2] = cam->dest[2];
             cam->search_time = level.time + 1.0f          // 0x10092178 = 1
-                               + ((float)(rand() & 0x7FFF) / 32767.0f);
+                               + ((float)(Q_rand() & 0x7FFF) / 32767.0f);
         }
     }
 } //end of the function Cam_IdleThink
@@ -1546,23 +1535,23 @@ void Cam_Think(edict_t *ent, usercmd_t *ucmd)
     cam = &ent->client->camera;
     if (cam->state == 0) {
         Cam_IdleThink(ent, ucmd);
-        Cam_UpdateView(ent, 1.0, ucmd);
+        Cam_UpdateView(ent, 1.0f, ucmd);
     } //end if
     else if (cam->state == 2) {
         Cam_FlyByThink(ent, ucmd);
-        Cam_UpdateView(ent, 0.0, ucmd);
+        Cam_UpdateView(ent, 0.0f, ucmd);
     } //end else if
     else if (cam->state == 3) {
         Cam_FollowThink(ent, ucmd);
-        Cam_UpdateView(ent, 0.0, ucmd);
+        Cam_UpdateView(ent, 0.0f, ucmd);
     } //end else if
     else if (cam->state == 7) {
         Cam_DeathThink(ent, ucmd);
-        Cam_UpdateView(ent, 100.0, ucmd);
+        Cam_UpdateView(ent, 100.0f, ucmd);
     } //end else if
     else if (cam->state == 1) {
         Cam_FixedThink(ent, ucmd);
-        Cam_UpdateView(ent, 0.0, ucmd);
+        Cam_UpdateView(ent, 0.0f, ucmd);
     } //end else if
     else {
         cam->state = 0;
@@ -1571,81 +1560,73 @@ void Cam_Think(edict_t *ent, usercmd_t *ucmd)
 
 //===========================================================================
 // sub_1007ace3 -- ChangeChaseCamOffset
+//
+// The input and camera angles live in two vec3_t's, `diff` declared first:
+// gamei386.so stores all three differences to contiguous slots above the
+// three angles and computes the ROLL difference in full although nothing
+// reads it (gcc 2.7 never drops an array store), and gcc's inliner only
+// copies an AngleDifference argument into its own register when it is not a
+// plain variable, which is the load-once shape the .so has.
+//
+// FAITHFUL 1999 BUG, do NOT "fix": the second threshold of each pair tests
+// the SAME constant, `> 3` then `< 3` (and `> 10` then `< 10`), not -3 / -10,
+// so the offsets move whenever the difference is not exactly 3 (or 10).  Both
+// originals prove it: gamex86.dll compares against one .rdata constant twice
+// (ds:0x10092140 for 3, ds:0x10092168 for 10) where the +-20 and +-48 clamps
+// use two, and gamei386.so keeps the one 3.0 on the x87 stack for both tests.
 //===========================================================================
 void ChangeChaseCamOffset(edict_t *ent, usercmd_t *ucmd)
 {
     camera_t *cam;
     cvar_t *m_pitch;
-    float yaw_in, pitch_in, roll_in;
-    float yaw_diff, pitch_diff, roll_diff;
+    vec3_t diff, angles;
     float m_pitch_val, inv_m_pitch;
 
     cam = &ent->client->camera;
-
-    // pitch_in = anglemod( SHORT2ANGLE(ucmd->angles[PITCH]) + SHORT2ANGLE(client->ps.pmove.delta_angles[PITCH]) )
-    // (gclient_t.ps.pmove.delta_angles lives at +0x14, short[3])
-    pitch_in = SHORT2ANGLE(ucmd->angles[PITCH])
-               + SHORT2ANGLE(ent->client->ps.pmove.delta_angles[PITCH]);
-    pitch_in = anglemod(pitch_in);
-
-    yaw_in   = SHORT2ANGLE(ucmd->angles[YAW])
-               + SHORT2ANGLE(ent->client->ps.pmove.delta_angles[YAW]);
-    yaw_in   = anglemod(yaw_in);
-
-    roll_in  = SHORT2ANGLE(ucmd->angles[ROLL])
-               + SHORT2ANGLE(ent->client->ps.pmove.delta_angles[ROLL]);
-    roll_in  = anglemod(roll_in);
-
-    // Wrap cam->angles[*] through anglemod to keep them in [0,360).
+    angles[PITCH] = anglemod(SHORT2ANGLE(ucmd->angles[PITCH]) + SHORT2ANGLE(ent->client->ps.pmove.delta_angles[PITCH]));
+    angles[YAW] = anglemod(SHORT2ANGLE(ucmd->angles[YAW]) + SHORT2ANGLE(ent->client->ps.pmove.delta_angles[YAW]));
+    angles[ROLL] = anglemod(SHORT2ANGLE(ucmd->angles[ROLL]) + SHORT2ANGLE(ent->client->ps.pmove.delta_angles[ROLL]));
     cam->angles[0] = anglemod(cam->angles[0]);
     cam->angles[1] = anglemod(cam->angles[1]);
     cam->angles[2] = anglemod(cam->angles[2]);
+    diff[PITCH] = AngleDifference(angles[PITCH], cam->angles[PITCH]);
+    diff[YAW]   = AngleDifference(angles[YAW],   cam->angles[YAW]);
+    diff[ROLL]  = AngleDifference(angles[ROLL],  cam->angles[ROLL]);
 
-    pitch_diff = AngleDifference(pitch_in, cam->angles[0]);
-    yaw_diff   = AngleDifference(yaw_in,   cam->angles[1]);
-    roll_diff  = AngleDifference(roll_in,  cam->angles[2]);
-    // The donor computes the roll difference and never reads it -- the
-    // disassembly has the call and no consumer, and roll is not an axis the
-    // chase offset has.  Kept as the reconstruction has it, silenced rather
-    // than deleted: a reconstructed line removed for a warning is a line
-    // nobody can compare against the binary again.
-    (void)roll_diff;
-
-    // Clamp pitch_diff into [-20, 20].
-    if (pitch_diff >  20.0f) pitch_diff =  20.0f;
-    else if (pitch_diff < -20.0f) pitch_diff = -20.0f;
+    // Clamp diff[PITCH] into [-20, 20].
+    if (diff[PITCH] >  20.0f) diff[PITCH] =  20.0f;
+    else if (diff[PITCH] < -20.0f) diff[PITCH] = -20.0f;
 
     // inv_m_pitch = -0.022 / m_pitch  (so chaseoffset moves proportional to m_pitch)
     m_pitch = gi.cvar("m_pitch", 0, 0);
     m_pitch_val = -0.022f;
     if (m_pitch && m_pitch->value != 0.0f)
         m_pitch_val = m_pitch->value;
-    inv_m_pitch = -0.022 / m_pitch_val;
+    inv_m_pitch = -0.022f / m_pitch_val;
 
     // chaseoffset[ROLL] is the "vertical" component (offset behind the player).
-    // Adjust by  +/- 0.5 * pitch_diff * inv_m_pitch depending on attack-button
+    // Adjust by  +/- 0.5 * diff[PITCH] * inv_m_pitch depending on attack-button
     // state (ucmd->buttons bit 0 == BUTTON_ATTACK).
     if (ucmd->buttons & 1) {
-        if (pitch_diff >  3.0f)
-            cam->chaseoffset[ROLL] += inv_m_pitch * pitch_diff * 0.5;
-        else if (pitch_diff < -3.0f)
-            cam->chaseoffset[ROLL] += inv_m_pitch * pitch_diff * 0.5;
+        if (diff[PITCH] >  3.0f)
+            cam->chaseoffset[ROLL] += inv_m_pitch * diff[PITCH] * 0.5f;
+        else if (diff[PITCH] < 3.0f)
+            cam->chaseoffset[ROLL] += inv_m_pitch * diff[PITCH] * 0.5f;
     } else {
-        if (pitch_diff >  3.0f)
-            cam->chaseoffset[PITCH] -= inv_m_pitch * pitch_diff * 0.5;
-        else if (pitch_diff < -3.0f)
-            cam->chaseoffset[PITCH] -= inv_m_pitch * pitch_diff * 0.5;
+        if (diff[PITCH] >  3.0f)
+            cam->chaseoffset[PITCH] -= inv_m_pitch * diff[PITCH] * 0.5f;
+        else if (diff[PITCH] < 3.0f)
+            cam->chaseoffset[PITCH] -= inv_m_pitch * diff[PITCH] * 0.5f;
     }
 
-    // chaseoffset[YAW] += yaw_diff * 0.2 ; wrap.  (disasm writes cam+0x2c
-    // which is chaseoffset[1]=[YAW]; only triggered if |yaw_diff|>10).
-    // Original mirrors the pitch block: two separate branches > 10 and < -10
-    // each duplicating the body.
-    if (yaw_diff >  10.0f) {
-        cam->chaseoffset[YAW] += yaw_diff * 0.2;
+    // chaseoffset[YAW] += diff[YAW] * 0.2 ; wrap.  (disasm writes cam+0x2c
+    // which is chaseoffset[1]=[YAW].)  Mirrors the pitch block: two separate
+    // branches, > 10 and < 10 (sic, see above), each duplicating the body.
+    if (diff[YAW] >  10.0f) {
+        cam->chaseoffset[YAW] += diff[YAW] * 0.2f;
         cam->chaseoffset[YAW]  = anglemod(cam->chaseoffset[YAW]);
-    } else if (yaw_diff < -10.0f) {
-        cam->chaseoffset[YAW] += yaw_diff * 0.2;
+    } else if (diff[YAW] < 10.0f) {
+        cam->chaseoffset[YAW] += diff[YAW] * 0.2f;
         cam->chaseoffset[YAW]  = anglemod(cam->chaseoffset[YAW]);
     }
 
@@ -1719,7 +1700,7 @@ void UpdateChaseCamera(edict_t *ent, usercmd_t *ucmd)
     // an intermediate vec3.
     horizfwd[0] = forward[0];
     horizfwd[1] = forward[1];
-    horizfwd[2] = (horizfwd[0] * up[0] + horizfwd[1] * up[1]) * -1.0 / up[2];
+    horizfwd[2] = (horizfwd[0] * up[0] + horizfwd[1] * up[1]) * -1.0f / up[2];
     VectorNormalize(horizfwd);
 
     // dir = horizfwd * (-chaseoffset[PITCH]); dir[2] += chaseoffset[ROLL]
@@ -1745,7 +1726,7 @@ void UpdateChaseCamera(edict_t *ent, usercmd_t *ucmd)
     // Push the endpoint 5 units further along the (re-normalised)
     // horizontal forward so the camera doesn't sit flush against the wall.
     vectoangles(horizfwd, angles);
-    VectorScale(horizfwd, 5.0, horizfwd);
+    VectorScale(horizfwd, 5.0f, horizfwd);
     end[0] = tr.endpos[0] + horizfwd[0];
     end[1] = tr.endpos[1] + horizfwd[1];
     end[2] = tr.endpos[2] + horizfwd[2];
@@ -1970,7 +1951,9 @@ void ClientSetCamera(edict_t *ent)
     for (i = 0; i < game.maxclients; i++) {
         cand = g_edicts + 1 + i;
         if (!cand->inuse) continue;
-        if (!Q_stricmp(cand->client->pers.netname, name)) {
+        /* Q_strcasecmp, not stricmp: gamei386.so calls q_shared.c's Q_strcasecmp here
+         * (through the PLT), where a stricmp would be linux-i386.mak's strcasecmp. */
+        if (!Q_strcasecmp(cand->client->pers.netname, name)) {
             ent->client->camera.ent = cand;
             break;
         } //end if
@@ -2012,7 +1995,7 @@ int DoObserver(edict_t *ent, usercmd_t *ucmd)
     // 0x10092138, fsub'd from level.time at sub_1007b926+0x6f)
     /* lastcycle on the LEFT: ref materialises `ent->client` before the FP
        subtraction, which is the evaluation order for the left-hand operand. */
-    if (ucmd->upmove > 100 && ent->client->camera.lastcycle < level.time - 0.5) {
+    if (ucmd->upmove > 100 && ent->client->camera.lastcycle < level.time - 0.5f) {
         ent->client->camera.lastcycle = level.time;
         if (ent->client->camera.flags & CAMFL_AUTOCAM) {
             next = Cam_Cycle(ent->client->camera.ent);
@@ -2203,7 +2186,7 @@ void ClientToggleAutoCam(edict_t *ent)
         cam->dest[1] = ent->s.origin[1];
         cam->dest[2] = ent->s.origin[2];
         AngleVectors(ent->client->v_angle, forward, NULL, NULL);
-        VectorMA(cam->dest, 100.0, forward, cam->viewtarget);
+        VectorMA(cam->dest, 100.0f, forward, cam->viewtarget);
         cam->ent = ent;
         cam->pause_time = level.time;
         cam->delay = level.time;
@@ -2279,6 +2262,8 @@ void ClientObserverHelp(edict_t *ent)
 //===========================================================================
 bool ClientObserverCmd(const char *cmd, edict_t *ent)
 {
+    /* Q_stricmp throughout: all eight compares in gamei386.so call q_shared.c's
+     * Q_stricmp, not the strcasecmp that a plain stricmp becomes on Linux. */
     if (!Q_stricmp(cmd, "observer"))          ClientToggleObserver(ent);
     else if (!Q_stricmp(cmd, "autocam"))      ClientToggleAutoCam(ent);
     else if (!Q_stricmp(cmd, "chasecam"))     ClientToggleChaseCam(ent);
