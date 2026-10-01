@@ -108,6 +108,10 @@ typedef struct bot_globals_s
     int notest;                         //don't call the library test function
     int nobotinput;                 //true if bot input isn't processed
     int nobotai;                        //true if bots don't execute ai
+    // A brain failed to load this level's map: set where BotLoadMap fails,
+    // cleared by BotSpawn at each level, read by the fill, which stops asking,
+    // and by the queue, which says why (CheckMinimumPlayers).
+    bool mapfailed;
 } bot_globals_t;
 
 //bl_main.c

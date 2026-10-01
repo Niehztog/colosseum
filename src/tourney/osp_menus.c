@@ -301,7 +301,6 @@ osp_pmenu_t Invite_Menu[18] = {
     { "Press ENTER to select",                   osp_PMENU_ALIGN_CENTER,  NULL, NULL },
     { "*v(2.75)",                                osp_PMENU_ALIGN_RIGHT,   NULL, NULL },
 };
-char    voted_botname[32];
 
 // The menu text the update functions build.  Every *_Menu table entry's `text`
 // is just a pointer, so the builders sprintf into file statics and point the
@@ -376,6 +375,8 @@ static char bot_total_line[32];
 static int  bot_add_arg;
 static int  bot_rem_arg;
 static char invite_teamname[32];
+// Only its ADDRESS is used: it is the tag on the "*Accept Invitation" row
+// (OSP_updateInviteMenu), and the team is read from the invitation itself.
 static int  invite_teamnum;
 static char admin_title[32];
 // A SECOND 32-byte line static here, and nothing in the image references it:
@@ -624,8 +625,15 @@ void OSP_inviteMenu(edict_t *ent)
 // break at the bottom of the search loop does.
 int OSP_updateTeamMenu(edict_t *ent)
 {
+    char    clean[16];
     int     i;
     int     pick;
+
+    // A duellist's slot is named after them in the CLEANED spelling
+    // (OSP_1v1Team, R-SEC-11), so that is what is compared and offered here:
+    // a raw netname with a space or a symbol in it never matched its own slot.
+    // One that cleans to nothing renames no slot and is offered none.
+    OSP_CleanTeamName(clean, sizeof(clean), ent->client->pers.netname);
 
     pick = -1;
     Q_snprintf(tm_join[0], sizeof(tm_join[0]), "*Join %s", osp_teams[0].netname);
@@ -647,8 +655,8 @@ int OSP_updateTeamMenu(edict_t *ent)
             pick = -1;
             break;
         }
-        if (G_Ruleset() == RULESET_DUEL &&
-            !Q_stricmp(osp_teams[i].netname, ent->client->pers.netname)) {
+        if (G_Ruleset() == RULESET_DUEL && clean[0] &&
+            !Q_stricmp(osp_teams[i].netname, clean)) {
             pick = -1;
             break;
         }
@@ -656,8 +664,8 @@ int OSP_updateTeamMenu(edict_t *ent)
 
     if (pick >= 0 && G_Ruleset() == RULESET_TDM && ent->osp_e3a0[0])
         Q_snprintf(tm_join[pick], sizeof(tm_join[pick]), "*Join %s", ent->osp_e3a0);
-    else if (pick >= 0 && G_Ruleset() == RULESET_DUEL)
-        Q_snprintf(tm_join[pick], sizeof(tm_join[pick]), "*Join %s", ent->client->pers.netname);
+    else if (pick >= 0 && G_Ruleset() == RULESET_DUEL && clean[0])
+        Q_snprintf(tm_join[pick], sizeof(tm_join[pick]), "*Join %s", clean);
 
     Team_Menu[1].text = tm_title;
     Team_Menu[3].text = tm_join[0];
@@ -800,8 +808,28 @@ void OSP_joinTeam_menu(edict_t *ent, osp_pmenu_t *p)
     int     invited;
     int     i;
 
-    tnum = *(int *)p->arg;
+    // R-SEC-4: an invitation names team 0 or 1 and indexes osp_teams[] below,
+    // so any other value is no invitation at all.
     invited = ent->client->resp.osp_r078;
+    if (invited != 1 && invited != 2)
+        invited = 0;
+
+    // "*Accept Invitation" is this leaf too, and its row's arg is a tag, not a
+    // team (OSP_updateInviteMenu): the team is the invitation's, which is this
+    // client's own.  The donor read the team out of that one file static, and
+    // osp_PMenu_Open copies a row's pointer, not what it points at, so every
+    // client's invitation menu read the team of whoever was invited LAST --
+    // and holding an invitation skips the lock, so accepting one captain's
+    // invitation could join the other captain's locked team.
+    if (p->arg == &invite_teamnum) {
+        if (!invited) {
+            gi.cprintf(ent, PRINT_HIGH, "You have no invitation to accept.\n");
+            osp_PMenu_Close(ent);
+            return;
+        }
+        tnum = invited - 1;
+    } else
+        tnum = *(int *)p->arg;
 
     if (ent->client->resp.team == tnum) {
         gi.cprintf(ent, PRINT_HIGH, "You are already on \"%s\"!\n",
@@ -842,7 +870,7 @@ void OSP_joinTeam_menu(edict_t *ent, osp_pmenu_t *p)
     }
 
     if (!ent->client->resp.osp_r030 && G_Ruleset() == RULESET_TDM &&
-        (!osp_teams[tnum].osp_m0f4 || invited) && pick == tnum) {
+        (!osp_teams[tnum].osp_m0f4 || invited == tnum + 1) && pick == tnum) {
         if (OSP_defaultTeam(ent))
             goto joined;
     }
@@ -850,14 +878,16 @@ void OSP_joinTeam_menu(edict_t *ent, osp_pmenu_t *p)
     if (G_Ruleset() == RULESET_DUEL && OSP_1v1Team(ent))
         goto joined;
 
-    if ((!(OSP_teamCount(tnum) >= (int)team_maxplayers->value && !invited)
+    if ((!(OSP_teamCount(tnum) >= OSP_TeamMaxPlayers() && !invited)
          || (G_Ruleset() == RULESET_TDM && ((int)match_latejoin->value > 2
                              || (sync_stat > 2 && (int)match_latejoin->value == 2 &&
-                                 OSP_teamCount(tnum) < (int)team_maxplayers->value))))
-        && !(osp_teams[tnum].osp_m0f4 && !invited)) {
+                                 OSP_teamCount(tnum) < OSP_TeamMaxPlayers()))))
+        // A lock is lifted by an invitation to this team only, as in
+        // OSP_teamjoin_cmd.
+        && !(osp_teams[tnum].osp_m0f4 && invited != tnum + 1)) {
         if (invited) {
             if (tnum != invited - 1 &&
-                OSP_teamCount(tnum) >= (int)team_maxplayers->value) {
+                OSP_teamCount(tnum) >= OSP_TeamMaxPlayers()) {
                 gi.cprintf(ent, PRINT_HIGH,
                            "You've been invited to join only team %s\n",
                            osp_teams[invited - 1].greenname);
@@ -870,7 +900,7 @@ void OSP_joinTeam_menu(edict_t *ent, osp_pmenu_t *p)
             return;
         goto joined;
     } else {
-        if (osp_teams[tnum].osp_m0f4 && !invited)
+        if (osp_teams[tnum].osp_m0f4 && invited != tnum + 1)
             gi.cprintf(ent, PRINT_HIGH, "\"%s\" is locked.\n", osp_teams[tnum].netname);
         else
             gi.cprintf(ent, PRINT_HIGH, "\"%s\" is full.\n", osp_teams[tnum].netname);
@@ -1937,7 +1967,6 @@ void OSP_addSpecificBot_menu(edict_t *ent, osp_pmenu_t *p)
 {
     bot_t       *b;
     int         ncount;
-    int         t;
 
     if (ent->client->resp.osp_r254 && ent->client->resp.osp_r254 != 0x40) {
         ent->client->resp.osp_r250 = 0;
@@ -1959,15 +1988,12 @@ void OSP_addSpecificBot_menu(edict_t *ent, osp_pmenu_t *p)
     else if (ent->client->resp.osp_r29c >= ncount)
         ent->client->resp.osp_r29c = -1;
 
-    if (ent->client->resp.osp_r29c == -1 || !ncount) {
+    // The donor also copied the chosen bot's name into a global, voted_botname,
+    // which nothing read: the proposal carries the index (resp.osp_r29c).
+    if (ent->client->resp.osp_r29c == -1 || !ncount)
         ent->client->resp.osp_r254 = 0;
-        voted_botname[0] = 0;
-    } else {
-        for (t = 0, b = botlist; b && t < ent->client->resp.osp_r29c; b = b->next, t++)
-            ;
-        Q_strlcpy(voted_botname, b->name, sizeof(voted_botname));
+    else
         ent->client->resp.osp_r254 = 0x40;
-    }
 
     OSP_updateBotMenu(ent);
     osp_PMenu_Sync(ent, Bot_Menu);
@@ -2053,11 +2079,13 @@ void OSP_declineVote_menu(edict_t *ent, osp_pmenu_t *p)
     osp_PMenu_Close(ent);
 }
 
+// "*Accept Invitation" carries &invite_teamnum as a tag and no team in it:
+// that address is how OSP_joinTeam_menu knows to take the team from the
+// client's own invitation rather than from the row.
 int OSP_updateInviteMenu(edict_t *ent)
 {
     Q_snprintf(invite_teamname, sizeof(invite_teamname), "%s",
                OSP_teamNameFor(ent->client->resp.osp_r2cc));
-    invite_teamnum = ent->client->resp.osp_r078 - 1;
     Invite_Menu[7].text = invite_teamname;
     Invite_Menu[11].arg = &invite_teamnum;
     return 11;
@@ -2327,8 +2355,10 @@ void OSP_playerAdminChoose(edict_t *ent, osp_pmenu_t *p)
             }
 
             if (target->flags & FL_BOT) {
+                // NULL, not 0: the list is read back as char * through
+                // va_arg, and an int 0 there is undefined on LP64.
                 BotServerCommand("sv", "removebot",
-                                 target->client->pers.netname, 0);
+                                 target->client->pers.netname, NULL);
                 // The target's own oddity, the same five instructions as in
                 // OSP_kickplayer_cmd: the counter is subtracted from itself and
                 // the (always zero) result clamped.

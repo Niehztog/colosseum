@@ -161,11 +161,11 @@ typedef struct arena_settings_s {
 } arena_settings_t;
 
 // `arena_settings_t` is addressed by index.  `ra2menus.c` reads and
-// writes it as `int settings[44]` -- settings[2] is the weapon mask,
-// settings[17] the armour protection, settings[41] the changed flag,
-// settings[42] the per-arena bot switch -- and `arena_t` carries a
-// second, inline copy of the same 44 members that `arena.c` and `ra2menus.c`
-// memcpy across with `sizeof(arena_settings_t)`.
+// writes it as `int settings[50]` -- settings[2] is the weapon mask,
+// settings[17] the health protection, settings[41] the changed flag,
+// settings[42] the per-arena bot switch, settings[49] the pack-weapon vote --
+// and `arena_t` carries a second, inline copy of the same 50 members that
+// `arena.c` and `ra2menus.c` memcpy across with `sizeof(arena_settings_t)`.
 // Both are assumptions about layout that no compiler was checking, and the
 // class is the one that bit RA2 after its own port: a qboolean -> bool
 // retype shrank this struct from 168 bytes to 96 while `ra2menus.c` still
@@ -174,9 +174,9 @@ typedef struct arena_settings_s {
 // So the layout is pinned rather than trusted.  A member inserted, removed,
 // reordered or retyped now fails the build on the line that names it,
 // instead of silently moving every index after it.
-// 49 since the pack five were appended; ra2menus.c reads 0..43 and never more, and
-// `settings` there is a POINTER into the struct rather than a fixed array, so
-// the run may grow at the end and may not move underneath it.
+// 50 since the pack five and their vote were appended; ra2menus.c reads 0..43
+// and 49, and `settings` there is a POINTER into the struct rather than a fixed
+// array, so the run may grow at the end and may not move underneath it.
 _Static_assert(sizeof(arena_settings_t) == 50 * sizeof(int),
                "arena_settings_t is read by index from ra2menus.c");
 _Static_assert(offsetof(arena_settings_t, playersperteam) == 0 * sizeof(int),
@@ -185,8 +185,8 @@ _Static_assert(offsetof(arena_settings_t, rounds) == 1 * sizeof(int),
                "arena_settings_t.rounds is index 1");
 _Static_assert(offsetof(arena_settings_t, weapons) == 2 * sizeof(int),
                "arena_settings_t.weapons is index 2");
-// The pack five, pinned like the rest: 44..48, after everything ra2menus.c
-// names by number.
+// The pack five, pinned like the rest: 44..48, which ra2menus.c names by no
+// number, and their vote at 49, which it does.
 _Static_assert(offsetof(arena_settings_t, magslug) == 44 * sizeof(int),
                "arena_settings_t.magslug is index 44");
 _Static_assert(offsetof(arena_settings_t, trap) == 48 * sizeof(int),
@@ -368,12 +368,12 @@ typedef struct arena_s {
     struct ra2_round_s  *stats;     // NULL when statsfile is off
 } arena_t;
 
-// The second half of the same contract: `arena_t` repeats those 44 members
-// inline, from `playersperteam` to `allow_voting_bots`, and both arena.c and
-// ra2menus.c copy a whole `arena_settings_t` over that run with memcpy.  If the
-// run and the struct ever differ in extent the copy writes past the end of the
-// run and into `proposetime` -- so the extent is pinned too, measured from the
-// first member of the run to the field that follows it.
+// The second half of the same contract: `arena_t` repeats those 50 members
+// inline, from `playersperteam` to `allow_voting_packweapons`, and both arena.c
+// and ra2menus.c copy a whole `arena_settings_t` over that run with memcpy.  If
+// the run and the struct ever differ in extent the copy writes past the end of
+// the run and into `proposetime` -- so the extent is pinned too, measured from
+// the first member of the run to the field that follows it.
 _Static_assert(offsetof(arena_t, proposetime) - offsetof(arena_t, playersperteam)
                == sizeof(arena_settings_t),
                "arena_t's inline settings run must match arena_settings_t");
@@ -423,10 +423,10 @@ extern const char   dm_statusbar[];
 // 9..14 are the mission packs' six giveable weapons.  They have no
 // digit left to be named by -- the keyboard row is used up -- so `arena.cfg`
 // names them in words, and the settings menu offers a row for each only while
-// its content layer is on.  That last part is why the mask rebuild in
-// ra2menus.c consults RA_PackWeaponOffered() rather than clearing all six: a
-// bit whose row is not drawn has to be carried, or an admin who came to change
-// the round count strips every pack weapon from the arena.
+// its content layer is on.  That last part is why ra2menus.c's Apply and
+// Propose let each drawn row decide its own bit and carry every other: a bit
+// whose row is not drawn has to be carried, or an admin who came to change the
+// round count strips every pack weapon from the arena.
 //
 // The Disruptor is not among them: `weapon_disintegrator` is IT_NOT_GIVEABLE
 //So a bit for it could never be honoured.

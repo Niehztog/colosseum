@@ -110,7 +110,7 @@ func run(q2, ref, lib, dir, mapname string, arena, port int, label, cfg string) 
 		if err != nil {
 			return err
 		}
-		if err := os.WriteFile(filepath.Join(dir, "arena", "arena.cfg"), b, 0o644); err != nil {
+		if err := playtest.WriteFixture(filepath.Join(dir, "arena", "arena.cfg"), b, 0o644); err != nil {
 			return err
 		}
 		fmt.Printf("  ..    arena.cfg from %s\n", cfg)

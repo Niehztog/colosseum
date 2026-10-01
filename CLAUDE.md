@@ -18,7 +18,7 @@ Guidance for Claude Code when working in this repository. `SPECS.md` is the cont
 
 * **`content_flavour` reports the SERVER's configuration, not the entity's.** It is set in `ED_CallSpawn` from `G_LayerEnabled`, so it is the same value for everything in the level.
 * **It is for a monster BOTH donors have.** Never use it to gate a pack-exclusive entity's own defining feature. The spawn path refuses nothing when a layer is off, so `monster_gekk`, `monster_widow` and the rest keep working; a feature gated on the latch instead silently disappears.
-* **Where the world already carries the distinction, the world is the selector.** The heat chick is its own classname whose spawn function sets `s.skinnum = 3`, so `skinnum > 1` is the test and the layer must not appear in it (R-201).
+* **Where the world already carries the distinction, the world is the selector.** The heat chick is its own classname whose spawn function sets `s.skinnum = 3`, so `skinnum > 1` is the test and the layer must not appear in it (R-CORE-11d).
 * **Not every difference is behaviour.** Some are ABI accommodations -- a `trace_t *` added to a dodge signature, say -- and want no latch at all.
 * **A helper can remove the need for a latch.** Where a difference is a tuning value rather than a policy, a shared helper that takes the difference as a parameter is better than two arms: the nightmare-pain test, a velocity lead, a slots-left count. That is a refactoring idea, never a behaviour source.
 

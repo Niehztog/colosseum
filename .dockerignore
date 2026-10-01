@@ -1,0 +1,11 @@
+# Host build output never belongs in an image build: `make` would take these
+# objects as up to date.  server/Dockerfile also removes them after its COPY,
+# because whether this file applies to a NAMED build context depends on the
+# builder.  `.git` stays: the image records the commit it was built from.
+release*/
+debug*/
+build/
+vendor/gladiator-bot-restored/release/
+vendor/gladiator-bot-restored/build/
+src/.g_ptrs.gen.*
+**/__pycache__/

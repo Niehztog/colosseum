@@ -51,12 +51,15 @@ void flechette_touch(edict_t *self, edict_t *other, cplane_t *plane, csurface_t 
         return;
     }
 
-    if (self->client)
+    // The SHOOTER's client, as blaster2_touch and the id weapons ask.  Ground
+    // Zero tested the flechette's own, which a projectile never has, so in sp
+    // no monster heard an ETF rifle impact.
+    if (self->owner && self->owner->client)
         PlayerNoise(self->owner, self->s.origin, PNOISE_IMPACT);
 
     if (other->takedamage) {
 //gi.dprintf("t_damage %s\n", other->classname);
-        T_Damage(other, self, self->owner, self->velocity, self->s.origin, plane->normal,
+        T_Damage(other, self, self->owner, self->velocity, self->s.origin, plane ? plane->normal : NULL,
                  self->dmg, self->dmg_radius, DAMAGE_NO_REG_ARMOR, MOD_ETF_RIFLE);
     } else {
         if (!plane)
@@ -118,6 +121,36 @@ void fire_flechette(edict_t *self, vec3_t start, vec3_t dir, int damage, int spe
         check_dodge(self, flechette->s.origin, dir, speed);
 }
 #endif
+
+// Threewave's team spawn points, which are spawn points only under `ctf`,
+// where SelectCTFSpawnPoint puts a player who has just joined a team on one.
+// Neither Ground Zero nor the 1999 merge tested them, so under ctf a mine or a
+// tesla could sit on a team's spawn.  They are walked by classname rather than
+// added to the findradius searches below, because findradius skips a SOLID_NOT
+// entity and a team spawn is one -- as is info_player_start, whose name in
+// those searches is Ground Zero's and finds nothing.
+static bool TeamSpawnNear(edict_t *ent, float radius)
+{
+    static char *const names[] = {
+        "info_player_team1", "info_player_team2"
+    };
+    edict_t *spot;
+    vec3_t  d;
+    int     i;
+
+    if (G_Ruleset() != RULESET_CTF)
+        return false;
+
+    for (i = 0; i < 2; i++) {
+        spot = NULL;
+        while ((spot = G_Find(spot, FOFS(classname), names[i])) != NULL) {
+            VectorSubtract(spot->s.origin, ent->s.origin, d);
+            if (VectorLength(d) <= radius && visible(spot, ent))
+                return true;
+        }
+    }
+    return false;
+}
 
 // **************************
 // PROX
@@ -277,6 +310,13 @@ void prox_open(edict_t *ent)
                 Prox_Explode(ent);
                 return;
             }
+        }
+
+        // ...and Threewave's team spawns, which that search cannot see.
+        if (TeamSpawnNear(ent, PROX_DAMAGE_RADIUS + 10)) {
+            gi.sound(ent, CHAN_VOICE, gi.soundindex("weapons/proxwarn.wav"), 1, ATTN_NORM, 0);
+            Prox_Explode(ent);
+            return;
         }
 
         if (strong_mines && (strong_mines->value))
@@ -1193,12 +1233,25 @@ static void Nuke_Explode(edict_t *ent)
     ent->timestamp = level.framenum + NUKE_QUAKE_TIME * BASE_FRAMERATE;
     ent->nextthink = level.framenum + 1;
     ent->last_move_framenum = 0;
+
+    // ...and nothing else: the quake is not a nuke any more.  Ground Zero
+    // left a timed or a lava detonation DAMAGE_YES and SOLID_BBOX with
+    // nuke_die (only the `die` path cleared takedamage), so for the quake's
+    // three seconds it was an invisible box in the way, and any splash or
+    // bullet that reached it ran nuke_die and a second full blast.
+    ent->takedamage = DAMAGE_NO;
+    ent->die = NULL;
+    ent->solid = SOLID_NOT;
+    gi.linkentity(ent);
 }
 
 void nuke_die(edict_t *self, edict_t *inflictor, edict_t *attacker, int damage, vec3_t point)
 {
     self->takedamage = DAMAGE_NO;
-    if ((attacker) && !(strcmp(attacker->classname, "nuke"))) {
+    // "Nuked by a nuke" is the INFLICTOR's classname.  Ground Zero asked the
+    // attacker, which in T_RadiusNukeDamage is the thrower, so the guard
+    // never fired and one nuke's blast set off every other nuke in reach.
+    if ((inflictor) && inflictor->classname && !(strcmp(inflictor->classname, "nuke"))) {
 //      if ((g_showlogic) && (g_showlogic->value))
 //          gi.dprintf ("nuke nuked by a nuke, not nuking\n");
         G_FreeEdict(self);
@@ -1520,6 +1573,11 @@ void tesla_activate(edict_t *self)
                 }
             }
         }
+        // ...and Threewave's team spawns, which that search cannot see.
+        if (TeamSpawnNear(self, 1.5f * TESLA_DAMAGE_RADIUS)) {
+            tesla_remove(self);
+            return;
+        }
     }
 
     trigger = G_Spawn();
@@ -1600,11 +1658,11 @@ void tesla_lava(edict_t *ent, edict_t *other, cplane_t *plane, csurface_t *surf)
         gi.sound(ent, CHAN_VOICE, gi.soundindex("weapons/hgrenb2a.wav"), 1, ATTN_NORM, 0);
 }
 
+// No OSP_accShot: the tesla has no accuracy column -- it is a device that
+// zaps everything in its field every frame, not a shot that hits or misses
+// (osp_acc.c, acc_column).
 void fire_tesla(edict_t *self, vec3_t start, vec3_t aimdir, int damage_multiplier, int speed)
 {
-    if (G_IsOspRuleset())
-        OSP_accShot(self, MOD_TESLA, 1);
-
     edict_t *tesla;
     vec3_t  dir;
     vec3_t  forward, right, up;
@@ -1841,12 +1899,12 @@ void blaster2_touch(edict_t *self, edict_t *other, cplane_t *plane, csurface_t *
             self->owner->takedamage = DAMAGE_NO;
             if (self->dmg >= 5)
                 T_RadiusDamage(self, self->owner, self->dmg * 3, other, self->dmg_radius, 0);
-            T_Damage(other, self, self->owner, self->velocity, self->s.origin, plane->normal, self->dmg, 1, DAMAGE_ENERGY, mod);
+            T_Damage(other, self, self->owner, self->velocity, self->s.origin, plane ? plane->normal : NULL, self->dmg, 1, DAMAGE_ENERGY, mod);
             self->owner->takedamage = damagestat;
         } else {
             if (self->dmg >= 5)
                 T_RadiusDamage(self, self->owner, self->dmg * 3, other, self->dmg_radius, 0);
-            T_Damage(other, self, self->owner, self->velocity, self->s.origin, plane->normal, self->dmg, 1, DAMAGE_ENERGY, mod);
+            T_Damage(other, self, self->owner, self->velocity, self->s.origin, plane ? plane->normal : NULL, self->dmg, 1, DAMAGE_ENERGY, mod);
         }
     } else {
         //PMM - yeowch this will get expensive
@@ -1859,7 +1917,7 @@ void blaster2_touch(edict_t *self, edict_t *other, cplane_t *plane, csurface_t *
         if (!plane)
             gi.WriteDir(vec3_origin);
         else
-            gi.WriteDir(plane->normal);
+            gi.WriteDir(plane ? plane->normal : NULL);
         gi.multicast(self->s.origin, MULTICAST_PVS);
     }
 
@@ -2044,15 +2102,22 @@ void tracker_touch(edict_t *self, edict_t *other, cplane_t *plane, csurface_t *s
         return;
     }
 
-    if (self->client)
+    // The shooter's client, not the tracker's (see flechette_touch).
+    if (self->owner && self->owner->client)
         PlayerNoise(self->owner, self->s.origin, PNOISE_IMPACT);
 
     if (other->takedamage) {
         if ((other->svflags & SVF_MONSTER) || other->client) {
             if (other->health > 0) {    // knockback only for living creatures
+                // Tourney's accuracy counts the Disruptor's hit here, where
+                // the bolt lands: the damage is the pain daemon's, five ticks
+                // that OSP_accDamage takes as damage and not as five hits.
+                if (G_IsOspRuleset())
+                    OSP_accHit(other, self->owner, MOD_TRACKER);
+
                 // PMM - kickback was times 4 .. reduced to 3
                 // now this does no damage, just knockback
-                T_Damage(other, self, self->owner, self->velocity, self->s.origin, plane->normal,
+                T_Damage(other, self, self->owner, self->velocity, self->s.origin, plane ? plane->normal : NULL,
                          /* self->dmg */ 0, (self->dmg * 3), TRACKER_IMPACT_FLAGS, MOD_TRACKER);
 
                 if (!(other->flags & (FL_FLY | FL_SWIM)))
@@ -2064,11 +2129,11 @@ void tracker_touch(edict_t *self, edict_t *other, cplane_t *plane, csurface_t *s
 
                 tracker_pain_daemon_spawn(self->owner, other, (int)damagetime);
             } else {                    // lots of damage (almost autogib) for dead bodies
-                T_Damage(other, self, self->owner, self->velocity, self->s.origin, plane->normal,
+                T_Damage(other, self, self->owner, self->velocity, self->s.origin, plane ? plane->normal : NULL,
                          self->dmg * 4, (self->dmg * 3), TRACKER_IMPACT_FLAGS, MOD_TRACKER);
             }
         } else { // full damage in one shot for inanimate objects
-            T_Damage(other, self, self->owner, self->velocity, self->s.origin, plane->normal,
+            T_Damage(other, self, self->owner, self->velocity, self->s.origin, plane ? plane->normal : NULL,
                      self->dmg, (self->dmg * 3), TRACKER_IMPACT_FLAGS, MOD_TRACKER);
         }
     }

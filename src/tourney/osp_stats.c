@@ -99,9 +99,10 @@ its caller testing a cvar.
 */
 static FILE *begin_event(const char *event)
 {
-    // stats_path is the "logging is on" flag; the handle is reopened if
-    // something closed it, so that a shutdown/restart cycle inside one game
-    // library load does not silently stop the log.
+    // stats_path is the "logging is on" flag.  The handle is closed only by
+    // OSP_Stats_Init, which opens it again, and OSP_Stats_Shutdown, which
+    // clears the path with it, so the reopen below is a backstop for a handle
+    // closed with the path still set -- which nothing in this file does.
     if (!stats_f) {
         if (!stats_path[0])
             return NULL;
@@ -137,7 +138,9 @@ static void json_player(FILE *f, edict_t *ent)
 OSP_Stats_DateString
 
 "YY.MM.DD.HH.MM".  This is ngLog_getDateInfo's short form, kept because the
-admin log and the auto-record demo names are built from it.
+auto-record demo names are built from it (OSP_startDemos).  YY is the year
+modulo 100, as the high-score dates have it: the donor printed tm_year whole,
+which was two digits only until 2000, and is "126" now.
 =================
 */
 void OSP_Stats_DateString(char *out, size_t size)
@@ -149,11 +152,11 @@ void OSP_Stats_DateString(char *out, size_t size)
     tm = localtime(&t);
 
     if (!tm) {
-        Q_strlcpy(out, "0.00.00.00.00", size);
+        Q_strlcpy(out, "00.00.00.00.00", size);
         return;
     }
 
-    Q_snprintf(out, size, "%d.%.2d.%.2d.%.2d.%.2d", tm->tm_year,
+    Q_snprintf(out, size, "%.2d.%.2d.%.2d.%.2d.%.2d", tm->tm_year % 100,
                tm->tm_mon + 1, tm->tm_mday, tm->tm_hour, tm->tm_min);
 }
 
@@ -193,6 +196,7 @@ void OSP_Stats_Init(void)
         return;
     }
 
+    G_FsCreatePath(stats_path);
     stats_f = fopen(stats_path, "a");
     if (!stats_f) {
         gi.dprintf("Couldn't open stats log \"%s\", logging disabled.\n",
@@ -236,6 +240,10 @@ void OSP_Stats_Shutdown(const char *reason)
         fclose(stats_f);
         stats_f = NULL;
     }
+    // ...and logging is off: begin_event reopens the file whenever the path is
+    // set, so a record written after this -- a late departure during
+    // ShutdownGame -- would have opened a handle nothing closes.
+    stats_path[0] = 0;
 }
 
 /*
@@ -271,7 +279,7 @@ void OSP_Stats_GameInit(void)
             (int)sv_cheats->value, (int)game.maxclients);
     fprintf(f, ",\"hook\":%s", (int)hook_enable->value ? "true" : "false");
     fprintf(f, ",\"runes\":%d", rune_stat);
-    fprintf(f, ",\"respawn_protection\":%d", (int)client_protect->value);
+    fprintf(f, ",\"respawn_protection\":%d", OSP_ClientProtect());
     fprintf(f, ",\"railgun_damage\":%d", (int)damage_railgun->value);
 
     if (OSP_IsTeams()) {

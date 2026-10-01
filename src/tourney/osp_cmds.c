@@ -126,6 +126,24 @@ void OSP_talkto_cmd(edict_t *ent)
     gi.cprintf(ent, PRINT_CHAT, "%s", text2);
 }
 
+
+// Clients a `ready` still waits for: entered, not ready, and a person.
+static int OSP_unreadyPeople(void)
+{
+    edict_t *e;
+    int     i, n = 0;
+
+    for (i = 1; i <= game.maxclients; i++) {
+        e = g_edicts + i;
+        if (!e->inuse || !e->client || (e->flags & FL_BOTCLIENT) ||
+            e->client->resp.osp_entered != ENTERED_ENTERED)
+            continue;
+        if (!e->client->resp.osp_r20c)
+            n++;
+    }
+    return n;
+}
+
 void OSP_ready_cmd(edict_t *ent, int quiet)
 {
     int     t;
@@ -153,8 +171,12 @@ void OSP_ready_cmd(edict_t *ent, int quiet)
         if (OSP_CheckReady() == 2)
             return;
 
-        // Everybody left is a bot: start without waiting them out.
-        if (sync_stat < 4 && botglobals.numbots >= OSP_countReady() &&
+        // Everybody left is a bot: start without waiting them out.  Asked of
+        // the PEOPLE: the donor compares every connected bot, queued and still
+        // loading ones included, with every unready client, people included --
+        // so in a duel with one bot waiting in the queue, one player's `ready`
+        // readied the other player too and started the countdown.
+        if (sync_stat < 4 && !OSP_unreadyPeople() &&
             !(int)bots_warmuptime->value) {
             OSP_allready_svcmd();
             return;
@@ -368,7 +390,10 @@ void OSP_accuracyInfo(edict_t *ent, char *name, int cid)
 
     playerno = cid;
     any = 0;
-    if (Q_stricmp(name, p_acc[playerno].netname)) {
+    // A client can hold no id for a whole level -- every one taken by the
+    // connected and the parked (OSP_giveClientID) -- and so no row either.
+    if (playerno < 0 || playerno >= (int)q_countof(p_acc) ||
+        Q_stricmp(name, p_acc[playerno].netname)) {
         gi.cprintf(ent, PRINT_HIGH, "No accuracy information for \"%s\"\n", name);
         return;
     }
@@ -381,7 +406,7 @@ void OSP_accuracyInfo(edict_t *ent, char *name, int cid)
         if (p_acc[playerno].shots[nindex]) {
             gi.cprintf(ent, PRINT_HIGH, "%s %.1f%% (%d/%d hits)\n",
                        a_info[k].name,
-                       (float)(p_acc[playerno].hits[nindex] * 100) /
+                       (float)(min(p_acc[playerno].hits[nindex], p_acc[playerno].shots[nindex]) * 100) /
                        p_acc[playerno].shots[nindex],
                        p_acc[playerno].hits[nindex],
                        p_acc[playerno].shots[nindex]);
@@ -470,7 +495,8 @@ void OSP_oldAccuracyInfo(edict_t *ent, int cid)
         if (o_acc[cid].shots[nindex]) {
             gi.cprintf(ent, PRINT_HIGH, "%s %.1f%% (%d/%d hits)\n",
                        a_info[k].name,
-                       (double)(100 * o_acc[cid].hits[nindex]) /
+                       (double)(100 * min(o_acc[cid].hits[nindex],
+                                          o_acc[cid].shots[nindex])) /
                        o_acc[cid].shots[nindex],
                        o_acc[cid].hits[nindex],
                        o_acc[cid].shots[nindex]);
@@ -528,15 +554,12 @@ void OSP_ffajoin_cmd(edict_t *ent)
 
 // The bots on the server, walked rather than read off `botglobals.numbots`.
 //
-// That global is a CACHE with a dozen writers, and across a REMOVAL it is
-// wrong in a way that matters here: BotDestroy() calls ClientDisconnect()
-// before its own `numbots--`, tourney's disconnect path recounts the clients,
-// and the departing bot is already gone from that count -- so each removal
-// takes the cache down by two and it sits one below the truth until the next
-// recount corrects it.  A before-and-after difference read from it therefore
-// counts one removal too many, which is a bot the fill would never seat again
-// (R-OSP-16).  The cache is left alone: it self-corrects on the next frame,
-// and a vote is not the place to change what every ruleset reads.
+// That global is a CACHE with a dozen writers, and a vote that counts what a
+// removal ACTUALLY took off wants a count nobody else writes: BotDestroy()
+// recounts the cache from the bot states, but tourney's disconnect path
+// recounts it from the clients in the middle of every removal, and a
+// before-and-after difference across the two is one writer's view against the
+// other's (R-OSP-16).  Walking the clients asks the question once.
 int OSP_botCount(void)
 {
     edict_t *e;
@@ -547,6 +570,28 @@ int OSP_botCount(void)
         e = g_edicts + i;
         if (e->inuse && e->client && e->client->pers.connected &&
             (e->flags & FL_BOTCLIENT))
+            n++;
+    }
+
+    return n;
+}
+
+// The people on the server, or with `entered` the people playing, counted the
+// same way and for the same reason.  `active_clients - botglobals.numbots` was
+// the voters' count and the observers' gate, and it is not "humans playing":
+// `active_clients` counts the bots that are playing and the cache counts every
+// bot, so a bot waiting in a duel's queue took a person off the electorate.
+int OSP_humanCount(bool entered)
+{
+    edict_t *e;
+    int     i;
+    int     n;
+
+    for (n = 0, i = 1; i <= game.maxclients; i++) {
+        e = g_edicts + i;
+        if (e->inuse && e->client && e->client->pers.connected &&
+            !(e->flags & FL_BOTCLIENT) &&
+            (!entered || e->client->resp.osp_entered == ENTERED_ENTERED))
             n++;
     }
 
@@ -565,6 +610,7 @@ void OSP_vote_cmd(edict_t *ent, int mode, int nargs, char *what, char *value)
     char    *a1;
     char    *a2;
     char    kickid[16];
+    char    number[16];
     cvar_t  *bfg;
     cvar_t  *quad;
     bot_t   *b;
@@ -622,9 +668,11 @@ void OSP_vote_cmd(edict_t *ent, int mode, int nargs, char *what, char *value)
         return;
     }
 
+    // "Active players" are people: bots playing do not keep an observer from
+    // voting, and a bot waiting to play does not let one (OSP_humanCount).
+    // Whether observers vote at all is OSP_CountSpectators()'s.
     if (ent->client->resp.osp_entered != ENTERED_ENTERED && !ent->osp_e39c &&
-        !(int)vote_countspectators->value &&
-        active_clients - botglobals.numbots) {
+        !OSP_CountSpectators() && OSP_humanCount(true)) {
         gi.cprintf(ent, PRINT_HIGH, "Observers cannot vote with active\n");
         gi.cprintf(ent, PRINT_HIGH, "players in the game.\n");
         return;
@@ -678,6 +726,11 @@ void OSP_vote_cmd(edict_t *ent, int mode, int nargs, char *what, char *value)
         OSP_votePercent(ent, 1);
         return;
     }
+
+    // No vote is running, so any item still set is a dead one's -- and the
+    // propose tail below proposes whatever is set, so an arm that refuses its
+    // input must find 0 here and leave it there.
+    vote_item = 0;
 
     if (!Q_stricmp(a1, "map")) {
         if (!(int)vote_enable_map->value) {
@@ -822,6 +875,13 @@ void OSP_vote_cmd(edict_t *ent, int mode, int nargs, char *what, char *value)
                 gi.cprintf(ent, PRINT_HIGH,
                            "\n*** Cannot vote to kick referees!\n");
                 return;
+            } else if (other->client->resp.clientid < 0) {
+                // The vote carries the ID, and -1 is "none" -- which every
+                // client the allocator ran out for shares (OSP_giveClientID).
+                gi.cprintf(ent, PRINT_HIGH,
+                           "\n*** \"%s\" has no player ID to vote on.\n",
+                           other->client->pers.netname);
+                return;
             } else {
                 // The vote carries the ID, not the name.  It is built into a
                 // local: a2 points into the engine's tokenizer buffer, and a
@@ -918,6 +978,16 @@ void OSP_vote_cmd(edict_t *ent, int mode, int nargs, char *what, char *value)
     if (vote_item) {
         vote_inprogress = 1;
         vote_frametime = level.framenum + (int)vote_time->value * 10;
+        // The number a vote checked is the number it applies.  Every arm but
+        // `map` and `config` judged Q_atoi(a2), and a pass hands vote_value to
+        // gi.cvar_set, whose parse is the engine's strtof: `1e9` was 1 to one
+        // and a billion to the other, `0x10` 0 and 16.  So the value is written
+        // back from the integer that was checked -- which also keeps a raw `"`
+        // out of the menus and the console lines that print it.
+        if (vote_item != 1 && vote_item != 2) {
+            Q_snprintf(number, sizeof(number), "%d", Q_atoi(a2 ? a2 : ""));
+            a2 = number;
+        }
         Q_strlcpy(vote_value, a2 ? a2 : "", sizeof(vote_value));
         vote_yea = 1;
         ent->client->resp.osp_r2d8 = 1;
@@ -942,6 +1012,8 @@ int OSP_votePercent(edict_t *ent, int what)
     int         i;
     int         botcount;
     int         voters;
+    int         people;
+    int         players;
     int         yes;
     int         no;
 
@@ -965,15 +1037,20 @@ int OSP_votePercent(edict_t *ent, int what)
 
     // Every arm divides by a head count that goes to zero once the last
     // human leaves, which used to take the server down with SIGFPE.
-    if (!(int)vote_countspectators->value) {
-        if (!active_clients || active_clients - botglobals.numbots <= 0)
-            voters = connected_clients - botglobals.numbots;
-        else
-            voters = active_clients - botglobals.numbots;
-    } else if (sync_stat != 4)
-        voters = connected_clients - botglobals.numbots;
+    //
+    // The electorate is people -- connected, or playing -- COUNTED.  It was
+    // `active_clients - botglobals.numbots`, the bots playing taken from every
+    // bot, which is "people playing" only while every bot plays: in a duel
+    // between two people with one bot in the queue it was 1, and the proposer
+    // alone passed anything, the opponent's kick included.
+    people = OSP_humanCount(false);
+    players = OSP_humanCount(true);
+    if (!OSP_CountSpectators())
+        voters = players ? players : people;
+    else if (sync_stat != 4)
+        voters = people;
     else
-        voters = active_clients - botglobals.numbots;
+        voters = players;
 
     if (voters < 1)
         voters = 1;
@@ -1206,7 +1283,10 @@ void OSP_kick_vote(void)
             gi.unicast(cli, true);
             ClientDisconnect(cli);
         } else {
-            BotServerCommand("sv", "removebot", cli->client->pers.netname, 0);
+            // NULL, not 0: the list is a variadic one ended by a null POINTER,
+            // and a 0 passed there is an int, whose upper half is not zeroed
+            // on an LP64 ABI.
+            BotServerCommand("sv", "removebot", cli->client->pers.netname, NULL);
             // A bot kicked by vote is a bot the people playing decided they
             // did not want, and the fill has to be told or it seats a
             // replacement within 32 frames -- the same failure the `rembot`
@@ -1218,6 +1298,9 @@ void OSP_kick_vote(void)
             else
                 bots_votedout++;
         }
+
+        // One vote, one client: the vote named one player, as its text did.
+        break;
     }
 }
 
@@ -1331,9 +1414,9 @@ void OSP_yes_cmd(edict_t *ent)
         return;
     }
 
+    // The same gate as OSP_vote_cmd's, asked of people.
     if (ent->client->resp.osp_entered != ENTERED_ENTERED && !ent->osp_e39c &&
-        !(int)vote_countspectators->value &&
-        active_clients - botglobals.numbots) {
+        !OSP_CountSpectators() && OSP_humanCount(true)) {
         gi.cprintf(ent, PRINT_HIGH, "Observers cannot vote with active\n");
         gi.cprintf(ent, PRINT_HIGH, "players in the game.\n");
         return;
@@ -1371,9 +1454,9 @@ void OSP_no_cmd(edict_t *ent)
         return;
     }
 
+    // The same gate as OSP_vote_cmd's, asked of people.
     if (ent->client->resp.osp_entered != ENTERED_ENTERED && !ent->osp_e39c &&
-        !(int)vote_countspectators->value &&
-        active_clients - botglobals.numbots) {
+        !OSP_CountSpectators() && OSP_humanCount(true)) {
         gi.cprintf(ent, PRINT_HIGH, "Observers cannot vote with active\n");
         gi.cprintf(ent, PRINT_HIGH, "players in the game.\n");
         return;
@@ -1701,15 +1784,18 @@ void OSP_listItems(char *out)
 
     }
 
+    // Bit 0x80 is `team_hurtteam` (OSP_checkItems, OSP_changeItems).  This
+    // compared `team_hurtself`, so under tdm.cfg's hurtteam 0 / hurtself 1 a
+    // vote that turned friendly fire on did not say so.
     if (G_Ruleset() == RULESET_TDM) {
         if (want & 0x80) {
-            if (!(int)teamhurtself->value) {
+            if (!(int)team_hurtteam->value) {
                 if (any)
                     Q_strlcat(buf, ",", sizeof(buf));
                 Q_strlcat(buf, " team damage ON", sizeof(buf));
                 any = 1;
             }
-        } else if ((int)teamhurtself->value) {
+        } else if ((int)team_hurtteam->value) {
             if (any)
                 Q_strlcat(buf, ",", sizeof(buf));
             Q_strlcat(buf, " team damage OFF", sizeof(buf));
@@ -1924,6 +2010,21 @@ void OSP_muzzle_cmd(edict_t *ent)
     }
 }
 
+// A wrong referee password costs the connection time, through the backoff
+// every password check shares (G_LoginThrottled, R-SEC-12).  Both passwords
+// are checked here -- `referee` accepts the server's `rcon_password` as well
+// as `referee_password` -- so without it the login was an unthrottled test of
+// the rcon password, bypassing the engine's `sv_rcon_limit`.
+static bool OSP_refereeThrottled(edict_t *ent)
+{
+    return G_LoginThrottled(ent);
+}
+
+static void OSP_refereeFailed(edict_t *ent)
+{
+    G_LoginFailed(ent);
+}
+
 void OSP_isreferee_cmd(edict_t *ent)
 {
     if (!(int)referee_enable->value || !referee_password->string[0] ||
@@ -1947,11 +2048,15 @@ void OSP_isreferee_cmd(edict_t *ent)
     // A prefix compare authenticated anything starting with the password,
     // and a mismatch used to drop the client outright -- so a stale
     // ref_passwd in a config locked its owner out of the server.  Neither is
-    // wanted: compare the whole string and just decline.
-    if (strcmp(referee_password->string, gi.argv(2))) {
+    // wanted: compare the whole string and just decline.  A decline costs
+    // time like `referee`'s do, since this is the same password.
+    if (OSP_refereeThrottled(ent) || strcmp(referee_password->string, gi.argv(2))) {
+        if (!OSP_refereeThrottled(ent))
+            OSP_refereeFailed(ent);
         ent->osp_e39c = 0;
         return;
     }
+    G_LoginSucceeded(ent);
 
     gi.bprintf(PRINT_HIGH, "** Referee %s joined the match!\n",
                ent->client->pers.greenname);
@@ -1986,9 +2091,11 @@ void OSP_referee_cmd(edict_t *ent)
         gi.cprintf(ent, PRINT_HIGH,
                    "Referee mode is disabled on this server.\n");
 
+        // Never the argument: it is a guess at a password, very possibly
+        // the right one typed on the wrong server, and the log is a file.
         if (server_log) {
-            OSP_logAdminLog("Referee_Attempt: %s (%s) [%s]",
-                            ent->client->pers.netname, gi.argv(1),
+            OSP_logAdminLog("Referee_Attempt: %s [%s]",
+                            ent->client->pers.netname,
                             ent->client->pers.address);
         }
 
@@ -2000,13 +2107,19 @@ void OSP_referee_cmd(edict_t *ent)
         return;
     }
 
+    if (OSP_refereeThrottled(ent)) {
+        gi.cprintf(ent, PRINT_HIGH, "Wrong password.  Wait a moment before trying again.\n");
+        return;
+    }
+
     // Neither password matches at all: log the attempt and stop.
     if (referee_password && referee_password->string[0] &&
         strcmp(referee_password->string, gi.argv(1)) &&
         rcon && rcon->string[0] && strcmp(rcon->string, gi.argv(1))) {
+        OSP_refereeFailed(ent);
         if (server_log) {
-            OSP_logAdminLog("Referee_Fail: %s (%s) [%s]",
-                            ent->client->pers.netname, gi.argv(1),
+            OSP_logAdminLog("Referee_Fail: %s [%s]",
+                            ent->client->pers.netname,
                             ent->client->pers.address);
         }
 
@@ -2019,6 +2132,7 @@ void OSP_referee_cmd(edict_t *ent)
          strcmp(referee_password->string, "none")) ||
         (rcon && rcon->string[0] && !strcmp(rcon->string, gi.argv(1)) &&
          strcmp(rcon->string, "none"))) {
+        G_LoginSucceeded(ent);
         gi.bprintf(PRINT_HIGH, "%s now has referee status.\n",
                    ent->client->pers.greenname);
         gi.cprintf(ent, PRINT_HIGH,
@@ -2036,10 +2150,11 @@ void OSP_referee_cmd(edict_t *ent)
     }
 
     gi.cprintf(ent, PRINT_HIGH, "Password incorrect.\n");
+    OSP_refereeFailed(ent);
 
     if (server_log) {
-        OSP_logAdminLog("Referee_Fail2: %s (%s) [%s]",
-                        ent->client->pers.netname, gi.argv(1),
+        OSP_logAdminLog("Referee_Fail2: %s [%s]",
+                        ent->client->pers.netname,
                         ent->client->pers.address);
     }
 }
@@ -2364,7 +2479,7 @@ void OSP_rban_cmd(edict_t *ent, char *who)
 
 void OSP_rbanaddr_cmd(edict_t *ent)
 {
-    char        banip[16];
+    char        banip[MAX_CLIENT_ADDRESS];
     edict_t     *e;
     int         i;
     char        *cliaddr;
@@ -2374,7 +2489,21 @@ void OSP_rbanaddr_cmd(edict_t *ent)
         return;
     }
 
+    // An empty address is a prefix of every address, the bots' "SERVER_BOT"
+    // included, and one the ban list cannot hold whole would be stored cut
+    // short and match something else.  Both are refused rather than half-done;
+    // pl_addr[] is as wide as pers.address, so only a typed one is too long.
     Q_strlcpy(banip, gi.argv(1), sizeof(banip));
+    if (!banip[0]) {
+        gi.cprintf(ent, PRINT_HIGH, "Usage: r_banaddr <address>\n");
+        return;
+    }
+    if (strlen(gi.argv(1)) >= sizeof(pl_addr[0])) {
+        gi.cprintf(ent, PRINT_HIGH,
+                   "Address \"%s\" is too long for the ban list.\n", banip);
+        return;
+    }
+
     i = OSP_addBan(NULL, banip);
     if (!i) {
         gi.cprintf(ent, PRINT_HIGH, "Address \"%s\" already in ban list!\n",
@@ -2388,15 +2517,24 @@ void OSP_rbanaddr_cmd(edict_t *ent)
     }
 
     gi.cprintf(ent, PRINT_HIGH, "Address \"%s\" added to ban list.\n", banip);
+    if (server_log)
+        OSP_logAdminLog("Referee_BanAddress: %s -> %s",
+                        ent->client->pers.netname, banip);
 
+    // The players the ban keeps out, and nobody else: the test the ban makes
+    // at every connect (OSP_addrMatch, a partial address stops on a dot), not
+    // a bare prefix -- which kicked 10.0.0.10 for `10.0.0.1`, unbanned, and
+    // let them straight back in.  Never the referee who typed it, and never a
+    // bot, whose "address" is a name and whose way out is BotDestroy.
     for (i = 1; i <= game.maxclients; i++) {
         e = g_edicts + i;
-        if (!e->inuse || !e->client || !e->client->pers.connected)
+        if (!e->inuse || !e->client || !e->client->pers.connected ||
+            e == ent || (e->flags & FL_BOTCLIENT))
             continue;
 
         cliaddr = e->client->pers.address;
 
-        if (strstr(cliaddr, banip) == cliaddr) {
+        if (OSP_addrMatch(cliaddr, banip)) {
             gi.bprintf(PRINT_CHAT, "%s has been banned!\n",
                        e->client->pers.netname);
             e->client->resp.osp_r07c[0] = 1;
@@ -2404,9 +2542,6 @@ void OSP_rbanaddr_cmd(edict_t *ent)
             gi.unicast(e, true);
             ClientDisconnect(e);
         }
-        if (server_log)
-            OSP_logAdminLog("Referee_BanAddress: %s -> %s",
-                            ent->client->pers.netname, banip);
     }
 }
 
@@ -2493,11 +2628,15 @@ void OSP_allnotready_svcmd(bool announce)
         e->client->resp.osp_r028 = 0;
     }
 
+    // The score cells, OSP_CS(3) and the two team ones at (6) and (8), from
+    // game.csr like every other configstring: the donor's 0x623/0x626/0x628
+    // are those slots on the OLD layout only, and with the protocol
+    // extensions they are model slots every client then tried to load.
     if (!OSP_IsTeams())
-        gi.configstring(CS_OSP_STATUS_DM, "  WARMUP");
+        gi.configstring(OSP_CS(3), "  WARMUP");
     else {
-        gi.configstring(CS_OSP_STATUS_A, "       WARMUP");
-        gi.configstring(CS_OSP_STATUS_B, "       WARMUP");
+        gi.configstring(OSP_CS(6), "       WARMUP");
+        gi.configstring(OSP_CS(8), "       WARMUP");
         if (G_Ruleset() == RULESET_TDM) {
             gi.cvar_set("Score_A", "WARMUP");
             gi.cvar_set("Score_B", "WARMUP");
@@ -2508,16 +2647,33 @@ void OSP_allnotready_svcmd(bool announce)
         gi.bprintf(PRINT_HIGH, "All clients set to NOT ready!\n");
 
     sync_stat = 0;
+    // ...and the match's overtime goes back with it.  Every way a match ends
+    // without the level ending -- a forfeit, a stopped match, a qualifier left
+    // with one player (OSP_checkHalt, OSP_rstopmatch_cmd) -- comes through
+    // here, and one ended in sudden death left the flag, the offset and the
+    // added minutes to the next match on the same level, which then ended at
+    // its first frag with its clock showing DEATH.
+    osp_suddendeath = false;
+    start_suddendeath = 0;
+    frag_offset = 0;
+    overtime_timer = 0;
+    ot_count = 0;
     OSP_DoRankSort();
     gi.cvar_set("time_remaining", "WARMUP");
 }
 
-void OSP_playerlist_svcmd(void)
+// Only `sv playerlist <file>` reads a file argument.  The two other callers,
+// OSP_gameInit and OSP_levelSpawned, run inside `map` / `gamemap`, whose argv
+// is the map command's -- so `map q2dm1 force`, Q2PRO's forced restart and the
+// way an operator changes the latched g_ruleset, loaded the player list from a
+// file named "force" and dropped the deny list, the reserved names and the
+// address bans for the whole game.
+void OSP_playerlist_svcmd(bool command)
 {
     cvar_t      *pfile;
 
     pfile = gi.cvar("player_file", "players.txt", 0);
-    if (gi.argc() >= 3)
+    if (command && gi.argc() >= 3)
         OSP_loadPlayers(gi.argv(2));
     else
         OSP_loadPlayers(pfile->string);
@@ -2541,6 +2697,17 @@ through to its own list and then to "Unknown server command".
 */
 bool OSP_ServerCommand(const char *cmd)
 {
+    // The three match verbs need a match, as their referee forms do
+    // (`r_allready`, `r_allnotready`, `r_stopmatch`): `allnotready` under `dm`,
+    // which has no ready gate, set sync_stat 0 and wiped the scores, and the
+    // warmup nags and the ready countdown then ran in free play until the
+    // level ended.
+    if ((Q_stricmp(cmd, "allready") == 0 || Q_stricmp(cmd, "allnotready") == 0 ||
+         Q_stricmp(cmd, "stopmatch") == 0) && !OSP_IsMatch()) {
+        gi.dprintf("There is no match to control under this ruleset.\n");
+        return true;
+    }
+
     if (Q_stricmp(cmd, "allready") == 0)
         OSP_allready_svcmd();
     else if (Q_stricmp(cmd, "allnotready") == 0)
@@ -2550,7 +2717,7 @@ bool OSP_ServerCommand(const char *cmd)
     else if (Q_stricmp(cmd, "stopmatch") == 0)
         OSP_rstopmatch_cmd(NULL);
     else if (Q_stricmp(cmd, "playerlist") == 0)
-        OSP_playerlist_svcmd();
+        OSP_playerlist_svcmd(true);
     else
         return false;
 

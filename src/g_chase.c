@@ -45,9 +45,6 @@ void UpdateChaseCam(edict_t *ent)
 
     ownerv[2] += targ->viewheight;
 
-    VectorCopy(targ->s.origin, ownerv);
-    ownerv[2] += targ->viewheight;
-
     VectorCopy(targ->client->v_angle, angles);
     // Tourney's two cameras, and everything below that reads `osp` is
     // theirs.  Tourney has a chase camera with controls and an in-eyes mode,
@@ -162,9 +159,12 @@ void UpdateChaseCam(edict_t *ent)
     // Under ctf the chased player's name is a unicast layout rather than a
     // statusbar element: CTF's bar has no slot 16 element and the slot is
     // unmapped for that ruleset (g_stats.h), which is the honest expression of
-    // "Threewave draws this differently".
-    // Elsewhere STAT_CHASE and the bar's `stat_string 16` do the job and this
-    // block would fight them for the layout channel.
+    // "Threewave draws this differently".  Tourney draws its plate the same
+    // way, because its slot 16 is the crosshair-id line (below).
+    // The one other ruleset with a chase camera is sp, the Gladiator
+    // observer's: there STAT_CHASE and the sp bar's `stat_string 16` do the
+    // job, and this block would fight them for the layout channel.  Arena's
+    // observer never sets a chase target.
     if ((G_Ruleset() == RULESET_CTF || G_IsOspRuleset()) &&
         ((!ent->client->showscores && !G_MenuActive(ent) &&
           !ent->client->showinventory && !ent->client->showhelp &&
@@ -272,9 +272,11 @@ void ChasePrev(edict_t *ent)
 }
 
 // Threewave DELETES this and reaches the chase camera through CTFObserver
-// instead.  Kept, because dm and sp still enter it from the attack button and
-// the rule that a donor's deletion is not replayed applies to functions
-// as well as to files.
+// instead.  Kept, because sp still enters it -- the Gladiator observer's attack
+// and jump keys, in ClientThink; ctf's way in is Threewave's menu, and arena
+// and the OSP four (`dm` among them) have cameras of their own -- and the rule
+// that a donor's deletion is not replayed applies to functions as well as to
+// files.
 void GetChaseTarget(edict_t *ent)
 {
     int i;

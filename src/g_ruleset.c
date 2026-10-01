@@ -1,3 +1,20 @@
+/*
+Copyright (C) 1997-2001 Id Software, Inc.
+
+This program is free software; you can redistribute it and/or modify
+it under the terms of the GNU General Public License as published by
+the Free Software Foundation; either version 2 of the License, or
+(at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+GNU General Public License for more details.
+
+You should have received a copy of the GNU General Public License along
+with this program; if not, write to the Free Software Foundation, Inc.,
+51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+*/
 // Colosseum ruleset dispatch
 //
 // Resolution runs once, from InitGame, and never calls gi.error.  The reason
@@ -72,17 +89,25 @@ static const char *modifier_names[MOD_COUNT] = {
 static const bool modifier_ok[MOD_COUNT][RULESET_COUNT] = {
     // Team play is a RULESET now (`tdm`, `duel`), so the modifier that also
     // reached it is refused across the OSP four -- the whole argument of the
-    // flattening applied to itself.  arena keeps it: its teams are the
-    // arena's, and the modifier is how an operator asks for them.
+    // flattening applied to itself.  ctf and arena refuse it too, for the
+    // reason those two rulesets give: each decides its own teams, and nothing
+    // either of them runs ever read the modifier -- G_TeamplayEnabled()
+    // answers ctf from the ruleset and has no caller under arena -- so
+    // accepting it was a switch connected to nothing.
     [MOD_TEAMPLAY] = {
         [RULESET_DM] = false, [RULESET_DMPRO] = false,
         [RULESET_TDM] = false, [RULESET_DUEL] = false,
-        [RULESET_CTF] = true, [RULESET_ARENA] = true, [RULESET_SP] = false,
+        [RULESET_CTF] = false, [RULESET_ARENA] = false, [RULESET_SP] = false,
     },
+    // The hook is a request the OSP four fold into their own switch
+    // (G_ApplyOspHookRequest).  ctf and arena refuse it for teamplay's reason:
+    // each has its own switch -- Threewave's `ctf_hook`, on by default, and
+    // arena.cfg's `grapple:`, read per level -- and nothing read the request,
+    // so `hook 1` beside either one switched off was silently nothing.
     [MOD_HOOK] = {
         [RULESET_DM] = true, [RULESET_DMPRO] = true,
         [RULESET_TDM] = true, [RULESET_DUEL] = true,
-        [RULESET_CTF] = true, [RULESET_ARENA] = true, [RULESET_SP] = false,
+        [RULESET_CTF] = false, [RULESET_ARENA] = false, [RULESET_SP] = false,
     },
     // Runes under the OSP four, techs under ctf.  `dm` gains them by becoming
     // OSP's RegularDM; baseq2's deathmatch had neither.
@@ -240,6 +265,18 @@ static void reconcile_legacy_cvars(void)
         gi.dprintf("Colosseum: ruleset '%s' requires deathmatch; setting it\n",
                    ruleset_names[g_active_ruleset]);
         gi.cvar_forceset("deathmatch", "1");
+
+        // A deathmatch set here is one the engine did not see when it sized
+        // the server, and a server it took for single player -- neither
+        // deathmatch nor coop set -- has ONE slot: q2pro's SV_InitGame forces
+        // maxclients 1 for it.  Nobody else can join and no bot has a seat.
+        // The engine has allocated its clients by now, so this can only be
+        // said, not fixed.
+        if (maxclients->value <= 1)
+            gi.dprintf("Colosseum: ...but maxclients is 1, so nobody can join "
+                       "and no bot fits; 'deathmatch 1' before the map gives "
+                       "a deathmatch server's slots, 'g_ruleset sp' is the "
+                       "campaign\n");
     } else if (!want_dm && deathmatch->value) {
         // Always reachable on a dedicated server, and not because the user did
         // anything wrong: `deathmatch` *defaults* to 1 there (q2pro
@@ -250,6 +287,36 @@ static void reconcile_legacy_cvars(void)
         gi.dprintf("Colosseum: ruleset 'sp' -- forcing deathmatch 0 "
                    "(a dedicated server defaults it to 1)\n");
         gi.cvar_forceset("deathmatch", "0");
+    }
+
+    // A deathmatch ruleset is not co-op, and the engine's own "both set,
+    // disabling coop" cannot see that here: it ran with deathmatch still 0.
+    // The arm below leaves coop 1 behind it, so a later `g_ruleset dm` or
+    // `ctf` in the same process reached this point with coop 1 and deathmatch
+    // forced on -- every kill a friendly-fire kill, a CTF frag scored as -1,
+    // weapons staying on the floor -- until the next full restart.
+    if (want_dm && coop->value) {
+        gi.dprintf("Colosseum: ruleset '%s' is not co-op -- forcing coop 0\n",
+                   ruleset_names[g_active_ruleset]);
+        gi.cvar_forceset("coop", "0");
+    }
+
+    // ...and the other half of the engine's rule: a dedicated server cannot
+    // be single player.  With `coop` unset the forcing above leaves
+    // deathmatch 0 AND coop 0 -- single player's semantics on a server with a
+    // slot per player, so respawn() sent every dead player `menu_loadgame` and
+    // SelectSpawnPoint gave all of them the one info_player_start.  `sp` on a
+    // dedicated server is therefore co-op, the one campaign it can host.
+    //
+    // So is `sp` on a listen server the engine gave more than one slot -- it
+    // does whenever it saw deathmatch or coop set, and the deathmatch it saw
+    // is the one forced off above.  Only a one-slot server is single player.
+    if (!want_dm && !coop->value &&
+        (dedicated->value || maxclients->value > 1)) {
+        gi.dprintf("Colosseum: ruleset 'sp' on a server with %d slots -- "
+                   "forcing coop 1 (single player has one)\n",
+                   (int)maxclients->value);
+        gi.cvar_forceset("coop", "1");
     }
 }
 
@@ -305,7 +372,7 @@ void G_InitRuleset(void)
     // and what was done instead.  It never calls gi.error.
     g_modifier[MOD_TEAMPLAY] = gi.cvar("teamplay", "0", CVAR_LATCH)->value != 0;
     g_modifier[MOD_HOOK]     = gi.cvar("hook", "0", CVAR_LATCH)->value != 0;
-    // The REQUEST, so that the refusal below still fires under dm and arena.
+    // The REQUEST, so that the refusal below still fires under arena and sp.
     // G_ResolveModifiers() overwrites it at the end of InitGame with what the
     // ruleset's own switch actually says -- see there.
     g_modifier[MOD_RUNES]    = gi.cvar("runes", "0", CVAR_LATCH)->value != 0;
@@ -331,17 +398,30 @@ void G_InitRuleset(void)
 
     for (int m = 0; m < MOD_COUNT; m++) {
         if (g_modifier[m] && !modifier_ok[m][g_active_ruleset]) {
+            // `bots` is on by default and sp never takes bots, so under sp the
+            // default is not a request and is refused without a word.  Said
+            // aloud it was a line on every sp start, and the `bots 0` that
+            // configs/sp.cfg carried to silence it was latched into every
+            // ruleset the process ran afterwards.  Only the default's own
+            // value is quiet; anything else is still told no.
+            if (m == MOD_BOTS && g_active_ruleset == RULESET_SP &&
+                !strcmp(gi.cvar("bots", "1", CVAR_LATCH)->string, "1")) {
+                g_modifier[m] = false;
+                continue;
+            }
+
             gi.dprintf("Colosseum: ruleset '%s' does not accept modifier '%s'; "
                        "disabling it\n",
                        ruleset_names[g_active_ruleset], modifier_names[m]);
             g_modifier[m] = false;
 
             // `teamplay` is the one refusal an operator is likely to have meant
-            // something by, because it USED to work here: it reached team play
-            // under the old `dm` and the old `tourney` alike.  Saying only "not
-            // accepted" leaves them to guess where it went, so the line after
-            // says -- and says something different depending on whether they
-            // are already in the ruleset they were asking for.
+            // something by, because it USED to be accepted: it reached team
+            // play under the old `dm` and the old `tourney` alike, and ctf and
+            // arena took it.  Saying only "not accepted" leaves them to guess
+            // where it went, so the line after says -- and says something
+            // different depending on whether they are already in the ruleset
+            // they were asking for.
             if (m == MOD_TEAMPLAY && G_IsOspRuleset()) {
                 if (OSP_IsTeams())
                     gi.dprintf("Colosseum: ...'%s' IS team play; the modifier is "
@@ -350,6 +430,14 @@ void G_InitRuleset(void)
                 else
                     gi.dprintf("Colosseum: ...team play is a ruleset here -- "
                                "'g_ruleset tdm' or 'duel'\n");
+            } else if (m == MOD_TEAMPLAY && g_active_ruleset != RULESET_SP) {
+                gi.dprintf("Colosseum: ...'%s' decides its own teams\n",
+                           ruleset_names[g_active_ruleset]);
+            } else if (m == MOD_HOOK && g_active_ruleset == RULESET_CTF) {
+                gi.dprintf("Colosseum: ...'ctf' has its own hook, 'ctf_hook'\n");
+            } else if (m == MOD_HOOK && g_active_ruleset == RULESET_ARENA) {
+                gi.dprintf("Colosseum: ...'arena' has its own grapple, "
+                           "arena.cfg's 'grapple:'\n");
             }
         }
     }
@@ -399,6 +487,22 @@ bool G_ModifierEnabled(modifier_t m)
             return rune_stat != 0;
     }
 
+    // ...and so do ctf's and arena's, which are their own switches and not the
+    // request: Threewave's offhand hook is `ctf_hook`, on by default, where the
+    // `hook` request defaults to 0 and nothing under ctf reads it; the techs
+    // are DF_CTF_NO_TECH, and `dmflags` is not latched, so an InitGame
+    // snapshot went stale at the first write; and arena's grapple is
+    // arena.cfg's `grapple:` key, re-read every level.  The same switches the
+    // bot layer tells the brain about.
+    if (g_active_ruleset == RULESET_CTF) {
+        if (m == MOD_HOOK)
+            return ctf_hook && ctf_hook->value != 0;
+        if (m == MOD_RUNES)
+            return !((int)dmflags->value & DF_CTF_NO_TECH);
+    }
+    if (g_active_ruleset == RULESET_ARENA && m == MOD_HOOK)
+        return allow_grapple;
+
     return g_modifier[m];
 }
 
@@ -410,8 +514,7 @@ bool G_LayerEnabled(content_layer_t l)
 bool G_UsesRogueGameRules(void)
 {
     return gamerules && gamerules->value &&
-           (g_active_ruleset == RULESET_CTF ||
-            g_active_ruleset == RULESET_ARENA);
+           g_active_ruleset == RULESET_CTF;
 }
 
 void G_ApplyOspHookRequest(void)
@@ -869,9 +972,9 @@ bool G_TeamplayEnabled(void)
     case RULESET_DUEL:                  // two teams of one, forced
         return true;
     default:
-        // arena is the only ruleset left that reaches team play through the
-        // modifier; the OSP four refuse it and sp has no teams, so
-        // both answer false here through modifier_ok rather than by name.
+        // No ruleset reaches team play through the modifier any more -- every
+        // one refuses it -- so dm, dmpro, arena and sp all answer false here,
+        // through modifier_ok rather than by name.
         return G_ModifierEnabled(MOD_TEAMPLAY);
     }
 }
@@ -923,7 +1026,7 @@ bool G_BotsAllowed(void)
 //   * `sv ruleset` stops lying.  `runes=1` now means runes or techs will
 //     actually spawn, which is a fact a play test can check.
 //
-// The refusal under dm and arena is unchanged and still fires from the request,
+// The refusal under arena and sp is unchanged and still fires from the request,
 // which is why the request is what InitGame stores and this runs afterwards.
 //
 // `bots` is the same shape with the switch on the other side: it IS the switch,
@@ -974,6 +1077,13 @@ void G_ResolveModifiers(void)
         g_modifier[MOD_RUNES] = false;
         break;
     }
+}
+
+bool G_RogueDMFlag(int flag)
+{
+    if (G_Ruleset() == RULESET_CTF)
+        flag &= ~(DF_NO_MINES | DF_NO_STACK_DOUBLE | DF_NO_NUKES);
+    return ((int)dmflags->value & flag) != 0;
 }
 
 bool G_SavegamesAllowed(void)

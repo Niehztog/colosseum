@@ -69,6 +69,8 @@ void BotIndexProbe(const char *what, int index);
 void BotIndexesForget(void);
 // initializes the muzzleflash to sound index table
 void BotInitMuzzleFlashToSoundindex(void);
+// registers what a brain must find in the tables when it is handed a map
+void BotPrecache(void);
 // dumps the model index
 void BotDumpModelindex(void);
 // dumps the sound index
@@ -80,11 +82,13 @@ void BotDumpImageindex(void);
 // indexes at 251..255 -- inside the 1999 256-entry table -- so that the brain
 // would see an OSP rune as a CTF tech.  The table's size is a runtime fact
 // here, so a fixed index near the old ceiling is meaningless; the translation
-// now looks the tech model up by name in the live table.  Note
+// now registers the tech models and uses the indexes the engine gives them.  Note
 // also records that both Gladiator trees define TECH4_INDEX twice (254 then
 // 255) and never define TECH5_INDEX, so the donor's TOURNEY path has never
 // compiled anywhere.
-// The five tech models the rune->tech translation maps onto.
+// The five tech models the rune->tech translation maps onto, and their indexes
+// this level (BotPrecache), 0 where none was registered.
 extern const char *const bot_tech_models[5];
+extern int bot_tech_modelindexes[5];
 
 #endif // BL_REDIRGI_H

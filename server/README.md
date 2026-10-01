@@ -53,6 +53,20 @@ The build fails rather than shipping a silently-wrong engine: not ELF32, a
 not reach the binary, a TEXTREL in q2admin, a game library missing a cvar that
 proves the right tree was built — each is a failed layer, not a warning.
 
+### The host's own values
+
+Two build args and four runtime variables belong to whoever runs the image,
+and the defaults are only defaults:
+
+| name | kind | default | what it is |
+|---|---|---|---|
+| `QUAKE2_UID` | build arg | `1000` | the uid the server runs as; it must be able to write the bind-mounted gamedir, so pass `--build-arg QUAKE2_UID=$(id -u)` |
+| `TZ` | build arg | `Etc/UTC` | the container's zone. The game has no clock but the container's, and xatrix's `func_clock` shows local time from it |
+| `Q2_IP` | env | `localhost` | the address to bind. Empty or `localhost` binds every interface, as id's `ip` cvar did; anything else is passed on as `net_ip` |
+| `Q2_SERVER_CFG` | env | `server.cfg` | the server's own cfg (server target) |
+| `Q2_OVERRIDE_CFG` | env | `q2pro-override.cfg` | a cfg exec'd after it, so it wins |
+| `Q2_GAMEDIR`, `Q2_PORT` | env | per target | the gamedir under the mounted data, and the port |
+
 ### `GAME_ABI_HACK`
 
 The one build arg that can ruin a server. It selects the i386 struct-return

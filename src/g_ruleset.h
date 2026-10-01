@@ -1,3 +1,20 @@
+/*
+Copyright (C) 1997-2001 Id Software, Inc.
+
+This program is free software; you can redistribute it and/or modify
+it under the terms of the GNU General Public License as published by
+the Free Software Foundation; either version 2 of the License, or
+(at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+GNU General Public License for more details.
+
+You should have received a copy of the GNU General Public License along
+with this program; if not, write to the Free Software Foundation, Inc.,
+51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+*/
 // Colosseum ruleset dispatch
 //
 // The 1999 Gladiator build used three independent booleans (`ctf`,
@@ -122,7 +139,10 @@ bool        G_LayerEnabled(content_layer_t l);
 
 // Ground Zero's DMGame callback table is a protocol between an active
 // deathmatch ruleset and the Rogue game-rule implementation.  It is available
-// under CTF and Arena only; OSP owns its own match protocol.
+// under CTF only: OSP owns its own match protocol, and arena can host none of
+// the rules -- Tag needs a map-placed token and a frag score, and arena's item
+// purge frees the token while its score is by damage, so the table ran there
+// with no token, paid every frag twice and cut every hit by a quarter.
 bool        G_UsesRogueGameRules(void);
 
 // Is the OSP Tourney DM code path active?  `dm`, `dmpro`, `tdm` and `duel` are
@@ -178,8 +198,9 @@ bool G_IsCampaign(void);
 // BotRulesetLibVars().
 //
 // Ruleset-derived since the flattening: ctf implies it, `tdm` and `duel` ARE it,
-// and the MOD_TEAMPLAY modifier is refused across the OSP four so it
-// only ever answers for arena now.
+// and the MOD_TEAMPLAY modifier is refused by every ruleset -- ctf and arena
+// decide their own teams -- so it answers false everywhere else, arena
+// included, where nothing asks.
 //
 // Not the same question as the brain's `teamplay` libvar, which reads
 // RULESET_TDM alone.  `duel` is two teams of one, the brain has no ally, and
@@ -195,5 +216,12 @@ bool G_BotsAllowed(void);
 // May the game be saved?  sp only, and additionally never while
 // a bot exists.
 bool G_SavegamesAllowed(void);
+
+// Is one of Ground Zero's dmflags set?  Three of them share their bits with
+// Threewave's -- DF_NO_MINES is DF_CTF_FORCEJOIN, DF_NO_STACK_DOUBLE is
+// DF_ARMOR_PROTECT, DF_NO_NUKES is DF_CTF_NO_TECH -- because the two packs were
+// never one library.  Under `ctf` those bits are Threewave's, so this answers
+// false for them there; every Ground Zero reader asks this, never dmflags.
+bool G_RogueDMFlag(int flag);
 
 #endif // G_RULESET_H

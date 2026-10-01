@@ -12,7 +12,7 @@
 // declared size, or `team_maxplayers` -- and `sv ruleset`'s `botfill` row is
 // the only place it is written down.
 //
-// Six servers, because the interesting claims are different:
+// Seven servers, because the interesting claims are different:
 //
 //   A  dm / q2dm1 / maxclients 12 / botfill 1
 //      The arithmetic AND the fill reaching it: q2dm1 carries 10
@@ -21,18 +21,25 @@
 //      STAY there, sampled across several 32-frame fill ticks.  Then two people
 //      arrive and the removal arm has to give the seats back.
 //
+//   B0 dm / q2dm1 / botfill 0 / bots_minplayers 4 / bots_autoload 0
+//      Tourney's own gate on that flat count: bots_autoload 0 means bots come
+//      only by a vote or a command, so nobody is seated however high
+//      bots_minplayers is -- which is also why B sets bots_autoload 2.
+//
 //   B  dm / q2dm1 / maxclients 12 / botfill 0 / bots_minplayers 4
 //      The control.  Off must mean off: the row says `bots_minplayers 4 is the
 //      target` and the count settles at 4, not at 8.  Without this row, a fill
 //      that ignored its own switch would pass every check in A.  The cvar is
 //      `bots_minplayers` and not `minimumplayers` because `dm` is OSP's
 //      RegularDM since 1.36, and the OSP four use tourney's bot cvars
-// -- which is this scenario's only migration.
+// -- which is this scenario's only migration.  `bots_autoload 2` is set
+// because tourney runs its flat count only at 2, 3 or 4 (row B0).
 //
 //   C  ctf / q2ctf1 / maxclients 4 / botfill 1
 //      The arithmetic on a BIG map, cheaply.  q2ctf1's three pools are 17
 //      shared and 12/14 per base, so `seats` is 2*min(17/2,12,14) = 16 -- and
-//      `want` is 4, because `maxclients` is the ceiling and it is latched at 4.
+//      `want` is 4, because `maxclients` is the ceiling and this row sets it
+//      to 4 -- below Q2PRO's own default of 8, so the clamp is the one binding.
 //      Both numbers are printed, which is the only way to tell a clamp from a
 //      miscalculation.
 //
@@ -292,7 +299,7 @@ func boot(q2, ref, ctf, lib, glad, aas, dir string, port int, p phase) (*playtes
 			if err := os.MkdirAll(maps, 0o755); err != nil {
 				return nil, err
 			}
-			if err := os.WriteFile(filepath.Join(maps, p.mapname+".aas"),
+			if err := playtest.WriteFixture(filepath.Join(maps, p.mapname+".aas"),
 				src, 0o644); err != nil {
 				return nil, err
 			}
@@ -487,13 +494,41 @@ func run(q2, ref, ctf, lib, glad, aasarg, root string, port, secs int, only stri
 		port++
 	}
 
+	// ---- B0: tourney's own gate on its flat count.  bots_autoload 0 is "bots
+	// only by a vote or a command" (port_osp:g_main.c:715 asks for 2, 3 or 4
+	// before it runs the fill at all), so bots_minplayers 4 seats nobody.  A
+	// fill that ignored the gate adds its first bot about three seconds in,
+	// which three settled readings four seconds apart cannot miss.
+	if want("B0", only) {
+		fmt.Println("\n== B0. dm / q2dm1 / botfill 0 / bots_minplayers 4 / bots_autoload 0 ==")
+		srv, err := boot(q2, ref, ctf, lib, glad, findAAS(aasarg, "q2dm1"),
+			filepath.Join(root, "b0"), port,
+			phase{ruleset: "dm", mapname: "q2dm1", maxclients: 12,
+				cvars: map[string]string{"botfill": "0", "bots_minplayers": "4",
+					"bots_autoload": "0"}})
+		if err != nil {
+			return bad, err
+		}
+		hist, serr := settle(srv, 0, 3, false, settleFor)
+		last := hist[len(hist)-1]
+		bad += report([]check{
+			{"dm-autoload0/the flat count seats nobody", serr == nil && last.bots == 0,
+				fmt.Sprintf("clients=%d bots=%d, want 0", last.clients, last.bots)},
+		})
+		srv.Stop()
+		port++
+	}
+
 	// ---- B: the control.  Off means off. ----------------------------------
 	if want("B", only) {
 		fmt.Println("\n== B. dm / q2dm1 / maxclients 12 / botfill 0 / bots_minplayers 4 (control) ==")
 		srv, err := boot(q2, ref, ctf, lib, glad, findAAS(aasarg, "q2dm1"),
 			filepath.Join(root, "b"), port,
+			// bots_autoload 2 is tourney's "keep bots_minplayers seated";
+			// its default, 0, seats nobody -- row B0.
 			phase{ruleset: "dm", mapname: "q2dm1", maxclients: 12,
-				cvars: map[string]string{"botfill": "0", "bots_minplayers": "4"}})
+				cvars: map[string]string{"botfill": "0", "bots_minplayers": "4",
+					"bots_autoload": "2"}})
 		if err != nil {
 			return bad, err
 		}

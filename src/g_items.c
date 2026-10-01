@@ -187,8 +187,11 @@ void DoRespawn(edict_t *ent)
         newEnt = DoRandomRespawn(ent);
 
         // if we've changed entities, then do some sleight of hand.
-        // otherwise, the old entity will respawn
-        if (newEnt) {
+        // otherwise, the old entity will respawn.  A substitute SpawnItem
+        // freed on arrival -- a dmflag or a ruleset refused it -- is not one:
+        // taking it would free the original too, and the spot would be empty
+        // for the rest of the level, so the original comes back instead.
+        if (newEnt && newEnt->inuse) {
             G_FreeEdict(ent);
             ent = newEnt;
         }
@@ -630,7 +633,9 @@ bool Pickup_Sphere(edict_t *ent, edict_t *other)
 {
     int     quantity;
 
-    if (other->client && other->client->owned_sphere) {
+    // A sphere still in the world, not a pointer that outlived one: that
+    // refused every sphere until the player's next death (G_OwnedSphere).
+    if (other->client && G_OwnedSphere(other)) {
 //      gi.cprintf(other, PRINT_HIGH, "Only one sphere to a customer!\n");
         return false;
     }
@@ -662,7 +667,7 @@ bool Pickup_Sphere(edict_t *ent, edict_t *other)
 
 void Use_Defender(edict_t *ent, const gitem_t *item)
 {
-    if (ent->client && ent->client->owned_sphere) {
+    if (ent->client && G_OwnedSphere(ent)) {    // as Pickup_Sphere asks
         gi.cprintf(ent, PRINT_HIGH, "Only one sphere at a time!\n");
         return;
     }
@@ -675,7 +680,7 @@ void Use_Defender(edict_t *ent, const gitem_t *item)
 
 void Use_Hunter(edict_t *ent, const gitem_t *item)
 {
-    if (ent->client && ent->client->owned_sphere) {
+    if (ent->client && G_OwnedSphere(ent)) {    // as Pickup_Sphere asks
         gi.cprintf(ent, PRINT_HIGH, "Only one sphere at a time!\n");
         return;
     }
@@ -688,7 +693,7 @@ void Use_Hunter(edict_t *ent, const gitem_t *item)
 
 void Use_Vengeance(edict_t *ent, const gitem_t *item)
 {
-    if (ent->client && ent->client->owned_sphere) {
+    if (ent->client && G_OwnedSphere(ent)) {    // as Pickup_Sphere asks
         gi.cprintf(ent, PRINT_HIGH, "Only one sphere at a time!\n");
         return;
     }
@@ -911,7 +916,13 @@ static bool Pickup_Ammo(edict_t *ent, edict_t *other)
     if (!Add_Ammo(other, ent->item, count))
         return false;
 
-    if (weapon && !oldcount) {
+    // Tourney switches whenever nothing else is queued rather than on the
+    // first of a kind: `port_osp:g_items.c` Pickup_Ammo tests
+    // `!newweapon` and leaves vanilla's `oldcount` a dead assignment, so a
+    // player holding the blaster switches to the grenades they pick up even
+    // when they already carry some.  Its inner test is this one -- tourney is
+    // always deathmatch -- and Ground Zero's tesla exception stands in both.
+    if (weapon && (G_IsOspRuleset() ? !other->client->newweapon : !oldcount)) {
         // don't switch to tesla
         if (other->client->pers.weapon != ent->item
             && (!deathmatch->value || other->client->pers.weapon == FindItem("blaster"))
@@ -962,9 +973,16 @@ void MegaHealth_think(edict_t *self)
     // and so do two of tourney's runes -- each up to its own ceiling, which is
     // why this asks the ruleset rather than one predicate: `runes_regen_hmax`
     // and `runes_vampire_max` are different numbers.
+    //
+    // Tourney also stops when THIS mega's share is gone: `dmg` is the health it
+    // gave, set by Pickup_Health, so a mega taken on top of another one comes
+    // back once its own hundred has bled rather than when both have (R-OSP-23).
     if (self->owner->health > self->owner->max_health
         && !CTFHasRegeneration(self->owner)
-        && !(G_IsOspRuleset() && OSP_runesHoldHealth(self->owner))) {
+        && !(G_IsOspRuleset() &&
+             (self->dmg <= 0 || OSP_runesHoldHealth(self->owner)))) {
+        if (G_IsOspRuleset())
+            self->dmg--;
         self->nextthink = level.framenum + 1 * BASE_FRAMERATE;
         self->owner->health -= 1;
         return;
@@ -1029,6 +1047,12 @@ bool Pickup_Health(edict_t *ent, edict_t *other)
         if (G_IsOspRuleset()) {
             // Taking anything ends spawn protection.
             other->client->resp.osp_r23c = 0;
+            // The share of the overhealth this mega is timed by: what is above
+            // the ceiling the player's rune holds health to, and never more
+            // than the item's own hundred.  MegaHealth_think counts it down.
+            ent->dmg = other->health - OSP_runesHealthCeiling(other);
+            if (ent->dmg > 100)
+                ent->dmg = 100;
             OSP_Stats_ItemPickup("Mega_Health", 0, other);
         }
     } else {
@@ -1615,7 +1639,13 @@ void SpawnItem(edict_t *ent, const gitem_t *item)
     // in the donor -- there is no `noitems` cvar in RA2 v2.25; that one is
     // Gladiator's, in its own `g_items.c` -- so the gate is the ruleset, and baseq2's
     // dmflags filter below is what every other ruleset still needs.
+    //
+    // Precached FIRST, as RA2's SpawnItem does it (`rocketarena2@99f8bb2`
+    // g_items.c): the map's placed weapons are what registers give_ammo's
+    // loadout at load time -- view models, projectiles, sounds -- and freed
+    // before the precache below, they registered mid-round on first use.
     if (G_Ruleset() == RULESET_ARENA && item->pickup) {
+        PrecacheItem(item);
         G_FreeEdict(ent);
         return;
     }
@@ -1628,14 +1658,23 @@ void SpawnItem(edict_t *ent, const gitem_t *item)
     }
 
     // some items will be prevented in deathmatch
+    //
+    // Two of these are not tourney's.  osp-tourney's SpawnItem (`a8d1725`
+    // g_items.c) takes only Pickup_Armor under DF_NO_ARMOR, so its power
+    // screens and shields stay, and it has no DF_NO_ITEMS filter at all -- a
+    // tourney server switches powerups and power armour off one by one with
+    // its `allow_item_*` cvars (OSP_disableItems), not with the dmflags.
+    // Ground Zero's spheres and decoy sit under the same dmflag as id's
+    // powerups and follow it.
     if (deathmatch->value) {
         if ((int)dmflags->value & DF_NO_ARMOR) {
-            if (item->pickup == Pickup_Armor || item->pickup == Pickup_PowerArmor) {
+            if (item->pickup == Pickup_Armor ||
+                (item->pickup == Pickup_PowerArmor && !G_IsOspRuleset())) {
                 G_FreeEdict(ent);
                 return;
             }
         }
-        if ((int)dmflags->value & DF_NO_ITEMS) {
+        if (((int)dmflags->value & DF_NO_ITEMS) && !G_IsOspRuleset()) {
             if (item->pickup == Pickup_Powerup) {
                 G_FreeEdict(ent);
                 return;
@@ -1668,14 +1707,17 @@ void SpawnItem(edict_t *ent, const gitem_t *item)
 
 //==========
 //ROGUE
-        if ((int)dmflags->value & DF_NO_MINES) {
+        // G_RogueDMFlag, because under `ctf` these two bits are force-join
+        // and no-techs, and a CTF server that forced teams stripped every prox
+        // and tesla from the map.
+        if (G_RogueDMFlag(DF_NO_MINES)) {
             if (!strcmp(ent->classname, "ammo_prox") ||
                 !strcmp(ent->classname, "ammo_tesla")) {
                 G_FreeEdict(ent);
                 return;
             }
         }
-        if ((int)dmflags->value & DF_NO_NUKES) {
+        if (G_RogueDMFlag(DF_NO_NUKES)) {
             if (!strcmp(ent->classname, "ammo_nuke")) {
                 G_FreeEdict(ent);
                 return;
@@ -1926,8 +1968,10 @@ const gitem_t itemlist[] = {
 
     // RA2's own weapon_grapple row was here.  Dropped: the itemlist already
     // has Threewave's for the same classname and there is one grapple
-    // implementation.  Its one real difference -- the grhurt.wav
-    // precache -- is on that entry instead.
+    // implementation.  It differed from that entry twice.  Its precaches --
+    // grhurt.wav and the hook model -- are on the entry instead.  And it had
+    // no `use`, which is what kept arena's Grapple out of the weapon slot, so
+    // that one is carried as Use_Weapon's refusal under arena (p_weapon.c).
 
     /* weapon_blaster (.3 .3 1) (-16 -16 -16) (16 16 16)
     always owned, never in the world
@@ -3246,10 +3290,9 @@ const gitem_t itemlist[] = {
         },
     },
 
-    // CTF: both flags and all five techs.  Content is unioned, so they are in
-    // the one itemlist every ruleset compiles against and SpawnItem removes
-    // the flags outside ctf.  Four tech classnames, five techs: item_tech1..4
-    // plus the flag-carrier bonus is not an item.
+    // CTF: both flags and all four techs, item_tech1..4.  Content is unioned,
+    // so they are in the one itemlist every ruleset compiles against and
+    // SpawnItem removes the flags outside ctf.
     /*QUAKED item_flag_team1 (1 0.2 0) (-16 -16 -24) (16 16 32)
     */
     {
@@ -3578,6 +3621,10 @@ void SP_item_foodcube(edict_t *self)
 
     self->model = "models/objects/trapfx/tris.md2";
     SpawnItem(self, FindItem("Health"));
+    // SpawnItem can free it -- under arena it frees every item -- and the
+    // writes below would land in the zeroed slot for its next occupant.
+    if (!self->inuse)
+        return;
     self->spawnflags |= DROPPED_ITEM;
     self->style = HEALTH_IGNORE_MAX;
     gi.soundindex("items/s_health.wav");
@@ -3607,50 +3654,3 @@ void SetItemNames(void)
     power_screen_index = ITEM_INDEX(FindItem("Power Screen"));
     power_shield_index = ITEM_INDEX(FindItem("Power Shield"));
 }
-
-//===============
-//ROGUE
-void SP_xatrix_item(edict_t *self)
-{
-    const gitem_t   *item;
-    int     i;
-    char    *spawnClass = NULL;
-
-    if (!self->classname)
-        return;
-
-    if (!strcmp(self->classname, "ammo_magslug"))
-        spawnClass = "ammo_flechettes";
-    else if (!strcmp(self->classname, "ammo_trap"))
-        spawnClass = "weapon_proxlauncher";
-    else if (!strcmp(self->classname, "item_quadfire")) {
-        float   chance = 0;
-
-        chance = random();
-        if (chance < 0.2f)
-            spawnClass = "item_sphere_hunter";
-        else if (chance < 0.6f)
-            spawnClass = "item_sphere_vengeance";
-        else
-            spawnClass = "item_sphere_defender";
-    } else if (!strcmp(self->classname, "weapon_boomer"))
-        spawnClass = "weapon_etf_rifle";
-    else if (!strcmp(self->classname, "weapon_phalanx"))
-        spawnClass = "weapon_plasmabeam";
-
-    if (!spawnClass)
-        return;
-
-    // check item spawn functions
-    for (i = 0, item = itemlist; i < game.num_items; i++, item++) {
-        if (!item->classname)
-            continue;
-        if (!strcmp(item->classname, spawnClass)) {
-            // found it
-            SpawnItem(self, item);
-            return;
-        }
-    }
-}
-//ROGUE
-//===============

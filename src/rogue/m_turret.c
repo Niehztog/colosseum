@@ -668,6 +668,13 @@ void turret_activate(edict_t *self, edict_t *other, edict_t *activator)
     vec3_t      forward;
     edict_t     *base;
 
+    // Once only.  `use` stayed this function until turret_wake's
+    // monster_start replaced it, so a trigger fired again while the turret
+    // was sliding out restarted both moves from wherever they had got to, and
+    // the turret and its wall section overshot their slot by another 32 units
+    // each time.
+    self->use = NULL;
+
     self->movetype = MOVETYPE_PUSH;
     if (!self->speed)
         self->speed = 15;

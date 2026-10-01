@@ -209,13 +209,18 @@ void infantry_pain(edict_t *self, edict_t *other, float kick, int damage)
     if (self->health < (self->max_health / 2))
         self->s.skinnum = 1;
 
-    if (!self->groundentity) {
+    // The ground check, the dodge bookkeeping and the duck-flag clear below are
+    // Ground Zero's and follow the latch, as in gunner_pain: id's infantry_pain,
+    // The Reckoning's and gladq2_src's have none of them, so an airborne base
+    // infantry still gets its pain sound, animation and debounce.
+    if ((self->content_flavour & CONTENT_ROGUE) && !self->groundentity) {
 //      if ((g_showlogic) && (g_showlogic->value))
 //          gi.dprintf ("infantry: pain avoided due to no ground\n");
         return;
     }
 
-    monster_done_dodge(self);
+    if (self->content_flavour & CONTENT_ROGUE)
+        monster_done_dodge(self);
 
     if (level.framenum < self->pain_debounce_framenum)
         return;
@@ -235,7 +240,8 @@ void infantry_pain(edict_t *self, edict_t *other, float kick, int damage)
     }
 
     // PMM - clear duck flag
-    if (self->monsterinfo.aiflags & AI_DUCKED)
+    if ((self->content_flavour & CONTENT_ROGUE) &&
+        (self->monsterinfo.aiflags & AI_DUCKED))
         monster_duck_up(self);
 }
 
@@ -261,9 +267,6 @@ static void InfantryMachineGun(edict_t *self)
     vec3_t  vec;
     int     flash_number;
 
-    if (!self->enemy || !self->enemy->inuse)    //PGM
-        return;                                 //PGM
-
     // Which animation is running, not which frame number.
     //
     // Three donors give the infantry three different fire frames, because each
@@ -283,6 +286,12 @@ static void InfantryMachineGun(edict_t *self)
     // infantry_frames_death2.  Asking which one is running is correct for all
     // three donors and needs no constant of its own.
     if (self->s.frame >= FRAME_attak101 && self->s.frame <= FRAME_attak115) {
+        // Ground Zero's paranoia guard, on the aimed shot only: the death
+        // spray fires along the corpse's own angles and needs no enemy, and
+        // id's infantry sprays whether or not its killer is still there.
+        if (!self->enemy || !self->enemy->inuse)    //PGM
+            return;                                 //PGM
+
         flash_number = MZ2_INFANTRY_MACHINEGUN_1;
         AngleVectors(self->s.angles, forward, right, NULL);
         G_ProjectSource(self->s.origin, monster_flash_offset[flash_number], forward, right, start);
@@ -439,15 +448,6 @@ const mmove_t infantry_move_duck = {FRAME_duck01, FRAME_duck05, infantry_frames_
 
 // PMM - dodge code moved below so I can see the attack frames
 
-// baseq2's attack timing helper.  Ground Zero's attack frame table does not
-// call it, and both tables ship with the gate selecting -- so this
-// is kept for that gating rather than deleted, and tagged meanwhile.
-static q_unused void infantry_set_firetime(edict_t *self)
-{
-    // pmm .. code that was here no longer needed
-    gi.sound(self, CHAN_WEAPON, sound_weapon_cock, 1, ATTN_NORM, 0);
-}
-
 static void infantry_cock_gun(edict_t *self)
 {
     gi.sound(self, CHAN_WEAPON, sound_weapon_cock, 1, ATTN_NORM, 0);
@@ -591,7 +591,16 @@ void infantry_attack(edict_t *self)
         self->monsterinfo.currentmove = &infantry_move_attack2;
     else {
         // All three sequences ship; the latch selects (if/else with
-        // literal assignments so genptr.py sees both).
+        // literal assignments so genptr.py sees both), Ground Zero's first
+        // with both layers on (R-CORE-11c).
+        //
+        // The latch picks the table and the installed paks pick the model,
+        // and the two need not agree: The Reckoning's and Ground Zero's
+        // infantry/tris.md2 share a reworked attak101-115 that id's does not,
+        // so with either pak installed and both layers off, id's table plays
+        // its timing over the reworked animation.  One model file serves all
+        // three, so runtime layering cannot match them; it is cosmetic
+        // (R-CORE-11e).
         if (self->content_flavour & CONTENT_ROGUE)
             self->monsterinfo.currentmove = &infantry_move_attack1;
         else if (self->content_flavour & CONTENT_XATRIX)

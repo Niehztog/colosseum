@@ -105,7 +105,7 @@ void    OSP_Stats_Death(edict_t *self, edict_t *inflictor, edict_t *attacker);
 void    OSP_Stats_Accuracy(edict_t *ent);
 void    OSP_Stats_AccuracyAll(void);
 
-// "YY.MM.DD.HH.MM", the stamp the admin log and the demo names use
+// "YY.MM.DD.HH.MM", the stamp the auto-record demo names use
 void    OSP_Stats_DateString(char *out, size_t size);
 
 #endif // OSP_STATS_H

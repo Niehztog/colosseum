@@ -62,7 +62,7 @@ void OSP_configLoad(void)
     conf_size = 0;
 
     {
-        if (!G_FsGamePath(path, sizeof(path),
+        if (!G_FsReadPath(path, sizeof(path),
                           list ? list->string : "serverconfigs.txt")) {
             gi.dprintf("Server config list path is too long. No configs loaded.\n\n");
             gi.cvar_set("vote_enable_config", "0");
@@ -96,7 +96,7 @@ void OSP_configLoad(void)
                         Q_strlcpy(conf_info[i], p, sizeof(conf_info[i]));
                     }
 
-                    if (!G_FsGamePath(path, sizeof(path), line)) {
+                    if (!G_FsReadPath(path, sizeof(path), line)) {
                         gi.dprintf("Server config path is too long, skipping \"%s\".\n",
                                    line);
                         i--;
@@ -127,7 +127,7 @@ void OSP_configLoad(void)
 
                 if ((int)cdefault->value && cdefname->string &&
                     strcmp(cdefname->string, "default")) {
-                    if (!G_FsGamePath(path, sizeof(path), cdefname->string)) {
+                    if (!G_FsReadPath(path, sizeof(path), cdefname->string)) {
                         gi.dprintf("** Default config path is too long!\n");
                         gi.dprintf("** No default config will be used.\n");
                         gi.cvar_set("vote_config_default", "0");

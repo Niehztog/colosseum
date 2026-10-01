@@ -37,8 +37,8 @@ int selected_map = 0;
 int next_map;
 
 // Picks the next level and returns a freshly spawned target_changelevel for it,
-// or NULL when map_queue is off / there is nothing to pick. EndDMLevel is the
-// caller.
+// or NULL when there is nothing to pick -- map_queue off with no map chosen,
+// or no list. EndDMLevel is the caller.
 edict_t *NextMap(void)
 {
     edict_t         *ent = NULL;
@@ -54,7 +54,18 @@ edict_t *NextMap(void)
     int             n;
     edict_t         *cl_ent;
 
-    if (!(int)map_queue->value)
+    // A choice is an index into the list it was made from, and a list re-read
+    // since -- a config vote's maps.txt (OSP_loadMaps) -- can be shorter.
+    if (selected_map && (next_map < 0 || next_map >= (int)map_size))
+        selected_map = 0;
+
+    // `map_queue 0` turns off the ROTATION, not the choice: a passed map vote,
+    // `r_map` and the admin menu's map name the next level whatever it says.
+    // This returned before reading `selected_map`, so the level went wherever
+    // baseq2's rotation sent it and the choice waited, set, for the next
+    // NextMap that got past here.  The list a vote picks from is maps.txt
+    // either way (OSP_mapExists loads it).
+    if (!(int)map_queue->value && !selected_map)
         return NULL;
 
     if (!map)
@@ -202,7 +213,7 @@ void OSP_loadMaps(void)
                 char    path[MAX_OSPATH];
                 char    *pathptr = path;
 
-                if (!G_FsGamePath(path, sizeof(path),
+                if (!G_FsReadPath(path, sizeof(path),
                                   mfile ? mfile->string : "maps.txt")) {
                     gi.dprintf("Colosseum: map list path is too long; the OSP "
                                "rotation falls back to sv_maplist\n");

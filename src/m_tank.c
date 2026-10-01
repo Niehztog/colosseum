@@ -483,8 +483,11 @@ static void TankRocket(edict_t *self)
     } else {
         trace = gi.trace(start, vec3_origin, vec3_origin, vec, self, MASK_SHOT);
         if (trace.ent == self->enemy || trace.ent == world) {
+            // The tank's own flash: Ground Zero passed MZ2_CHICK_ROCKET_1
+            // here, so the client drew the chick's muzzle offset and played
+            // chick/chkatck2.wav for every aimed tank rocket.
             if (trace.fraction > 0.5f || (trace.ent && trace.ent->client))
-                monster_fire_rocket(self, start, dir, 50, rocketSpeed, MZ2_CHICK_ROCKET_1);
+                monster_fire_rocket(self, start, dir, 50, rocketSpeed, flash_number);
             //      else
             //          gi.dprintf("didn't make it halfway to target...aborting\n");
         }

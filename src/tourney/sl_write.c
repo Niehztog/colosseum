@@ -41,18 +41,6 @@ static int      sl_buffered;        // lines written since the last flush
 // 2 (the default) = flush every line.
 #define SL_BUFFER_LINES 40
 
-static bool sl_IsAbsolutePath(const char *path)
-{
-#ifdef _WIN32
-    return path[0] == '/' || path[0] == '\\' ||
-           (((path[0] >= 'A' && path[0] <= 'Z') ||
-             (path[0] >= 'a' && path[0] <= 'z')) &&
-            path[1] == ':');
-#else
-    return path[0] == '/';
-#endif
-}
-
 void sl_LogMapName(game_import_t *import, char *mapname)
 {
     char    output[1024];
@@ -250,7 +238,7 @@ int sl_OpenLogFile(game_import_t *import)
 
     // sl_filename keeps v2.75's meaning: a path relative to the Quake II
     // base directory, not to the game directory.
-    if (sl_IsAbsolutePath(sl_filename->string))
+    if (G_FsIsAbsolute(sl_filename->string))
         len = Q_snprintf(path, sizeof(path), "%s", sl_filename->string);
     else
         len = Q_snprintf(path, sizeof(path), "%s/%s", G_FsBaseDir(),

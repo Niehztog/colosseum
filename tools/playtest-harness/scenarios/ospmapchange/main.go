@@ -170,7 +170,7 @@ func report() {
 // the directory to the caller, so these are real files and are ours to write.
 func fixtures(game string) error {
 	write := func(name string, lines []string) error {
-		return os.WriteFile(filepath.Join(game, name),
+		return playtest.WriteFixture(filepath.Join(game, name),
 			[]byte(strings.Join(lines, "\n")+"\n"), 0o644)
 	}
 	if err := write("maps.txt", mapList); err != nil {

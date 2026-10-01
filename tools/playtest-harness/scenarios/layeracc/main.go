@@ -34,7 +34,15 @@ import (
 	"q2playtest/playtest"
 )
 
-var fails int
+var fails, skips int
+
+// skip records a phase that did not run.  It is not a check and is not
+// counted as a pass: a skipped phase printed "[ ok ]" and the run's total
+// said "0 check(s) failed", which is what a run that tested it says too.
+func skip(name, why string) {
+	skips++
+	fmt.Printf("  [skip] %-44s %s\n", name, why)
+}
 
 func check(name string, ok bool, detail string) {
 	tag := " ok "
@@ -94,14 +102,14 @@ func main() {
 	// missing, and never subtract it silently.
 	have := func(p, what string) bool {
 		if _, err := os.Stat(p); err != nil {
-			check("skipped/"+what, true, "no "+p)
+			skip(what, "no "+p)
 			return false
 		}
 		return true
 	}
 	haveXat := have(filepath.Join(*xat, "pak0.pak"), "xatrix")
 	haveRog := have(filepath.Join(*rog, "pak0.pak"), "rogue")
-	haveGlad := *glad != "" && have(filepath.Join(*glad, "release", "gladiator.so"), "brain")
+	haveGlad := *glad != "" && have(playtest.Brain(*glad), "brain")
 
 	install := func(d string, brain bool) error {
 		if err := colosseum.Install(d, *ref, *ctf, *lib); err != nil {
@@ -333,7 +341,7 @@ func main() {
 		}
 	}
 
-	fmt.Printf("\n%d check(s) failed\n", fails)
+	fmt.Printf("\n%d check(s) failed, %d skipped\n", fails, skips)
 	if fails > 0 {
 		os.Exit(1)
 	}

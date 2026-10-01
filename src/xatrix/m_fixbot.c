@@ -113,6 +113,42 @@ static int fixbot_search(edict_t *self)
     return (0);
 }
 
+// A bot_goal is the fixbot's own waypoint, an edict only so that goalentity
+// and enemy can name a point.  The Reckoning made it SOLID_BBOX and linked it
+// before it had a size or a place, so the world kept it filed at the map's
+// origin, and SV_CloseEnough, which reads the linked absmin/absmax, measured
+// the fixbot against that.  Nothing needs it solid -- the fixbot's own traces
+// skip it as its owner's anyway -- so it is SOLID_NOT, and its spawner links
+// it once it is placed.  It was also freed only on the arrival and stuck
+// paths, while FoundTarget and M_ReactToDamage overwrite goalentity and enemy
+// without knowing a goal was there, a new goal replaces an old one, and the
+// fixbot's death frees the fixbot under it -- each of which left the goal for
+// the rest of the level.  So it watches its owner, and frees itself once
+// neither field names it.
+void fixbot_goal_think(edict_t *self)
+{
+    edict_t *bot = self->owner;
+
+    if (!bot || !bot->inuse || bot->health <= 0 ||
+        (bot->goalentity != self && bot->enemy != self)) {
+        G_FreeEdict(self);
+        return;
+    }
+    self->nextthink = level.framenum + 1;
+}
+
+static edict_t *fixbot_spawn_goal(edict_t *self)
+{
+    edict_t *ent = G_Spawn();
+
+    ent->classname = "bot_goal";
+    ent->solid = SOLID_NOT;
+    ent->owner = self;
+    ent->think = fixbot_goal_think;
+    ent->nextthink = level.framenum + 1;
+    return ent;
+}
+
 static void landing_goal(edict_t *self)
 {
     trace_t tr;
@@ -120,11 +156,7 @@ static void landing_goal(edict_t *self)
     vec3_t end;
     edict_t *ent;
 
-    ent = G_Spawn();
-    ent->classname = "bot_goal";
-    ent->solid = SOLID_BBOX;
-    ent->owner = self;
-    gi.linkentity(ent);
+    ent = fixbot_spawn_goal(self);
 
     VectorSet(ent->mins, -32, -32, -24);
     VectorSet(ent->maxs, 32, 32, 24);
@@ -136,6 +168,7 @@ static void landing_goal(edict_t *self)
     tr = gi.trace(self->s.origin, ent->mins, ent->maxs, end, self, MASK_MONSTERSOLID);
 
     VectorCopy(tr.endpos, ent->s.origin);
+    gi.linkentity(ent);
 
     self->goalentity = self->enemy = ent;
     self->monsterinfo.currentmove = &fixbot_move_landing;
@@ -149,11 +182,7 @@ static void takeoff_goal(edict_t *self)
     vec3_t end;
     edict_t *ent;
 
-    ent = G_Spawn();
-    ent->classname = "bot_goal";
-    ent->solid = SOLID_BBOX;
-    ent->owner = self;
-    gi.linkentity(ent);
+    ent = fixbot_spawn_goal(self);
 
     VectorSet(ent->mins, -32, -32, -24);
     VectorSet(ent->maxs, 32, 32, 24);
@@ -165,6 +194,7 @@ static void takeoff_goal(edict_t *self)
     tr = gi.trace(self->s.origin, ent->mins, ent->maxs, end, self, MASK_MONSTERSOLID);
 
     VectorCopy(tr.endpos, ent->s.origin);
+    gi.linkentity(ent);
 
     self->goalentity = self->enemy = ent;
     self->monsterinfo.currentmove = &fixbot_move_takeoff;
@@ -217,11 +247,7 @@ static void roam_goal(edict_t *self)
     // if every trace comes back zero length nothing below sets whichvec
     VectorCopy(self->s.origin, whichvec);
 
-    ent = G_Spawn();
-    ent->classname = "bot_goal";
-    ent->solid = SOLID_BBOX;
-    ent->owner = self;
-    gi.linkentity(ent);
+    ent = fixbot_spawn_goal(self);
 
     oldlen = 0;
     for (i = 0; i < 12; i++) {
@@ -249,6 +275,7 @@ static void roam_goal(edict_t *self)
     }
 
     VectorCopy(whichvec, ent->s.origin);
+    gi.linkentity(ent);
     self->goalentity = self->enemy = ent;
 
     self->monsterinfo.currentmove = &fixbot_move_turn;
@@ -833,19 +860,27 @@ static const mframe_t fixbot_frames_attack1[] = {
 };
 const mmove_t fixbot_move_attack1 = {FRAME_shoot_01, FRAME_shoot_06, fixbot_frames_attack1, NULL};
 
+// Whether the corpse's own spot is free to stand it back up in: its box swept
+// 48 units up from where it lies, which is the room a monster getting to its
+// feet takes.  Anything damageable in it -- a player, a monster -- defers the
+// revive, and the looping laser frames ask again until it has moved; the
+// world, which never moves, does not, as before.  The Reckoning began the
+// sweep's end at {0,0,0}, so it tested the line from the corpse to just above
+// the MAP's origin and never the spot itself, and it "telefragged" whatever it
+// met there by writing -1000 into its health: no T_Damage and no death, a
+// player or monster left standing at -1000 to die to its next hit, once a
+// frame for as long as the laser ran.  Gladiator's copy is the same.
 static int check_telefrag(edict_t *self)
 {
-    vec3_t  start = { 0, 0, 0 };
+    vec3_t  end;
     vec3_t  forward, right, up;
     trace_t tr;
 
     AngleVectors(self->enemy->s.angles, forward, right, up);
-    VectorMA(start, 48, up, start);
-    tr = gi.trace(self->enemy->s.origin, self->enemy->mins, self->enemy->maxs, start, self, MASK_MONSTERSOLID);
-    if (tr.ent->takedamage) {
-        tr.ent->health = -1000;
+    VectorMA(self->enemy->s.origin, 48, up, end);
+    tr = gi.trace(self->enemy->s.origin, self->enemy->mins, self->enemy->maxs, end, self, MASK_MONSTERSOLID);
+    if (tr.ent->takedamage)
         return (0);
-    }
 
     return (1);
 }

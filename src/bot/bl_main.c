@@ -269,15 +269,13 @@ void BotExecuteInput(edict_t *bot)
     // three bots shooting at a person for the whole of the round countdown,
     // when a shot cannot land and the ammo is the round's only load.
     //
-    // The grapple is fired with the same button and is MOVEMENT rather than
-    // damage, so a bot holding one is left alone -- otherwise `allow_grapple`
-    // would lose its hook for the countdown as well.
+    // The grapple needs no exemption: under arena it is never the weapon in
+    // hand (Use_Weapon refuses it, as RA2's itemlist did), only the offhand
+    // hook, which is a command and not ATTACK.
     holdfire = false;
     if (G_Ruleset() == RULESET_ARENA && !RA_RoundFighting(bot))
     {
-        const gitem_t *w = bot->client->pers.weapon;
-
-        holdfire = !w || !w->classname || Q_stricmp(w->classname, "weapon_grapple");
+        holdfire = true;
 
         if (bi->actionflags & ACTION_ATTACK)
         {
@@ -429,6 +427,13 @@ bool BotStarted(edict_t *bot)
         bot->inuse = false;
         //the Quake2 server calls this function for real clients
         ClientBegin(bot);
+        //ClientBegin can destroy the bot it is beginning: under the OSP team
+        //rulesets a bot that finds both teams full or locked is removed by
+        //OSP_addTeamMember, and BotDestroy clears the edict and the bot state.
+        //Flagging that edict now would leave a free slot marked FL_BOT and
+        //`started` for whoever the engine seats there next.
+        if (!bot->inuse || !botglobals.botstates[DF_ENTCLIENT(bot)].active)
+            return false;
         //
         bot->flags |= FL_BOT;
         //the bot has started
@@ -467,6 +472,9 @@ void BotLib_BotLoadMap(char *mapname)
             int i;
             edict_t *cl_ent;
 
+            //a map that would not load stops the fill for the level; a NULL
+            //name is the index refresh and is not a map
+            if (mapname) botglobals.mapfailed = true;
             //remove all bots using this library
             for (i = 0; i < game.maxclients; i++)
             {
@@ -1090,6 +1098,13 @@ void BotLib_BotStartFrame(float time)
 // is a runtime fact.  The brain has no concept of an OSP rune; it does know
 // CTF's techs, so a rune is shown to it wearing the matching tech's model.
 // Only under tourney, and only when runes are actually in play.
+//
+// The index is the one BotPrecache registered for the level.  It used to be
+// searched for by name among the models the GAME had registered, and under the
+// OSP four nothing registers a CTF model -- CTFPrecache returns unless the
+// ruleset is ctf -- so the translation never fired, after scanning up to 8192
+// names per rune per frame, and the brain matched every rune as the default
+// runes_model's item_ancient_head.
 //===========================================================================
 static int BotRuneModelindex(edict_t *ent)
 {
@@ -1097,7 +1112,7 @@ static int BotRuneModelindex(edict_t *ent)
         SID_OSP_RUNE_RESIST, SID_OSP_RUNE_STRENGTH, SID_OSP_RUNE_HASTE,
         SID_OSP_RUNE_REGEN, SID_OSP_RUNE_VAMPIRE
     };
-    int i, j;
+    int i;
 
     if (!G_IsOspRuleset() || !BotTourneyRunes())
         return 0;
@@ -1106,17 +1121,10 @@ static int BotRuneModelindex(edict_t *ent)
     for (i = 0; i < 5; i++)
     {
         if (ent->item->quantity != rune_slots[i]) continue;
-        //A rune with no tech has a NULL row, and strcmp(x, NULL) is a
-        //crash rather than a mismatch.  RUNE_VAMPIRE is that row: OSP has five
-        //runes and Threewave four techs.
-        if (!bot_tech_models[i]) break;
-        //look the tech model up in the live index rather than assuming 251..255
-        for (j = 1; j < bot_max_modelindexes; j++)
-        {
-            if (modelindexes[j] && !strcmp(modelindexes[j], bot_tech_models[i]))
-                return j;
-        } //end for
-        break;
+        //0 for RUNE_VAMPIRE, which has no tech (OSP has five runes and
+        //Threewave four techs), and for runes switched on after the brain was
+        //handed this map: it learns its item models at the map load alone
+        return bot_tech_modelindexes[i];
     } //end for
     return 0;
 }
@@ -1577,12 +1585,20 @@ static void BotRulesetLibVars(bot_library_t *lib)
         // whole-string compare is what is wanted, under ctf the skin's own
         // second half already IS the team.
         lib->funcs.BotLibVarSet("teamplay", "0");
-        lib->funcs.BotLibVarSet("runes", "0");
         // CTFSetupTechSpawn gates the techs on DF_CTF_NO_TECH alone, so that
         // dmflag -- not the `runes` modifier -- is what the brain must be told
-        // about.
-        lib->funcs.BotLibVarSet("techs",
-            ((int)dmflags->value & DF_CTF_NO_TECH) ? "0" : "1");
+        // about.  And it is told through `runes`: the brain's one read of its
+        // tech switch is LibVar("runes", "0") (be_ai2_dmq2.c
+        // BotSetupDeathmatchAI), and `techs` is a name only botlib.h's table
+        // documents.  The 1999 `#ifdef ZOID` block sets `runes` 1 under ctf
+        // for the same reason.  With it the brain drops the tech it holds to
+        // take a different one it touches; with `runes` 0 it never did.
+        {
+            bool techs = !((int)dmflags->value & DF_CTF_NO_TECH);
+
+            lib->funcs.BotLibVarSet("runes", techs ? "1" : "0");
+            lib->funcs.BotLibVarSet("techs", techs ? "1" : "0");
+        }
         break;
     case RULESET_ARENA:
         // The other side of the seam.  Not `MOD_HOOK`, which is the
@@ -1688,9 +1704,12 @@ static int BotInitLibrary(bot_library_t *lib)
     BotSetVarIfSet(lib, "fastchat", "1");
     //alternative names
     BotSetVarIfSet(lib, "altnames", "1");
-    //enable rocket jumping
+    //rocket jumping, as the cvar says.  The donor pushed only a "1", and the
+    //brain's own default is LibVar("rocketjump", "1") -- so `rocketjump 0`
+    //could never reach it and the bots rocket-jumped regardless.  The same slip
+    //as fastchat's above, the other way round.
     cvar = gi.cvar("rocketjump", "1", 0);
-    if (cvar && cvar->value) lib->funcs.BotLibVarSet("rocketjump", "1");
+    lib->funcs.BotLibVarSet("rocketjump", cvar->string);
     //forced clustering calculations
     BotSetVarIfSet(lib, "forceclustering", "1");
     //forced reachability calculations
@@ -1715,7 +1734,12 @@ static int BotInitLibrary(bot_library_t *lib)
                                 bot_max_modelindexes, modelindexes,
                                 bot_max_soundindexes, soundindexes,
                                 bot_max_imageindexes, imageindexes);
-    if (err != BLERR_NOERROR) return false;
+    if (err != BLERR_NOERROR)
+    {
+        //remembered for the level: see CheckMinimumPlayers
+        botglobals.mapfailed = true;
+        return false;
+    } //end if
     return true;
 } //end of the function BotInitLibrary
 //===========================================================================
@@ -1788,10 +1812,19 @@ static bot_library_t *BotLoadLibrary(const char *botlibdir)
         // Report the reason and the bitness of both sides, and refuse
         // the bot rather than killing the server.  A mismatched brain is the
         // failure this message exists for, and "couldn't load" alone does not
-        // say which of the two is 32-bit.
-        gi.dprintf("couldn't load %s (game is %d-bit; a brain of the other "
-                   "word size cannot be loaded)\n",
-                   botlibdir, (int)(sizeof(void *) * 8));
+        // say which of the two is 32-bit.  The ELF loader's own text names the
+        // brain's class (dlerror, below); Windows gives only a number, and the
+        // number a DLL of the other word size gets is ERROR_BAD_EXE_FORMAT.
+        DWORD err = GetLastError();
+
+        if (err == ERROR_BAD_EXE_FORMAT)
+            gi.dprintf("couldn't load %s: error %lu, not a %d-bit DLL (game is "
+                       "%d-bit; a brain of the other word size cannot be "
+                       "loaded)\n", botlibdir, (unsigned long)err,
+                       (int)(sizeof(void *) * 8), (int)(sizeof(void *) * 8));
+        else
+            gi.dprintf("couldn't load %s: error %lu (game is %d-bit)\n",
+                       botlibdir, (unsigned long)err, (int)(sizeof(void *) * 8));
         return NULL;
     } //end if
     GetBotAPI = (PFNGetBotAPI)(void *)GetProcAddress(botlibhandle, "GetBotAPI");
@@ -1837,6 +1870,12 @@ static bot_library_t *BotLoadLibrary(const char *botlibdir)
         return NULL;
     } //end if
     lib->funcs = *exports;
+    //what the brain has to find in the index tables when BotInitLibrary hands
+    //it the map, and the game does not register for it (BotPrecache).  Before
+    //the library is on the list: a registration made with one on it is relayed
+    //to it at once, and this one has not been set up yet.
+    BotPrecache();
+    BotInitMuzzleFlashToSoundindex();
     //add the library to the list
     lib->next = botglobals.firstbotlib;
     lib->prev = NULL;
@@ -1877,6 +1916,43 @@ void BotUnloadAllLibraries(void)
     } //end for
 } //end of the function BotUnloadAllLibraries
 //===========================================================================
+// Where a bare library name is looked for, in order: beside the game library,
+// where the engine looked for THAT -- q2pro loads game<cpu> from `homedir`
+// and then from `libdir`, each with the gamedir under it -- and then basedir
+// + gamedir, the 1999 search.  The first that holds the file wins; when none
+// does, the 1999 path is what dlopen is handed, so its failure names the
+// place the documentation does.  basedir alone could not find a brain
+// installed beside the game library on a system install, which keeps the
+// libraries under libdir and the data under basedir, nor under a homedir.
+//===========================================================================
+static void BotLibrarySearch(char *out, int size, const char *name)
+{
+    const char *roots[3];
+    FILE *fp;
+    int i;
+
+    roots[0] = gi.cvar("homedir", "", 0)->string;
+    roots[1] = gi.cvar("libdir", "", 0)->string;
+    roots[2] = G_FsBaseDir();
+    for (i = 0; i < 3; i++)
+    {
+        if (!roots[i][0]) continue;
+        Q_strlcpy(out, roots[i], size);
+        AppendPathSeperator(out, size);
+        Q_strlcat(out, G_FsGameDir(), size);
+        AppendPathSeperator(out, size);
+        Q_strlcat(out, name, size);
+        //the 1999 root is the answer whether the file is there or not
+        if (i == 2) return;
+        fp = fopen(out, "rb");
+        if (fp)
+        {
+            fclose(fp);
+            return;
+        } //end if
+    } //end for
+} //end of the function BotLibrarySearch
+//===========================================================================
 //
 // Parameter:               -
 // Returns:                 -
@@ -1887,8 +1963,10 @@ bot_library_t *BotUseLibrary(const char *path)
     char botlibdir[BOT_MAX_PATH] = "";
     bot_library_t *lib;
 
-    // The search order: the path as given, then basedir + gamedir.  The
-    // donor decides between them with `access(path, 4)`, and the obvious
+    // A path is used as given, and a bare name is searched for
+    // (BotLibrarySearch: homedir, libdir, then basedir, each with the gamedir
+    // under it).  The donor decides between them with `access(path, 4)`, and
+    // the obvious
     // modernisation -- ask the engine's filesystem whether it can read the
     // file -- is wrong and was wrong in the first run of tools/botmatrix.sh:
     // the engine finds `gladiator.so` in the gamedir and answers yes, so the
@@ -1896,17 +1974,16 @@ bot_library_t *BotUseLibrary(const char *path)
     // gamedir, and every bot failed to load with "cannot open shared object
     // file".  dlopen needs an OS path, so the question is not "can this be
     // read" but "is this already a path" -- which is what a separator says.
+    // A bare name is then searched for as an OS path (BotLibrarySearch).
     if (!strchr(path, '/') && !strchr(path, '\\'))
     {
-        //get the base directory
-        Q_strlcpy(botlibdir, G_FsBaseDir(), sizeof(botlibdir));
-        AppendPathSeperator(botlibdir, BOT_MAX_PATH);
-        //user specified game directory
-        Q_strlcat(botlibdir, G_FsGameDir(), sizeof(botlibdir));
-        AppendPathSeperator(botlibdir, BOT_MAX_PATH);
+        BotLibrarySearch(botlibdir, sizeof(botlibdir), path);
     } //end if
-    //the dll name
-    Q_strlcat(botlibdir, path, sizeof(botlibdir));
+    else
+    {
+        //the dll name, as given
+        Q_strlcpy(botlibdir, path, sizeof(botlibdir));
+    } //end else
     //check if the library is loaded already
     for (lib = botglobals.firstbotlib; lib; lib = lib->next)
     {

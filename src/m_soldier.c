@@ -470,15 +470,19 @@ static void soldier_fire(edict_t *self, int in_flash_number)
     vec3_t aim_good;
 #endif
 
-    if ((!self->enemy) || (!self->enemy->inuse)) {
-        self->monsterinfo.aiflags &= ~AI_HOLD_FRAME;
-        return;
-    }
-
     if ((self->content_flavour & CONTENT_ROGUE) && in_flash_number < 0) {
         flash_number = -1 * in_flash_number;
     } else
         flash_number = in_flash_number;
+
+    // Ground Zero's paranoia guard, on the aimed shot only: the death-throe
+    // shots on flashes 5 and 6 fire straight ahead and need no enemy, and id's
+    // soldier fires them whether or not its killer is still there.
+    if (!(flash_number == 5 || flash_number == 6) &&
+        ((!self->enemy) || (!self->enemy->inuse))) {
+        self->monsterinfo.aiflags &= ~AI_HOLD_FRAME;
+        return;
+    }
 
     if (self->s.skinnum < 2)
         flash_index = blaster_flash[flash_number];
@@ -834,8 +838,10 @@ static const mframe_t soldier_frames_attack6[] = {
 const mmove_t soldier_move_attack6 = {FRAME_runs01, FRAME_runs14, soldier_frames_attack6, soldier_run};
 
 // Baseq2's soldier_move_attack6, kept alongside Ground Zero's.
-// Ground Zero swaps ai_charge for ai_run over part of the run-and-shoot and
-// adds soldier_start_charge, so the soldier closes differently.
+// Ground Zero swaps ai_charge for ai_run over all fourteen frames of the
+// run-and-shoot, fires soldier_fire8 a frame earlier (runs03, not runs04), and
+// adds soldier_start_charge and a monster_done_dodge, so the soldier closes
+// differently.
 static const mframe_t bq2_soldier_frames_attack6[] = {
     { ai_charge, 10, NULL },
     { ai_charge,  4, NULL },
@@ -916,8 +922,8 @@ void soldier_attack(edict_t *self)
         (range(self, self->enemy) >= RANGE_NEAR) &&
         (r < (skill->value * 0.25f) &&
          (self->s.skinnum <= 3))) {
-        // Both sequences ship; the latch selects (if/else with
-        // literal assignments so genptr.py sees both).
+        // The else is unreachable -- id's arm returned above -- and stays
+        // because tools/gates.py wants the bq2_ twin at every site.
         if (self->content_flavour & CONTENT_ROGUE)
             self->monsterinfo.currentmove = &soldier_move_attack6;
         else
@@ -955,8 +961,8 @@ void soldier_sight(edict_t *self, edict_t *other)
     if ((skill->value > 0) && (self->enemy) && (range(self, self->enemy) >= RANGE_NEAR)) {
 //  PMM - don't let machinegunners run & shoot
         if ((random() > 0.75f) && (self->s.skinnum <= 3)) {
-            // Both sequences ship; the latch selects (if/else with
-            // literal assignments so genptr.py sees both).
+            // The else is unreachable -- id's arm returned above -- and stays
+            // because tools/gates.py wants the bq2_ twin at every site.
             if (self->content_flavour & CONTENT_ROGUE)
                 self->monsterinfo.currentmove = &soldier_move_attack6;
             else
@@ -1072,12 +1078,7 @@ void soldier_dodge (edict_t *self, edict_t *attacker, float eta, trace_t *tr)
         {
             if ((g_showlogic) && (g_showlogic->value))
                 gi.dprintf ("shooting back!\n");
-            // Both sequences ship; the latch selects (if/else with
-            // literal assignments so genptr.py sees both).
-            if (self->content_flavour & CONTENT_ROGUE)
-                self->monsterinfo.currentmove = &soldier_move_attack6;
-            else
-                self->monsterinfo.currentmove = &bq2_soldier_move_attack6;
+            self->monsterinfo.currentmove = &soldier_move_attack6;
         }
         else
         {
@@ -1582,14 +1583,8 @@ void soldier_sidestep(edict_t *self)
     if (self->s.skinnum <= 3) {
 //      if ((g_showlogic) && (g_showlogic->value))
 //          gi.dprintf ("shooting back!\n");
-        if (self->monsterinfo.currentmove != &soldier_move_attack6) {
-            // Both sequences ship; the latch selects (if/else with
-            // literal assignments so genptr.py sees both).
-            if (self->content_flavour & CONTENT_ROGUE)
-                self->monsterinfo.currentmove = &soldier_move_attack6;
-            else
-                self->monsterinfo.currentmove = &bq2_soldier_move_attack6;
-        }
+        if (self->monsterinfo.currentmove != &soldier_move_attack6)
+            self->monsterinfo.currentmove = &soldier_move_attack6;
     } else {
 //      if ((g_showlogic) && (g_showlogic->value))
 //          gi.dprintf ("strafing away!\n");
@@ -3132,8 +3127,12 @@ void SP_monster_soldier_ripper(edict_t *self)
     gi.soundindex("misc/lasfly.wav");
     gi.soundindex("soldier/solatck2.wav");
 
+    // max_health too, as Q2PRO's e50a9474 does for the three base soldiers:
+    // SP_monster_soldier_h has already run monster_start, which copied
+    // max_health from a health of 0 -- so soldierh_pain never showed the pain
+    // skin and a medic ranked the corpse below every other.
     self->s.skinnum = 0;
-    self->health = 50;
+    self->max_health = self->health = 50;
     self->gib_health = -30;
 }
 
@@ -3154,7 +3153,7 @@ void SP_monster_soldier_hypergun(edict_t *self)
     gi.soundindex("soldier/solatck1.wav");
 
     self->s.skinnum = 2;
-    self->health = 60;
+    self->max_health = self->health = 60;
     self->gib_health = -30;
 }
 
@@ -3174,7 +3173,7 @@ void SP_monster_soldier_lasergun(edict_t *self)
     gi.soundindex("soldier/solatck3.wav");
 
     self->s.skinnum = 4;
-    self->health = 70;
+    self->max_health = self->health = 70;
     self->gib_health = -30;
 
 }

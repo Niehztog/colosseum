@@ -122,7 +122,7 @@ func boot(sub, ruleset, mesh string, port int, extra map[string]string) (*playte
 		if err := os.MkdirAll(d+"/colosseum/maps", 0o755); err != nil {
 			return nil, err
 		}
-		if err := os.WriteFile(d+"/colosseum/maps/q2dm1.aas", src, 0o644); err != nil {
+		if err := playtest.WriteFixture(d+"/colosseum/maps/q2dm1.aas", src, 0o644); err != nil {
 			return nil, err
 		}
 	}

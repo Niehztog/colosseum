@@ -108,9 +108,13 @@ static void Killed(edict_t *targ, edict_t *inflictor, edict_t *attacker, int dam
         if (M_UsesRogueBehavior(targ)) {
             if (targ->enemy)
                 cleanupHealTarget(targ->enemy);
-        } else if (targ->enemy && targ->enemy->owner == targ) {
-            targ->enemy->owner = NULL;
         }
+        // `owner` is id's claim and the Xatrix fixbot's under every flavour,
+        // released under either arm.  id's medic_die frees it too -- "free him
+        // up for another medic" -- but tests an `enemy` its Killed has already
+        // pointed at the attacker, so the release is made here (R-CORE-11f).
+        if (targ->enemy && targ->enemy->owner == targ)
+            targ->enemy->owner = NULL;
 
         targ->monsterinfo.aiflags &= ~AI_MEDIC;
         targ->enemy = attacker;
@@ -247,8 +251,9 @@ static int CheckPowerArmor(edict_t *ent, const vec3_t point, const vec3_t normal
     int         index;
     // Float, because `power_armor_screen` and `power_armor_shield` are
     // floats and the merge had left this an int with the two ratios hardcoded.
-    // With the defaults the arithmetic is identical -- 1.0 and 2.0 are what the
-    // int held -- so this widens the type without moving any number.
+    // With the defaults the arithmetic is the int's -- 1.0 and 2.0 are what
+    // it held -- given one truncation the int did implicitly: see the ETF
+    // rifle's arm below.
     float       damagePerCell;
     int         pa_te_type;
     int         power;
@@ -331,8 +336,12 @@ static int CheckPowerArmor(edict_t *ent, const vec3_t point, const vec3_t normal
     SpawnDamage(pa_te_type, point, normal, save);
     ent->powerarmor_framenum = level.framenum + 0.2f * BASE_FRAMERATE;
 
+    // Ground Zero's int arithmetic truncated the quotient before doubling it,
+    // so an odd `save` against the shield cost 2 * (save / 2) cells; done in
+    // float the same line costs `save`, a cell more per odd flechette hit.
+    // The cast puts the truncation back where it was.
     if (dflags & DAMAGE_NO_REG_ARMOR)
-        power_used = (save / damagePerCell) * 2;
+        power_used = (int)(save / damagePerCell) * 2;
     else
         power_used = save / damagePerCell;
 
@@ -454,17 +463,25 @@ static void M_ReactToDamage(edict_t *targ, edict_t *attacker, edict_t *inflictor
     }
 //PGM
 
-    if ((targ->enemy) && (targ->monsterinfo.aiflags & AI_MEDIC)) {
-        if (rogue_behavior) {
-            float percentHealth = (float)targ->health / targ->max_health;
+    // Ground Zero's medic block, on its arm alone: id's and Xatrix's have
+    // none.  A base medic shot off a corpse keeps its claim and AI_MEDIC,
+    // turns on its attacker below, and ai_checkattack drops AI_MEDIC next
+    // frame -- and the corpse stays claimed, id's leak, which is why id's shot
+    // medic fights rather than going back to it (R-CORE-11f).
+    if ((targ->enemy) && (targ->monsterinfo.aiflags & AI_MEDIC) &&
+        rogue_behavior) {
+        float percentHealth = (float)targ->health / targ->max_health;
 
-            if (targ->enemy->inuse && percentHealth > 0.25f)
-                return;
-            cleanupHealTarget(targ->enemy);
-        } else if (targ->enemy->owner == targ) {
-            targ->enemy->owner = NULL;
-        }
+        if (targ->enemy->inuse && percentHealth > 0.25f)
+            return;
+        cleanupHealTarget(targ->enemy);
         targ->monsterinfo.aiflags &= ~AI_MEDIC;
+        // The Xatrix fixbot claims through `owner` under every flavour, and
+        // cleanupHealTarget clears only `healer`, which left its corpse marked
+        // for good once this block had dropped AI_MEDIC -- fixbot_FindDeadMonster
+        // skips one with an owner.
+        if (targ->enemy->owner == targ)
+            targ->enemy->owner = NULL;
     }
 
     // we now know that we are not both good guys
@@ -550,12 +567,12 @@ bool CheckTeamDamage(edict_t *targ, edict_t *attacker)
             targ != attacker)
             return true;
 
-    // RA2 replaces this function outright with teamnum equality, and it
-    // had no arena arm at all.  The one caller is the grapple's damage tick, so
-    // what the omission bought was a team-mate on the end of your hook hearing
-    // `grhurt.wav` every frame while healthprotect cancelled the damage one
-    // function later -- the right outcome reached by the wrong road, and only
-    // because healthprotect happened to be on.
+    // RA2 replaces this function outright with teamnum equality, and its
+    // only caller there is the hook's damage tick, which this arm serves: a
+    // team-mate on the end of your hook is not hurt by it.  T_Damage is this
+    // tree's other caller and does not ask under arena -- RA2's T_Damage never
+    // calls this, and its `healthprotect` block has already decided team
+    // damage by then, `0` meaning a team-mate's health is hit.
     //
     // Asked through OnSameTeam(), which is this tree's one answer to "are these
     // two on a side together" and already carries arena's.
@@ -577,6 +594,16 @@ void T_Damage(edict_t *targ, edict_t *inflictor, edict_t *attacker, const vec3_t
     int         psave;
     int         te_sparks;
     int         sphere_notified;    // PGM
+
+    // A freed or disconnected edict takes no damage.  ClientDisconnect leaves
+    // `takedamage` set on the slot it empties, and several callers find
+    // their target without asking whether it is still there -- the
+    // Reckoning's misc_nuke, which walks every client slot, Ground Zero's
+    // kamikaze flyer, the floater's zap, fire_hit -- so without this a hit on
+    // a client who had just left ran player_die on the empty slot: a weapon
+    // drop, an obituary and a relink for nobody.
+    if (!targ->inuse)
+        return;
 
     if (!targ->takedamage)
         return;
@@ -694,7 +721,9 @@ void T_Damage(edict_t *targ, edict_t *inflictor, edict_t *attacker, const vec3_t
     client = targ->client;
 
     // PMM - defender sphere takes half damage
-    if ((client) && (client->owned_sphere) && (client->owned_sphere->spawnflags == 1)) {
+    // ...a sphere still there and still theirs, not a reused slot whose
+    // spawnflags happen to be 1 (G_OwnedSphere).
+    if ((client) && (G_OwnedSphere(targ)) && (client->owned_sphere->spawnflags == 1)) {
         damage *= 0.5f;
         if (!damage)
             damage = 1;
@@ -757,7 +786,8 @@ void T_Damage(edict_t *targ, edict_t *inflictor, edict_t *attacker, const vec3_t
     // Tourney's `client_protect` is the second disjunct: `resp.osp_r23c` is a
     // frame number OSP_seedPlayer sets to `client_protect` seconds ahead when a
     // player spawns into plain deathmatch with the blaster, and it makes them
-    // untouchable until it passes or they pick something up.  Carrying the
+    // untouchable until it passes or they pick something up, fire, hook or
+    // `kill`.  Carrying the
     // shell in p_view.c without this test left a protected player glowing and
     // taking full damage, which is the one state the feature must not produce.
     //
@@ -787,7 +817,8 @@ void T_Damage(edict_t *targ, edict_t *inflictor, edict_t *attacker, const vec3_t
 
     // CTF's DF_ARMOR_PROTECT: with the dmflag set, a teammate's shot does not
     // eat your armour either.  Gated on the ruleset because the dmflags bit
-    // itself is CTF's (0x40000) and means nothing elsewhere.
+    // (0x40000) is Ground Zero's DF_NO_STACK_DOUBLE everywhere else, and
+    // G_RogueDMFlag gives it to Threewave under `ctf`.
     if (G_Ruleset() == RULESET_CTF && targ->client && attacker->client &&
         targ->client->resp.ctf_team == attacker->client->resp.ctf_team &&
         targ != attacker && ((int)dmflags->value & DF_ARMOR_PROTECT)) {
@@ -803,6 +834,22 @@ void T_Damage(edict_t *targ, edict_t *inflictor, edict_t *attacker, const vec3_t
     //treat cheat/powerup savings the same as armor
     asave += save;
 
+// ROGUE - this option will do damage both to the armor and person. originally for DPU rounds
+    //
+    // Straight after the armour, which is Ground Zero's own order -- its
+    // CheckArmor, its team-damage return, then this -- and so ahead of the
+    // reductions the other donors put after the armour: RA2's healthprotect,
+    // CTF's resistance tech and tourney's runes now apply to the hit this
+    // restores, where below them it undid every one.  `save` is what the
+    // protections above refused -- godmode, the invulnerability powerup,
+    // tourney's spawn protection, a monster's invincibility -- so a target any
+    // of them covers stays covered; Ground Zero's guard restated the first two
+    // and had no others to know about.
+    if ((dflags & DAMAGE_DESTROY_ARMOR) && !save &&
+        !(dflags & DAMAGE_NO_PROTECTION))
+        take = damage;
+// ROGUE
+
     // `healthprotect`, the health half of RA2's friendly fire, in
     // the donor's own position -- after the armour has had its say and before
     // anything is taken off.  1 means nobody on your team takes health off you
@@ -815,8 +862,21 @@ void T_Damage(edict_t *targ, edict_t *inflictor, edict_t *attacker, const vec3_t
     // switch, and under arena its dmflags gate is off, so the two never both
     // fire.  meansOfDeath is rewritten rather than only `mod`, because
     // colosseum publishes it before this point and Killed() reads the global.
-    if (G_Ruleset() == RULESET_ARENA && targ->client &&
-        !(dflags & DAMAGE_NO_PROTECTION) && OnSameTeam(targ, attacker)) {
+    //
+    // Its first arm is RA2's answer to a flagged aimbot, which is where RA2
+    // has it (`rocketarena2@99f8bb2` g_combat.c): the damage lands on the
+    // attacker.  The victim's armour has already paid, and the attacker scores
+    // nothing for the rest, because score-by-damage asks for a victim who is
+    // not the attacker.  `resp.isbot` is RA_ZBotSample's verdict or the port
+    // the client connected from, and the sampler watches Gladiator bots too,
+    // whose aim can snap the way a ZBot's does -- so the redirect is for a
+    // cheating client and never for this library's own bots.
+    if (G_Ruleset() == RULESET_ARENA && attacker->client &&
+        attacker->client->resp.isbot && !(attacker->flags & FL_BOTCLIENT)) {
+        client = attacker->client;
+        targ = attacker;
+    } else if (G_Ruleset() == RULESET_ARENA && targ->client &&
+               !(dflags & DAMAGE_NO_PROTECTION) && OnSameTeam(targ, attacker)) {
         int protect = arenas[targ->client->resp.context].healthprotect;
 
         if (protect == 1 || (protect == 2 && targ != attacker))
@@ -839,8 +899,12 @@ void T_Damage(edict_t *targ, edict_t *inflictor, edict_t *attacker, const vec3_t
                                   targ->health - take < -40 ? 40 : take);
     }
 
-    // team damage avoidance
-    if (!(dflags & DAMAGE_NO_PROTECTION) && CheckTeamDamage(targ, attacker))
+    // team damage avoidance.  Not asked under arena: the healthprotect block
+    // above is arena's answer, and asked here the arena arm would return true
+    // for every team-mate, so `healthprotect 0` -- "Damage all", which
+    // arena.cfg sets for ra2map8 and ra2map22 -- could only ever take armour.
+    if (!(dflags & DAMAGE_NO_PROTECTION) && G_Ruleset() != RULESET_ARENA &&
+        CheckTeamDamage(targ, attacker))
         return;
 
     // CTF: hurting a flag carrier's escort earns the carrier's killer a bonus
@@ -855,22 +919,13 @@ void T_Damage(edict_t *targ, edict_t *inflictor, edict_t *attacker, const vec3_t
     if (G_Ruleset() == RULESET_CTF)
         CTFCheckHurtCarrier(targ, attacker);
 
-// ROGUE - this option will do damage both to the armor and person. originally for DPU rounds
-    if (dflags & DAMAGE_DESTROY_ARMOR) {
-        if (!(targ->flags & FL_GODMODE) && !(dflags & DAMAGE_NO_PROTECTION) &&
-            !(client && client->invincible_framenum > level.framenum)) {
-            take = damage;
-        }
-    }
-// ROGUE
-
     // Tourney's accuracy table, credited once, here, rather than at fifteen
     // sites across g_weapon.c and g_combat.c -- see src/tourney/osp_acc.c for
     // what that changes and why.  This is the point every one of those sites
     // was feeding: `take` is the damage that survived armour, powerups and the
     // team rules, which is what the report means by damage given and taken.
     if (G_IsOspRuleset())
-        OSP_accDamage(targ, attacker, mod, take);
+        OSP_accDamage(targ, inflictor, attacker, mod, take);
 
 // do the damage
     if (take) {
@@ -916,7 +971,9 @@ void T_Damage(edict_t *targ, edict_t *inflictor, edict_t *attacker, const vec3_t
             targ->health = targ->health - take;
 
 //PGM - spheres need to know who to shoot at
-        if (client && client->owned_sphere) {
+        // (only their own, alive: G_OwnedSphere -- a reused slot's `pain` is
+        // somebody else's)
+        if (client && G_OwnedSphere(targ)) {
             sphere_notified = true;
             if (client->owned_sphere->pain)
                 client->owned_sphere->pain(client->owned_sphere, attacker, 0, 0);
@@ -933,7 +990,7 @@ void T_Damage(edict_t *targ, edict_t *inflictor, edict_t *attacker, const vec3_t
 
 //PGM - spheres need to know who to shoot at
     if (!sphere_notified) {
-        if (client && client->owned_sphere) {
+        if (client && G_OwnedSphere(targ)) {
             sphere_notified = true;
             if (client->owned_sphere->pain)
                 client->owned_sphere->pain(client->owned_sphere, attacker, 0, 0);
@@ -1027,6 +1084,7 @@ void T_RadiusNukeDamage(edict_t *inflictor, edict_t *attacker, float damage, edi
     float   killzone, killzone2;
     trace_t tr;
     float   dist;
+    int     i;
 
     killzone = radius;
     killzone2 = radius * 2.0f;
@@ -1071,28 +1129,38 @@ void T_RadiusNukeDamage(edict_t *inflictor, edict_t *attacker, float damage, edi
                 ent->client->nuke_framenum = level.framenum + 20;
             VectorSubtract(ent->s.origin, inflictor->s.origin, dir);
             T_Damage(ent, inflictor, attacker, dir, inflictor->s.origin, vec3_origin, (int)points, (int)points, DAMAGE_RADIUS, mod);
+            // FL_NOGIB is for the death this hit causes, and player_die --
+            // its only reader -- has run inside T_Damage by now.  A survivor
+            // (invulnerable, god-moded, spawn-protected) kept it until their
+            // next death that should gib, which then threw no gibs.
+            if (ent->client)
+                ent->flags &= ~FL_NOGIB;
 //          }
         }
     }
-    ent = g_edicts + 1; // skip the worldspawn
     // cycle through players
-    while (ent) {
-        if ((ent->client) && (ent->client->nuke_framenum != level.framenum + 20) && (ent->inuse)) {
-            tr = gi.trace(inflictor->s.origin, NULL, NULL, ent->s.origin, inflictor, MASK_SOLID);
-            if (tr.fraction == 1.0f) {
-//              if ((g_showlogic) && (g_showlogic->value))
-//                  gi.dprintf ("Undamaged player in LOS with nuke, flashing!\n");
-                ent->client->nuke_framenum = level.framenum + 20;
-            } else {
-                dist = realrange(ent, inflictor);
-                if (dist < 2048)
-                    ent->client->nuke_framenum = max(ent->client->nuke_framenum, level.framenum + 15);
-                else
-                    ent->client->nuke_framenum = max(ent->client->nuke_framenum, level.framenum + 10);
-            }
-            ent++;
-        } else
-            ent = NULL;
+    //
+    // Every client slot, stepping past the ones with nothing to do.  Ground
+    // Zero's loop ended at the first slot that failed its test -- an empty one,
+    // or a player the damage pass above had already flashed -- so nobody after
+    // it was flashed at all (upstream q2pro and gladq2_src have it the same).
+    for (i = 1; i <= game.maxclients; i++) {
+        ent = g_edicts + i;
+        if (!ent->inuse || !ent->client ||
+            ent->client->nuke_framenum == level.framenum + 20)
+            continue;
+        tr = gi.trace(inflictor->s.origin, NULL, NULL, ent->s.origin, inflictor, MASK_SOLID);
+        if (tr.fraction == 1.0f) {
+//          if ((g_showlogic) && (g_showlogic->value))
+//              gi.dprintf ("Undamaged player in LOS with nuke, flashing!\n");
+            ent->client->nuke_framenum = level.framenum + 20;
+        } else {
+            dist = realrange(ent, inflictor);
+            if (dist < 2048)
+                ent->client->nuke_framenum = max(ent->client->nuke_framenum, level.framenum + 15);
+            else
+                ent->client->nuke_framenum = max(ent->client->nuke_framenum, level.framenum + 10);
+        }
     }
 }
 

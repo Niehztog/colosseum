@@ -229,6 +229,19 @@ void ValidateSelectedItem(edict_t *ent)
 
 //=================================================================================
 
+// The question every cheat command asks first, in baseq2's words: refused in
+// deathmatch and co-op unless the server runs `cheats 1`.  baseq2 writes it out
+// in each of its four; one copy is what lets Ground Zero's `disguise` ask the
+// same question rather than a fifth spelling of it.
+static bool CheatsRefused(edict_t *ent)
+{
+    if ((deathmatch->value || coop->value) && !sv_cheats->value) {
+        gi.cprintf(ent, PRINT_HIGH, "You must run the server with '+set cheats 1' to enable this command.\n");
+        return true;
+    }
+    return false;
+}
+
 /*
 ==================
 Cmd_Give_f
@@ -245,10 +258,8 @@ void Cmd_Give_f(edict_t *ent)
     bool        give_all;
     edict_t     *it_ent;
 
-    if ((deathmatch->value || coop->value) && !sv_cheats->value) {
-        gi.cprintf(ent, PRINT_HIGH, "You must run the server with '+set cheats 1' to enable this command.\n");
+    if (CheatsRefused(ent))
         return;
-    }
 
     name = gi.args();
 
@@ -390,10 +401,8 @@ argv(0) god
 */
 void Cmd_God_f(edict_t *ent)
 {
-    if ((deathmatch->value || coop->value) && !sv_cheats->value) {
-        gi.cprintf(ent, PRINT_HIGH, "You must run the server with '+set cheats 1' to enable this command.\n");
+    if (CheatsRefused(ent))
         return;
-    }
 
     ent->flags ^= FL_GODMODE;
     if (!(ent->flags & FL_GODMODE))
@@ -413,10 +422,8 @@ argv(0) notarget
 */
 void Cmd_Notarget_f(edict_t *ent)
 {
-    if ((deathmatch->value || coop->value) && !sv_cheats->value) {
-        gi.cprintf(ent, PRINT_HIGH, "You must run the server with '+set cheats 1' to enable this command.\n");
+    if (CheatsRefused(ent))
         return;
-    }
 
     ent->flags ^= FL_NOTARGET;
     if (!(ent->flags & FL_NOTARGET))
@@ -434,10 +441,8 @@ argv(0) noclip
 */
 void Cmd_Noclip_f(edict_t *ent)
 {
-    if ((deathmatch->value || coop->value) && !sv_cheats->value) {
-        gi.cprintf(ent, PRINT_HIGH, "You must run the server with '+set cheats 1' to enable this command.\n");
+    if (CheatsRefused(ent))
         return;
-    }
 
     if (ent->movetype == MOVETYPE_NOCLIP) {
         ent->movetype = MOVETYPE_WALK;
@@ -784,7 +789,19 @@ void Cmd_WeapPrev_f(edict_t *ent)
 Cmd_WeapNext_f
 =================
 */
-#if 0
+// Ground Zero's, like Cmd_WeapPrev_f above, so the pair is one algorithm run
+// both ways: stop at the first weapon whose `use` takes (`newweapon == it`).
+// The merge had kept Xatrix's copy of id's loop live and this one inside
+// Xatrix's `#if 0`.  id's loop -- the spine's as well -- succeeds on
+// `pers.weapon == it`, which only ChangeWeapon makes true, later, so only on
+// wrapping round to the weapon in hand: every press `use`d every weapon
+// owned, printed "No X for Y." for each one without ammo, and landed on the
+// next weapon only because the last `use` before the wrap is the one that
+// sticks.  Ground Zero reverses both scans for exactly that reason, so each
+// command still goes where its name says.  Xatrix's shared slots are
+// Use_Weapon2's and survive it: the Ionripper and the Phalanx are listed right
+// after the HyperBlaster and the Railgun, so a `use` the slot hands to its
+// partner fails this test and the scan takes the partner on its next step.
 void Cmd_WeapNext_f(edict_t *ent)
 {
     gclient_t   *cl;
@@ -817,37 +834,6 @@ void Cmd_WeapNext_f(edict_t *ent)
 //          return; // successful
         if (cl->newweapon == it)
             return;
-    }
-}
-#endif
-void Cmd_WeapNext_f(edict_t *ent)
-{
-    gclient_t   *cl;
-    int         i, index;
-    const gitem_t   *it;
-    int         selected_weapon;
-
-    cl = ent->client;
-
-    if (!cl->pers.weapon)
-        return;
-
-    selected_weapon = ITEM_INDEX(cl->pers.weapon);
-
-    // scan  for the next valid one
-    for (i = 1; i <= MAX_ITEMS; i++) {
-        index = (selected_weapon + MAX_ITEMS - i) % MAX_ITEMS;
-
-        if (!cl->pers.inventory[index])
-            continue;
-        it = &itemlist[index];
-        if (!it->use)
-            continue;
-        if (!(it->flags & IT_WEAPON))
-            continue;
-        it->use(ent, it);
-        if (cl->pers.weapon == it)
-            return; // successful
     }
 }
 
@@ -887,11 +873,15 @@ void Cmd_InvDrop_f(edict_t *ent)
 {
     const gitem_t   *it;
 
-    if (G_Ruleset() == RULESET_ARENA && G_MenuActive(ent) &&
-        ent->client->menu_owner == MENU_ARENA) {
+    if (G_Ruleset() == RULESET_ARENA) {
         // RA2 binds the menu's "back" to `drop`, the way it binds "select" to
         // `invuse`; there is nothing droppable in an arena anyway.
-        UseMenu(ent, 0);
+        if (G_MenuActive(ent) && ent->client->menu_owner == MENU_ARENA)
+            UseMenu(ent, 0);
+        // ...and with no menu open it drops nothing either, for the reason
+        // ClientCommand gives for `drop`: a dropped weapon is an item in a
+        // ruleset that has none, lying on the floor for whoever the round goes
+        // to next.  RA2's own Cmd_InvDrop_f never drops anything.
         return;
     }
 
@@ -942,7 +932,8 @@ Cmd_Kill_f
 void Cmd_Kill_f(edict_t *ent)
 {
     // An observer has nothing to kill.  Threewave tests `solid != SOLID_NOT`,
-    // which also catches a dead player -- who should be able to re-suicide.
+    // which is its observer test: player_die leaves `solid` alone, so a dead
+    // player passes it and may re-suicide, here as there.
     //
     // Tourney's spelling is its own and G_IsObserver() does not carry it: the
     // donor deleted baseq2's spectator system and says "watching" as
@@ -967,14 +958,15 @@ void Cmd_Kill_f(edict_t *ent)
     if (G_IsOspRuleset())
         ent->client->resp.osp_r23c = 0;
 
-    // The donor's three lines before the death, and they are the ones that
-    // make a tourney `kill` leave no trace.  Clearing `s.effects` and
-    // `s.renderfx` matters because CopyToBodyQue copies both to the corpse:
-    // whatever the body was wearing -- a quad shell, a rune glow, the CTF flag
-    // effect -- would otherwise go on glowing on the floor after its owner had
-    // gone.  And the hook is let go before the die rather than inside it,
-    // because tourney's grapple is not Threewave's and player_die releases
-    // Threewave's (p_client.c).
+    // The donor's three lines before the death.  The first two were what kept
+    // a 1999 `kill` from leaving a glowing corpse: id's CopyToBodyQue copied
+    // the whole entity state, `body->s = ent->s`, shell and rune glow
+    // included.  q2pro's copies it field by field and takes neither -- here
+    // and in the donor -- so they only clear a little early what
+    // PutClientInServer clears again.  The third lets go of tourney's hook
+    // ahead of the death; player_die lets go of it as well
+    // (G_PlayerResetGrapple), so this is the donor's line kept in the donor's
+    // place rather than the only release.
     if (G_IsOspRuleset()) {
         ent->s.effects = 0;
         ent->s.renderfx = 0;
@@ -990,7 +982,11 @@ void Cmd_Kill_f(edict_t *ent)
     if (ent->client->tracker_pain_framenum)
         RemoveAttackingPainDaemons(ent);
 
-    if (ent->client->owned_sphere) {
+    // Only a sphere that is still this player's (G_OwnedSphere): the pointer
+    // can outlive its sphere, and freeing the slot it names freed whatever
+    // had been spawned there since -- at every OSP match start, which kills
+    // everybody through here.
+    if (G_OwnedSphere(ent)) {
         G_FreeEdict(ent->client->owned_sphere);
         ent->client->owned_sphere = NULL;
     }
@@ -1321,27 +1317,15 @@ void Cmd_Say_f(edict_t *ent, bool team, bool arg0, bool bcast)
         return;
     }
 
+    // FloodProtect alone, under arena too.  RA2's own spam counter -- six lines
+    // in two seconds and the client was asked to `disconnect` itself, and
+    // muted if it did not -- is the defect the pinned donor deleted
+    // (rocketarena2@fa01a64: FloodProtect "is configurable, it expires, and
+    // the server enforces it"), and section 7 rule 7 keeps a donor's fix.
+    // `spamcount` and `spamtime` stay declared only because g_save.c's client
+    // table names them.
     if (FloodProtect(ent))
         return;
-
-    if (G_Ruleset() == RULESET_ARENA) {
-        if (ent->client->spamcount == -1)
-            return;
-
-        if (level.time < ent->client->spamtime + 2.0f) {
-            ent->client->spamcount++;
-            if (ent->client->spamcount > 5) {
-                ent->client->spamcount = -1;
-                gi.bprintf(PRINT_CHAT, "%s: Sorry guys, I talk too much\n",
-                           ent->client->pers.netname);
-                stuffcmd(ent, "disconnect\n");
-                return;
-            }
-        } else {
-            ent->client->spamcount = 1;
-        }
-        ent->client->spamtime = level.time;
-    }
 
     // RA2 deletes this test, and leaving it in leaked every team callout to
     // the other side.
@@ -1670,22 +1654,34 @@ void ClientCommand(edict_t *ent)
     // RA_HookThink()'s question, asked every frame from ClientThink, because
     // `grapple` can be voted off and a round can end under a player who is
     // still holding the key.
-    else if (G_Ruleset() == RULESET_ARENA && Q_stricmp(cmd, "grap_on") == 0)
+    //
+    // `hookon`/`hookoff` are the same latch under the names the rest of this
+    // tree uses, and the names the brain sends: with `usehook` following
+    // `grapple:` it plans grapple routes and issues EA_Command "hookon", which
+    // only `ctf` answered -- so under arena every attempt fell through to the
+    // chat line below, carrying whatever command line the engine had last
+    // tokenized, and the bot never grappled.
+    else if (G_Ruleset() == RULESET_ARENA &&
+             (Q_stricmp(cmd, "grap_on") == 0 || Q_stricmp(cmd, "hookon") == 0))
         ent->client->ctf_hookstate = CTF_HOOK_STATE_ON;
     // TURNOFF rather than 0: it has to say "the offhand hook is finished" and
     // not merely "no offhand hook is out", because those are the two cases
     // RA_HookThink() has to tell apart -- a bare 0 is also what a player firing
     // the Grapple ITEM from the weapon slot looks like, and that hook is not
     // the latch's to release.
-    else if (G_Ruleset() == RULESET_ARENA && Q_stricmp(cmd, "grap_off") == 0)
+    else if (G_Ruleset() == RULESET_ARENA &&
+             (Q_stricmp(cmd, "grap_off") == 0 || Q_stricmp(cmd, "hookoff") == 0))
         ent->client->ctf_hookstate = CTF_HOOK_STATE_TURNOFF;
     else if (G_Ruleset() == RULESET_ARENA && Q_stricmp(cmd, "listkeys") == 0)
         list_keys(ent);
     else if (G_Ruleset() == RULESET_ARENA && Q_stricmp(cmd, "listmaps") == 0)
         print_map_loop(ent);
-    else if (G_Ruleset() == RULESET_ARENA && Q_stricmp(cmd, "nextmap") == 0)
-        gi.cprintf(ent, PRINT_MEDIUM, "Next map is %s\n",
-                   get_next_map(level.mapname));
+    // get_next_map is NULL with no maploop, and a NULL `%s` is undefined.
+    else if (G_Ruleset() == RULESET_ARENA && Q_stricmp(cmd, "nextmap") == 0) {
+        const char *next = get_next_map(level.mapname);
+
+        gi.cprintf(ent, PRINT_MEDIUM, "Next map is %s\n", next ? next : level.mapname);
+    }
     // Three RA2 commands that are `return;` in the donor too -- clients bind
     // them and the server is expected to swallow them silently.
     else if (G_Ruleset() == RULESET_ARENA &&
@@ -1695,11 +1691,17 @@ void ClientCommand(edict_t *ent)
         return;
     else if (Q_stricmp(cmd, "entcount") == 0)       // PGM
         Cmd_Ent_Count_f(ent);                       // PGM
+    // Ground Zero's own test command, and a cheat: Rogue monsters do not see a
+    // disguised player, and RF_USE_DISGUISE has the client draw
+    // players/<model>/disguise.pcx in place of the skin -- under ctf, tdm or
+    // arena a player in no team's colours.  So it asks what god and notarget
+    // ask.  trigger_disguise sets the flag itself and is not behind this.
     else if (Q_stricmp(cmd, "disguise") == 0) {     // PGM
-        ent->flags |= FL_DISGUISED;
+        if (!CheatsRefused(ent))
+            ent->flags |= FL_DISGUISED;
     }
     // From a client rather than the console, so `server` is false --
-    // which is what makes the six dump commands console-only.
+    // which is what makes the nine dump commands console-only.
     // `serveronlybotcmds` gates the rest and defaults to 1.  Asked LAST, and
     // before the chat fallback, so no bot name can shadow a ruleset's command.
     else if (BotCmd(cmd, ent, false))

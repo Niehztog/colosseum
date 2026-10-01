@@ -692,6 +692,10 @@ void SP_monster_supertank(edict_t *self)
     self->monsterinfo.currentmove = &supertank_move_stand;
     self->monsterinfo.scale = MODEL_SCALE;
 
+    // The Reckoning's Powershield, and deliberately not on the latch: the
+    // spawnflag is the map's, so the world is the selector (R-CORE-11d), as in
+    // gladq2_src, whose XATRIX is always defined.  No retail map sets it -- id's two
+    // supertanks carry 1 and 2 -- so it reaches custom maps only.
     if (self->spawnflags & 8) {
         self->monsterinfo.power_armor_type = POWER_ARMOR_SHIELD;
         self->monsterinfo.power_armor_power = 400;

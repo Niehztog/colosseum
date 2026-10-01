@@ -124,9 +124,9 @@ static void cleanupHeal(edict_t *self, bool change_frame)
     // clean up target, if we have one and it's legit
     if (self->enemy && self->enemy->inuse) {
         // The claim is released here whichever field holds it -- see
-        // medic_ClaimPatient.  This is reached for a baseq2 medic too, because
-        // its frame table drives Ground Zero's `medic_cable_attack` and that
-        // aborts on an obstructed spawn point.
+        // medic_ClaimPatient.  Ground Zero's cable is the one that reaches
+        // this; baseq2's arm heals with id's (bq2_medic_cable_attack), which
+        // never aborts.
         self->enemy->monsterinfo.healer = NULL;
         if (self->enemy->owner == self)
             self->enemy->owner = NULL;
@@ -273,11 +273,12 @@ static edict_t *medic_FindDeadMonster(edict_t *self)
 // predicate reads `owner`, so the search and the claim have to move together
 // or the search tests a field nobody writes.
 //
-// What is not split, and is worth naming rather than leaving to be discovered:
-// the heal itself.  `medic_cable_attack`, `medic_hook_launch` and
-// `medic_hook_retract` are Ground Zero's for every flavour, and baseq2's
-// `bq2_medic_move_attackCable` drives them on id's frame distances.  Splitting
-// those too would be a second medic rather than a latch.
+// The heal itself is split the same way.  baseq2's
+// `bq2_medic_move_attackCable` drives `bq2_medic_cable_attack` and
+// `bq2_medic_hook_retract`, which are id's, because Ground Zero's cable is not
+// id's plus additions: it drops id's own range and pitch tests and leans on a
+// checkattack that baseq2's arm does not run (see bq2_medic_cable_attack).
+// Only `medic_hook_launch` is shared, and for a 400-mass medic it is id's line.
 static edict_t *bq2_medic_FindDeadMonster(edict_t *self)
 {
     edict_t *ent = NULL;
@@ -588,7 +589,12 @@ const mmove_t medic_move_pain2 = {FRAME_painb1, FRAME_painb15, medic_frames_pain
 
 void medic_pain(edict_t *self, edict_t *other, float kick, int damage)
 {
-    monster_done_dodge(self);
+    // The dodge bookkeeping, the heal's immunity to pain and the duck-flag
+    // clear are Ground Zero's and follow its predicate, as in gunner_pain: id's
+    // medic_pain and gladq2_src's have none of them, so a base medic hurt
+    // mid-heal flinches as id's does.
+    if (medic_UsesRogueBehavior(self))
+        monster_done_dodge(self);
 
     if ((self->health < (self->max_health / 2))) {
         if (self->mass > 400)
@@ -606,7 +612,8 @@ void medic_pain(edict_t *self, edict_t *other, float kick, int damage)
         return;     // no pain anims in nightmare
 
     // if we're healing someone, we ignore pain
-    if (self->monsterinfo.aiflags & AI_MEDIC)
+    if (medic_UsesRogueBehavior(self) &&
+        (self->monsterinfo.aiflags & AI_MEDIC))
         return;
 
     if (self->mass > 400) {
@@ -632,7 +639,8 @@ void medic_pain(edict_t *self, edict_t *other, float kick, int damage)
         gi.sound(self, CHAN_VOICE, sound_pain2, 1, ATTN_NORM, 0);
     }
     // PMM - clear duck flag
-    if (self->monsterinfo.aiflags & AI_DUCKED)
+    if (medic_UsesRogueBehavior(self) &&
+        (self->monsterinfo.aiflags & AI_DUCKED))
         monster_duck_up(self);
 }
 
@@ -721,14 +729,10 @@ void medic_die(edict_t *self, edict_t *inflictor, edict_t *attacker, int damage,
 {
     int     n;
 
-    // Ground Zero's comment, and it is true of ITS claim only: the shared
-    // Killed() clears `monsterinfo.healer`.  Nothing clears `owner`, so
-    // baseq2's own release is restored here -- without it a base medic that
-    // dies mid-heal leaves the corpse marked for good and no other medic will
-    // ever take it (id's line, m_medic.c, immediately above the gib check).
-    if (!medic_UsesRogueBehavior(self) &&
-        (self->enemy) && (self->enemy->owner == self))
-        self->enemy->owner = NULL;
+    // if we had a pending patient, he was already freed up in Killed -- the
+    // claim of either kind, `healer` or `owner`.  id released its claim here,
+    // but its Killed had already pointed `enemy` at the attacker, so that
+    // release tested the attacker and never freed a patient.
 
 // check for gib
     if (self->health <= self->gib_health) {
@@ -965,6 +969,13 @@ static void medic_cable_attack(edict_t *self)
         */      else {
             self->enemy->monsterinfo.aiflags |= AI_DO_NOT_COUNT;
             ED_CallSpawn(self->enemy);
+            // A corpse whose classname has no spawn function is freed by
+            // ED_CallSpawn, and the code below would run its cleared
+            // monsterinfo callbacks.  Abandon the heal as frame 51 would.
+            if (!self->enemy->inuse) {
+                abortHeal(self, true, false, false);
+                return;
+            }
 
             if (self->enemy->think) {
                 self->enemy->nextthink = level.framenum;
@@ -1090,9 +1101,108 @@ static const mframe_t medic_frames_attackCable[] = {
 };
 const mmove_t medic_move_attackCable = {FRAME_attack33, FRAME_attack60, medic_frames_attackCable, medic_run};
 
-// Baseq2's medic_move_attackCable, kept alongside Ground Zero's.
-// Ground Zero rewrote the cable attack wholesale -- different frame count,
-// different hook launch timing, and AI_MANUAL_STEERING handling.
+// Baseq2's cable itself, for the medic on id's arm, verbatim from
+// q2pro/src/game at the pin.  Ground Zero rewrote this too, and its copy is not
+// id's with additions: it drops id's `distance > 256` and pitch tests -- "done in
+// checkattack", which Ground Zero's medic_checkattack does against
+// MEDIC_MAX_HEAL_DISTANCE and baseq2's arm does not -- gibs a corpse within 32
+// units of the hook tip or one whose spawn point is blocked, makes the patient
+// DAMAGE_NO for the heal, and revives it AI_IGNORE_SHOTS | AI_DO_NOT_COUNT.  Run
+// from baseq2's frame table, that cable let an id medic raise a corpse from
+// across the room.  medic_hook_launch stays shared: for a 400-mass medic
+// Ground Zero's is id's line.
+static void bq2_medic_cable_attack(edict_t *self)
+{
+    vec3_t  offset, start, end, f, r;
+    trace_t tr;
+    vec3_t  dir, angles;
+    float   distance;
+
+    if (!self->enemy->inuse)
+        return;
+
+    AngleVectors(self->s.angles, f, r, NULL);
+    VectorCopy(medic_cable_offsets[self->s.frame - FRAME_attack42], offset);
+    G_ProjectSource(self->s.origin, offset, f, r, start);
+
+    // check for max distance
+    VectorSubtract(start, self->enemy->s.origin, dir);
+    distance = VectorLength(dir);
+    if (distance > 256)
+        return;
+
+    // check for min/max pitch
+    vectoangles(dir, angles);
+    if (angles[0] < -180)
+        angles[0] += 360;
+    if (fabsf(angles[0]) > 45)
+        return;
+
+    tr = gi.trace(start, NULL, NULL, self->enemy->s.origin, self, MASK_SHOT);
+    if (tr.fraction != 1.0f && tr.ent != self->enemy)
+        return;
+
+    if (self->s.frame == FRAME_attack43) {
+        gi.sound(self->enemy, CHAN_AUTO, sound_hook_hit, 1, ATTN_NORM, 0);
+        self->enemy->monsterinfo.aiflags |= AI_RESURRECTING;
+    } else if (self->s.frame == FRAME_attack50) {
+        self->enemy->spawnflags = 0;
+        self->enemy->monsterinfo.aiflags = 0;
+        self->enemy->target = NULL;
+        self->enemy->targetname = NULL;
+        self->enemy->combattarget = NULL;
+        self->enemy->deathtarget = NULL;
+        self->enemy->owner = self;
+        ED_CallSpawn(self->enemy);
+        // A corpse whose classname has no spawn function is freed by
+        // ED_CallSpawn, and FoundTarget below would run its cleared
+        // monsterinfo callbacks.  The heal is over: drop AI_MEDIC, as
+        // ai_checkattack does for a revived patient, or the medic would take
+        // its cable to the next enemy it fights.
+        if (!self->enemy->inuse) {
+            self->monsterinfo.aiflags &= ~AI_MEDIC;
+            return;
+        }
+        self->enemy->owner = NULL;
+        if (self->enemy->think) {
+            self->enemy->nextthink = level.framenum;
+            self->enemy->think(self->enemy);
+        }
+        self->enemy->monsterinfo.aiflags |= AI_RESURRECTING;
+        if (self->oldenemy && self->oldenemy->client) {
+            self->enemy->enemy = self->oldenemy;
+            FoundTarget(self->enemy);
+        }
+    } else {
+        if (self->s.frame == FRAME_attack44)
+            gi.sound(self, CHAN_WEAPON, sound_hook_heal, 1, ATTN_NORM, 0);
+    }
+
+    // adjust start for beam origin being in middle of a segment
+    VectorMA(start, 8, f, start);
+
+    // adjust end z for end spot since the monster is currently dead
+    VectorCopy(self->enemy->s.origin, end);
+    end[2] = self->enemy->absmin[2] + self->enemy->size[2] / 2;
+
+    gi.WriteByte(svc_temp_entity);
+    gi.WriteByte(TE_MEDIC_CABLE_ATTACK);
+    gi.WriteShort(self - g_edicts);
+    gi.WritePosition(start);
+    gi.WritePosition(end);
+    gi.multicast(self->s.origin, MULTICAST_PVS);
+}
+
+static void bq2_medic_hook_retract(edict_t *self)
+{
+    gi.sound(self, CHAN_WEAPON, sound_hook_retract, 1, ATTN_NORM, 0);
+    self->enemy->monsterinfo.aiflags &= ~AI_RESURRECTING;
+}
+
+// Baseq2's medic_move_attackCable, kept alongside Ground Zero's.  Both run
+// frames 33-60 with the hook launched on 42; Ground Zero's charges on 33-36,
+// negates the distances on 36-40 so the medic backs off its patient, zeroes
+// frame 52's -15 to compensate, and calls its own cable and retract.
 static const mframe_t bq2_medic_frames_attackCable[] = {
     { ai_move, 2,     NULL },
     { ai_move, 3,     NULL },
@@ -1104,16 +1214,16 @@ static const mframe_t bq2_medic_frames_attackCable[] = {
     { ai_charge, 4,   NULL },
     { ai_charge, 0,   NULL },
     { ai_move, 0,     medic_hook_launch },
-    { ai_move, 0,     medic_cable_attack },
-    { ai_move, 0,     medic_cable_attack },
-    { ai_move, 0,     medic_cable_attack },
-    { ai_move, 0,     medic_cable_attack },
-    { ai_move, 0,     medic_cable_attack },
-    { ai_move, 0,     medic_cable_attack },
-    { ai_move, 0,     medic_cable_attack },
-    { ai_move, 0,     medic_cable_attack },
-    { ai_move, 0,     medic_cable_attack },
-    { ai_move, -15,   medic_hook_retract },
+    { ai_move, 0,     bq2_medic_cable_attack },
+    { ai_move, 0,     bq2_medic_cable_attack },
+    { ai_move, 0,     bq2_medic_cable_attack },
+    { ai_move, 0,     bq2_medic_cable_attack },
+    { ai_move, 0,     bq2_medic_cable_attack },
+    { ai_move, 0,     bq2_medic_cable_attack },
+    { ai_move, 0,     bq2_medic_cable_attack },
+    { ai_move, 0,     bq2_medic_cable_attack },
+    { ai_move, 0,     bq2_medic_cable_attack },
+    { ai_move, -15,   bq2_medic_hook_retract },
     { ai_move, -1.5,  NULL },
     { ai_move, -1.2,  NULL },
     { ai_move, -3,    NULL },
@@ -1493,6 +1603,8 @@ void medic_attack(edict_t *self)
         if ((self->mass > 400) && (r > 0.8f) && (self->monsterinfo.monster_slots > 2))
             self->monsterinfo.currentmove = &medic_move_callReinforcements;
         else {
+            // The else is unreachable -- id's arm returned above -- and stays
+            // because tools/gates.py wants the bq2_ twin at every site.
             if (medic_UsesRogueBehavior(self))
                 self->monsterinfo.currentmove = &medic_move_attackCable;
             else
@@ -1535,9 +1647,9 @@ bool medic_checkattack(edict_t *self)
         // The deadline and the walk-in are Ground Zero's, and they are a
         // different design from id's -- not an addition to it.
         //
-        // baseq2 commits to the cable animation and lets `medic_cable_attack`
-        // decline frame by frame on its own `distance > 256` test, so a medic
-        // that cannot reach keeps swinging.  Ground Zero gives the attempt a
+        // baseq2 commits to the cable animation and lets its own cable,
+        // `bq2_medic_cable_attack`, decline frame by frame on the
+        // `distance > 256` test, so a medic that cannot reach keeps swinging.  Ground Zero gives the attempt a
         // MEDIC_TRY_TIME deadline, gibs the target when it expires, and walks
         // closer with AS_STRAIGHT when the corpse is beyond
         // MEDIC_MAX_HEAL_DISTANCE.  Neither half exists in id's file:
@@ -1586,7 +1698,7 @@ bool medic_checkattack(edict_t *self)
     // ROGUE
     // since his idle animation looks kinda bad in combat, if we're not in easy mode, always attack
     // when he's on a combat point
-    if (medic_UsesRogueBehavior(self) && skill->value > 0)
+    if (skill->value > 0)
         if (self->monsterinfo.aiflags & AI_STAND_GROUND) {
             self->monsterinfo.attack_state = AS_MISSILE;
             return true;

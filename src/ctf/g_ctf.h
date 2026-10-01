@@ -149,6 +149,9 @@ void CTFCheckHurtCarrier(edict_t *targ, edict_t *attacker);
 // GRAPPLE
 void CTFWeapon_Grapple(edict_t *ent);
 void CTFPlayerResetGrapple(edict_t *ent);
+bool CTFOwnsGrapple(edict_t *ent);
+void CTFGrappleTouch(edict_t *self, edict_t *other, cplane_t *plane, csurface_t *surf);
+void CTFForgetGrapple(gclient_t *cl);
 void CTFGrapplePull(edict_t *self);
 void CTFResetGrapple(edict_t *self);
 

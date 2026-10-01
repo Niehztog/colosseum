@@ -117,20 +117,34 @@ fi
 # The engine loads the game library from homedir, never from basedir (SPECS 1.5).
 cp -f "$LIB" "$TREE/home/colosseum/game$CPU.so" || die "cannot write $TREE/home"
 cp -r "$ROOT/colosseum/." "$TREE/home/colosseum/" 2>/dev/null
+# The brain that matches $LIB.  The Makefile copies it beside the library it
+# builds, and rebuilds $GLADDIR/release for whichever target it built LAST --
+# so the one there can be another target's, or wiped mid-switch.  An explicit
+# BRAINSO wins (BRAIN is this script's own yes/no), beside $LIB comes next,
+# the checkout's release/ is the fallback.
+if [ -z "${BRAINSO:-}" ]; then
+  if [ -f "$(dirname "$LIB")/gladiator.so" ]; then
+    BRAINSO=$(cd "$(dirname "$LIB")" && pwd)/gladiator.so
+  else
+    BRAINSO=$GLADDIR/release/gladiator.so
+  fi
+fi
+export COLOSSEUM_BRAIN=$BRAINSO
 BRAIN=""
-if [ -f "$GLADDIR/release/gladiator.so" ]; then
+if [ -f "$BRAINSO" ]; then
   # The brain is loaded from BASEDIR's gamedir, not homedir's -- that is where
   # BotSetPathVars looks and where every other harness here puts it.  It needs
   # its own assets too: pak7.pak holds the weapon and sound configs and the
   # bots/*.c characters the roster names, and the .aas files are the navigation
   # meshes.  Without pak7 the brain loads, says "couldn't load the weapon
   # config" and unloads itself again.
-  ln -sf "$GLADDIR/release/gladiator.so" "$TREE/colosseum/gladiator.so"
+  ln -sf "$BRAINSO" "$TREE/colosseum/gladiator.so"
   [ -f "$GLADDIR/assets/pak7.pak" ] && ln -sf "$GLADDIR/assets/pak7.pak" "$TREE/colosseum/pak7.pak"
   mkdir -p "$TREE/colosseum/maps"
+  # Copied, not linked: the brain writes a mesh back (botmatrix.sh says why).
   for a in "$GLADDIR"/assets/maps/*.aas; do
     case $a in *.original_baseline) continue ;; esac
-    [ -f "$a" ] && ln -sf "$a" "$TREE/colosseum/maps/$(basename "$a")"
+    [ -f "$a" ] && { rm -f "$TREE/colosseum/maps/$(basename "$a")"; cp "$a" "$TREE/colosseum/maps/$(basename "$a")"; }
   done
   # ...and say so when THIS map has none, because the failure is silent from
   # here: the brain loads, refuses the map with "no AAS file available", the
@@ -146,7 +160,7 @@ if [ -f "$GLADDIR/release/gladiator.so" ]; then
   fi
   BRAIN=1
 elif [ "$BOTS" -gt 0 ]; then
-  echo "watch.sh: no brain at $GLADDIR/release/gladiator.so -- running with no bots"
+  echo "watch.sh: no brain at $BRAINSO -- running with no bots"
   BOTS=0
 fi
 cp -f "$DRIVE" "$TREE/home/colosseum/play_drive.cfg" || die "cannot write the drive script"

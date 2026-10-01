@@ -59,6 +59,8 @@ Bots play in every ruleset but `sp` - all six multiplayer ones. They load, spawn
 
 Engines disagree about what to call the file: Q2PRO wants `game<cpu>.so`, R1Q2 the same shape (`gamei386.so`, `gamex86_64.so`), Yamagi a flat `game.so`. Name it whatever yours looks for.
 
+**On macOS**, the release packages need macOS 10.13 or later on an Intel Mac, and macOS 11 or later on Apple Silicon.
+
 **Game data.** Colosseum ships code and configuration, but none of the game assets, and it loads against the **original 1998 maps and paks**. Every one of these is somebody else's data, and you supply it:
 
 * **Quake II** - **mandatory.** The retail game, from the CD, [GOG](https://www.gog.com/en/game/quake_ii_quad_damage) or [Steam](https://store.steampowered.com/app/2320/QUAKE_II/). Every ruleset is played on its data, and it is the one thing nothing works without.
@@ -85,7 +87,7 @@ If you are not sure which one you have type `path` at the engine's console - it 
 
 **The library is the one file that is fussy about its name.** It is named for the platform it was built for - `gamex86_64.dll` or `gamex86.dll` on Windows, `gamex86_64.so`, `gamei386.so` or `gamearm64.so` on Linux, `gamex86_64.dylib` or `gamearm64.dylib` on macOS. Take it from a release or build it yourself ([`DEVELOPMENT.md`](DEVELOPMENT.md#building)). A release package carries **two** builds under that one name, both inside its `colosseum/`: the one in the folder itself is for the new game API, and `colosseum/oldapi/` holds the old one. Find your engine in the table in [Requirements](#requirements); if it wants the classic ABI, copy that second file over the first and delete the `oldapi/` directory, and either way rename it to whatever your engine looks for - Yamagi, for one, wants a flat `game.so`. The engine only ever looks for a library in the gamedir itself, so the spare build sits in that subdirectory doing nothing until you use it.
 
-**Nothing in the config set is required.** Every value in it is a default the code already carries, written down so you can see and change it; `colosseum/README.md` says what each file is.
+**Nothing in the config set is required.** The code carries a default for every cvar, and most of the set is those defaults written down so you can see and change them; the per-ruleset configs also choose a few values of their own -- the bot fill on, a match's limits -- and say so where they do. `colosseum/README.md` says what each file is.
 
 ### The paks
 
@@ -137,7 +139,7 @@ The AAS files - Area Awareness System, the botlib's own navigation data - are th
 
 Miss `pak7.pak` and the botlib loads, says *"couldn't load the weapon config"* and unloads itself. The botlib can fall back to reading real files instead of pak entries, so it is possible to unpack `pak7.pak` into the gamedir rather than leaving it packed; `InitGame` prints which of the two is in place. Miss the `.aas` and it loads, refuses the map with **`no AAS file available`**, and every bot that wanted it is destroyed. On the console that reads as `gladiator.so not available`, and no bots appear.
 
-**Every map needs a pre-computed AAS file, and the eight for the stock deathmatch maps ship with the release.** On Windows the botlib can start one itself: with `autolaunchbspc 1`, and `winbspc.exe` from the submodule's `tools/vendor/bspc/` copied into the gamedir, a map with no AAS file starts WinBSPC on it in the background, and bots cannot play that map until the file exists. The libvar is off by default and does nothing on other platforms. Making one by hand is two steps:
+**Every map needs a pre-computed AAS file, and the eight for the stock deathmatch maps ship with the release.** On Windows the botlib can start one itself: with `autolaunchbspc 1`, and `winbspc.exe` from the submodule's `tools/vendor/bspc/` copied into the gamedir, a map with no AAS file starts WinBSPC on it in the background, and bots cannot play that map until the file exists. The libvar is off by default and does nothing on other platforms. Turn it on in `server.cfg`, whose own `autolaunchbspc 0` would undo a `+set` of it on the command line. Making one by hand is two steps:
 
 1. `bspc -bsp2aas <map>.bsp` for the geometry - the 1999 tool, in the submodule's `tools/vendor/bspc/`. On Windows you can use `winbspc.exe` from the original Gladiator distribution, which offers a clickable UI. A map it refuses with `**** leaked ****` usually yields to `-nocsg`, which skips the brush chopping the leak test runs on;
 2. one load of that map with the botlib ingame, which computes reachability and clustering itself and writes the finished file (minutes, not seconds).
@@ -169,7 +171,8 @@ Either way, the order is what matters:
 
 * **`game` goes first.** Nothing can `exec` a file out of a gamedir the engine is not searching yet. With no server running, `game` takes effect the moment you set it, which is what makes the console route work at all.
 * **`map` goes last.** `maxclients` and `g_ruleset` are **latched**, meaning the server reads them when the map loads and not before.
-* **Raise `maxclients` before that.** It defaults to **4**, and it is the ceiling on everything else - how many bots the fill may add, how large a CTF side can be, how long an arena's queue may get. Leave it at 4 and nothing else has room to happen. The lines below use 32.
+* **On the command line every `+set` runs first**, wherever it stands: Q2PRO applies all of them before any other `+` command. So a `+set` of something a config also sets is undone by that config's `+exec`. `server.cfg` leaves the ruleset, both content layers, the modifiers (`runes`, `teamplay`, `hook`) and `bots` unset for exactly that reason, and a `configs/<ruleset>.cfg` sets only the first of them -- choosing it is what that file is for -- so the rest can be chosen per launch; anything else they set is theirs, and is changed by editing the file or by typing it at the console after the `exec`.
+* **Raise `maxclients` before that.** Q2PRO defaults it to **8** - the engine registers it before the game library loads, so the library's own default never applies - and it is the ceiling on everything else: how many bots the fill may add, how large a CTF side can be, how long an arena's queue may get. At 8 the fill takes every seat on the larger maps and the next person to arrive is turned away as full (see *Leave room for people* under [Once the map is up](#once-the-map-is-up)). The lines below use 32.
 
 ### One line per ruleset
 
@@ -204,30 +207,30 @@ sv addrandom 3       // three bots picked from the bot list
 sv addrandom         // just one
 sv removebot all     // clear them out again
 
-bots_minplayers 4    // hold the server at four, bots making up the difference
 botfill 1            // hold the server at the optimal number for the current map
+minimumplayers 4     // ...or at four, bots making up the difference (ctf, arena)
 ```
 
-`sv addbot` names one instead, and wants all four of `<name> <skin> <charfile> <charname>`; it prints its own usage if you give it fewer. As the host of a listen server you can also just type `menu` with no password and drive the 1999 bot menu instead. Every *other* bot command stays console-only, which is what `serveronlybotcmds` is for.
+`sv addbot` names one instead, and wants all four of `<name> <skin> <charfile> <charname>`; it prints its own usage if you give it fewer. As the host of a listen server you can also just type `menu` with no password and drive the 1999 bot menu instead - under `ctf` and `arena`, because under the four OSP rulesets `menu` is tourney's own menu. With `serveronlybotcmds` at its default of 1, the commands that manage bots (`addbot`, `addrandom`, `removebot`, `becomebot`, `botpause`) stay console-only and the bot menu wants the rcon password from everybody but that host. The few a bot itself types - `name`, `skin`, `gender`, `teamhelp`, `teamaccompany`, `checkpoint`, `gps` - are client commands whatever it says, and `bbox` needs only `cheats`.
 
 **The last two are settings rather than one-shot commands**, and they are how the server keeps itself populated instead of you adding bots by hand after every map change. The server re-checks them every few seconds, adding bots up to the target and removing them again as real players arrive; observers and spectators are counted out, so a full crowd of them does not hold bots back.
 
-`bots_minplayers` is one flat count for the whole server. **It goes by two names**, depending on the ruleset: `bots_minplayers` under the four OSP rulesets (`dm`, `dmpro`, `tdm`, `duel`), and `minimumplayers` under `ctf` and `arena`. Both names are registered under every ruleset, so setting the wrong one is accepted at the console and then quietly ignored - which is the one thing to get right here.
+`minimumplayers` is one flat count for the whole server. **It goes by two names**, depending on the ruleset: `minimumplayers` under `ctf` and `arena`, and `bots_minplayers` under the four OSP rulesets (`dm`, `dmpro`, `tdm`, `duel`). Both names are registered under every ruleset, so setting the wrong one is accepted at the console and then quietly ignored - which is the one thing to get right here. **Under the OSP four it takes a second setting as well**: tourney runs its flat count only with `bots_autoload` 2, 3 or 4 (3 or 4 under `duel`), and reads that when the game starts and when a vote changes the config, not live - so both go in the config, before the map loads. The shipped configs set `bots_autoload 0`, which runs no flat count at all.
 
 `botfill 1` determines the ideal target player count based on ruleset and map instead of taking a number from you. Each ruleset determines the bot count in its own way:
 
 * `dm` and `dmpro` - The number of bots depend on how many spawn points the map has.
 * `ctf` - half the spawn points the whole map shares, or one of the two bases if a base has fewer, then doubled so the two sides come out even.
-* `tdm` and `duel` - a full team on each side, `2 * team_maxplayers`. Under `duel` that is 2.
-* `arena` - For non-pickup arenas: a full team on each side as configured in `arena.cfg` (`playersperteam`), for pickup arenas: the amount of the arena's own spawn points. With nobody on the server yet the bots always wait in the pickup arena.
+* `tdm` and `duel` - a full team on each side: `2 * team_maxplayers` under `tdm`, and 2 under `duel`, whose teams are one player each whatever `team_maxplayers` says.
+* `arena` - For non-pickup arenas: a full team on each side as configured in `arena.cfg` (`playersperteam`, 1 where an arena names none), for pickup arenas: the amount of the arena's own spawn points. With nobody on the server yet the bots wait together in one arena - the one already holding the most of them, else the lowest-numbered pickup arena that will seat a bot, else the lowest-numbered arena that will - and follow the first person to join a team somewhere else.
 
 One switch, then, and a count that follows the map instead of one you have to guess again after every map change. It defaults to `0`, which leaves the flat count above in charge.
 
-Two things cap both settings: `maxclients`, and how many bots `bots.cfg` lists. Neither setting can seat more than the smaller of the two. To check that yours took effect, run `sv ruleset` - it prints a `botfill` line naming the ruleset, the target in force, and where that number came from.
+`maxclients` caps both settings, and under `ctf` and `arena` so does the bot list: once every bot `bots.cfg` names is in the game, neither setting seats more. The four OSP rulesets seat a second copy of a character under a suffixed name instead, so there only `maxclients` limits them. To check that yours took effect, run `sv ruleset` - it prints a `botfill` line naming the ruleset, the target in force, and where that number came from.
 
 **Leave room for people.** The target is the game's number rather than yours, so a `maxclients` at or below it means the bots take every slot on an empty server and somebody arriving finds it full - the fill only gives a seat back to a player who is already on the server. Set `maxclients` above the target that `sv ruleset` prints, and the seats above it stay open.
 
-Every shipped config that takes bots already carries both lines the same way: `botfill 1`, with the flat count zeroed beside it, so the server sizes itself to whatever it is running - all six of `dm`, `dmpro`, `tdm`, `duel`, `ctf` and `arena`. `sp` has no bots and sets neither. Under `duel` that target is exactly 2, so a duel server left alone bot-duels itself and a person arriving joins the queue behind them; `sv removebot all`, or `botfill 0` with a flat count beside it, is the way back to a fixed number.
+Every shipped config that takes bots already carries both lines the same way: `botfill 1`, with the flat count zeroed beside it, so the server sizes itself to whatever it is running - all six of `dm`, `dmpro`, `tdm`, `duel`, `ctf` and `arena`. `sp` has no bots and sets neither. Under `duel` that target is exactly 2, so a duel server left alone bot-duels itself and a person arriving joins the queue behind them; `sv removebot all`, or `botfill 0` with a flat count beside it - and under the OSP four the `bots_autoload` above - is the way back to a fixed number.
 
 **Letting the players decide.** Both settings are yours, but the people on the server can be given a say in them, and each ruleset family has its own way of asking:
 
@@ -279,9 +282,9 @@ real player from a filled seat, which is what a player counter needs. Nothing
 on a dedicated server turns these off; only a listen server in single player
 (one client slot) writes neither line.
 
-Anchor a pattern on the space: `disconnected from` and `reconnected from` both
-contain `connected from`, so match `\(.+ connected from ` and not the bare
-substring. Match the whole line if you want only arrivals.
+Anchor a pattern on the space: `disconnected from` contains `connected from`,
+so match `\(.+ connected from ` and not the bare substring. Match the whole line
+if you want only arrivals.
 
 Both lines go to the console, which means the server's `logfile`. What a
 ruleset says to the *players* on the same event is its own - `X disconnected`,
@@ -295,10 +298,10 @@ Folder `colosseum/` in this repository provides a default gamedir config set - t
 
 | file | what it is |
 |---|---|
-| `server.cfg` | the shared defaults, every one of them the code's own |
+| `server.cfg` | the shared defaults, every one of them the code's own. The per-launch choices - ruleset, content layers, modifiers, `bots` - are there as comments rather than set, so a `+set` on the command line keeps them |
 | `configs/<ruleset>.cfg` | one per ruleset: `dm`, `dmpro`, `tdm`, `duel`, `ctf`, `arena`, `sp` |
 | `arena.cfg` | Rocket Arena 2's own arena-definition file, read under `arena` |
-| `motd.txt` | the arena menu's message of the day |
+| `motd.txt` | the message of the day, shown by the arena menu and to anybody joining one of the four OSP rulesets |
 | `botcfg/` | where the bot list goes; the list itself comes with the botlib |
 
 There is deliberately **no `default.cfg`** in that set: the name is id's, it ships inside `baseq2/pak0.pak`, and it holds all 68 key bindings a client starts with. A file of ours by that name would leave a joining client with no bindings at all.
@@ -313,8 +316,8 @@ The inventories are kept with the code rather than written from memory - the fir
 
 * the server should run as an unprivileged user, in a directory it does not share with anything else
 * set a `rcon_password` which is not easy to guess
-* set `serveronlybotcmds` to 1 (its default) and leave `autolaunchbspc` unset
-* set `sv_cheats` to 0
+* set `serveronlybotcmds` to 1 (its default) and leave `autolaunchbspc` at 0
+* set `cheats` to 0
 * leave `netlog` empty - the name still resolves and does nothing, but an operator who set it expected something
 
 ## Known limitations
@@ -322,7 +325,7 @@ The inventories are kept with the code rather than written from memory - the fir
 * **AAS files are per map, and eight of them ship.** q2dm1 through q2dm8 are in the package; on any other map there are no bots until one has been made, by the two steps above.
 * **Savegames can not cross the two builds.** A savegame written by the default build is refused by an `API=old` build rather than misread, and the other way round.
 * **Under `API=old`, `ctf` loses the second powerup timer.** Threewave already uses 0..30 of the classic 32 stat slots; the pair lives at 32/33 and is reachable only on the new game API.
-* **`sp` on a dedicated server is co-op.** A dedicated server cannot run single player at all - that is the engine's rule, not this library's.
+* **`sp` on a dedicated server is co-op.** A dedicated server cannot run single player at all - that is the engine's rule, not this library's. So is `sp` on a listen server with more than one slot: only a one-slot server is single player, and the console says so at startup when it forces coop on.
 * **The content layers do not gate spawning.** With `rogue 0`, a Ground Zero map still spawns its own monsters. What the layer decides is narrower than that: for a monster *both* packs have, it picks whose version of the behaviour is used.
 * **A stock engine does not count the bots as players.** A bot is a client of the *game*, not of the engine: nothing ever connects, so no engine client slot exists for it and the server browser lists none of them - eight bots playing, and the server advertises itself as empty. It is not a Q2PRO defect; id's 1997 server, yquake2 and q2repro all report players the same way. The scoreboard, `players` and `sv clientdump` show them, because those are the game's. If you run your own engine build, [`server/`](server/README.md) carries a patch that fixes it.
 

@@ -37,7 +37,15 @@ import (
 	"q2playtest/ra2"
 )
 
-var fails int
+var fails, skips int
+
+// skip records a phase that did not run.  It is not a check and is not
+// counted as a pass: a skipped phase printed "[ ok ]" and the run's total
+// said "0 check(s) failed", which is what a run that tested it says too.
+func skip(name, why string) {
+	skips++
+	fmt.Printf("  [skip] %-40s %s\n", name, why)
+}
 
 func check(name string, ok bool, detail string) {
 	tag := " ok "
@@ -70,7 +78,7 @@ func rows(tag, cfg string, cv map[string]string, port int,
 	}
 	path := d + "/colosseum/arena.cfg"
 	os.Remove(path)
-	if err := os.WriteFile(path, []byte(cfg), 0o644); err != nil {
+	if err := playtest.WriteFixture(path, []byte(cfg), 0o644); err != nil {
 		return nil, err
 	}
 
@@ -152,8 +160,8 @@ func main() {
 	flag.Parse()
 
 	if *glad == "" {
-		check("skipped", true, "no -gladdir, and InstallBrain needs it")
-		fmt.Printf("\n%d check(s) failed\n", fails)
+		skip("everything", "no -gladdir, and InstallBrain needs it")
+		fmt.Printf("\n%d check(s) failed, %d skipped\n", fails, skips)
 		return
 	}
 
@@ -229,7 +237,7 @@ func main() {
 		check("menu/"+ph.tag, len(wrong) == 0, detail)
 	}
 
-	fmt.Printf("\n%d check(s) failed\n", fails)
+	fmt.Printf("\n%d check(s) failed, %d skipped\n", fails, skips)
 	if fails > 0 {
 		os.Exit(1)
 	}

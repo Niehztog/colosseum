@@ -4,9 +4,11 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"math/rand"
 	"regexp"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/packetflinger/libq2/bot"
@@ -95,6 +97,27 @@ const (
 )
 
 // NewBot builds a client that will connect to host:port as name.
+// qports hands out one qport per client this process makes.  q2pro tells two
+// clients at one address apart by it and nothing else (SV_PacketEvent), and
+// every client here is 127.0.0.1; libq2 draws it from rand.Intn(256), so
+// sixteen clients shared one about a third of the time.  Then the second
+// connect DROPS the first as "reconnected", and until it does the server
+// credits one client's packets to the other.  Sequential from a random base,
+// so two scenarios run side by side are unlikely to start on the same one,
+// and never 0, which libq2 reads as "pick one".
+var qports atomic.Uint32
+
+func init() { qports.Store(uint32(1 + rand.Intn(60000))) }
+
+func nextQPort() int {
+	for {
+		q := int(qports.Add(1) & 0xffff)
+		if q != 0 {
+			return q
+		}
+	}
+}
+
 func NewBot(name, host string, port int) *Bot {
 	ui := pl.NewUserinfo()
 	ui["name"] = name
@@ -112,6 +135,7 @@ func NewBot(name, host string, port int) *Bot {
 		User:    ui,
 		Version: "q2playtest",
 	}
+	p.b.Netchan.QPort = nextQPort()
 
 	p.b.RegisterCallback(message.CallbackOnBegin, func(_ any, _ *message.Buffer) {
 		p.once.Do(func() { close(p.spawned) })
@@ -266,12 +290,29 @@ func (p *Bot) Start(timeout time.Duration) error {
 		if p.err != nil {
 			return fmt.Errorf("%s: %w", p.Name, p.err)
 		}
-		return fmt.Errorf("%s: never spawned in", p.Name)
+		return p.deaf(fmt.Errorf("%s: never spawned in", p.Name))
 	}
 }
 
+// deaf appends why the client stopped hearing the server, when it has, to a
+// wait's error: a timeout on a client whose reader died is not a slow server,
+// and the error said nothing else.
+func (p *Bot) deaf(err error) error {
+	if rerr := p.b.ReadErr(); rerr != nil {
+		return fmt.Errorf("%w -- and the client stopped hearing the server: %v", err, rerr)
+	}
+	return err
+}
+
 // Cmd sends a console command to the server, as if the player typed it.
+//
+// From the caller's goroutine, while libq2's receive loop and frame timer
+// write the same outgoing message -- which is safe only because the vendored
+// libq2 carries patches/libq2-v1.0.335-netchan.patch.  The reference to NetMu
+// below is what keeps it carried: a `go mod vendor` that drops the patch
+// fails to compile here instead of racing quietly.
 func (p *Bot) Cmd(format string, a ...any) {
+	_ = &p.b.NetMu
 	p.b.AddClientString(format+"\n", a...)
 }
 
@@ -300,7 +341,7 @@ func (p *Bot) WaitFrames(n int, timeout time.Duration) error {
 		}
 		time.Sleep(20 * time.Millisecond)
 	}
-	return fmt.Errorf("%s: only reached frame %d, wanted %d", p.Name, p.Frame(), target)
+	return p.deaf(fmt.Errorf("%s: only reached frame %d, wanted %d", p.Name, p.Frame(), target))
 }
 
 // PMType is the pmove type the server last reported for this client.
@@ -428,8 +469,8 @@ func (p *Bot) WaitStat(n, want int, timeout time.Duration) (int, error) {
 		}
 		time.Sleep(20 * time.Millisecond)
 	}
-	return p.Stat(n), fmt.Errorf("%s: stats[%d] is %d, wanted %d",
-		p.Name, n, p.Stat(n), want)
+	return p.Stat(n), p.deaf(fmt.Errorf("%s: stats[%d] is %d, wanted %d",
+		p.Name, n, p.Stat(n), want))
 }
 
 // Press holds the given BUTTON_* bits down for `hold`, then releases them, and
@@ -508,7 +549,7 @@ func (p *Bot) WaitPrint(re string, timeout time.Duration) (string, error) {
 		}
 		time.Sleep(20 * time.Millisecond)
 	}
-	return "", fmt.Errorf("%s: no print matched %q", p.Name, re)
+	return "", p.deaf(fmt.Errorf("%s: no print matched %q", p.Name, re))
 }
 
 // StatusBar is the statusbar program last sent to this client, rejoined from
@@ -615,7 +656,7 @@ func (p *Bot) WaitConfigString(n int, re string, timeout time.Duration) (string,
 		}
 		time.Sleep(20 * time.Millisecond)
 	}
-	return "", fmt.Errorf("%s: configstring %d never matched %q (is %q)", p.Name, n, re, p.ConfigString(n))
+	return "", p.deaf(fmt.Errorf("%s: configstring %d never matched %q (is %q)", p.Name, n, re, p.ConfigString(n)))
 }
 
 // PlayerSkin returns this client's own entry in the player configstring block,
@@ -646,7 +687,7 @@ func (p *Bot) WaitStuff(re string, timeout time.Duration) (string, error) {
 		}
 		time.Sleep(20 * time.Millisecond)
 	}
-	return "", fmt.Errorf("%s: no stuffed command matched %q", p.Name, re)
+	return "", p.deaf(fmt.Errorf("%s: no stuffed command matched %q", p.Name, re))
 }
 
 // Layout is the last scoreboard/layout string the server sent this client.
@@ -666,7 +707,7 @@ func (p *Bot) WaitLayout(re string, timeout time.Duration) (string, error) {
 		}
 		time.Sleep(20 * time.Millisecond)
 	}
-	return "", fmt.Errorf("%s: no layout matched %q", p.Name, re)
+	return "", p.deaf(fmt.Errorf("%s: no layout matched %q", p.Name, re))
 }
 
 // Centers returns every centerprint this client received.
@@ -688,7 +729,7 @@ func (p *Bot) WaitCenter(re string, timeout time.Duration) (string, error) {
 		}
 		time.Sleep(20 * time.Millisecond)
 	}
-	return "", fmt.Errorf("%s: no centerprint matched %q", p.Name, re)
+	return "", p.deaf(fmt.Errorf("%s: no centerprint matched %q", p.Name, re))
 }
 
 // ConnectKey sets a userinfo key BEFORE Start, so that it travels in the

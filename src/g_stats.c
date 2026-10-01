@@ -1,3 +1,20 @@
+/*
+Copyright (C) 1997-2001 Id Software, Inc.
+
+This program is free software; you can redistribute it and/or modify
+it under the terms of the GNU General Public License as published by
+the Free Software Foundation; either version 2 of the License, or
+(at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+GNU General Public License for more details.
+
+You should have received a copy of the GNU General Public License along
+with this program; if not, write to the Free Software Foundation, Inc.,
+51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+*/
 // Colosseum per-ruleset stat slot map and composed statusbar --
 // The map itself is in g_stats.h; this is the resolution, the
 // accessors and the emitter.
@@ -336,7 +353,8 @@ typedef struct {
     // sb_shape_baseq2 and draw the powerup countdown sixteen pixels right of
     // where 1999 put it.  The composed bar is token-identical to the donor's
     // literal in every other respect, read off a client on q2ctf1, so this one
-    // number was the whole divergence.
+    // number was the whole divergence.  The second powerup timer is drawn at
+    // the same x, above it (sb_universal).
     int     timer1_x;
 } sb_shape_t;
 
@@ -406,12 +424,18 @@ static void sb_universal(statusbar_t *sb, const sb_shape_t *shape)
     sb_endif(sb);
 
     // timer 2 (pent).  The shared mechanic: one call site, one place in the
-    // bar, and the slot pair comes from the ruleset's map -- 18/19 under dm
-    // and sp, 32/33 under ctf, nothing at all on a server without protocol
-    // extensions under ctf.
+    // bar, and the slot pair comes from the ruleset's map -- 29/30 under the
+    // OSP four, 26/27 under arena, 18/19 under sp, 32/33 under ctf, and
+    // nothing at all under ctf on a server without protocol extensions.
+    //
+    // At timer 1's x, directly above it, as every donor that draws both has
+    // it: baseq2 at 262 and 262, tourney's four bars at 246 and 246 -- which a
+    // fixed 262 here moved sixteen pixels right of its donor.  Threewave and
+    // RA2 draw no second timer; theirs is this tree's, and stands over their
+    // own timer 1 at 246.
     sb_if(sb, SID_TIMER2_ICON);
     sb_layout(sb, "yb", -76);
-    sb_layout(sb, "xv", 262);
+    sb_layout(sb, "xv", shape->timer1_x);
     sb_num(sb, 2, SID_TIMER2);
     sb_layout(sb, "xv", 296);
     sb_pic(sb, SID_TIMER2_ICON);
@@ -436,12 +460,13 @@ static void sb_frags(statusbar_t *sb)
 
 // BASEQ2'S DM tail is gone, and the compiler is what said so.  It drew the
 // spectator banner and the chase-cam name, and it was reached through the
-// composer's `default:` arm, which only RULESET_DM ever took -- `sp` breaks
-// early with no tail at all and the other rulesets have their own.  When `dm`
+// composer's `default:` arm, which only RULESET_DM ever took -- `sp` had its
+// own arm and the other rulesets have their own tails.  When `dm`
 // became OSP's RegularDM the arm had no ruleset left, and -Werror=unused-function
 // reported it on the first build after the switch was made exhaustive.
 //
-// Nothing inherits it: SID_SPECTATOR is mapped only under `sp` now (the OSP
+// Only its chase-cam name survives, as sp's arm in sb_compose.  The banner
+// does not: SID_SPECTATOR is mapped only under `sp` now (the OSP
 // column claims 17 for SID_OSP_MATCHSTATE, which is permitted for a
 // ruleset with its own observer), and every remaining bar draws its own frags.
 
@@ -774,8 +799,19 @@ static void sb_compose(statusbar_t *sb, ruleset_t r)
                         OSP_IsTeams());
         break;
     case RULESET_SP:
-        // The campaign has no frag counter, no spectators and no chase cam --
-        // baseq2 installs single_statusbar alone here and so does this.
+        // The campaign has no frag counter -- baseq2 installs single_statusbar
+        // alone here -- but it does have a chase camera, which baseq2's
+        // campaign did not: the Gladiator observer enters it from the attack
+        // and jump keys (GetChaseTarget), and G_SetSpectatorStats writes the
+        // chased player's name into SID_CHASE.  Without this element nothing
+        // drew it.  baseq2's own dm_statusbar block, in slot terms.
+        sb_if(sb, SID_CHASE);
+        sb_layout(sb, "xv", 0);
+        sb_layout(sb, "yb", -68);
+        sb_raw(sb, "string \"Chasing\"");
+        sb_layout(sb, "xv", 64);
+        sb_stat_string(sb, SID_CHASE);
+        sb_endif(sb);
         break;
     case RULESET_COUNT:
         break;

@@ -21,7 +21,14 @@
 // the same shape of fix are in q2pro's own CTF: PutClientInServer there calls
 // PMenu_Close() before the memset for exactly this reason.
 //
-// Exit 0 the count was flat, 1 it grew, 2 the scenario could not run.
+// THE COUNT IS NOT TAKEN ANY MORE, and the reason is at the skip below: the
+// headless driver it used was the `spectator` userinfo key, which arena no
+// longer honours (R-RA-17).  What still runs is the second half -- the menu
+// opens, closes and reopens -- which is the half that catches a fix freeing a
+// menu the client was still using.
+//
+// Exit 0 the menu checks passed (the count is reported as SKIP), 1 one
+// failed, 2 the scenario could not run.
 package main
 
 import (
@@ -70,7 +77,13 @@ func main() {
 	}
 }
 
-var failed int
+var failed, skipped int
+
+// skip records a check that did not run.  It is not a pass.
+func skip(name, why string) {
+	skipped++
+	fmt.Printf("  SKIP  %-30s %s\n", name, why)
+}
 
 func check(name string, ok bool, detail string) {
 	if ok {
@@ -139,92 +152,25 @@ func run(q2, ref, lib, dir, mapname string, arena, respawns, port int, label str
 	}
 	fmt.Println("  ..    round is live, both are fighters")
 
-	// The driver.  RA2 dispatches no `kill` -- Cmd_Kill_f is q_unused -- and a
-	// bot cannot shoot its way to a death, so the respawn is reached the other
-	// way PutClientInServer is: `spectator 1` in the userinfo makes
-	// pers.spectator disagree with resp.spectator, and ClientBeginServerFrame
-	// answers that with spectator_respawn() five seconds later.  It is the same
-	// PutClientInServer a death reaches through respawn(), and it lands with the
-	// observer menu open because PutClientInServer's own last statement --
-	// move_to_arena(..., 1) -- is what opens it.
-	//
-	// A userinfo update is one unreliable-channel message and the gate it opens
-	// is only re-read once every five seconds, so resend until the server says
-	// it landed.  Retrying the trigger cannot make a leaking build look clean:
-	// the count below is a separate observation and holds however many attempts
-	// it took to get there.
-	var spectErr error
-	for i := 0; i < 5; i++ {
-		subject.SetUserinfo("spectator", "1")
-		if _, spectErr = subject.WaitPrint(`moved to the sidelines`, 12*time.Second); spectErr == nil {
-			break
-		}
-	}
-	if spectErr != nil {
-		return fmt.Errorf("spectator_respawn never ran: %w", spectErr)
-	}
-	// let the placement and the menu it opens settle
+	// THE RESPAWN HALF CANNOT BE DRIVEN, and is a stated skip rather than a
+	// pass.  Its driver was the `spectator` userinfo key: RA2 dispatches no
+	// `kill` (Cmd_Kill_f is q_unused), so a headless client reached
+	// PutClientInServer by toggling `spectator` and letting spectator_respawn
+	// run.  That key is inert under arena now (R-RA-17) -- RA2's own copy
+	// never synced resp.spectator, so `spectator 1` respawned the client every
+	// five seconds for good -- and every other way into PutClientInServer
+	// under arena is a death.  A death needs a killer: a harness client cannot
+	// get through the 200/200 default loadout reliably, and a Gladiator bot
+	// can, but the brain allocates through gi.TagMalloc(TAG_GAME), the same
+	// z_stats row this counts, and its route caches grow while it hunts.  So
+	// the block count would measure the bot.  The fix it guarded -- the menus
+	// closed before PutClientInServer's memset -- is unchanged and is in
+	// menu.c; what is lost is the driver, and this says so.
+	skip("respawns do not grow the heap",
+		"no headless path into PutClientInServer under arena since R-RA-17")
+	_ = respawns
+	_ = gameUsage
 	subject.WaitFrames(20, 10*time.Second)
-
-	base, err := gameUsage(srv)
-	if err != nil {
-		return err
-	}
-	fmt.Printf("  ..    after the first respawn: %d blocks, %d bytes\n", base.blocks, base.bytes)
-
-	// Every further respawn opens one observer menu and lets go of the one
-	// before it, so the count is flat on a build that frees what it drops.
-	//
-	// THE DRIVER HAS TO KEEP ASKING.  An earlier version of this waited for the
-	// respawn to repeat on its own, on the reading that spectator_respawn runs
-	// for as long as pers.spectator disagrees with resp.spectator -- it does
-	// not: PutClientInServer sets `resp.spectator = pers.spectator` on both of
-	// its arms, so one userinfo change buys exactly one respawn and the wait
-	// timed out on every build.  So the toggle is driven, both ways, and both
-	// ways are respawns: `spectator 0` is the one that lands with a menu open,
-	// because PutClientInServer returns early for a spectator and never reaches
-	// the move_to_arena that opens it.
-	var last usage
-	toggle := func(i int, value, want string) error {
-		seen := len(subject.Prints())
-		for try := 0; try < 5; try++ {
-			subject.SetUserinfo("spectator", value)
-			if err := waitForPrint(subject, seen, want, 12*time.Second); err == nil {
-				return nil
-			}
-		}
-		return fmt.Errorf("respawn %d: no %q after 5 attempts", i, want)
-	}
-	for i := 1; i <= respawns; i++ {
-		if err := toggle(i, "0", `joined the game`); err != nil {
-			return err
-		}
-		subject.WaitFrames(20, 10*time.Second)
-		if err := toggle(i, "1", `moved to the sidelines`); err != nil {
-			return err
-		}
-		subject.WaitFrames(20, 10*time.Second)
-		u, err := gameUsage(srv)
-		if err != nil {
-			return err
-		}
-		last = u
-		fmt.Printf("  ..    respawn pair %d: %+d blocks, %+d bytes against the first\n",
-			i, u.blocks-base.blocks, u.bytes-base.bytes)
-	}
-
-	check("respawns do not grow the heap", last.blocks <= base.blocks,
-		fmt.Sprintf("%d blocks after %d further respawns, %d after the first (%+d)",
-			last.blocks, respawns, base.blocks, last.blocks-base.blocks))
-
-	// Back into the arena for the menu checks, and then let it settle: the
-	// driver stops on its own now (one userinfo change is one respawn), so what
-	// this waits for is the last respawn's own statusbar repaint landing before
-	// anything reads the bar.
-	if err := toggle(0, "0", `joined the game`); err != nil {
-		return err
-	}
-	subject.WaitFrames(80, 20*time.Second)
 
 	// ...and the menu still has to WORK afterwards, in both directions: a fix
 	// that freed a menu the client was still using would pass the count and
@@ -260,8 +206,12 @@ func run(q2, ref, lib, dir, mapname string, arena, respawns, port int, label str
 			len(open), openTitle, len(closed), len(again), againTitle))
 	check("menu still closes", closed != open, trunc(playtest.Decode(closed)))
 
-	check("server survived", len(srv.Grep(`Segmentation|assertion|Z_Free|bad magic`)) == 0,
-		"no crash or heap complaint in the console")
+	// A heap complaint is printed; a crash is not -- q2proded says nothing on
+	// SIGSEGV -- so both halves are asked.
+	aliveErr := srv.Alive(5 * time.Second)
+	check("server survived", aliveErr == nil &&
+		len(srv.Grep(`Segmentation|assertion|Z_Free|bad magic`)) == 0,
+		fmt.Sprintf("answering: %v; no heap complaint in the console", aliveErr))
 	return nil
 }
 

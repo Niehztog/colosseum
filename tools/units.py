@@ -18,7 +18,7 @@ site written against the other is now a unit mix.  That is how the gekk's three
 `attack_finished` sites came to disagree with the other fifty, and no
 upstream check could have seen it.
 
-FOUR CHECKS
+FIVE CHECKS
 
   MIX    an int-declared timer field used with level.time, or a float-declared
          one used with level.framenum, on the same line.
@@ -38,7 +38,17 @@ FOUR CHECKS
          four more survived in CTF, Ground Zero and the Gladiator observer
          until somebody read the assignments side by side.
 
-None of the three can see a comparison written entirely in the wrong unit --
+  STEP   an int-declared timer stepped by FRAMETIME -- `nextthink +=
+         FRAMETIME`, `timestamp += FRAMETIME`.  FRAMETIME is 0.1 SECONDS, so
+         on an int frame count the step truncates to nothing: Ground Zero's
+         spawn-in sphere froze forever and the Carrier's wave lost its
+         kamikaze that way, and the four checks above could not see either,
+         because neither line names a clock.
+
+The timer types come from g_local.h and the two donor headers that declare
+struct members of their own, arena.h and osp_types.h.
+
+None of them can see a comparison written entirely in the wrong unit --
 `SV_RunThink`'s `thinktime > level.time` mentions no timer field at all.  Only
 running a level and waiting finds that, which is the census check's job and why
 `sv ruleset` prints level.framenum.
@@ -75,6 +85,9 @@ FLOAT_LIT = re.compile(r'(?<![\w.])\d+\.\d*f?(?![\w.])')
 # elsewhere on the line from reading as one.
 # `pmove.pm_time = <something>`.  The value is captured so an assignment of a
 # literal 0 -- "cancel the hold", which has no unit at all -- is not a finding.
+# `field += FRAMETIME`, `field -= FRAMETIME`, `field = field + FRAMETIME`.
+STEP_RE = re.compile(r'(?:->|\.)(\w+)\s*(?:[+-]=\s*[^;]*\bFRAMETIME\b|'
+                     r'=\s*[\w.>-]*\b\1\s*[+-]\s*[^;]*\bFRAMETIME\b)')
 PM_TIME = re.compile(r'([\w\[\]\.>-]*\bpm_time)\s*=\s*([^;]+);')
 
 ADJACENT_LIT = re.compile(
@@ -114,6 +127,11 @@ def sources(tree):
 # is a real reversion of a real fix from this import, applied to a copy of the
 # tree in memory.
 SELFTESTS = [
+    # The defect STEP exists for, as Ground Zero's port spelled it.
+    ('frametime step', 'g_spawn.c',
+     ('self->nextthink = level.framenum + 1;',
+      'self->nextthink += FRAMETIME;'),
+     'stepped by FRAMETIME'),
     ('mix', 'g_weapon.c',
      ('trap->timestamp = level.framenum + 30 * BASE_FRAMERATE;',
       'trap->timestamp = level.time + 30;'),
@@ -189,10 +207,14 @@ def run(tree, files):
     header = os.path.join(tree, 'g_local.h')
     if not os.path.exists(header):
         return ['units.py: no g_local.h in %s' % tree]
-    types = declared_types(dict(files).get(header) or
-                           open(header, encoding='latin-1').read())
+    types = {}
+    for h in ('arena/arena.h', 'tourney/osp_types.h', 'g_local.h'):
+        hp = os.path.join(tree, h)
+        if os.path.exists(hp):
+            types.update(declared_types(dict(files).get(hp) or
+                                        open(hp, encoding='latin-1').read()))
 
-    mix, scale, shift = [], [], []
+    mix, scale, shift, step = [], [], [], []
     clocks = {}     # field -> {'time': n, 'framenum': n}
 
     for path, text in files:
@@ -223,6 +245,13 @@ def run(tree, files):
                         shift.append((name, i, line.strip()[:70]))
                 else:
                     shift.append((name, i, line.strip()[:70]))
+
+            # STEP: an int frame count moved by a seconds constant.  Asked
+            # before the clock filter, because the defect names no clock.
+            for m in STEP_RE.finditer(line):
+                f = m.group(1)
+                if types.get(f) == 'int' and f not in NOT_TIMER:
+                    step.append((name, i, f, line.strip()[:70]))
 
             has_t = 'level.time' in line
             has_f = 'level.framenum' in line
@@ -264,7 +293,10 @@ def run(tree, files):
 
     out.append(f'units.py: {len(types)} declared timer field(s); '
                f'{len(mix)} mix, {len(scale)} lost-scale, {len(split)} split, '
-               f'{len(shift)} raw pm_time')
+               f'{len(shift)} raw pm_time, {len(step)} FRAMETIME step')
+    for n, i, f, txt in step:
+        out.append(f'  !! {n}:{i}: {f} is an int frame count stepped by '
+                   f'FRAMETIME, which is 0.1 seconds and truncates to 0: {txt}')
 
     for n, i, f, why, txt in mix:
         out.append(f'  !! {n}:{i}: {f} -- {why}: {txt}')
@@ -281,7 +313,7 @@ def run(tree, files):
         out.append(f'  !! {n}:{i}: pm_time written without PM_TIME_SHIFT -- an '
                    f'extended server holds for an eighth as long: {txt}')
 
-    if not (mix or scale or split or shift):
+    if not (mix or scale or split or shift or step):
         out.append('  every declared timer field agrees with the clock it is '
                    'used with')
         out.append('  (this cannot see a comparison written entirely in the '

@@ -115,6 +115,50 @@ grep -q "disabling Coop" "$DIR/coop.log" && bad "campaign/coop" "the server disa
 note "campaign $SPMAP (coop)" "${co_inh:-no} entities inhibited"
 [ "${co_inh:-0}" -gt 0 ] 2>/dev/null || bad "campaign/inhibited" "expected non-zero, got ${co_inh:-none}"
 
+# ...and WHICH filter ran, computed from the map itself.  id's co-op shares
+# single player's skill filter, so on id's maps it removes the entities marked
+# `!easy & !med & !hard` -- the deathmatch items, base1's BFG and quad among
+# them.  Ground Zero's co-op keeps that marking (co-op only there) and removes
+# SPAWNFLAG_NOT_COOP instead, and SpawnEntities runs it only on a map that sets
+# NOT_COOP somewhere (G_MapUsesNotCoop).  This reads $SPMAP's entity lump out of
+# the paks the server booted, applies that rule at skill 1, and requires the
+# server's count to be the same number -- so the check needs no figure written
+# down, and holds for demo1 as well as base1.
+want_co=$(python3 - "$Q2DATA" "$SPMAP" <<'PY'
+import glob, re, struct, sys
+data, name = sys.argv[1], 'maps/%s.bsp' % sys.argv[2]
+bsp = None
+for pak in sorted(glob.glob(data + '/pak*.pak')):      # a later pak overrides
+    d = open(pak, 'rb').read()
+    _, off, ln = struct.unpack('<4sii', d[:12])
+    for i in range(ln // 64):
+        n, fo, fl = struct.unpack('<56sii', d[off + i*64:off + i*64 + 64])
+        if n.split(b'\0')[0].decode().lower() == name:
+            bsp = d[fo:fo + fl]
+if bsp is None:
+    sys.exit('no %s in %s' % (name, data))
+eo, el = struct.unpack('<ii', bsp[8:16])
+ents = [dict(re.findall(r'"([^"]*)"\s+"([^"]*)"', b))
+        for b in re.findall(r'\{([^}]*)\}', bsp[eo:eo + el].decode('latin-1'))]
+flags = [int(e.get('spawnflags', '0') or 0) for e in ents[1:]]   # not worldspawn
+rogue = any(f & 0x1000 for f in flags)
+n = 0
+for f in flags:
+    if rogue:
+        n += bool(f & 0x1000) or ((f & 0x700) != 0x700 and bool(f & 0x200))
+    else:
+        n += bool(f & 0x200)                        # NOT_MEDIUM, skill 1
+print(n)
+PY
+) || want_co=""
+if [ -z "$want_co" ]; then
+  bad "campaign/filter" "could not compute $SPMAP's co-op count from $Q2DATA"
+elif [ "${co_inh:-x}" != "$want_co" ]; then
+  bad "campaign/filter" "$SPMAP co-op inhibited ${co_inh:-none}, its own entity lump says $want_co"
+else
+  note "campaign $SPMAP (the map's own filter)" "$want_co expected, $co_inh inhibited"
+fi
+
 # ---- 3. savegame round-trip, across two processes
 serve "$DIR/save.log" 0 1 "$SPMAP" "save smoke"
 serve "$DIR/load.log" 0 1 "$SPMAP" "load smoke" status
@@ -125,6 +169,18 @@ note "savegame round-trip" "saved on $s_map, loaded on $l_map, $l_inh inhibited"
 [ "$s_map" = "$l_map" ] || bad "savegame/map" "$s_map != $l_map"
 [ "$(saveerrs "$DIR/save.log")" = "0" ] || bad "savegame/save" "g_save.c complained"
 [ "$(saveerrs "$DIR/load.log")" = "0" ] || bad "savegame/load" "$(grep -m1 -E 'unknown pointer|bad index|type mismatch' "$DIR/load.log")"
+# ...and that a save and a load HAPPENED.  A refused `load` -- no such
+# savegame, a version the library turns away -- leaves the server on the map it
+# booted, which is the map it saved on, with the same inhibited count, so every
+# line above passed with no load at all.  The save prints `Game saved.`; a load
+# prints nothing of its own and respawns the map, so the load process spawns
+# twice.
+grep -q '^Game saved\.' "$DIR/save.log" || bad "savegame/saved" "no 'Game saved.' -- the save did not happen"
+[ "$(grep -c '^SpawnServer: ' "$DIR/load.log")" -ge 2 ] || \
+  bad "savegame/loaded" "one SpawnServer: the load did not respawn the level ($(grep -m1 -E 'No such savegame|Couldn.t read|different version|^ERROR' "$DIR/load.log"))"
+if grep -qE 'No such savegame|Couldn.t read|different version|^ERROR' "$DIR/load.log"; then
+  bad "savegame/load refused" "$(grep -m1 -E 'No such savegame|Couldn.t read|different version|^ERROR' "$DIR/load.log")"
+fi
 
 if [ "$CONTROL" = 1 ]; then
   # Control 2, and it is the one the exit-status check needs: a boot that is

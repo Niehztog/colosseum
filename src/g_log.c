@@ -39,8 +39,11 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 //     checks their callers, and `writelog` passes the operator's text as an
 //     ARGUMENT rather than as the format.
 //   * the timestamp is computed from `level.framenum`, because q2pro's
-//     conversion made frame numbers the unit that cannot drift.
-//     The donor's four-field h:mm:ss:cc shape is preserved exactly.
+//     conversion made frame numbers the unit that cannot drift.  The four
+//     fields are the donor's and the minutes and seconds are not: it printed
+//     the level's TOTAL minutes and seconds in them, so ten minutes in read
+//     00:10:600:00.  Here they are taken modulo 60, the h:mm:ss:cc the field
+//     widths were written for.
 //===========================================================================
 
 #include "g_local.h"
@@ -77,6 +80,7 @@ void Log_Open(const char *filename)
         return;
     }
 
+    G_FsCreatePath(path);
     logfp = fopen(path, "wb");
     if (!logfp) {
         gi.dprintf("Error opening log file %s\n", path);
@@ -134,6 +138,8 @@ void Log_WriteTimeStamped(const char *fmt, ...)
 
     // level.framenum is 10 Hz, so hundredths come out in steps of ten -- which
     // is what the 1999 log did too, since level.time advanced by 0.1 as well.
+    // Minutes and seconds modulo 60, where the donor printed totals (see the
+    // head of this file).
     centis = level.framenum * 10;
     fprintf(logfp, "%d   %02d:%02d:%02d:%02d   ",
             lognumwrites,

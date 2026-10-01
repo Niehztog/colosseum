@@ -17,9 +17,26 @@ cvar?" -- and cannot see this one, because these sites test a *field*, not a
 cvar, and the field is legitimately in the union.
 
 WHAT COUNTS AS THE DONOR'S SURFACE.  Everything declared in `src/<donor>/*.h`
-that is not also declared in `g_local.h` or defined in a spine file.  A helper
-that moved into the shared tree on purpose -- `stuffcmd` did -- stops being the
-donor's and stops being reported, automatically.
+that is not also declared in `g_local.h` or defined in a spine file, plus the
+donor's fields `g_local.h` declares (FIELDS; every `osp_*` member for
+tourney).  A helper that moved into the shared tree on purpose -- `stuffcmd`
+did -- stops being the donor's and stops being reported, automatically; so
+does a name the scanned file defines itself, which is how CTF's own static
+`loc_CanSee` is told from tourney's.
+
+WHERE IT LOOKS.  Every shared file: `src/*.[ch]` and every subdirectory but
+the donor's own -- the bot layer, CTF and both mission packs are shared code
+that reaches into arena and tourney too.  Until this said so it read the top
+level only, and tourney's g_local.h fields were keyed under a ruleset that no
+longer exists, so neither was looked at.
+
+WHY CTF IS NOT A DONOR HERE.  Threewave's surface is called from shared code by
+design and is gated inside its functions by STATE rather than by ruleset:
+CTFHasRegeneration() answers false for a player holding no tech, and
+CTFPlayerResetGrapple(), CTFDeadDropFlag() and CTFDeadDropTech() are no-ops
+for one holding nothing; its commands are gated at the dispatch (g_cmds.c),
+and its grapple item is RA2's as well.  So "a CTF name outside ctf/" is not a
+defect, and a rule that said it was would be an exemption list.
 
 WHAT COUNTS AS A GATE.  `G_Ruleset() == RULESET_<DONOR>` on the occurrence's own
 line, on the line that opens an enclosing block, or as the whole condition of a
@@ -76,7 +93,9 @@ DONORS = {
 # OSP_IsTeams() are strictly narrower -- each is true only under rulesets
 # G_IsOspRuleset() is also true under -- so they gate too.
 PREDICATES = {
-    'RULESET_ARENA': ('MENU_ARENA',),
+    # ...and a `case MID_RA2_*:` arm: those rows exist only in the RA2 submenu,
+    # which p_botmenu.c attaches under RULESET_ARENA alone.
+    'RULESET_ARENA': ('MENU_ARENA', 'MID_RA2_'),
     'RULESET_OSP': ('MENU_TOURNEY', 'G_IsOspRuleset', 'OSP_IsMatch',
                     'OSP_IsTeams', 'RULESET_DM', 'RULESET_DMPRO',
                     'RULESET_TDM', 'RULESET_DUEL'),
@@ -93,8 +112,56 @@ FIELDS = {
         'menuqueue', 'curmenulink', 'ra_menutime', 'menuusetime', 'menutext',
         'showmotd', 'teammember',
     ),
-    'RULESET_TOURNEY': (),
+    # Tourney's are every `osp_*` member g_local.h declares, found rather than
+    # listed (osp_fields): 111 of them, and a list by hand is the list the next
+    # one is left off.  This key was RULESET_TOURNEY, a ruleset that no longer
+    # exists, so none of them was ever looked for.
+    'RULESET_OSP': (),
 }
+
+
+def osp_fields(tree):
+    local = strip(read(os.path.join(tree, 'g_local.h')))
+    return set(re.findall(r'\b(osp_\w+)\s*(?:\[[^\]]*\])?\s*;', local))
+
+
+def own_definitions(text):
+    """Names this file defines itself -- a function, an object, an
+    initialised table.  They are the file's, whoever else declares the same
+    name: CTF's own static `loc_CanSee` is not tourney's `loc_CanSee`."""
+    t = strip(text)
+    out = set()
+    for m in re.finditer(r'^(?:static\s+)?(?:q_unused\s+)?(?:const\s+)?'
+                         r'[A-Za-z_][\w \t*]*?\b([A-Za-z_]\w*)\s*\([^;]*$', t, re.M):
+        out.add(m.group(1))
+    for m in re.finditer(r'^(?:static\s+)?(?:const\s+)?[A-Za-z_][\w \t*]*?'
+                         r'\b([A-Za-z_]\w*)\s*(?:\[[^\]]*\])?\s*[=;]', t, re.M):
+        out.add(m.group(1))
+    for m in re.finditer(r'^\}\s*([A-Za-z_]\w*)\s*(?:\[[^\]]*\])?\s*=', t, re.M):
+        out.add(m.group(1))
+    return out
+
+
+def gate_aliases(lines, ruleset):
+    """Locals this file assigns from a gate -- `bool osp = ent &&
+    G_IsOspRuleset();`, `fillarena = G_Ruleset() == RULESET_ARENA ? ... : 0;`
+    -- which gate as the expression they hold does."""
+    pats = [] if ruleset == 'RULESET_OSP' else \
+        [r'RULESET_' + ruleset.split('_', 1)[1]]
+    pats += [re.escape(p) for p in PREDICATES.get(ruleset, ())]
+    rx = re.compile('|'.join(pats))
+    out = set()
+    for m in re.finditer(r'\b([A-Za-z_]\w*)\s*=(?!=)\s*([^;]*);', '\n'.join(lines)):
+        if rx.search(m.group(2)):
+            out.add(m.group(1))
+    return out
+
+
+# A line that only CLEARS a donor field -- `game.clients[i].osp_menu = NULL;`
+# in the level-change loop that resets every client's menu state -- is a
+# reset, not behaviour: the field means nothing outside its ruleset, and a
+# clear there is the one write that cannot.
+CLEAR = re.compile(r'^\s*[\w.\[\]>-]+\s*=\s*(?:NULL|0|false)\s*;\s*$')
 
 # Files whose mention of a donor name is data or declaration, not behaviour.
 EXEMPT_FILES = ('g_local.h', 'g_ptrs.c', 'g_ptrs.h')
@@ -347,12 +414,22 @@ AI_REQUIREMENTS = (
     ('m_boss32.c', 'MakronSpawn',
      ('M_UsesRogueBehavior(self) ? level.rogue_sight_client',
       ': level.sight_client')),
+    # Tourney times a mega health by the share it gave -- above the rune's
+    # ceiling, at most 100 -- and id's arm by the whole overhealth
+    # (port_osp:g_items.c Pickup_Health, MegaHealth_think; R-OSP-23).  The
+    # share is only ever set and read here, so losing either half is silent.
+    ('g_items.c', 'Pickup_Health',
+     ('ent->dmg = other->health - OSP_runesHealthCeiling(other);',
+      'ent->dmg = 100;')),
+    ('g_items.c', 'MegaHealth_think',
+     ('self->dmg <= 0 || OSP_runesHoldHealth(self->owner)',
+      'self->dmg--;')),
 )
 
 SAVE_FORMAT_REQUIREMENTS = (
     ('g_save.c', 'E(rogue_sight_client)'),
-    ('g_save.c', '#define SAVE_VERSION    0x101'),
-    ('g_save.c', '#define SAVE_VERSION    9'),
+    ('g_save.c', '#define SAVE_VERSION    0x102'),
+    ('g_save.c', '#define SAVE_VERSION    10'),
 )
 
 
@@ -563,8 +640,13 @@ def rogue_gamerule_violations(tree, override=None):
                    '(DMGame boundary)')
     else:
         body = strip(raw[span[0]:span[1]])
-        for required in ('gamerules && gamerules->value', 'RULESET_CTF',
-                         'RULESET_ARENA'):
+        # CTF only: arena can host none of Ground Zero's rules (R-MODE-3),
+        # and naming it here would let the table run there again.
+        if 'RULESET_ARENA' in body:
+            out.append('  !! g_ruleset.c:%d: `G_UsesRogueGameRules` must not '
+                       'admit `RULESET_ARENA` (DMGame boundary)' %
+                       (raw[:span[0]].count('\n') + 1))
+        for required in ('gamerules && gamerules->value', 'RULESET_CTF'):
             if required not in body:
                 out.append('  !! g_ruleset.c:%d: `G_UsesRogueGameRules` must '
                            'name `%s` (DMGame boundary)' %
@@ -732,11 +814,21 @@ def osp_config_violations(tree, override=None):
          ('G_ApplyQueuedOspHookRequest()',
           'OSP_SyncRuneState();',
           'OSP_setFeatures();',
-          # The donor's guard is integer (port_osp:g_spawn.c:761) and
-          # has to match the cast rune_stat is derived with, or a fractional
-          # runes_enable schedules a spawner with no rune type enabled.
-          'if (runes_enable && (int)runes_enable->value)',
-          'OSP_setupRuneSpawn(0);')),
+          # The pool is built from the RESOLVED rune set, which is integer
+          # by construction (OSP_SyncRuneState's cast), so a fractional
+          # runes_enable schedules nothing; and the once-per-map latch is
+          # reset first, as the donor does at port_osp:g_spawn.c:761, or a
+          # `gamemap` leaves it set from the last level and no rune ever
+          # spawns again (R-OSP-18).
+          'if (rune_stat) {',
+          'runespawn = 0;',
+          'OSP_setupRuneSpawn(0);',
+          # ...and what else InitGame derives from a config -- the armour
+          # table, the weapon and item switches, the default_* snapshot --
+          # which a voted config's `gamemap` would otherwise leave stale.
+          'OSP_configReloaded();')),
+        ('tourney/osp_main.c', 'OSP_configReloaded',
+         ('OSP_parseArmor();', 'OSP_initWeapItem();')),
     )
 
     for filename, function, required in requirements:
@@ -779,8 +871,61 @@ def osp_config_violations(tree, override=None):
     return out
 
 
+_SURFACE = {}
+_FILE = {}
+
+
 def donor_surface(tree, donor):
     """Names the donor's headers declare and the shared tree does not own."""
+    key = (os.path.abspath(tree), donor)
+    if key not in _SURFACE:
+        _SURFACE[key] = _donor_surface(tree, donor)
+    return _SURFACE[key]
+
+
+def file_facts(raw, ruleset):
+    """(own definitions, stripped lines, statement groups, gate aliases) for
+    one file's text -- memoised on the text, because the self-test re-runs
+    the whole scan once per control and changes one file each time."""
+    key = (hash(raw), len(raw), ruleset)
+    if key not in _FILE:
+        lines = strip(raw).split('\n')
+        _FILE[key] = (own_definitions(raw), lines, group(lines),
+                      gate_aliases(lines, ruleset))
+    return _FILE[key]
+
+
+_SCAN = {}
+
+
+def scan_file(raw, name, donor, ruleset, surface):
+    """(uses checked, findings) for one shared file against one donor --
+    memoised on the text, for the reason file_facts is."""
+    key = (hash(raw), len(raw), name, donor)
+    if key in _SCAN:
+        return _SCAN[key]
+    own, lines, groups, aliases = file_facts(raw, ruleset)
+    mine = surface - own
+    checked, found = 0, []
+    if mine:
+        rx = re.compile(r'\b(%s)\b' % '|'.join(sorted(re.escape(s)
+                                                      for s in mine)))
+        for i, line in enumerate(lines):
+            m = rx.search(line)
+            if not m or DESCRIPTOR.match(line) or INITIALISER.match(line) \
+                    or CLEAR.match(line):
+                continue
+            checked += 1
+            if not gate_lines(lines, groups, ruleset, i, aliases):
+                found.append('  !! %s:%d: `%s` is %s\'s and is not inside a '
+                             '%s gate: %s'
+                             % (name, i + 1, m.group(1), donor, ruleset,
+                                line.strip()[:60]))
+    _SCAN[key] = (checked, found)
+    return _SCAN[key]
+
+
+def _donor_surface(tree, donor):
     names = set()
     for h in sorted(glob.glob(os.path.join(tree, donor, '*.h'))):
         for m in DECL.finditer(strip(read(h))):
@@ -819,6 +964,9 @@ def donor_surface(tree, donor):
     return names - shared
 
 
+CASE_LABEL = re.compile(r'^\s*(?:case\s+\w+|default)\s*:')
+
+
 def group(lines):
     """line index -> (first, last) of the statement it belongs to.
 
@@ -834,7 +982,12 @@ def group(lines):
         bal, j = 0, i
         while j < n:
             bal += lines[j].count('(') - lines[j].count(')')
-            if bal <= 0:
+            # ...and a line ending in an operator continues the statement:
+            # `return G_IsOspRuleset() && hook_enable &&` balances on its own
+            # and the read it gates is on the next line.
+            if bal <= 0 and not (re.search(r'(?:&&|\|\||[?,=+*/|&-])\s*$',
+                                           lines[j]) and j + 1 < n and
+                                 not CASE_LABEL.match(lines[j])):
                 break
             j += 1
         for k in range(i, min(j, n - 1) + 1):
@@ -853,7 +1006,7 @@ CASE = re.compile(r'^\s*(?:case\s+\w+|default)\s*:')
 ELSEARM = re.compile(r'^\s*\}\s*else\b.*\{\s*$')
 
 
-def gate_lines(lines, groups, ruleset, i):
+def gate_lines(lines, groups, ruleset, i, aliases=()):
     """True if line i is inside a gate for `ruleset`."""
     # RULESET_OSP is the family, not an enum value, so it contributes no
     # literal name of its own -- everything that gates it is in PREDICATES.
@@ -861,6 +1014,8 @@ def gate_lines(lines, groups, ruleset, i):
         [r'RULESET_' + ruleset.split('_', 1)[1]]
     for p in PREDICATES.get(ruleset, ()):
         pats.append(re.escape(p))
+    for a in sorted(aliases):
+        pats.append(r'\b%s\b' % re.escape(a))
     rx = re.compile('|'.join(pats))
 
     def stmt(k):
@@ -896,6 +1051,14 @@ def gate_lines(lines, groups, ruleset, i):
         if depth < 0:
             if rx.search(stmt(j)):
                 return True
+            # Allman braces -- the bot layer's style -- put the `{` alone on
+            # its line, and the statement it opens is the one above it.
+            if line.strip() == '{':
+                k = j - 1
+                while k >= 0 and not lines[k].strip():
+                    k -= 1
+                if k >= 0 and rx.search(stmt(k)):
+                    return True
             depth, seen_case = 0, False
         j -= 1
     return False
@@ -908,26 +1071,25 @@ def run(tree, override=None):
         if not os.path.isdir(os.path.join(tree, donor)):
             continue
         surface = donor_surface(tree, donor) | set(FIELDS.get(ruleset, ()))
-        rx = re.compile(r'\b(%s)\b' % '|'.join(sorted(re.escape(s) for s in surface)))
-        for f in sorted(glob.glob(os.path.join(tree, '*.c')) +
-                        glob.glob(os.path.join(tree, '*.h'))):
-            name = os.path.basename(f)
-            if name in EXEMPT_FILES:
+        if ruleset == 'RULESET_OSP':
+            surface |= osp_fields(tree)
+        # Every shared file, the subdirectories included: the bot layer, CTF
+        # and both mission packs are shared code too, and reach into arena and
+        # tourney from there.  Only the donor's own directory is its own.
+        files = sorted(glob.glob(os.path.join(tree, '*.c')) +
+                       glob.glob(os.path.join(tree, '*.h')) +
+                       [f for f in glob.glob(os.path.join(tree, '*', '*.[ch]'))
+                        if os.path.basename(os.path.dirname(f)) != donor])
+        for f in files:
+            name = os.path.relpath(f, tree).replace(os.sep, '/')
+            if os.path.basename(f) in EXEMPT_FILES:
                 continue
-            raw = (override or {}).get(name) or read(f)
-            lines = strip(raw).split('\n')
-            groups = group(lines)
-            for i, line in enumerate(lines):
-                m = rx.search(line)
-                if not m or DESCRIPTOR.match(line) or INITIALISER.match(line):
-                    continue
-                checked += 1
-                if not gate_lines(lines, groups, ruleset, i):
-                    out.append('  !! %s:%d: `%s` is %s\'s and is not inside a '
-                               '%s gate: %s'
-                               % (name, i + 1, m.group(1), donor, ruleset,
-                                  line.strip()[:60]))
-                    bad += 1
+            raw = (override or {}).get(name) or \
+                (override or {}).get(os.path.basename(f)) or read(f)
+            n, found = scan_file(raw, name, donor, ruleset, surface)
+            checked += n
+            out.extend(found)
+            bad += len(found)
     # The stray-extern shape, which is not a gate question but is the same input: a
     # donor's own object re-declared `extern` somewhere other than the header
     # that defines it.  The bug it is named for is `extern int botglobals;` in
@@ -1019,6 +1181,16 @@ SELFTESTS = [
     # The initialiser exemption must not swallow a real call.  `.pickup =`
     # rows are data; `OSP_Pickup_Rune(ent, other);` in a function body is not,
     # and turning one into the other has to be reported.
+    # The reach this check gained: a shared SUBDIRECTORY, where the bot
+    # layer's arena fill reads the arena's census through a gated local...
+    ('subdirectory arena fill', 'bot/bl_spawn.c',
+     ('fillarena = G_Ruleset() == RULESET_ARENA ? RA_BotFillArena() : 0;',
+      'fillarena = RA_BotFillArena();')),
+    # ...and one of tourney's g_local.h fields, which were keyed under a
+    # ruleset that no longer exists and so were never looked for.
+    ('OSP field in a spine file', 'p_client.c',
+     ('bool    osp = ent && G_IsOspRuleset();',
+      'bool    osp = ent != NULL;')),
     ('rune pickup call', 'g_items.c',
      ('    taken = ent->item->pickup(ent, other);',
       '    taken = OSP_Pickup_Rune(ent, other);')),
@@ -1057,7 +1229,7 @@ SHARED_BEHAVIOR_SELFTESTS = [
     ('Rogue sight cache serialization', 'g_save.c',
      'E(rogue_sight_client)', 'E(sight_client)'),
     ('Rogue sight cache save version', 'g_save.c',
-     '#define SAVE_VERSION    0x101', '#define SAVE_VERSION    0x100'),
+     '#define SAVE_VERSION    0x102', '#define SAVE_VERSION    0x101'),
     ('base idle interval', 'g_ai.c',
      '(1 + random()) * 15', '(1 + random() * 15)'),
     ('base checkattack arm', 'g_ai.c',
@@ -1105,6 +1277,10 @@ SHARED_BEHAVIOR_SELFTESTS += [
     ('Makron rogue sight cache', 'm_boss32.c',
      'M_UsesRogueBehavior(self) ? level.rogue_sight_client',
      'false ? level.rogue_sight_client'),
+    # id's think with tourney's share dropped: the bleed runs to max_health.
+    ('OSP mega health share', 'g_items.c',
+     '(self->dmg <= 0 || OSP_runesHoldHealth(self->owner))',
+     '(OSP_runesHoldHealth(self->owner))'),
 ]
 
 DYNAMIC_FLAVOUR_SELFTESTS = [
@@ -1145,17 +1321,18 @@ OSP_HOOK_SELFTESTS = [
 ]
 
 OSP_CONFIG_SELFTESTS = [
-    ('OSP rune spawn integer guard', 'g_spawn.c',
-     'if (runes_enable && (int)runes_enable->value)',
-     'if (runes_enable && runes_enable->value)'),
+    ('OSP rune spawn latch reset', 'g_spawn.c',
+     '            runespawn = 0;\n            OSP_setupRuneSpawn(0);',
+     '            OSP_setupRuneSpawn(0);'),
     ('OSP config rune synchronization', 'g_spawn.c',
      ('        if (G_ApplyQueuedOspHookRequest()) {\n'
       '            OSP_SyncRuneState();\n'
-      '            OSP_setFeatures();\n'
-      '        }'),
+      '            OSP_setFeatures();\n'),
      ('        if (G_ApplyQueuedOspHookRequest()) {\n'
-      '            OSP_setFeatures();\n'
-      '        }')),
+      '            OSP_setFeatures();\n')),
+    ('OSP config derived state reload', 'g_spawn.c',
+     '            OSP_configReloaded();\n',
+     '            /* no reload */\n'),
     ('OSP rune synchronization mask', 'tourney/osp_main.c',
      'if (rune_stat > 0x1f)',
      'if (rune_stat > 0x3f)'),

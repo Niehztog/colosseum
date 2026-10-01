@@ -50,7 +50,14 @@ void hunter_touch(edict_t *self, edict_t *other, cplane_t *plane, csurface_t *su
 // =================
 void sphere_think_explode(edict_t *self)
 {
-    if (self->owner && self->owner->client && !(self->spawnflags & SPHERE_DOPPLEGANGER)) {
+    // Only while the pointer still names THIS sphere, as sphere_touch's sky
+    // case asks.  A hunter or vengeance sphere with an enemy outlives its
+    // owner's death, the respawn clears `owned_sphere`, and by the time this
+    // one hits or times out the owner may hold a new one -- which Ground Zero
+    // cleared here, orphaning it: no HUD timer, no defender half damage, no
+    // pain notice, a second sphere allowed, and none freed on disconnect.
+    if (self->owner && self->owner->client && !(self->spawnflags & SPHERE_DOPPLEGANGER) &&
+        self->owner->client->owned_sphere == self) {
         self->owner->client->owned_sphere = NULL;
     }
     BecomeExplosion1(self);
@@ -180,30 +187,9 @@ void sphere_chase(edict_t *self, int stupidChase)
 // Attack related stuff
 // *************************
 
-// =================
-// =================
-void sphere_fire(edict_t *self, edict_t *enemy)
-{
-    vec3_t  dest;
-    vec3_t  dir;
-
-    if (level.time >= self->wait || !enemy) {
-        sphere_think_explode(self);
-        return;
-    }
-
-    VectorCopy(enemy->s.origin, dest);
-    self->s.effects |= EF_ROCKET;
-
-    VectorSubtract(dest, self->s.origin, dir);
-    VectorNormalize(dir);
-    vectoangles2(dir, self->s.angles);
-    VectorScale(dir, 1000, self->velocity);
-
-    self->touch = vengeance_touch;
-    self->think = sphere_think_explode;
-    self->nextthink = self->wait;
-}
+// Ground Zero's sphere_fire is not carried.  Nothing called it -- its one
+// caller, in vengeance_think, is commented out in every donor -- and it put
+// `wait`, a time in seconds, into `nextthink`, a frame number.
 
 // =================
 // =================
@@ -224,13 +210,21 @@ void sphere_touch(edict_t *self, edict_t *other, cplane_t *plane, csurface_t *su
             return;
     }
 
+    // Into the sky it goes without a bang, and its owner is told, as
+    // sphere_think_explode tells it: Ground Zero freed the sphere and left
+    // `owned_sphere` naming the freed edict, so the owner could never take
+    // another sphere and their next death called the NULL `die` G_FreeEdict had
+    // left in that slot -- or, the slot reused, somebody else's.
     if (surf && (surf->flags & SURF_SKY)) {
+        if (self->owner && self->owner->client &&
+            self->owner->client->owned_sphere == self)
+            self->owner->client->owned_sphere = NULL;
         G_FreeEdict(self);
         return;
     }
 
     if (other->takedamage) {
-        T_Damage(other, self, self->owner, self->velocity, self->s.origin, plane->normal,
+        T_Damage(other, self, self->owner, self->velocity, self->s.origin, plane ? plane->normal : NULL,
                  10000, 1, DAMAGE_DESTROY_ARMOR, mod);
     } else {
         T_RadiusDamage(self, self->owner, 512, self->owner, 256, mod);
@@ -687,6 +681,34 @@ edict_t *Sphere_Spawn(edict_t *owner, int spawnflags)
 }
 
 // =================
+// G_OwnedSphere - the player's sphere, if they still have one
+//
+// `owned_sphere` is not cleared on every way out of the world.  A sphere is a
+// zero-size FLYMISSILE that takes no damage, so one trailing its owner through
+// a closing door or under a crusher or train is freed by BecomeExplosion1 from
+// the mover's blocked function, and the pointer goes on naming the slot --
+// which G_Spawn hands out again half a second later, to a rocket, an item, a
+// monster or a dropped flag.  So every reader asks here: the pointer counts
+// only while it names an in-use sphere this player owns, and is cleared the
+// first time it does not.
+// =================
+edict_t *G_OwnedSphere(edict_t *ent)
+{
+    edict_t *sphere;
+
+    if (!ent->client)
+        return NULL;
+
+    sphere = ent->client->owned_sphere;
+    if (sphere && (!sphere->inuse || !sphere->classname ||
+                   strcmp(sphere->classname, "sphere") || sphere->owner != ent)) {
+        ent->client->owned_sphere = NULL;
+        sphere = NULL;
+    }
+    return sphere;
+}
+
+// =================
 // Own_Sphere - attach the sphere to the client so we can
 //      directly access it later
 // =================
@@ -697,8 +719,9 @@ void Own_Sphere(edict_t *self, edict_t *sphere)
 
     // ownership only for players
     if (self->client) {
-        // if they don't have one
-        if (!(self->client->owned_sphere)) {
+        // if they don't have one -- a pointer that outlived its sphere is not
+        // one, and the slot it names is not freed as if it were
+        if (!G_OwnedSphere(self)) {
             self->client->owned_sphere = sphere;
         }
         // they already have one, take care of the old one

@@ -478,6 +478,63 @@ static void MenuProc(edict_t *ent, int id)
     } //end switch
 } //end of the function MenuProc
 //========================================================================
+// Every row that shows a setting, relabelled from the live value.  The tree
+// is built once, at InitGame, and only a toggle from the menu itself used to
+// relabel a row after that -- so a dmflags, `botfill` or minimum-players
+// change from the console, a config or a vote showed the old value until the
+// row was toggled.  Called on every open; a row the running ruleset's tree
+// does not carry is not found, which costs a search and nothing else.  The
+// names are bot_MenuCreate's and the toggles', and have to stay the same.
+//========================================================================
+static void bot_MenuRelabel(void)
+{
+    static const struct {
+        int         id;
+        const char  *name;
+        int         flag;
+        int         flip;           // 1 where the row shows the flag's absence
+    } rows[] = {
+        { MID_DM_NO_HEALTH,         "allow health",         DF_NO_HEALTH,           1 },
+        { MID_DM_NO_ITEMS,          "allow powerups",       DF_NO_ITEMS,            1 },
+        { MID_DM_NO_ARMOR,          "allow armor",          DF_NO_ARMOR,            1 },
+        { MID_DM_WEAPONS_STAY,      "weapons stay",         DF_WEAPONS_STAY,        0 },
+        { MID_DM_NO_FALLING,        "falling damage",       DF_NO_FALLING,          1 },
+        { MID_DM_INSTANT_ITEMS,     "instant items",        DF_INSTANT_ITEMS,       0 },
+        { MID_DM_SAME_LEVEL,        "same map",             DF_SAME_LEVEL,          0 },
+        { MID_DM_NO_FRIENDLY_FIRE,  "friendly fire",        DF_NO_FRIENDLY_FIRE,    1 },
+        { MID_DM_SPAWN_FARTHEST,    "spawn farthest",       DF_SPAWN_FARTHEST,      0 },
+        { MID_DM_FORCE_RESPAWN,     "force respawn",        DF_FORCE_RESPAWN,       0 },
+        { MID_DM_ALLOW_EXIT,        "allow exit",           DF_ALLOW_EXIT,          0 },
+        { MID_DM_INFINITE_AMMO,     "infinite ammo",        DF_INFINITE_AMMO,       0 },
+        { MID_DM_QUAD_DROP,         "quad drop",            DF_QUAD_DROP,           0 },
+        { MID_DM_FIXED_FOV,         "fixed FOV",            DF_FIXED_FOV,           0 },
+        { MID_DM_QUADFIRE_DROP,     "quad fire drop",       DF_QUADFIRE_DROP,       0 },
+        { MID_DM_NO_MINES,          "allow mines",          DF_NO_MINES,            1 },
+        { MID_DM_NO_STACK_DOUBLE,   "allow stack double",   DF_NO_STACK_DOUBLE,     1 },
+        { MID_DM_NO_NUKES,          "allow nukes",          DF_NO_NUKES,            1 },
+        { MID_DM_NO_SPHERES,        "allow spheres",        DF_NO_SPHERES,          1 },
+        { MID_CTF_FORCEJOIN,        "force join",           DF_CTF_FORCEJOIN,       0 },
+        { MID_CTF_ARMOR_PROTECT,    "armor protect",        DF_ARMOR_PROTECT,       0 },
+        { MID_CTF_NO_TECH,          "allow techs",          DF_CTF_NO_TECH,         1 },
+    };
+    int flags = (int)dmflags->value;
+    int i;
+
+    for (i = 0; i < q_countof(rows); i++)
+        bot_MenuItemRename(mainmenu, rows[i].id, OnOffString(rows[i].name,
+                           ((flags & rows[i].flag) != 0) ^ rows[i].flip));
+    bot_MenuItemRename(mainmenu, MID_DM_TEAMPLAY, TeamPlayMenuString());
+    bot_MenuItemRename(mainmenu, MID_BOT_MINPLAYERS, MinPlayersString());
+    bot_MenuItemRename(mainmenu, MID_BOT_BOTFILL, OnOffString("botfill",
+                       (int)gi.cvar("botfill", "0", 0)->value));
+    bot_MenuItemRename(mainmenu, MID_CTF_BOTTEAM, BotCTFTeamString());
+    bot_MenuItemRename(mainmenu, MID_RA2_BOTARENA, BotArenaString());
+    bot_MenuItemRename(mainmenu, MID_RA2_PLAYERCYCLE, OnOffString("ra_playercycle",
+                       (int)gi.cvar("ra_playercycle", "1", 0)->value));
+    bot_MenuItemRename(mainmenu, MID_RA2_BOTCYCLE, OnOffString("ra_botcycle",
+                       (int)gi.cvar("ra_botcycle", "1", 0)->value));
+} //end of the function bot_MenuRelabel
+//========================================================================
 //
 // Parameter:               -
 // Returns:                 -
@@ -490,6 +547,7 @@ void bot_MenuOpen(edict_t *ent)
     if (!ent->client) return;
     if (!mainmenu) bot_MenuCreate();
     if (!mainmenu) return;
+    bot_MenuRelabel();
 
     // The arbiter closes whatever was open and records the owner.
     G_MenuOpen(ent, MENU_BOT);
@@ -577,21 +635,39 @@ void bot_MenuToggle(edict_t *ent)
         // that never set a password the honest form was refused to everybody
         // and two quote marks admitted anybody.  Measured on the wire under
         // ctf before this: `menu` refused, `menu ""` opened the menu.
-        //
-        // Ordered before the "none" test, which is a password of that name and
-        // is not empty.
         if (!rcon_password->string[0])
         {
             gi.cprintf(ent, PRINT_HIGH, "the menu needs the rcon password, "
                        "and this server has not set one\n");
             return;
         } //end if
-        if (strcmp(rcon_password->string, "none") &&
-            (gi.argc() <= 1 || strcmp(rcon_password->string, gi.argv(1))))
+        // ...and "none" is a password like any other.  It used to open the
+        // menu to everybody, and q2pro gives it no meaning: rcon_validate
+        // compares whatever the string holds, so a server whose rcon answered
+        // to "none" handed its bot management to anyone who typed `menu`.
+        //
+        // A wrong guess costs time (G_LoginThrottled, R-SEC-12).  The engine
+        // takes eight string commands a packet and sv_rcon_limit never sees
+        // these, so the check was an unthrottled test of the rcon password
+        // itself.  `menu` with no password is not a guess and costs nothing.
+        if (gi.argc() <= 1)
         {
             gi.cprintf(ent, PRINT_HIGH, "need rcon password to open the menu\n");
             return;
         } //end if
+        if (G_LoginThrottled(ent))
+        {
+            gi.cprintf(ent, PRINT_HIGH, "Wrong password.  Wait a moment before "
+                       "trying again.\n");
+            return;
+        } //end if
+        if (strcmp(rcon_password->string, gi.argv(1)))
+        {
+            G_LoginFailed(ent);
+            gi.cprintf(ent, PRINT_HIGH, "need rcon password to open the menu\n");
+            return;
+        } //end if
+        G_LoginSucceeded(ent);
     } //end if
     bot_MenuOpen(ent);
 } //end of the function bot_MenuToggle
@@ -684,7 +760,10 @@ void bot_MenuCreate(void)
     {
         bot_MenuAppend(dmmenu, MI_ITEM, MID_DM_QUADFIRE_DROP, NULL, OnOffString("quad fire drop", flags & DF_QUADFIRE_DROP), NULL);
     } //end if
-    //Rogue mission pack 2
+    //Rogue mission pack 2.  This tree is never attached under `ctf` (the switch
+    //below), where three of these bits are Threewave's -- force join, armor
+    //protect and allow techs, which the CTF tree offers -- so there they are
+    //offered once, as CTF's, and `allow spheres` not at all, as in 1999.
     if (G_LayerEnabled(LAYER_ROGUE))
     {
         bot_MenuAppend(dmmenu, MI_ITEM, MID_DM_NO_MINES, NULL, OnOffString("allow mines", !(flags & DF_NO_MINES)), NULL);
@@ -700,6 +779,25 @@ void bot_MenuCreate(void)
     bot_MenuAppend(ctfmenu, MI_ITEM, MID_CTF_FORCEJOIN, NULL, OnOffString("force join", flags & DF_CTF_FORCEJOIN), NULL);
     bot_MenuAppend(ctfmenu, MI_ITEM, MID_CTF_ARMOR_PROTECT, NULL, OnOffString("armor protect", flags & DF_ARMOR_PROTECT), NULL);
     bot_MenuAppend(ctfmenu, MI_ITEM, MID_CTF_NO_TECH, NULL, OnOffString("allow techs", !(flags & DF_CTF_NO_TECH)), NULL);
+    // ...and the general dmflags, which the 1999 CTF page carries after its own
+    // four (gladq2_src/p_botmenu.c): under `ctf` the DM page is never attached,
+    // so these rows are the only place the bot menu offers them.  The ids are
+    // the DM page's, which cannot collide because only one of the two pages is
+    // ever in the tree.
+    bot_MenuAppend(ctfmenu, MI_ITEM, MID_DM_NO_HEALTH, NULL, OnOffString("allow health", !(flags & DF_NO_HEALTH)), NULL);
+    bot_MenuAppend(ctfmenu, MI_ITEM, MID_DM_NO_ITEMS, NULL, OnOffString("allow powerups", !(flags & DF_NO_ITEMS)), NULL);
+    bot_MenuAppend(ctfmenu, MI_ITEM, MID_DM_NO_ARMOR, NULL, OnOffString("allow armor", !(flags & DF_NO_ARMOR)), NULL);
+    bot_MenuAppend(ctfmenu, MI_ITEM, MID_DM_WEAPONS_STAY, NULL, OnOffString("weapons stay", flags & DF_WEAPONS_STAY), NULL);
+    bot_MenuAppend(ctfmenu, MI_ITEM, MID_DM_NO_FALLING, NULL, OnOffString("falling damage", !(flags & DF_NO_FALLING)), NULL);
+    bot_MenuAppend(ctfmenu, MI_ITEM, MID_DM_INSTANT_ITEMS, NULL, OnOffString("instant items", flags & DF_INSTANT_ITEMS), NULL);
+    bot_MenuAppend(ctfmenu, MI_ITEM, MID_DM_SAME_LEVEL, NULL, OnOffString("same map", flags & DF_SAME_LEVEL), NULL);
+    bot_MenuAppend(ctfmenu, MI_ITEM, MID_DM_NO_FRIENDLY_FIRE, NULL, OnOffString("friendly fire", !(flags & DF_NO_FRIENDLY_FIRE)), NULL);
+    bot_MenuAppend(ctfmenu, MI_ITEM, MID_DM_SPAWN_FARTHEST, NULL, OnOffString("spawn farthest", flags & DF_SPAWN_FARTHEST), NULL);
+    bot_MenuAppend(ctfmenu, MI_ITEM, MID_DM_FORCE_RESPAWN, NULL, OnOffString("force respawn", flags & DF_FORCE_RESPAWN), NULL);
+    bot_MenuAppend(ctfmenu, MI_ITEM, MID_DM_ALLOW_EXIT, NULL, OnOffString("allow exit", flags & DF_ALLOW_EXIT), NULL);
+    bot_MenuAppend(ctfmenu, MI_ITEM, MID_DM_INFINITE_AMMO, NULL, OnOffString("infinite ammo", flags & DF_INFINITE_AMMO), NULL);
+    bot_MenuAppend(ctfmenu, MI_ITEM, MID_DM_QUAD_DROP, NULL, OnOffString("quad drop", flags & DF_QUAD_DROP), NULL);
+    bot_MenuAppend(ctfmenu, MI_ITEM, MID_DM_FIXED_FOV, NULL, OnOffString("fixed FOV", flags & DF_FIXED_FOV), NULL);
     bot_MenuAppend(ctfmenu, MI_SEPERATOR, -1, NULL, "-----------", NULL);
     bot_MenuAppend(ctfmenu, MI_ITEM, MID_BACK, NULL, "back", NULL);
     //Rocket Arena 2

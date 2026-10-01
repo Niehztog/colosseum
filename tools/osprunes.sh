@@ -55,7 +55,11 @@ HARNESS=${HARNESS:-$(cd "$(dirname "$0")/playtest-harness" && pwd)}
 Q2PRO_BUILD=${Q2PRO_BUILD:-$(dirname "$0")/../../q2pro/builddir-native}
 Q2DATA=${Q2DATA:-/usr/share/games/quake2/baseq2}
 CTFDATA=${CTFDATA:-/usr/share/games/quake2/ctf}
-LIB=release/game$(uname -m | sed -e 's/^x86_64$/x86_64/' -e 's/^aarch64$/arm64/').so
+# The environment's LIB wins, as in smoke.sh and the matrix scripts; the
+# default is the repository's own release build, found from this script
+# rather than from wherever it was run, with the Makefile's CPU names.
+ROOT=$(cd "$(dirname "$0")/.." && pwd)
+LIB=${LIB:-$ROOT/release/game$(uname -m | sed -e 's/^aarch64$/arm64/' -e 's/^i.86$/i386/').so}
 
 while [ $# -gt 0 ]; do
   case $1 in
@@ -74,5 +78,9 @@ LIB=$(cd "$(dirname "$LIB")" && pwd)/$(basename "$LIB")
 Q2=$(cd "$Q2PRO_BUILD" && pwd)/q2proded
 
 cd "$HARNESS"
-exec go run ./scenarios/osprunes \
+# Built, then exec'd: `go run` reports every non-zero exit as 1 (playtest.sh).
+BIN=${TMPDIR:-/tmp}/q2playtest/.bin/osprunes
+mkdir -p "$(dirname "$BIN")" || die "cannot create $(dirname "$BIN")"
+go build -o "$BIN" ./scenarios/osprunes || die "could not build the osprunes scenario"
+exec "$BIN" \
   -q2proded "$Q2" -lib "$LIB" -ref "$Q2DATA" -ctf "$CTFDATA" "$@"

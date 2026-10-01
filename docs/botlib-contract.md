@@ -11,7 +11,7 @@ The authoritative copy of the ABI and the libvar contract; SPECS.md Appendix A i
 | version | change |
 |---|---|
 | 1 | initial contract, taken from `osp-tourney`'s already-ported `botlib.h` including its `const`-ification of the `PointContents` slot |
-| **2** | *superseded by 3.* **The `Trace` slot gains its 64-bit spelling.** `bsp_trace_t` is 88 bytes, so the caller always passes a hidden return buffer; on 32-bit that buffer IS the first visible argument and the two spellings are the same ABI, and on x86-64 and aarch64 it is a hidden register (`rax` / `x8`) and they are **different** ABIs. Version 1 carried only the 32-bit form, because `osp-tourney` -- the port the contract says to take it from -- is a 32-bit port. Both sides now select with `#if defined(__x86_64__) \|\| defined(__aarch64__)`, and the condition is identical on both sides *by check*, not by intent |
+| **2** | *superseded by 3.* **The `Trace` slot gains its 64-bit spelling.** `bsp_trace_t` is 84 bytes -- the size table below, and `tools/botabi.py`'s compiled probe -- so the caller always passes a hidden return buffer; on 32-bit that buffer IS the first visible argument and the two spellings are the same ABI, and on x86-64 and aarch64 it is a hidden register (`rax` / `x8`) and they are **different** ABIs. Version 1 carried only the 32-bit form, because `osp-tourney` -- the port the contract says to take it from -- is a 32-bit port. Both sides now select with `#if defined(__x86_64__) \|\| defined(__aarch64__)`, and the condition is identical on both sides *by check*, not by intent |
 | **3** | **The `Trace` slot's 64-bit spelling is WITHDRAWN -- by value on every target, which is what the published contract always said.** Upstream removed all three branches (`gladiator-bot-restored 57ce85a3`) and the reason is better than version 2's match: the branch was only sound while both sides were the same project's, because `game/botlib.h` -- the header a foreign engine builds against -- was never branched. By value is also the faithful 1999 spelling and the only form that reproduces `gladi386.so`'s trace thunk. `tools/botabi.py` reported the divergence on the first run after the update, which is what the ABI check exists for |
 
 ## Entry point
@@ -20,7 +20,7 @@ The authoritative copy of the ABI and the libvar contract; SPECS.md Appendix A i
 bot_export_t *GetBotAPI(bot_import_t *import);
 ```
 
-Loaded dynamically per bot from `bots.cfg`, with `BotUseLibrary`'s search order -- direct path, then `basedir` + `gamedir` -- reference counted per library, and `BotUnloadAllLibraries` on `ShutdownGame`.
+Loaded dynamically from the file the `botlib` cvar names -- `bots.cfg` has no library field -- with `BotUseLibrary`'s search order: a value containing a path separator as given; a bare name under `homedir` + `gamedir`, then `libdir` + `gamedir`, the first that holds the file, else `basedir` + `gamedir`. One library per server, reference counted, and `BotUnloadAllLibraries` on `ShutdownGame`.
 
 ## `bot_export_t` -- game -> botlib, 20 slots, in order
 
@@ -43,8 +43,8 @@ Four slots differ in **return type** between the two headers and are compatible 
 
 ## Two ABI hazards
 
-1. **`bsp_trace_t` is returned by value** from the `Trace` slot, so both sides must agree on the struct-return convention. On Windows the slot takes the same `q_gameabi` treatment Q2PRO applies to `gi.trace`. `BotLibImport_Trace` stays a translating wrapper (`trace_t` -> `bsp_trace_t`, `edict_t *` -> entity number, `passent` bounds-checked against `game.maxentities`) and must tolerate a null `trace.surface`. Risk 6 mitigates with a `Test()` round-trip at load.
-2. **Word size must match.** Both tables are pointer-bearing, so game and botlib must share bitness; `BotUseLibrary` reports a load failure with the reason and the bitness of both sides, and refuses the bot rather than killing the server. At 64 bits the botlib's `_Static_assert` layout guards are wrapped in `#if __SIZEOF_POINTER__ == 4` and go inert, so a 64-bit botlib carries **no layout verification** (Risk 5a) -- extend the guards to 64-bit offsets, or accept and record it, with the `Test()` round-trip as the fallback.
+1. **`bsp_trace_t` is returned by value** from the `Trace` slot, so both sides must agree on the struct-return convention. The slot takes **no** `q_gameabi` treatment, on Windows or anywhere: the brain's side carries none, this build sets `USE_GAME_ABI_HACK 0` so the attribute would expand to nothing anyway, and if a build ever turned it on this slot must still not get it -- the two sides have to agree, and the contract's spelling is the plain one (`src/bot/botlib.h`). `BotLibImport_Trace` stays a translating wrapper (`trace_t` -> `bsp_trace_t`, `edict_t *` -> entity number, `passent` bounds-checked against `game.maxentities`) and must tolerate a null `trace.surface`. Risk 6 mitigates with a `Test()` round-trip at load.
+2. **Word size must match.** Both tables are pointer-bearing, so game and botlib must share bitness; `BotUseLibrary` reports a load failure with the loader's reason and the game's word size -- the reason names the brain's side: on ELF and Mach-O the loader's text gives its class, and on Windows a DLL of the other word size is error 193, `ERROR_BAD_EXE_FORMAT`, reported as "not a N-bit DLL" -- and refuses the bot rather than killing the server. At 64 bits the botlib's `_Static_assert` layout guards are wrapped in `#if __SIZEOF_POINTER__ == 4` and go inert, so a 64-bit botlib carries **no layout verification** (Risk 5a) -- extend the guards to 64-bit offsets, or accept and record it, with the `Test()` round-trip as the fallback.
 
 **Both mitigations failed the first time they were needed, and the third time as well.** `BotVersion` is slot 0 so the two sides can shake hands, and it returns `"BotLib v0.96"` on both sides of an ABI split -- the version is the botlib's, not the convention's. `Test(int, char *, vec3_t, vec3_t)` passes no struct by value, so the round trip exercises none of hazard 1. A handshake that cannot fail is not a handshake. What found version 2's defect was a headless dedicated server, three bots and a minute of watching nothing happen; what would have found it earlier is `tools/botabi.py`, which compares the two headers and ships that defect itself as one of its four positive controls.
 
@@ -102,7 +102,7 @@ Action flags: `ATTACK` 1, `USE` 2, `RESPAWN` 4, `JUMP`/`MOVEUP` 8, `CROUCH`/`MOV
 
 ### Ruleset -> libvar mapping
 
-This table is the single authority for it, derived from the code rather than from any document. Every one of the 32 names is pushed on **every** ruleset, so the botlib always sees the same set and only the values move -- a libvar that is set on one ruleset and absent on another is a libvar whose default the botlib would silently use, which is the whole concern.
+This table is the single authority for it, derived from the code rather than from any document. 21 of the 32 names are pushed on **every** ruleset, so the botlib sees the same set and only the values move -- a libvar that is set on one ruleset and absent on another is a libvar whose default the botlib would silently use, which is the whole concern. The other eleven are pushed only when the game cvar of that name is set, on every ruleset alike, so where it is not the botlib's own default stands: the three engine limits `max_aaslinks`, `max_bsplinks` and `max_levelitems` as the cvar's value when it is positive (botlib defaults 4096, 4096 and 512), and the eight switches `autolaunchbspc`, `nochat`, `fastchat`, `altnames`, `forceclustering`, `forcereachability`, `forcewrite` and `nooptimize` as 1 (`BotSetVarIfSet`; botlib default 0). `rocketjump` is pushed as the cvar's value: the donor pushed only a 1, and the botlib's own default is 1, so `rocketjump 0` could never reach it.
 
 **Two places, and the split matters.** `BotInitLibrary` pushes the names that cannot move once the map is running -- the resolved ruleset, the content layers, the engine limits, the chat and log switches. `BotRulesetLibVars` pushes the five that a person can change *while* the map is running, and it runs **every frame** beside the `dmflags` push that is its precedent. Both are in `src/bot/bl_main.c`.
 
@@ -121,7 +121,7 @@ Per frame, in `BotRulesetLibVars`. Every cell is the value the code computes; wh
 | ruleset | `usehook` | `laserhook` | `teamplay` | `runes` | `techs` |
 |---|---|---|---|---|---|
 | `dm`, `dmpro`, `tdm`, `duel` | `BotTourneyHook()` | same as `usehook` | **`tdm` alone** -- see below | `BotTourneyRunes()` | 0 |
-| `ctf` | `ctf_hook` | **0** | **0** -- see below | 0 | `!(dmflags & DF_CTF_NO_TECH)` |
+| `ctf` | `ctf_hook` | **0** | **0** -- see below | `!(dmflags & DF_CTF_NO_TECH)` | the same |
 | `arena` | `allow_grapple`, i.e. `arena.cfg`'s `grapple:` key | 0 | **1** | 0 | 0 |
 | `sp` | unreachable: `G_BotsAllowed()` is false, so no library is ever loaded (N6). The `default:` arm is kept as the safe answer for a ruleset added later, because an unset libvar is whatever the previous map left in the botlib | | | | |
 
@@ -135,7 +135,7 @@ This is the tourney rule surviving its own cvar. It used to read `m_mode == MODE
 
 `laserhook` is 0 under `ctf` for a reason the name hides. To the botlib it is a *movement model* -- `be_ai_move.c`'s "0 = CTF hook, 1 = laser hook", meaning does the hook grab instantly or fly there. Threewave's hook is a projectile in both of its renderings, and this tree's `laserhook` cvar only chooses between `TE_GRAPPLE_CABLE` and `TE_MEDIC_CABLE_ATTACK`; pushing the cvar through told the botlib the hook was instantaneous whenever an operator preferred the beam. 1999 agrees by omission -- its `#ifdef ZOID` block sets `usehook` and `runes` and never `laserhook`, which it sets only under TOURNEY, where the hook really is a laser.
 
-`techs` is the other one that is not what it looks like. The botlib reads it as `LibVar("runes", "0")` -- one libvar under two names -- and CTF's techs are gated by `DF_CTF_NO_TECH` alone, never by the `runes` modifier, so the dmflag is what the botlib has to be told about. It was recorded as a finding and later turned into the modifier's definition.
+`techs` is the other one that is not what it looks like. The botlib's only read of its tech switch is `LibVar("runes", "0")` (`be_ai2_dmq2.c`, `BotSetupDeathmatchAI`); `techs` is a name only `botlib.h`'s table documents. So under `ctf` the value goes into `runes`, and `techs` carries the same value for the documented name. CTF's techs are gated by `DF_CTF_NO_TECH` alone, never by the `runes` modifier, so the dmflag is what the botlib has to be told about. The brain acts on it only under `ctf`: a bot touching a tech it does not hold drops its own (`drop tech`) to take the new one.
 
 ## Physics libvars the botlib expects
 

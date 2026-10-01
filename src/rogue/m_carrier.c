@@ -100,8 +100,10 @@ void carrier_sight(edict_t *self, edict_t *other)
 // pick one of the group, and let it rip
 static void CarrierCoopCheck(edict_t *self)
 {
-    // no more than 4 players in coop, so..
-    edict_t *targets[4];
+    // MAX_CLIENTS and not Ground Zero's four: Q2PRO does not cap co-op at
+    // four players, so a fifth one behind or below the Carrier wrote past the
+    // end of the array (PickCoopTarget has the same bound, and says why).
+    edict_t *targets[MAX_CLIENTS];
     int     num_targets = 0, target, player;
     edict_t *ent;
     trace_t tr;
@@ -113,7 +115,7 @@ static void CarrierCoopCheck(edict_t *self)
     if (self->wait > level.time)
         return;
 
-    memset(targets, 0, 4 * sizeof(edict_t *));
+    memset(targets, 0, sizeof(targets));
 
     // cycle through players
     for (player = 1; player <= game.maxclients; player++) {
@@ -121,6 +123,10 @@ static void CarrierCoopCheck(edict_t *self)
         if (!ent->inuse)
             continue;
         if (!ent->client)
+            continue;
+        // Nobody to fire at in an observer or a corpse, either of which Ground
+        // Zero's loop took for a target behind or below it.
+        if (G_IsObserver(ent) || ent->health <= 0)
             continue;
         if (inback(self, ent) || below(self, ent)) {
             tr = gi.trace(self->s.origin, NULL, NULL, ent->s.origin, self, MASK_SOLID);
@@ -393,9 +399,23 @@ static void CarrierMachineGun(edict_t *self)
         carrier_firebullet_right(self);
 }
 
+// The box a minion's spawn point must clear is the box that minion will have.
+// "monster_flyer" is a shared identity, and CreateMonster spawns it through
+// ED_CallSpawn, whose latch makes it id's flyer -- 32 units above its origin,
+// not Ground Zero's 16 -- whenever the server's rogue layer is off
+// (SP_monster_flyer).  Checked with Ground Zero's box alone, a wave at rogue 0
+// could put a flyer's top half in the ceiling, stuck.  The kamikaze is Ground
+// Zero's own, and 16 tall whatever the layer.
+static void CarrierMinionMaxs(bool kamikaze, vec3_t maxs)
+{
+    VectorCopy(flyer_maxs, maxs);
+    if (!kamikaze && !G_LayerEnabled(LAYER_ROGUE))
+        maxs[2] = 32;
+}
+
 static void CarrierSpawn(edict_t *self)
 {
-    vec3_t  f, r, offset, startpoint, spawnpoint;
+    vec3_t  f, r, offset, startpoint, spawnpoint, maxs;
     edict_t *ent;
     int     mytime;
 
@@ -410,7 +430,8 @@ static void CarrierSpawn(edict_t *self)
 //  if ((g_showlogic) && (g_showlogic->value))
 //      gi.dprintf ("mytime = %d, (%2.2f)\n", mytime, level.time - self->timestamp);
 
-    if (FindSpawnPoint(startpoint, flyer_mins, flyer_maxs, spawnpoint, 32)) {
+    CarrierMinionMaxs(mytime == 2, maxs);
+    if (FindSpawnPoint(startpoint, flyer_mins, maxs, spawnpoint, 32)) {
         // the second flier should be a kamikaze flyer
         if (mytime != 2)
             ent = CreateMonster(spawnpoint, self->s.angles, "monster_flyer");
@@ -483,7 +504,7 @@ static void carrier_spawn_check(edict_t *self)
 static void carrier_ready_spawn(edict_t *self)
 {
     float   current_yaw;
-    vec3_t  offset, f, r, startpoint, spawnpoint;
+    vec3_t  offset, f, r, startpoint, spawnpoint, maxs;
 
     CarrierCoopCheck(self);
     CarrierMachineGun(self);
@@ -494,7 +515,11 @@ static void carrier_ready_spawn(edict_t *self)
 
     if (fabsf(current_yaw - self->ideal_yaw) > 0.1f) {
         self->monsterinfo.aiflags |= AI_HOLD_FRAME;
-        self->timestamp += FRAMETIME;
+        // One frame held, one frame on the spawn clock: `timestamp` is a frame
+        // number here, and Ground Zero's `+= FRAMETIME` (seconds) truncated to
+        // nothing, so a Carrier that turned to face the player lost its place
+        // in the wave schedule and never launched the kamikaze.
+        self->timestamp++;
         return;
     }
 
@@ -503,7 +528,10 @@ static void carrier_ready_spawn(edict_t *self)
     VectorSet(offset, 105, 0, -58);
     AngleVectors(self->s.angles, f, r, NULL);
     G_ProjectSource(self->s.origin, offset, f, r, startpoint);
-    if (FindSpawnPoint(startpoint, flyer_mins, flyer_maxs, spawnpoint, 32)) {
+    // The grow marks where the next minion appears, so it is found with a
+    // flyer's box, which the kamikaze's never exceeds.
+    CarrierMinionMaxs(false, maxs);
+    if (FindSpawnPoint(startpoint, flyer_mins, maxs, spawnpoint, 32)) {
         SpawnGrow_Spawn(spawnpoint, 0);
     }
 }
@@ -1109,6 +1137,15 @@ bool Carrier_CheckAttack(edict_t *self)
 
 static void CarrierPrecache(void)
 {
+    sound_pain1 = gi.soundindex("carrier/pain_md.wav");
+    sound_pain2 = gi.soundindex("carrier/pain_lg.wav");
+    sound_pain3 = gi.soundindex("carrier/pain_sm.wav");
+    sound_death = gi.soundindex("carrier/death.wav");
+//  sound_search1 = gi.soundindex ("bosshovr/bhvunqv1.wav");
+    sound_rail = gi.soundindex("gladiator/railgun.wav");
+    sound_sight = gi.soundindex("carrier/sight.wav");
+    sound_spawn = gi.soundindex("medic_commander/monsterspawn1.wav");
+
     gi.soundindex("flyer/flysght1.wav");
     gi.soundindex("flyer/flysrch1.wav");
     gi.soundindex("flyer/flypain1.wav");
@@ -1132,6 +1169,12 @@ static void CarrierPrecache(void)
     gi.modelindex("models/items/spawngro2/tris.md2");
     gi.modelindex("models/objects/gibs/sm_metal/tris.md2");
     gi.modelindex("models/objects/gibs/gear/tris.md2");
+
+    // And the indices of the flyers and kamikazes it launches, as
+    // jorg_precache does the Makron's.  Their own spawn functions register
+    // flyer_precache, but a load runs those for the map's entities, not for a
+    // restored minion.
+    flyer_precache();
 }
 
 /*QUAKED monster_carrier (1 .5 0) (-56 -56 -44) (56 56 44) Ambush Trigger_Spawn Sight
@@ -1144,14 +1187,12 @@ void SP_monster_carrier(edict_t *self)
         return;
     }
 
-    sound_pain1 = gi.soundindex("carrier/pain_md.wav");
-    sound_pain2 = gi.soundindex("carrier/pain_lg.wav");
-    sound_pain3 = gi.soundindex("carrier/pain_sm.wav");
-    sound_death = gi.soundindex("carrier/death.wav");
-//  sound_search1 = gi.soundindex ("bosshovr/bhvunqv1.wav");
-    sound_rail = gi.soundindex("gladiator/railgun.wav");
-    sound_sight = gi.soundindex("carrier/sight.wav");
-    sound_spawn = gi.soundindex("medic_commander/monsterspawn1.wav");
+    // Registered, not called.  Ground Zero set this file's sound indices
+    // here, at spawn, and a load runs the spawn functions before it restores
+    // the saved configstrings: when they had been registered in another
+    // order, the indices named the wrong sounds or none.  G_RefreshPrecaches,
+    // at the end of ReadLevel, re-reads what G_AddPrecache holds.
+    G_AddPrecache(CarrierPrecache);
 
     self->s.sound = gi.soundindex("bosshovr/bhvengn1.wav");
 
@@ -1192,8 +1233,6 @@ void SP_monster_carrier(edict_t *self)
 
     self->monsterinfo.currentmove = &carrier_move_stand;
     self->monsterinfo.scale = MODEL_SCALE;
-
-    CarrierPrecache();
 
     flymonster_start(self);
 

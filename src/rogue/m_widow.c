@@ -1254,9 +1254,21 @@ static void WidowPowerArmor(edict_t *self)
         self->monsterinfo.power_armor_power += 250 * skill->value;
 }
 
+// She answers the powerup a player holds, read off the player's own timers and
+// not off s.effects, because in this merge the shell no longer names the
+// powerup: The Reckoning's Quad Fire glows EF_QUAD, and under ctf
+// CTFSetPowerUpEffect paints quad and invulnerability alike in the team's
+// colour, EF_PENT for red and EF_QUAD for blue.  Read off the shell, she took
+// a quad's multiplier from a Quad Fire -- with no quad timer to copy, so no
+// shell of her own -- went quad on a blue player's invulnerability and took
+// power armour for a red player's quad.  The timers are also steady where the
+// shell flickers through a powerup's last three seconds.  A target that is
+// not a client holds none of them.
 static void WidowRespondPowerup(edict_t *self, edict_t *other)
 {
-    if (other->s.effects & EF_QUAD) {
+    const gclient_t *cl = other->client;
+
+    if (cl && cl->quad_framenum > level.framenum) {
         if (skill->value == 1)
             WidowDouble(self, other->client->quad_framenum);
         else if (skill->value == 2)
@@ -1265,7 +1277,7 @@ static void WidowRespondPowerup(edict_t *self, edict_t *other)
             WidowGoinQuad(self, other->client->quad_framenum);
             WidowPowerArmor(self);
         }
-    } else if (other->s.effects & EF_DOUBLE) {
+    } else if (cl && cl->double_framenum > level.framenum) {
         if (skill->value == 2)
             WidowDouble(self, other->client->double_framenum);
         else if (skill->value == 3) {
@@ -1275,7 +1287,7 @@ static void WidowRespondPowerup(edict_t *self, edict_t *other)
     } else
         widow_damage_multiplier = 1;
 
-    if (other->s.effects & EF_PENT) {
+    if (cl && cl->invincible_framenum > level.framenum) {
         if (skill->value == 1)
             WidowPowerArmor(self);
         else if (skill->value == 2)
@@ -1292,17 +1304,26 @@ void WidowPowerups(edict_t *self)
     int player;
     edict_t *ent;
 
+    // Worked out afresh at every check.  Ground Zero reset it only in
+    // WidowRespondPowerup's else-arm, which the co-op scans below never reach
+    // once nobody holds a powerup: after the last quad ran out she kept four
+    // times her blaster and rail damage for the rest of the fight, with no
+    // shell to show for it.
+    widow_damage_multiplier = 1;
+
     if (!(coop && coop->value)) {
         WidowRespondPowerup(self, self->enemy);
     } else {
         // in coop, check for pents, then quads, then doubles
+        // (not an observer's: entering observer mode stops no timer, and a
+        // powerup held from outside the fight is not one to answer)
         for (player = 1; player <= game.maxclients; player++) {
             ent = &g_edicts[player];
             if (!ent->inuse)
                 continue;
             if (!ent->client)
                 continue;
-            if (ent->s.effects & EF_PENT) {
+            if (ent->client->invincible_framenum > level.framenum && !G_IsObserver(ent)) {
                 WidowRespondPowerup(self, ent);
                 return;
             }
@@ -1314,7 +1335,7 @@ void WidowPowerups(edict_t *self)
                 continue;
             if (!ent->client)
                 continue;
-            if (ent->s.effects & EF_QUAD) {
+            if (ent->client->quad_framenum > level.framenum && !G_IsObserver(ent)) {
                 WidowRespondPowerup(self, ent);
                 return;
             }
@@ -1326,7 +1347,7 @@ void WidowPowerups(edict_t *self)
                 continue;
             if (!ent->client)
                 continue;
-            if (ent->s.effects & EF_DOUBLE) {
+            if (ent->client->double_framenum > level.framenum && !G_IsObserver(ent)) {
                 WidowRespondPowerup(self, ent);
                 return;
             }
@@ -1506,8 +1527,17 @@ void WidowCalcSlots(edict_t *self)
 //      gi.dprintf ("number of slots changed from %d to %d\n", old_slots, self->monsterinfo.monster_slots);
 }
 
+// Registered with G_AddPrecache rather than called, for the sound indices this
+// file keeps (see SP_monster_carrier).
 static void WidowPrecache(void)
 {
+    sound_pain1 = gi.soundindex("widow/bw1pain1.wav");
+    sound_pain2 = gi.soundindex("widow/bw1pain2.wav");
+    sound_pain3 = gi.soundindex("widow/bw1pain3.wav");
+    sound_search1 = gi.soundindex("bosshovr/bhvunqv1.wav");
+//  sound_sight = gi.soundindex ("widow/sight.wav");
+    sound_rail = gi.soundindex("gladiator/railgun.wav");
+
     // cache in all of the stalker stuff, widow stuff, spawngro stuff, gibs
     gi.soundindex("stalker/pain.wav");
     gi.soundindex("stalker/death.wav");
@@ -1537,6 +1567,9 @@ static void WidowPrecache(void)
     gi.soundindex("misc/bigtele.wav");
     gi.soundindex("widow/bwstep3.wav");
     gi.soundindex("widow/bwstep2.wav");
+
+    // and her stalkers' indices, as CarrierPrecache does its flyers'
+    stalker_precache();
 }
 
 /*QUAKED monster_widow (1 .5 0) (-40 -40 0) (40 40 144) Ambush Trigger_Spawn Sight
@@ -1549,12 +1582,7 @@ void SP_monster_widow(edict_t *self)
         return;
     }
 
-    sound_pain1 = gi.soundindex("widow/bw1pain1.wav");
-    sound_pain2 = gi.soundindex("widow/bw1pain2.wav");
-    sound_pain3 = gi.soundindex("widow/bw1pain3.wav");
-    sound_search1 = gi.soundindex("bosshovr/bhvunqv1.wav");
-//  sound_sight = gi.soundindex ("widow/sight.wav");
-    sound_rail = gi.soundindex("gladiator/railgun.wav");
+    G_AddPrecache(WidowPrecache);
 
 //  self->s.sound = gi.soundindex ("bosshovr/bhvengn1.wav");
 
@@ -1605,7 +1633,6 @@ void SP_monster_widow(edict_t *self)
     self->monsterinfo.currentmove = &widow_move_stand;
     self->monsterinfo.scale = MODEL_SCALE;
 
-    WidowPrecache();
     WidowCalcSlots(self);
     widow_damage_multiplier = 1;
 

@@ -21,9 +21,13 @@
 //     prints it every frame.  So the COUNT is the mechanism, not the outcome,
 //     and the level change is asserted beside it.
 //
-//  2. team_maxplayers.  Re-getting a cvar with CVAR_NOSET is
-//     permanent -- both engines OR new flags onto an existing cvar -- so the
-//     test is simply whether the operator can still write it after a 1v1 map.
+//  2. team_maxplayers.  A duel is two teams of one, and the donor made it
+//     so by re-getting the cvar CVAR_NOSET -- permanent, because both engines
+//     OR new flags onto an existing cvar.  Writing the 1 instead outlives the
+//     ruleset: the next InitGame's gi.cvar keeps a value that exists.  So the
+//     witnesses are that the duel leaves the cvar as it found it, that the
+//     operator can still write it, and that a `tdm` game started in the same
+//     process afterwards reads the operator's value (R-OSP-22).
 //
 //  3. CONFIG NAME CASE.  A mixed-case config in serverconfigs.txt,
 //     voted for in lower case.  The witness is the name the server ANNOUNCES
@@ -139,6 +143,7 @@ func startServer(gdir string, p int, cvars map[string]string, mapname string) (*
 		bin, binArgs = "stdbuf", append([]string{"-oL", "-eL", *binary}, args...)
 	}
 	s.cmd = exec.Command(bin, binArgs...)
+	playtest.OwnChild(s.cmd)
 	s.cmd.Dir = gdir
 	out, err := s.cmd.StdoutPipe()
 	if err != nil {
@@ -285,14 +290,14 @@ func stage(d string, extra map[string]string) error {
 	if err != nil {
 		return err
 	}
-	if err := os.WriteFile(filepath.Join(d, "tourney", name), src, 0o755); err != nil {
+	if err := playtest.WriteFixture(filepath.Join(d, "tourney", name), src, 0o755); err != nil {
 		return err
 	}
 	// Files the test writes itself replace the symlink.
 	for n, body := range extra {
 		p := filepath.Join(d, "tourney", n)
 		os.Remove(p)
-		if err := os.WriteFile(p, []byte(body), 0o644); err != nil {
+		if err := playtest.WriteFixture(p, []byte(body), 0o644); err != nil {
 			return err
 		}
 	}
@@ -484,7 +489,7 @@ func row1(base string, p int) {
 		fmt.Sprintf("client rows in `status` after the change: %d", len(rows)-before))
 }
 
-// row2.  team_maxplayers survives a 1v1 map as a writable cvar.
+// row2.  A duel leaves team_maxplayers alone, and the next ruleset gets it.
 func row2(base string, p int) {
 	if !want("maxplayers") {
 		return
@@ -493,9 +498,9 @@ func row2(base string, p int) {
 	must(stage(d, map[string]string{"maps.txt": "q2dm1\nq2dm5\n"}))
 	s, err := startServer(d, p, map[string]string{
 		"maxclients": "8",
-		// duel, the arm that re-got the cvar NOSET.  It is a g_ruleset value
-		// here (R-MODE-1): this tree has no `match_mode`, and setting one
-		// selects nothing.
+		// duel, the ruleset whose teams are one player each.  It is a
+		// g_ruleset value here (R-MODE-1): this tree has no `match_mode`,
+		// and setting one selects nothing.
 		"g_ruleset":       "duel",
 		"team_maxplayers": "4",
 		"timelimit":       "0",
@@ -507,22 +512,49 @@ func row2(base string, p int) {
 	defer s.stop()
 	time.Sleep(2 * time.Second)
 
-	ck("maxplayers/1v1-forced-to-1",
-		len(s.grep(`1V1 Mode: setting teams' maxplayers to 1`)) > 0,
-		"the 1v1 clamp ran")
+	ck("maxplayers/duel-arm-ran",
+		len(s.grep(`1V1 Mode: teams are one player each`)) > 0,
+		"the 1v1 arm announced itself")
+	ok, line := cvarIs(s, "team_maxplayers", "4")
+	ck("maxplayers/duel-left-the-cvar", ok, line)
 
-	// The operator's own write, from the console the engine trusts most.
-	s.console("set team_maxplayers 4")
+	// The operator's own write, from the console the engine trusts most, and
+	// to a value no default supplies, so the last row cannot pass on one.
+	s.console("set team_maxplayers 3")
 	time.Sleep(700 * time.Millisecond)
 
 	// Scoped to this cvar's own name: Yamagi prints "basedir is write
 	// protected." at every boot, and an unscoped count reads that as a refusal
 	// of the write under test.
 	protected := s.count(`team_maxplayers (is write protected|may be set from command line only)`)
-	ok, line := cvarIs(s, "team_maxplayers", "4")
+	ok, line = cvarIs(s, "team_maxplayers", "3")
 	ck("maxplayers/operator-write-not-refused", protected == 0,
 		fmt.Sprintf("engine refusals: %d", protected))
 	ck("maxplayers/value-took", ok, line)
+
+	// The next ruleset, in the same process.  `g_ruleset` is latched, so it
+	// takes at a full restart, which is also what re-runs InitGame and its
+	// gi.cvar("team_maxplayers", ...).  `force` because Q2PRO ignores a `map`
+	// while a game runs; Yamagi reads no second argument.
+	inits := s.count(`==== InitGame`)
+	s.console("set g_ruleset tdm")
+	s.console("map q2dm1 force")
+	if !s.waitCount(`==== InitGame`, inits+1, 20*time.Second) {
+		ck("maxplayers/tdm-restart", false, "no second InitGame")
+		return
+	}
+	time.Sleep(2 * time.Second)
+	before := s.count(`^ruleset +\S+`)
+	s.console("sv ruleset")
+	s.waitCount(`^ruleset +\S+`, before+1, 4*time.Second)
+	rs := s.grep(`^ruleset +\S+`)
+	now := "(no answer)"
+	if len(rs) > before {
+		now = strings.TrimSpace(rs[len(rs)-1])
+	}
+	ck("maxplayers/tdm-restart", strings.Contains(now, "tdm"), now)
+	ok, line = cvarIs(s, "team_maxplayers", "3")
+	ck("maxplayers/tdm-after-duel-keeps-it", ok, line)
 }
 
 // row3.  A mixed-case config voted for in lower case is applied.

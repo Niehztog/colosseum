@@ -843,6 +843,12 @@ void MakronToss(edict_t *self)
     edict_t *ent;
 
     ent = G_Spawn();
+    // MakronSpawn calls SP_monster_makron directly, which sets no classname,
+    // so without this the Makron stayed G_InitEdict's "noclass": a medic that
+    // healed its corpse had ED_CallSpawn free it and then ran the freed edict,
+    // and base M_ReactToDamage's "do not retaliate against monster_makron"
+    // never applied to the only Makron the retail maps have -- Jorg's.
+    ent->classname = "monster_makron";
     // This delayed direct spawn bypasses ED_CallSpawn's content-flavour latch.
     ent->content_flavour = self->content_flavour;
     ent->nextthink = level.framenum + 0.8f * BASE_FRAMERATE;

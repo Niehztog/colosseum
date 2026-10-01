@@ -160,7 +160,7 @@ health: 200;
 `, *mapName, *arena)
 	path := filepath.Join(*dir, *gameDir, "arena.cfg")
 	os.Remove(path) // Install may have symlinked the reference one; never write through it
-	return os.WriteFile(path, []byte(cfg), 0o644)
+	return playtest.WriteFixture(path, []byte(cfg), 0o644)
 }
 
 // dumpEntityString boots the server once and asks the engine for the map's own
@@ -228,7 +228,7 @@ func writeOverride(ents string) (string, error) {
 	if err := os.MkdirAll(d, 0o755); err != nil {
 		return "", err
 	}
-	return sub, os.WriteFile(filepath.Join(d, *mapName+".ent"), []byte(ents), 0o644)
+	return sub, playtest.WriteFixture(filepath.Join(d, *mapName+".ent"), []byte(ents), 0o644)
 }
 
 func newServer(entDir string) *playtest.Server {
@@ -253,12 +253,11 @@ func newServer(entDir string) *playtest.Server {
 // alive asks the server a question only a running server can answer.  A game
 // library that dereferenced NULL takes the whole process with it, so this is
 // the check the whole scenario turns on.
+// alive asks the server now.  It used to wait for a `Current map:` line the
+// log already held from the first probe, so every probe after it was true
+// whatever the server had done since (Server.Alive).
 func alive(srv *playtest.Server) bool {
-	if err := srv.Console("status"); err != nil {
-		return false
-	}
-	_, err := srv.WaitLog(`Current map:`, 5*time.Second)
-	return err == nil
+	return srv.Alive(5*time.Second) == nil
 }
 
 // messagePhase needs no clients: G_UseTargets reads activator->svflags before

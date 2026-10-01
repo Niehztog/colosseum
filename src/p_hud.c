@@ -545,9 +545,15 @@ void Cmd_Score_f(edict_t *ent)
     // Cmd_Score_f has no menu test at all.  Keeping one meant an arena observer
     // could never open the board: move_to_arena() reopens the observer menu on
     // every placement, so `score` was always spent closing it.
+    //
+    // Threewave closes the menu and goes on to the board in the same press
+    // (port_ctf:p_hud.c:280-296) -- the close drops `showscores`, so the toggle
+    // below opens it -- and under ctf that is what `score` does.  Elsewhere the
+    // press is spent on the close.
     if (G_MenuActive(ent) && G_Ruleset() != RULESET_ARENA) {
         G_MenuClose(ent);
-        return;
+        if (G_Ruleset() != RULESET_CTF)
+            return;
     }
 
     if (!deathmatch->value && !coop->value)
@@ -795,7 +801,8 @@ void G_SetStats(edict_t *ent)
         ent->client->ps.stats[STAT_TIMER] = (ent->client->breather_framenum - level.framenum) / 10;
     }
 // PGM
-    else if (ent->client->owned_sphere) {
+    // G_OwnedSphere: a stale pointer drew i_fixme with a timer of -level.time.
+    else if (G_OwnedSphere(ent)) {
         if (ent->client->owned_sphere->spawnflags == 1)         // defender
             ent->client->ps.stats[STAT_TIMER_ICON] = gi.imageindex("p_defender");
         else if (ent->client->owned_sphere->spawnflags == 2)    // hunter
@@ -863,7 +870,17 @@ void G_SetStats(edict_t *ent)
     // it: `score` did nothing at all for a living arena player, and appeared
     // to work only while dead or in intermission, which are the two conditions
     // in the same test.
-    if (deathmatch->value) {
+    //
+    // Tourney shows no layout at all while `osp_r2dc` is set
+    // (osp-tourney@a8d1725 G_SetStats): 1 from a death until the HUD comes
+    // back after the respawn, 2 from the level's last frag until ClientThink
+    // sends the board 1.25 seconds into the intermission.  Tourney sends no
+    // board of its own in either state, so the bit drew whatever layout the
+    // client had last: the board a player died with, or the one from before
+    // the level ended.
+    if (G_IsOspRuleset() && ent->client->resp.osp_r2dc) {
+        // nothing: no layout until tourney puts one up
+    } else if (deathmatch->value) {
         if (ent->client->pers.health <= 0 || level.intermission_framenum
             || G_ScoreboardUp(ent))
             ent->client->ps.stats[STAT_LAYOUTS] |= LAYOUTS_LAYOUT;
@@ -908,6 +925,16 @@ void G_SetStats(edict_t *ent)
     // the case to gate inline rather than to hook.
     if (G_Ruleset() == RULESET_CTF)
         SetCTFStats(ent);
+    // ...and arena's id row, which is RA2's last line here (rocketarena2@99f8bb2
+    // p_hud.c): the name under an observer's crosshair, recomputed every frame.
+    // arena.c's CTFSetIDView, declared in arena.h -- g_ctf.c's of the same name
+    // is static and SetCTFStats is its caller.  Reached only from
+    // track_SetStats, it ran only while a camera did, so its crosshair arm was
+    // unreachable and a free-flying observer never saw a name.  Outside an
+    // intermission a camera observer does not get here (ClientEndServerFrame)
+    // and has the row from track_SetStats.
+    else if (G_Ruleset() == RULESET_ARENA)
+        CTFSetIDView(ent);
 }
 
 /*
@@ -970,8 +997,14 @@ void G_SetSpectatorStats(edict_t *ent)
     if (G_Ruleset() == RULESET_CTF && cl->chase_target)
         cl->ps.stats[STAT_LAYOUTS] |= LAYOUTS_LAYOUT;
 
+    // The campaign's plate names the player from the bare-name string
+    // ClientUserinfoChanged writes for it: `stat_string` draws a configstring
+    // verbatim, and the skins string reads "Name\male/grunt".  Elsewhere the
+    // skins string is baseq2's pointer, and no statusbar under ctf or arena
+    // draws this stat.
     if (cl->chase_target && cl->chase_target->inuse) {
-        G_SetStat(ent, SID_CHASE, game.csr.playerskins +
+        G_SetStat(ent, SID_CHASE, (G_Ruleset() == RULESET_SP ?
+                                   game.csr.general : game.csr.playerskins) +
                   (cl->chase_target - g_edicts) - 1);
     } else
         G_SetStat(ent, SID_CHASE, 0);

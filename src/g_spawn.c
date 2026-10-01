@@ -209,7 +209,6 @@ void SP_dm_dball_speed_change(edict_t *self);
 void SP_monster_kamikaze(edict_t *self);
 //void SP_monster_chick2 (edict_t *self);
 void SP_turret_invisible_brain(edict_t *self);
-void SP_xatrix_item(edict_t *self);
 void SP_misc_nuke_core(edict_t *self);
 //ROGUE
 //===========
@@ -420,11 +419,10 @@ static const spawn_func_t spawn_funcs[] = {
     {"turret_invisible_brain", SP_turret_invisible_brain},
     {"misc_nuke_core", SP_misc_nuke_core},
 
-    {"ammo_magslug", SP_xatrix_item},
-    {"ammo_trap", SP_xatrix_item},
-    {"item_quadfire", SP_xatrix_item},
-    {"weapon_boomer", SP_xatrix_item},
-    {"weapon_phalanx", SP_xatrix_item},
+    // Ground Zero's five SP_xatrix_item rows are not carried.  They stood its
+    // own items in for the Reckoning's ammo_magslug, ammo_trap, item_quadfire,
+    // weapon_boomer and weapon_phalanx; here those five are itemlist rows, and
+    // ED_CallSpawn searches the itemlist first, so no row could be reached.
 //ROGUE
 //==============
 
@@ -750,6 +748,23 @@ All but the first will have the FL_TEAMSLAVE flag set.
 All but the last will have the teamchain field set to the next one
 ================
 */
+// How many func_trains belong to `team`.  The retail maps answer the question
+// G_FixTeams and train_next need asked: every Ground Zero team that has a train
+// has exactly one, carrying pieces that are not trains, and every id and
+// Reckoning team that has one has two or more and nothing else -- 17 teams in
+// baseq2, one in the Reckoning's industry.
+int G_TeamTrainCount(const char *team)
+{
+    edict_t *e;
+    int     i, n = 0;
+
+    for (i = 1, e = g_edicts + i; i < globals.num_edicts; i++, e++)
+        if (e->inuse && e->team && !strcmp(e->team, team) &&
+            !strcmp(e->classname, "func_train"))
+            n++;
+    return n;
+}
+
 void G_FixTeams(void)
 {
     edict_t *e, *e2, *chain;
@@ -764,7 +779,12 @@ void G_FixTeams(void)
             continue;
         if (!e->team)
             continue;
-        if (!strcmp(e->classname, "func_train")) {
+        // Ground Zero's repair, for Ground Zero's teams only: a lone train that
+        // G_FindTeams made a slave of one of its own pieces is made the master,
+        // so that it carries them.  A team of trains is id's, and re-mastering
+        // it on its last train would make the others ride that train's path.
+        if (!strcmp(e->classname, "func_train") &&
+            G_TeamTrainCount(e->team) == 1) {
             if (e->flags & FL_TEAMSLAVE) {
                 chain = e;
                 e->teammaster = e;
@@ -895,6 +915,49 @@ static void G_FreePrecaches(void)
 
 /*
 ==============
+G_MapUsesNotCoop
+
+Whether a map was written for Ground Zero's co-op spawnflags -- which the map
+answers, not the content layer.  The two conventions disagree about one
+marking.  On id's maps and The Reckoning's, `!easy & !med & !hard` is how a
+DEATHMATCH-only entity is kept out of the campaign: id's co-op shares single
+player's skill filter, and base1 alone carries 26 such entities, its BFG, quad
+and rocket launcher among them.  On Ground Zero's, the same marking is
+co-op-only, and deathmatch items carry SPAWNFLAG_NOT_COOP instead.  Measured
+over the retail paks: none of id's 47 maps or The Reckoning's 25 sets
+NOT_COOP on anything, and every Ground Zero map that uses the skill marking
+at all uses NOT_COOP too.  So a map that sets NOT_COOP anywhere gets Ground
+Zero's filter, and every other map gets id's.
+==============
+*/
+static bool G_MapUsesNotCoop(const char *entities)
+{
+    const char  *p = entities;
+    char        *tok;
+    bool        flags;
+
+    while (1) {
+        tok = COM_Parse(&p);
+        if (!p || tok[0] != '{')
+            return false;
+        while (1) {
+            tok = COM_Parse(&p);            // a key, or the closing brace
+            if (!p)
+                return false;
+            if (tok[0] == '}')
+                break;
+            flags = !Q_stricmp(tok, "spawnflags");
+            tok = COM_Parse(&p);            // its value
+            if (!p)
+                return false;
+            if (flags && (Q_atoi(tok) & SPAWNFLAG_NOT_COOP))
+                return true;
+        }
+    }
+}
+
+/*
+==============
 SpawnEntities
 
 Creates a server's entity / program execution context by
@@ -908,6 +971,7 @@ void SpawnEntities(const char *mapname, const char *entities, const char *spawnp
     char        *com_token;
     int         i;
     int         skill_level;
+    bool        rogue_coop;
 
     skill_level = Q_clip(skill->value, 0, 3);
     if (skill->value != skill_level)
@@ -1051,6 +1115,8 @@ void SpawnEntities(const char *mapname, const char *entities, const char *spawnp
 
     ent = NULL;
     inhibit = 0;
+    // Read before the loop below consumes the string.
+    rogue_coop = coop->value && G_MapUsesNotCoop(entities);
 
 // parse ents
     while (1) {
@@ -1089,7 +1155,10 @@ void SpawnEntities(const char *mapname, const char *entities, const char *spawnp
                     inhibit++;
                     continue;
                 }
-            } else if (coop->value) {
+            } else if (rogue_coop) {
+                // Ground Zero's co-op arm, on a map written for it
+                // (G_MapUsesNotCoop).  Anywhere else co-op falls through to
+                // id's skill filter below, as it does in id's own tree.
                 if (ent->spawnflags & SPAWNFLAG_NOT_COOP) {
                     G_FreeEdict(ent);
                     inhibit++;
@@ -1157,15 +1226,29 @@ void SpawnEntities(const char *mapname, const char *entities, const char *spawnp
         if (G_ApplyQueuedOspHookRequest()) {
             OSP_SyncRuneState();
             OSP_setFeatures();
+            // ...and the rest of what InitGame derives from a config, which a
+            // `gamemap` does not rerun (OSP_configReloaded).
+            OSP_configReloaded();
         }
 
         // The rune spawners and the round's stats file.
-        // The donor's own test is integer (port_osp:g_spawn.c:761), and it
-        // has to be: rune_stat is derived with the same cast, so a fractional
-        // runes_enable would schedule a spawner with no rune type enabled
-        // -- the same rule as hook_enable.
-        if (runes_enable && (int)runes_enable->value)
+        //
+        // The latch is reset first, as the donor does here
+        // (port_osp:g_spawn.c:761): the library stays loaded across a
+        // `gamemap`, so `runespawn` still says "done" from the last level, and
+        // OSP_setupRuneSpawn would return without this level's pool or its
+        // seeding thinker -- and under `dm`, which has no match start to reset
+        // it, runes would not come back after the first map change.
+        //
+        // Gated on `rune_stat`, the resolved set, and not the donor's
+        // `runes_enable`: a vote passed with vote_carryover lives in rune_stat
+        // and not in the cvar, and `runes 1` has already been folded into both
+        // by G_ResolveModifiers.  rune_stat is derived with an integer cast, so
+        // a fractional runes_enable still schedules nothing.
+        if (rune_stat) {
+            runespawn = 0;
             OSP_setupRuneSpawn(0);
+        }
         OSP_Stats_GameInit();
         sl_GameStart(&gi, level);
         OSP_levelSpawned();
@@ -1189,9 +1272,14 @@ void SpawnEntities(const char *mapname, const char *entities, const char *spawnp
     if (deathmatch->value) {
         if (randomrespawn && randomrespawn->value)
             PrecacheForRandomRespawn();
-    } else {
-        InitHintPaths();        // if there aren't hintpaths on this map, enable quick aborts
     }
+    // The hint paths go with the monsters, not with `deathmatch`.
+    // SP_hint_path keeps them wherever G_MonstersAllowed() says, which
+    // includes ctf with deathmatch 1, so chaining them only in the `else` of
+    // the test above -- Ground Zero's place for it -- left ctf's spawned and
+    // never chained.
+    if (G_MonstersAllowed())
+        InitHintPaths();        // if there aren't hintpaths on this map, enable quick aborts
 //ROGUE
 
 // ROGUE    -- allow dm games to do init stuff right before game starts.
@@ -1418,6 +1506,12 @@ void SP_worldspawn(edict_t *ent)
     // THIS ORDER MUST MATCH THE DEFINES IN g_local.h
     // you can add more, max 19 (pete change)
     // these models are only loaded in coop or deathmatch. not singleplayer.
+    //
+    // The gate is the packs' line, and both packs have it; the spine and
+    // Threewave register the models unconditionally.  The packs' arm is
+    // taken because in single player nobody sees a third-person weapon, so the
+    // 19 model configstrings would buy nothing -- and the mission packs'
+    // campaign maps are the ones that need the room.
     if (coop->value || deathmatch->value) {
         gi.modelindex("#w_blaster.md2");
         gi.modelindex("#w_shotgun.md2");
@@ -1871,7 +1965,13 @@ void spawngrow_think(edict_t *self)
             return;
         }
     }
-    self->nextthink += FRAMETIME;
+    // The next frame, in frames.  Ground Zero wrote `nextthink += FRAMETIME`
+    // for seconds, where 0.1 past "now" is always due; `nextthink` is a frame
+    // number here, SV_RunThink zeroes it before calling this, and 0 + 0.1
+    // truncates to 0 -- so every spawn-in sphere stopped thinking at once and
+    // stood in the world, frozen and leaking its edict, for the rest of the
+    // level.  q2pro's own Ground Zero port carries the same line.
+    self->nextthink = level.framenum + 1;
 }
 
 void SpawnGrow_Spawn(vec3_t startpos, int size)

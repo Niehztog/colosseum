@@ -64,7 +64,7 @@ void OSP_setMOTD(void)
         char    path[MAX_OSPATH];
         char    *p = path;
 
-        if (!G_FsGamePath(path, sizeof(path),
+        if (!G_FsReadPath(path, sizeof(path),
                           motdfile ? motdfile->string : "motd.txt")) {
             gi.dprintf("MOTD: Path too long for \"%s\"\n",
                        motdfile ? motdfile->string : "motd.txt");
@@ -84,7 +84,13 @@ void OSP_setMOTD(void)
                         c = fgetc(f);
                         if (c == -1 || c == '\n')
                             break;
-                        motdpage[lines][i] = c;
+                        // Each line goes into the HUD as `string "<line>"`,
+                        // and a layout string has no way to carry a double
+                        // quote: one ends the string early and the rest of the
+                        // line is read as layout commands, drawing the next row
+                        // on top of this one.  The file is the operator's, so it
+                        // is made safe here rather than trusted.
+                        motdpage[lines][i] = (c == '"') ? '\'' : c;
                     }
 
                     // Windows' CRT translates CRLF to LF on a text-mode fgetc, so a
@@ -184,9 +190,13 @@ void OSP_setShowParams(void)
         Q_snprintf(buf, sizeof(buf), "yv 24 string \"Number of qualifying spots : %d\"", (int)qualifier_numspots->value);
         Q_strlcat(match_info, buf, sizeof(match_info));
 
+        // Greened with |= rather than the += every other line here uses: the
+        // level's name is the MAP's text, and a byte that already has the high
+        // bit wraps back to ASCII under +=, 0xA2 to the `"` that ends this
+        // layout string.  |= leaves no byte that can close it.
         Q_snprintf(tmp, sizeof(tmp), "%s (%s)", level.level_name, level.mapname);
         for (x = 0; x < strlen(tmp); x++)
-            tmp[x] += 128;
+            tmp[x] |= 128;
         Q_snprintf(buf, sizeof(buf), "yv 40 string2 \"Map: %s\"", tmp);
         Q_strlcat(match_info, buf, sizeof(match_info));
 
@@ -266,9 +276,10 @@ void OSP_setShowParams(void)
         Q_snprintf(buf, sizeof(buf), "yv 48 string \"%s %s %s\"", osp_teams[1].netname, tmp, osp_teams[1].skin);
         Q_strlcat(match_info, buf, sizeof(match_info));
 
+        // |=, for the reason given in the dmpro arm above.
         Q_snprintf(tmp, sizeof(tmp), "%s (%s)", level.level_name, level.mapname);
         for (x = 0; x < strlen(tmp); x++)
-            tmp[x] += 128;
+            tmp[x] |= 128;
         Q_snprintf(buf, sizeof(buf), "yv 64 string2 \"Map: %s\"", tmp);
         Q_strlcat(match_info, buf, sizeof(match_info));
 
@@ -370,9 +381,10 @@ void OSP_setShowParams(void)
                 osp_teams[1].netname);
         Q_strlcat(match_info, buf, sizeof(match_info));
 
+        // |=, for the reason given in the dmpro arm above.
         Q_snprintf(tmp, sizeof(tmp), "%s (%s)", level.level_name, level.mapname);
         for (x = 0; x < strlen(tmp); x++)
-            tmp[x] += 128;
+            tmp[x] |= 128;
         Q_snprintf(buf, sizeof(buf), "yv 32 string2 \"Map: %s\"", tmp);
         Q_strlcat(match_info, buf, sizeof(match_info));
 
@@ -878,7 +890,11 @@ void OSP_showPlayer(edict_t *ent)
             if (p_acc[cid].shots[index]) {
                 Q_snprintf(line, sizeof(line), "yv %d string \"%s %.1f%% (%d/%d hits)\"", y,
                         a_info[i].name,
-                        (double)(100 * p_acc[cid].hits[index]) /
+                        // Clamped like the `accuracy` command's: a splash
+                        // that lands on several players is several hits for
+                        // one shot, and the figure is a percentage.
+                        (double)(100 * min(p_acc[cid].hits[index],
+                                           p_acc[cid].shots[index])) /
                         p_acc[cid].shots[index],
                         p_acc[cid].hits[index],
                         p_acc[cid].shots[index]);
@@ -989,9 +1005,15 @@ void OSP_ScoreboardMessage(edict_t *ent, edict_t *killer)
 
     total = 0;
     if (sync_stat < 4) {
-        // Before the match is live there are no scores to sort by, so the order
-        // is "players who have entered, then everyone else" -- which is what
-        // the warmup board shows.
+        // Before the match is live there are no scores to sort by, so the
+        // warmup board is grouped by readiness: everyone who is not ready --
+        // observers included -- first, then the match referees (osp_e39c 1),
+        // then the players who are ready.  A client who is not ready goes to
+        // the very top and a referee to the head of the referees, so those two
+        // groups run in reverse client order and the ready players in client
+        // order.  The referee test reads the client in the j-th SORTED slot,
+        // sorted[j]; the donor's read g_edicts[j + 1] and game.clients[j], the
+        // j-th client, so it placed a referee by whoever had that number.
         for (i = 0; i < game.maxclients; i++) {
             cl_ent = g_edicts + i + 1;
             if (!cl_ent->inuse || !cl_ent->client)

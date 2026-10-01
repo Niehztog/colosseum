@@ -618,6 +618,7 @@ extern void fd_secret_move6(edict_t *);
 extern void fd_secret_use(edict_t *, edict_t *, edict_t *);
 extern void fixbot_attack(edict_t *);
 extern void fixbot_die(edict_t *, edict_t *, edict_t *, int, vec3_t);
+extern void fixbot_goal_think(edict_t *);
 extern void fixbot_pain(edict_t *, edict_t *, float, int);
 extern void fixbot_run(edict_t *);
 extern void fixbot_stand(edict_t *);
@@ -897,7 +898,6 @@ extern void spawngrow_think(edict_t *);
 extern void SpawnTechs(edict_t *);
 extern void sphere_explode(edict_t *, edict_t *, edict_t *, int, vec3_t);
 extern void sphere_if_idle_die(edict_t *, edict_t *, edict_t *, int, vec3_t);
-extern void sphere_think_explode(edict_t *);
 extern void stalker_attack_melee(edict_t *);
 extern void stalker_attack_ranged(edict_t *);
 extern void stalker_die(edict_t *, edict_t *, edict_t *, int, vec3_t);
@@ -1091,6 +1091,7 @@ const save_ptr_t save_ptrs[] = {
 { P_think, fd_secret_move2 },
 { P_think, fd_secret_move4 },
 { P_think, fd_secret_move6 },
+{ P_think, fixbot_goal_think },
 { P_think, flymonster_start_go },
 { P_think, force_wall_think },
 { P_think, func_clock_think },
@@ -1146,7 +1147,6 @@ const save_ptr_t save_ptrs[] = {
 { P_think, SP_FixCoopSpots },
 { P_think, spawngrow_think },
 { P_think, SpawnTechs },
-{ P_think, sphere_think_explode },
 { P_think, stationarymonster_start_go },
 { P_think, stationarymonster_triggered_spawn },
 { P_think, swimmonster_start_go },

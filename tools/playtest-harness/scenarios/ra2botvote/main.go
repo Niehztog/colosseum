@@ -37,9 +37,18 @@ import (
 	"q2playtest/ra2"
 )
 
-var failed int
+var failed, skips, checks int
+
+// skip records a phase that did not run.  It is not a check and is not
+// counted as a pass: a skipped phase printed "[ ok ]" and the run's total
+// said "0 check(s) failed", which is what a run that tested it says too.
+func skip(name, why string) {
+	skips++
+	fmt.Printf("  [skip] %-38s %s\n", name, why)
+}
 
 func check(name string, ok bool, detail string) {
+	checks++
 	tag := " ok "
 	if !ok {
 		tag = "FAIL"
@@ -75,7 +84,7 @@ func phase(tag string, cfg string, port int, settle time.Duration,
 	// its own, so the link (if any) is replaced by a real file.
 	path := d + "/colosseum/arena.cfg"
 	os.Remove(path)
-	if err := os.WriteFile(path, []byte(cfg), 0o644); err != nil {
+	if err := playtest.WriteFixture(path, []byte(cfg), 0o644); err != nil {
 		return nil, census, 0, err
 	}
 
@@ -165,7 +174,7 @@ func proposeRows(tag, cfg string, port int, q2, ref, ctf, lib, glad, root string
 	}
 	path := d + "/colosseum/arena.cfg"
 	os.Remove(path)
-	if err := os.WriteFile(path, []byte(cfg), 0o644); err != nil {
+	if err := playtest.WriteFixture(path, []byte(cfg), 0o644); err != nil {
 		return nil, nil, err
 	}
 
@@ -508,7 +517,7 @@ func main() {
 		if err != nil {
 			why = "no RA2 install -- run with -ra2ref"
 		}
-		check("crowded/skipped", true, why)
+		skip("crowded", why)
 	} else {
 		a1, a2, err := crowded(*port+5, *q2, *ref, *ra2ref, *lib, *glad, *root)
 		if err != nil {
@@ -542,7 +551,8 @@ func main() {
 			fmt.Sprintf("here=%d", f.a2After))
 	}
 
-	fmt.Printf("\n%d check(s), %d failed\n", 19, failed)
+	// Counted, not written down: this said 19 whatever ran.
+	fmt.Printf("\n%d check(s), %d failed, %d skipped\n", checks, failed, skips)
 	if failed > 0 {
 		os.Exit(1)
 	}
@@ -582,7 +592,7 @@ func crowded(port int, q2, baseq2, ra2ref, lib, glad, root string) (int, int, er
 		return 0, 0, fmt.Errorf("arena.cfg: %w", err)
 	}
 	os.Remove(d + "/colosseum/arena.cfg")
-	if err := os.WriteFile(d+"/colosseum/arena.cfg", cfg, 0o644); err != nil {
+	if err := playtest.WriteFixture(d+"/colosseum/arena.cfg", cfg, 0o644); err != nil {
 		return 0, 0, err
 	}
 
@@ -591,7 +601,7 @@ func crowded(port int, q2, baseq2, ra2ref, lib, glad, root string) (int, int, er
 	// reason that has nothing to do with it.
 	if src, err := os.ReadFile(aasPath); err == nil {
 		os.MkdirAll(d+"/colosseum/maps", 0o755)
-		os.WriteFile(d+"/colosseum/maps/ra2map9.aas", src, 0o644)
+		playtest.WriteFixture(d+"/colosseum/maps/ra2map9.aas", src, 0o644)
 	} else {
 		return 0, 0, fmt.Errorf("no ra2map9.aas at %s: %w", aasPath, err)
 	}
@@ -682,7 +692,7 @@ func follows(port int, q2, baseq2, ra2ref, lib, glad, root string) (followResult
 		return r, fmt.Errorf("arena.cfg: %w", err)
 	}
 	os.Remove(d + "/colosseum/arena.cfg")
-	if err := os.WriteFile(d+"/colosseum/arena.cfg", cfg, 0o644); err != nil {
+	if err := playtest.WriteFixture(d+"/colosseum/arena.cfg", cfg, 0o644); err != nil {
 		return r, err
 	}
 	src, err := os.ReadFile(aasPath)
@@ -690,7 +700,7 @@ func follows(port int, q2, baseq2, ra2ref, lib, glad, root string) (followResult
 		return r, fmt.Errorf("no ra2map9.aas at %s: %w", aasPath, err)
 	}
 	os.MkdirAll(d+"/colosseum/maps", 0o755)
-	os.WriteFile(d+"/colosseum/maps/ra2map9.aas", src, 0o644)
+	playtest.WriteFixture(d+"/colosseum/maps/ra2map9.aas", src, 0o644)
 
 	srv := &playtest.Server{
 		Binary: q2, Dir: d, Game: "colosseum", Map: "ra2map9",
@@ -803,7 +813,7 @@ func evict(port int, q2, ref, ctf, lib, glad, root string) (evictResult, error) 
 	}
 	path := d + "/colosseum/arena.cfg"
 	os.Remove(path)
-	if err := os.WriteFile(path, []byte(arenaCfg(1, 0)), 0o644); err != nil {
+	if err := playtest.WriteFixture(path, []byte(arenaCfg(1, 0)), 0o644); err != nil {
 		return r, err
 	}
 

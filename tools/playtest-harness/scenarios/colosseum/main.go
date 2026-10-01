@@ -63,6 +63,16 @@ type result struct {
 
 var results []result
 
+var skipped []string
+
+// skip records a phase that did not run.  It is not a check and is not
+// counted as a pass: a skipped phase printed "[ ok ]" and the run's total
+// said "0 check(s) failed", which is what a run that tested it says too.
+func skip(name, why string) {
+	skipped = append(skipped, name)
+	fmt.Printf("  [skip] %-46s %s\n", name, why)
+}
+
 func check(name string, ok bool, note string, a ...any) bool {
 	if len(a) > 0 {
 		note = fmt.Sprintf(note, a...)
@@ -124,7 +134,7 @@ func main() {
 			bad++
 		}
 	}
-	fmt.Printf("\n%d check(s), %d failed\n", len(results), bad)
+	fmt.Printf("\n%d check(s), %d failed, %d skipped\n", len(results), bad, len(skipped))
 	if bad > 0 {
 		for _, r := range results {
 			if !r.ok {
@@ -212,9 +222,12 @@ func run(rs colosseum.Ruleset, port int, base colosseum.State) (colosseum.State,
 	// and under ctf that switch is DF_CTF_NO_TECH -- clear by default, so the
 	// techs DO scatter and `runes=1` is now the truth about this server.  The
 	// old assertion said all three must be false and was measuring the thing
-	// was recorded as broken.  teamplay and hook still have no such switch and
-	// still must be off unless asked for.
-	check(rs.Name+"/no unrequested modifier", !st.Teamplay && !st.Hook,
+	// was recorded as broken.  `hook` is the same kind of answer now: under ctf
+	// it reports `ctf_hook`, which defaults to on, and under arena the arena's
+	// `grapple:`, which the shipped arena.cfg leaves off.  teamplay has no such
+	// switch and still must be off unless asked for.
+	check(rs.Name+"/no unrequested modifier",
+		!st.Teamplay && st.Hook == (rs.Name == "ctf"),
 		"teamplay=%v hook=%v", st.Teamplay, st.Hook)
 	// ...and the derived one, checked as a derivation: true exactly where the
 	// ruleset has techs or runes in play with nothing asked for.  ctf's techs
@@ -305,8 +318,12 @@ func run(rs colosseum.Ruleset, port int, base colosseum.State) (colosseum.State,
 	// `score` reaches each ruleset's own scoreboard writer, which is a
 	// dispatch row and the largest per-ruleset string in the game.
 	//
-	// Two rulesets answer it differently and both are correct.  Under sp there
-	// is no scoreboard at all -- baseq2 returns unless deathmatch or coop.
+	// Two rulesets answer it differently and both are correct.  Under sp the
+	// board is co-op's: baseq2 draws one in co-op and in deathmatch and not in
+	// single player, and `sp` on a dedicated server IS co-op (R-SP-3) -- this
+	// row asserted "no board" while the server ran single player's semantics
+	// with a slot per player, which was the defect.  Single player itself
+	// needs a listen server and is not asked here.
 	//
 	// Under arena the client is holding a menu and the board does NOT close it,
 	// which is the one exemption rather than an exception to it.  Every
@@ -320,7 +337,8 @@ func run(rs colosseum.Ruleset, port int, base colosseum.State) (colosseum.State,
 	if rs.Name == "sp" {
 		b.Cmd("score")
 		time.Sleep(1 * time.Second)
-		check(rs.Name+"/no scoreboard in a campaign", b.Layout() == "", "%q", b.Layout())
+		check(rs.Name+"/the co-op scoreboard", strings.Contains(b.Layout(), "client "),
+			"%q", b.Layout())
 	} else {
 		// ONE press, and both channels read off it -- arena's `score` CYCLES
 		// (board -> server-wide -> off, and for a client with no arena it
@@ -355,13 +373,23 @@ func run(rs colosseum.Ruleset, port int, base colosseum.State) (colosseum.State,
 	// donor owns the same verb.
 	observerChecks(srv, b, rs.Name)
 
+	// ---- 4c. the control for every "commands accepted" row above: a verb
+	// nothing handles must be SEEN as chat, or fellToChat is blind and the
+	// rows are as vacuous as the "Unknown command" grep they replaced.
+	mark := srv.Len()
+	b.Cmd("zz_no_such_command")
+	time.Sleep(600 * time.Millisecond)
+	check(rs.Name+"/control: an unhandled verb is seen as chat",
+		len(fellToChat(srv, mark, b.Name, []string{"zz_no_such_command"})) == 1,
+		"%s", strings.Join(srv.GrepFrom(mark, `zz_no_such_command`), " | "))
+
 	// ---- 5. leaving is a code path too, and the one that crashes last
 	b.Disconnect()
 	time.Sleep(800 * time.Millisecond)
-	srv.Console("sv ruleset")
-	if _, err := srv.WaitLog(`^world `, 5*time.Second); err == nil {
-		settle()
-		if after, err := colosseum.ParseRuleset(strings.Join(srv.Log(), "\n")); err == nil {
+	if after, err := askRuleset(srv, `^world `); err != nil {
+		check(rs.Name+"/client leaves cleanly", false, "no answer after the client left: %v", err)
+	} else {
+		{
 			check(rs.Name+"/client leaves cleanly", after.Clients == 0, "%d client(s) still counted", after.Clients)
 			// The techs are not in the world at spawn: CTFSetupTechSpawn puts
 			// a thinker in that scatters them two seconds later, so the census
@@ -439,14 +467,15 @@ func observerChecks(srv *playtest.Server, b *playtest.Bot, rs string) {
 	// absence of a complaint is checked too, because a command that falls
 	// through to the default arm is silent about it.
 	before = srv.Len()
-	for _, c := range []string{"autocam", "chasecam", "cyclecam", "camfixed", "camname", "observerhelp"} {
+	camVerbs := []string{"autocam", "chasecam", "cyclecam", "camfixed", "camname", "observerhelp"}
+	for _, c := range camVerbs {
 		b.Cmd(c)
 		time.Sleep(250 * time.Millisecond)
 	}
 	time.Sleep(600 * time.Millisecond)
-	check(rs+"/camera commands accepted",
-		len(srv.GrepFrom(before, `Unknown command|unknown command`)) == 0,
-		strings.Join(srv.GrepFrom(before, `nknown command`), " | "))
+	chat := fellToChat(srv, before, b.Name, camVerbs)
+	check(rs+"/camera commands accepted", len(chat) == 0,
+		"said as chat instead of handled: %v", chat)
 
 	// ...and a camera really does take the controls.  Only assertable with a
 	// subject to follow: with nobody else in the map `Cam_Cycle` finds nothing,
@@ -472,8 +501,8 @@ func observerChecks(srv *playtest.Server, b *playtest.Bot, rs string) {
 			"pmtype=%d following one of %d players -- a camera drives the view",
 			b.PMType(), others)
 	} else {
-		check(rs+"/a camera takes the controls", true,
-			"SKIPPED: nobody to follow, so the camera stays on this client")
+		skip(rs+"/a camera takes the controls",
+			"nobody to follow, so the camera stays on this client")
 	}
 
 	// ...and back out again.  Under ctf that is `team red`, not `observer`:
@@ -517,6 +546,49 @@ func settled[T any](parse func(string) (T, error), srv *playtest.Server) (T, err
 	return parse(strings.Join(srv.Log(), "\n"))
 }
 
+// askRuleset asks `sv ruleset` NOW and parses the answer to this question
+// only.  A row that asks whether the server is still sane after something
+// happened must not be answered by the report it printed before: WaitLog
+// accepts a line already in the log, and q2proded prints nothing when it
+// dies, so the old report was all a dead server had to offer -- and it passed.
+func askRuleset(srv *playtest.Server, re string) (colosseum.State, error) {
+	mark, err := srv.Ask("sv ruleset", re, 5*time.Second)
+	if err != nil {
+		return colosseum.State{}, err
+	}
+	settle()
+	return colosseum.ParseRuleset(strings.Join(srv.LogFrom(mark), "\n"))
+}
+
+// fellToChat returns the commands in cmds that reached Cmd_Say_f instead of a
+// handler.  An unknown CLIENT command is not an error in Quake II --
+// ClientCommand's last arm says it as chat -- so "Unknown command", which is
+// the engine's answer to an unknown CONSOLE command, never appears for one,
+// and a row that grepped for it could not fail.  The witness is the chat
+// echo, which both say paths print on a dedicated server: `<name>: <command>`,
+// `(<name>): ` for a team line, and `W:<name>: ` under arena, whose fallback
+// chat is server-wide -- the form the control row below found this missing.
+func fellToChat(srv *playtest.Server, from int, name string, cmds []string) []string {
+	var out []string
+	for _, c := range cmds {
+		re := `^(?:W:)?\(?` + regexp.QuoteMeta(name) + `\)?: ` + regexp.QuoteMeta(c) + `\b`
+		if len(srv.GrepFrom(from, re)) > 0 {
+			out = append(out, c)
+		}
+	}
+	return out
+}
+
+// askBots is askRuleset for the `bots` census line.
+func askBots(srv *playtest.Server) (colosseum.BotCensus, error) {
+	mark, err := srv.Ask("sv ruleset", `^bots `, 10*time.Second)
+	if err != nil {
+		return colosseum.BotCensus{}, err
+	}
+	settle()
+	return colosseum.ParseBots(strings.Join(srv.LogFrom(mark), "\n"))
+}
+
 // extras runs the servers that need a cvar the battery does not set.
 func extras() {
 	// 1. ctf WITH the runes modifier: the matrix accepts it here, and the
@@ -525,12 +597,15 @@ func extras() {
 	port := nextPort()
 	fmt.Printf("\n##### ctf + runes (port %d)\n", port)
 	if st, log, err := boot("ctf", "q2ctf1", port, map[string]string{
-		"runes": "1", "hook": "1", "teamplay": "1",
+		"runes": "1",
 	}); err != nil {
 		check("ctf+runes/boot", false, err.Error())
 	} else {
-		check("ctf+runes/accepted", st.Runes && st.Hook && st.Teamplay,
-			"runes=%v hook=%v teamplay=%v", st.Runes, st.Hook, st.Teamplay)
+		// Neither `teamplay` nor `hook` is asked for: ctf decides its own
+		// teams and has its own hook, `ctf_hook`, and refuses both modifiers.
+		// The hook it reports is that switch, on by default.
+		check("ctf+runes/accepted", st.Runes && st.Hook,
+			"runes=%v hook=%v", st.Runes, st.Hook)
 		// Techs are CTF's own content and spawn whether or not the modifier
 		// was asked for -- Threewave gates them on DF_CTF_NO_TECH alone.  So
 		// this is not evidence that `runes` did anything; it is evidence that
@@ -914,11 +989,19 @@ func ctfChecks(srv *playtest.Server, b *playtest.Bot, rs string) {
 	check(rs+"/team skin survives userinfo", strings.HasSuffix(skin, "ctf_r"),
 		"%q -- model may change, team skin may not", skin)
 
-	// The tech menu and the hook are CTF's, and both are client commands.
-	b.Cmd("id")
-	b.Cmd("hook")
+	// The ID view and the offhand hook are CTF's, and both are client
+	// commands.  Threewave's hook verbs are `hookon`/`hookoff`; a bare `hook`
+	// is tourney's, and under ctf it is chat -- which this row, grepping for
+	// "Unknown command", used to send and pass.
+	mark := srv.Len()
+	ctfVerbs := []string{"id", "hookon", "hookoff"}
+	for _, c := range ctfVerbs {
+		b.Cmd(c)
+	}
 	time.Sleep(500 * time.Millisecond)
-	check(rs+"/ctf commands accepted", len(srv.Grep(`Unknown command`)) == 0, "")
+	chat := fellToChat(srv, mark, b.Name, ctfVerbs)
+	check(rs+"/ctf commands accepted", len(chat) == 0,
+		"said as chat instead of handled: %v", chat)
 }
 
 func arenaChecks(srv *playtest.Server, b *playtest.Bot, rs string) {
@@ -990,13 +1073,19 @@ func tourneyChecks(srv *playtest.Server, b *playtest.Bot, rs string) {
 	check(rs+"/client has a bar", len(b.StatusBar()) > 0, "%d bytes", len(b.StatusBar()))
 
 	// The mod's own client commands must reach OSP_ClientCommand rather than
-	// falling through to "unknown command".
-	for _, c := range []string{"settings", "players", "matchinfo", "stats"} {
+	// falling through to chat.  `settings` was on this list and is no command
+	// of tourney's or of this tree's: it was chat on every run, and the row
+	// passed because it looked for "Unknown command", which a client command
+	// never produces.
+	mark := srv.Len()
+	ospVerbs := []string{"players", "matchinfo", "stats", "help"}
+	for _, c := range ospVerbs {
 		b.Cmd(c)
 	}
 	time.Sleep(800 * time.Millisecond)
-	check(rs+"/mod commands accepted", len(srv.Grep(`Unknown command`)) == 0,
-		strings.Join(srv.Grep(`Unknown command`), " | "))
+	chat := fellToChat(srv, mark, b.Name, ospVerbs)
+	check(rs+"/mod commands accepted", len(chat) == 0,
+		"said as chat instead of handled: %v", chat)
 
 	// R-OSP-14 -- WHICH SCREEN THE MOTD WINDOW DRAWS.
 	//
@@ -1056,7 +1145,7 @@ func tourneyChecks(srv *playtest.Server, b *playtest.Bot, rs string) {
 // what "bots play in ctf" actually means.
 func botRows() {
 	if *gladdir == "" {
-		check("bots/skipped", true, "no -gladdir, so the bot rows did not run")
+		skip("bots", "no -gladdir, so the bot rows did not run")
 		return
 	}
 
@@ -1285,13 +1374,14 @@ func slotRows() {
 	}
 	p2 := playtest.NewBot("human2", "127.0.0.1", full)
 	err = p2.Start(12 * time.Second)
-	check("slotsfull/human refused", err != nil,
-		"connect returned %v", err)
-	srv2.Console("sv ruleset")
-	time.Sleep(600 * time.Millisecond)
-	b3, _ := colosseum.ParseBots(strings.Join(srv2.Log(), "\n"))
-	check("slotsfull/no bot was stolen", b3.Bots == max,
-		"%d bot(s) still there", b3.Bots)
+	// A dead server refuses every connection too, so the refusal only counts
+	// from a server that is answering afterwards -- and the census has to be
+	// the one it gives now, not the one addBots left in the log.
+	b3, cerr := askBots(srv2)
+	check("slotsfull/human refused", err != nil && cerr == nil,
+		"connect returned %v; the server answered afterwards: %v", err, cerr)
+	check("slotsfull/no bot was stolen", cerr == nil && b3.Bots == max,
+		"%d bot(s) still there (%v)", b3.Bots, cerr)
 	if err == nil {
 		p2.Disconnect()
 	}
@@ -1496,15 +1586,23 @@ func voteRow(port int) {
 	check("vote/started", true, "a vote is running")
 
 	// Now take the only human away and let the per-frame division run.
+	// The answer has to be one the server gives AFTER that: the census it
+	// printed while the bots were added is still in the log, and a server
+	// killed by SIGFPE prints nothing, so a wait that accepted history passed
+	// against a corpse.
 	p.Disconnect()
 	time.Sleep(6 * time.Second)
-	srv.Console("sv ruleset")
-	if _, err := srv.WaitLog(`^bots `, 10*time.Second); err != nil {
+	b, err := askBots(srv)
+	if dead, why := srv.Exited(); dead {
+		check("vote/server survived the last human leaving", false,
+			"the server exited: %v", why)
+		return
+	}
+	if err != nil {
 		check("vote/server survived the last human leaving", false,
 			"the server stopped answering: %v", err)
 		return
 	}
-	b, _ := colosseum.ParseBots(strings.Join(srv.Log(), "\n"))
 	check("vote/server survived the last human leaving", true,
 		"still answering with %d bot(s) and %d client(s)", b.Bots, b.Clients)
 }

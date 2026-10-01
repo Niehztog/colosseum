@@ -254,22 +254,36 @@ void OSP_startObserve(edict_t *ent)
         EntityListAdd(ent);
         OSP_DoRankSort();
         OSP_Stats_PlayerEnter(ent);
-    } else {
-        if (sync_stat < 4) {
-            OSP_notready_cmd(ent, true);
-            OSP_CheckReady();
-        }
+    } else
+        OSP_forceObserve(ent);
+}
 
-        if (rune_stat)
-            OSP_deadDropRune(ent);
+// OSP_startObserve's leaving half, with none of its refusals but the
+// intermission's.  A captain's `kickplayer` is the other caller, because a
+// removal is not the victim's to refuse: not by being injured during a match,
+// and not by being a player whose placement was refused and who has no body
+// yet (R-OSP-1), both of which the `observe` toggle turns away.
+void OSP_forceObserve(edict_t *ent)
+{
+    gclient_t   *cl = ent->client;
 
-        OSP_observerTeamFrags(ent);
-        cl->resp.osp_r2d4 = level.framenum - cl->resp.enterframe;
-        cl->resp.osp_r000 = 0;
-        cl->osp_menu = NULL;
-        G_MenuClose(ent);
-        OSP_removeChaseCam(ent);
+    if (level.intermission_framenum != 0)
+        return;
+
+    if (sync_stat < 4) {
+        OSP_notready_cmd(ent, true);
+        OSP_CheckReady();
     }
+
+    if (rune_stat)
+        OSP_deadDropRune(ent);
+
+    OSP_observerTeamFrags(ent);
+    cl->resp.osp_r2d4 = level.framenum - cl->resp.enterframe;
+    cl->resp.osp_r000 = 0;
+    cl->osp_menu = NULL;
+    G_MenuClose(ent);
+    OSP_removeChaseCam(ent);
 }
 
 void OSP_removeChaseCam(edict_t *ent)

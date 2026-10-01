@@ -63,13 +63,15 @@ services:
     build: *build
     image: q2pro-server
     environment:
-      # The gamedir under the mounted game data, the address to advertise, the
-      # port, and a cfg exec'd AFTER server1.cfg so it wins.  A command-line
-      # `+set` cannot do that last one: q2pro applies every +set in an early
-      # phase, before any +exec, whatever the argument order.
+      # The gamedir under the mounted game data, the address to BIND (empty or
+      # 'localhost' is every interface, anything else becomes q2pro's net_ip),
+      # the port, the server's cfg, and a cfg exec'd AFTER it so it wins.  A
+      # command-line `+set` cannot do that last one: q2pro applies every +set
+      # in an early phase, before any +exec, whatever the argument order.
       Q2_GAMEDIR: 'baseq2'
       Q2_IP: 'localhost'
       Q2_PORT: '27910'
+      Q2_SERVER_CFG: 'server.cfg'
       Q2_OVERRIDE_CFG: 'q2pro-override.cfg'
     restart: always
     init: true

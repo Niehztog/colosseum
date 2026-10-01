@@ -52,7 +52,7 @@ typedef struct {
 definition_t    *find_key(char *key, int type, definition_t *items, int count);
 
 // The donor's `gamedir` was here and is gone with the two relative paths
-// that were the only things reading it -- G_FsGamePath() asks the engine which
+// that were the only things reading it -- G_FsReadPath() asks the engine which
 // directory the game is installed in rather than assuming it is the one the
 // server was started from.
 static  cvar_t  *arenacfg;
@@ -908,6 +908,12 @@ bool read_config(FILE *fp)
     return read_block(fp, definition_blocks, &num_definition_blocks);
 }
 
+// A key matches by strcmp, so case counts, and that is 1999's and kept.
+// arena.cfg has 35 `Weapons:` lines that therefore say nothing: 33 restate the
+// default, and ra2map17 arenas 4 and 5 ("Weapons: 2 3 4 5 6 7 9") would refuse
+// the hyperblaster and have handed it out since they shipped.  A case-blind
+// match would change those two arenas' loadout under every server that runs
+// the file, which is a change to RA2's maps rather than to its parser.
 definition_t *find_key(char *key, int type, definition_t *items, int count)
 {
     int     i;
@@ -989,17 +995,17 @@ void load_config(int num_arenas)
     allow_grapple = false;
     line = NULL;
 
-    // `<homedir-or-basedir>/<gamedir>/<name>`, not the donor's bare
-    // `<gamedir>/<name>`: that resolves against the server's working directORY,
-    // so a server started from anywhere but the installation read no arena.cfg
-    // at all -- every per-arena setting silently back to its built-in default,
-    // announced by one dprintf nobody is reading at map load.
-    //
-    // This is the same correction ra2stats.c and gslog.c already carry, with
-    // the same reasoning written against them; these two were the ones the
-    // sweep missed.  `path` grows with it -- 80 bytes could not hold an
-    // absolute path and the composer says so by failing.
-    if (!G_FsGamePath(path, sizeof(path), arenacfg->string)) {
+    // `homedir/<gamedir>/<name>` or `basedir/<gamedir>/<name>`, whichever
+    // exists, not the donor's bare `<gamedir>/<name>`: that resolves against the
+    // server's working directory, so a server started from anywhere but the
+    // installation read no arena.cfg at all -- every per-arena setting silently
+    // back to its built-in default, announced by one dprintf nobody is reading
+    // at map load.  And both roots, not the writers' one (G_FsReadPath): a
+    // system-wide Q2PRO sets homedir by default, and a gamedir installed under
+    // basedir is still where the engine exec'd this ruleset's config from.
+    // `path` grows with it -- 80 bytes could not hold an absolute path and the
+    // composer says so by failing.
+    if (!G_FsReadPath(path, sizeof(path), arenacfg->string)) {
         gi.dprintf("Error: arena config path too long for %s\n",
                    arenacfg->string);
         return;
@@ -1100,7 +1106,7 @@ void load_motd(void)
 
     // The second of the two.  See load_config() above for why the
     // donor's relative path cannot be kept.
-    if (!G_FsGamePath(path, sizeof(path), "motd.txt")) {
+    if (!G_FsReadPath(path, sizeof(path), "motd.txt")) {
         gi.dprintf("Error: motd path too long\n");
         return;
     }
@@ -1140,6 +1146,15 @@ void load_motd(void)
 
         if (p[len - 1] == '\n')
             p[--len] = 0;
+
+        // ...and the CR of a CRLF line, which "r" keeps everywhere but on
+        // Windows.  0x0D is not whitespace to RA2's menu: it is the glyph
+        // DisplayMenu draws as its cursor, so a motd.txt saved by a Windows
+        // editor put a cursor at the end of every row.  OSP's reader strips it
+        // too (osp_display.c).  `len` is left as it is, so the step below
+        // still lands after the newline.
+        if (len && p[len - 1] == '\r')
+            p[len - 1] = 0;
 
         node = gi.TagMalloc(sizeof(motd_t), TAG_LEVEL);
         node->line = p;

@@ -38,6 +38,29 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "bot/bl_main.h"
 #include "bot/bl_botcfg.h"
 
+// The verbs this chain owns and may REFUSE -- a weapon change or `kill` while
+// the match is paused, `inven`, `menu` and `ctfmenu` for an entered player
+// under match_strictmode -- and that a later table has too, with none of OSP's
+// conditions.  Handing one back with `false` runs it there: a paused player
+// suicides and respawns elsewhere, opens the menu strict mode closed, or -- for
+// `menu`, which ClientCommand's chain hands to BotCmd -- the Gladiator bot
+// menu.  So a refused one is answered here.  The donor ends its chain in chat,
+// which is its catch-all for every unknown word and is how its refusals never
+// reached a second handler; this chain hands unknown words on to the bot table
+// and then chat, so the refusals are the ones it has to keep.
+static bool osp_refused_verb(const char *cmd)
+{
+    static const char *const shared[] = {
+        "use", "inven", "invnext", "invprev", "invnextw", "invprevw",
+        "weapprev", "weapnext", "kill", "menu", "ctfmenu", NULL
+    };
+
+    for (int i = 0; shared[i]; i++)
+        if (!Q_stricmp(cmd, shared[i]))
+            return true;
+    return false;
+}
+
 bool OSP_ClientCommand(edict_t *ent)
 {
     char        *cmdstr;
@@ -94,9 +117,17 @@ bool OSP_ClientCommand(edict_t *ent)
         OSP_oldaccuracy_cmd(ent);
         return true;
     }
-    if (ent->osp_e39c != 1 && (!Q_stricmp(cmdstr, "referee") ||
-                               !Q_stricmp(cmdstr, "admin") || !Q_stricmp(cmdstr, "ref"))) {
-        OSP_referee_cmd(ent);
+    // Handled in every state.  A referee who logged in on joining
+    // (`_is_referee`, osp_e39c 1) does not get OSP_referee_cmd, as in the
+    // donor; the verb then fell through to chat, here as there, so
+    // `referee <pw>` typed by one went to every player and into the stats chat
+    // log, and the password may be the rcon password.  Swallowed, never echoed.
+    if (!Q_stricmp(cmdstr, "referee") || !Q_stricmp(cmdstr, "admin") ||
+        !Q_stricmp(cmdstr, "ref")) {
+        if (ent->osp_e39c != 1)
+            OSP_referee_cmd(ent);
+        else
+            gi.cprintf(ent, PRINT_HIGH, "You are already a referee.\n");
         return true;
     }
     if (!Q_stricmp(cmdstr, "joincode")) {
@@ -179,27 +210,29 @@ bool OSP_ClientCommand(edict_t *ent)
                              !Q_stricmp(cmdstr, "highscore") || !Q_stricmp(cmdstr, "hiscores") ||
                              !Q_stricmp(cmdstr, "hiscore")))
         OSP_highscores_cmd(ent);
-    else if (!(int)match_strictmode->value && !Q_stricmp(cmdstr, "ready"))
+    // Strict mode is asked of OSP_StrictMode(), which is off under `dm`
+    // whatever `match_strictmode` says, rather than of the cvar.
+    else if (!OSP_StrictMode() && !Q_stricmp(cmdstr, "ready"))
         OSP_ready_cmd(ent, false);
-    else if (!(int)match_strictmode->value && (!Q_stricmp(cmdstr, "notready") ||
+    else if (!OSP_StrictMode() && (!Q_stricmp(cmdstr, "notready") ||
              !Q_stricmp(cmdstr, "unready") || !Q_stricmp(cmdstr, "noready")))
         OSP_notready_cmd(ent, false);
-    else if ((!(int)match_strictmode->value ||
+    else if ((!OSP_StrictMode() ||
               ent->client->resp.osp_entered != ENTERED_ENTERED) &&
              (!Q_stricmp(cmdstr, "chasecam") || !Q_stricmp(cmdstr, "chase")))
         OSP_ChaseCam(ent);
-    else if ((!(int)match_strictmode->value ||
+    else if ((!OSP_StrictMode() ||
               ent->client->resp.osp_entered != ENTERED_ENTERED) &&
              (!Q_stricmp(cmdstr, "observer") || !Q_stricmp(cmdstr, "observe")))
         OSP_startObserve(ent);
-    else if ((!(int)match_strictmode->value ||
+    else if ((!OSP_StrictMode() ||
               ent->client->resp.osp_entered != ENTERED_ENTERED) && !Q_stricmp(cmdstr, "autocam"))
         CameraCmd(ent, true);
-    else if ((!(int)match_strictmode->value ||
+    else if ((!OSP_StrictMode() ||
               ent->client->resp.osp_entered != ENTERED_ENTERED) &&
              (!Q_stricmp(cmdstr, "menu") || !Q_stricmp(cmdstr, "ctfmenu")))
         Cmd_Inven_f(ent);
-    else if ((!(int)match_strictmode->value ||
+    else if ((!OSP_StrictMode() ||
               ent->client->resp.osp_entered != ENTERED_ENTERED) && !Q_stricmp(cmdstr, "inven"))
         Cmd_Inven_f(ent);
     else if (!Q_stricmp(cmdstr, "matchinfo"))
@@ -242,11 +275,11 @@ bool OSP_ClientCommand(edict_t *ent)
     else if (G_Ruleset() == RULESET_TDM && (!Q_stricmp(cmdstr, "unlockteam") ||
                              !Q_stricmp(cmdstr, "teamunlock") || !Q_stricmp(cmdstr, "unlock")))
         OSP_unlockteam_cmd(ent);
-    else if (G_Ruleset() == RULESET_TDM && !(int)match_strictmode->value &&
+    else if (G_Ruleset() == RULESET_TDM && !OSP_StrictMode() &&
              (!Q_stricmp(cmdstr, "readyteam") || !Q_stricmp(cmdstr, "teamready") ||
               !Q_stricmp(cmdstr, "teamallready")))
         OSP_readyteam_cmd(ent);
-    else if (G_Ruleset() == RULESET_TDM && !(int)match_strictmode->value &&
+    else if (G_Ruleset() == RULESET_TDM && !OSP_StrictMode() &&
              (!Q_stricmp(cmdstr, "notreadyteam") || !Q_stricmp(cmdstr, "unreadyteam") ||
               !Q_stricmp(cmdstr, "noreadyteam") || !Q_stricmp(cmdstr, "teamnotready")))
         OSP_notreadyteam_cmd(ent);
@@ -303,9 +336,9 @@ bool OSP_ClientCommand(edict_t *ent)
         // command table and then to chat -- the same tail as the outer chain,
         // written out twice.
         else
-            return false;
+            return osp_refused_verb(cmdstr);
     } else {
-        return false;
+        return osp_refused_verb(cmdstr);
     }
 
     return true;

@@ -1069,8 +1069,11 @@ void ionripper_touch(edict_t *self, edict_t *other, cplane_t *plane, csurface_t 
     if (self->owner->client)
         PlayerNoise(self->owner, self->s.origin, PNOISE_IMPACT);
 
+    // `plane` is NULL on fire_ionripper's point-blank path, which calls this
+    // directly, and on any touch that comes from the other entity's move;
+    // guarded the way rocket_touch and bfg_touch are.
     if (other->takedamage) {
-        T_Damage(other, self, self->owner, self->velocity, self->s.origin, plane->normal, self->dmg, 1, DAMAGE_ENERGY, MOD_RIPPER);
+        T_Damage(other, self, self->owner, self->velocity, self->s.origin, plane ? plane->normal : NULL, self->dmg, 1, DAMAGE_ENERGY, MOD_RIPPER);
 
     } else {
         return;
@@ -1149,8 +1152,14 @@ void heat_think(edict_t *self)
 
         if (self->owner == target)
             continue;
-        if (!(target->svflags & SVF_MONSTER))
-            continue;
+        // A player, which is what the shipped missile tracked.  The Reckoning
+        // wrote `if (!target->svflags & SVF_MONSTER)` here, which precedence
+        // makes a test that never passes, so only the `client` line below
+        // decided (gladq2_src has it the same way).  q2pro's port parenthesised
+        // it into `!(svflags & SVF_MONSTER)`, and next to `!client` that asks
+        // for an entity that is both a monster and a client: nothing, so the
+        // heat chick's rockets flew straight.  The line is gone rather than
+        // "fixed", because the behaviour that shipped is the one kept.
         if (!target->client)
             continue;
         if (target->health <= 0)
@@ -1259,8 +1268,11 @@ void plasma_touch(edict_t *ent, edict_t *other, cplane_t *plane, csurface_t *sur
     // calculate position for the explosion entity
     VectorMA(ent->s.origin, -0.02, ent->velocity, origin);
 
+    // NULL-safe like ionripper_touch: a touch that comes from the OTHER
+    // entity's move -- SV_Impact's second call, a player's pmove running into
+    // the ball -- has no plane.
     if (other->takedamage) {
-        T_Damage(other, ent, ent->owner, ent->velocity, ent->s.origin, plane->normal, ent->dmg, 0, 0, MOD_PHALANX);
+        T_Damage(other, ent, ent->owner, ent->velocity, ent->s.origin, plane ? plane->normal : NULL, ent->dmg, 0, 0, MOD_PHALANX);
     }
 
     T_RadiusDamage(ent, ent->owner, ent->radius_dmg, other, ent->dmg_radius, MOD_PHALANX);
@@ -1402,8 +1414,20 @@ void Trap_Think(edict_t *ent)
             ent->nextthink = level.framenum + 1.0 * BASE_FRAMERATE;
             ent->think = G_FreeEdict;
 
+            // No cube in an arena, which has no items: SpawnItem would only
+            // precache it -- mid-round -- and free it.
+            if (G_Ruleset() == RULESET_ARENA)
+                return;
+
             best = G_Spawn();
             SP_item_foodcube(best);
+            // And the cube need not survive its own spawn elsewhere either:
+            // SP_item_foodcube frees it under DF_NO_HEALTH.  G_FreeEdict
+            // zeroes the slot and G_InitEdict relies on that, so the writes
+            // below would have been inherited by the next entity spawned
+            // there -- and the link put a freed edict back in the world.
+            if (!best->inuse)
+                return;
             VectorCopy(ent->s.origin, best->s.origin);
             best->s.origin[2] += 16;
             best->velocity[2] = 400;
@@ -1538,9 +1562,12 @@ void fire_trap(edict_t *self, vec3_t start, vec3_t aimdir, int damage, int speed
     else
         trap->spawnflags = 1;
 
-    if (timer <= 0.0)
+    if (timer <= 0.0) {
+        // Gone: Grenade_Explode frees it, and the timestamp below would be
+        // written into a zeroed slot for the next G_Spawn to inherit.
         Grenade_Explode(trap);
-    else {
+        return;
+    } else {
         // gi.sound (self, CHAN_WEAPON, gi.soundindex ("weapons/trapdown.wav"), 1, ATTN_NORM, 0);
         gi.linkentity(trap);
     }

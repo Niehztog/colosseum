@@ -3,6 +3,13 @@
 # Mirrors q2pro/src/ctf/meson.build: drop this tree at q2pro/src/colosseum and
 # it builds through the same mission-pack mechanism, sharing game_shared_src and
 # engine_inc rather than compiling its own copies of shared.c and m_flash.c.
+#
+# THAT MECHANISM IS NOT UPSTREAM Q2PRO'S.  `-Dmission-packs` and the
+# game_shared_src and engine_inc variables this file uses come from the
+# feature/mission-packs branch of the Niehztog/q2pro fork; official
+# q2pro/q2pro defines game_deps and dll_link_args but not those three, so there
+# this does not configure.  The library does not depend on the fork: the
+# Makefile builds it standalone.
 # The standalone Makefile stays primary -- it is the one that covers all five
 # build targets, both settings of the game ABI, and the contract audits.
 #

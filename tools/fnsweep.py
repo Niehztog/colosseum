@@ -337,7 +337,7 @@ def norm_key(text):
 CLUSTERS = [
     ('findings',
      r'^(osp_r008|SVF_PROJECTILE|hooked|item_spehre_defender|'
-     r'OSP_getPlayerAddr|reconnected|nConnected)$'),
+     r'OSP_getPlayerAddr|reconnected|nConnected|skinicon)$'),
     ('unsafe libc/raw scanner replaced',
      r'^(sprintf|strcat|strncpy|strncat|vsprintf|fscanf|stricmp|strcasecmp)$'),
     ('match_mode deleted, four values of g_ruleset instead',
@@ -402,6 +402,11 @@ CLUSTERS = [
      r'^(MD5|ROTATE_LEFT$|Encode$|Decode$|FF$|GG$|HH$|II$|[GH]$)'),
     ('statusbar literals replaced by the composed bar',
      r'^(ctf_statusbar|dm_statusbar|single_statusbar|team_statusbar)'),
+    # Ground Zero stood its own items in for the Reckoning's five; here those
+    # classnames are itemlist rows, which ED_CallSpawn searches first, so the
+    # five spawn rows and the function could never be reached (g_spawn.c).
+    ("Ground Zero's Reckoning stand-ins, unreachable behind the itemlist",
+     r'^SP_xatrix_item$'),
 ]
 CLUSTERS = [(n, re.compile(p)) for n, p in CLUSTERS]
 FINDINGS_CLUSTER = CLUSTERS[0][0]
@@ -443,6 +448,12 @@ EXEMPT = {
                       'nobody.  It reads "ZBOT: <name> from <addr> -- userinfo '
                       '..." now, so the userinfo the admin wanted is kept and '
                       'nothing parsing R-LOG-1\'s pair can mistake it for one',
+    'skinicon':       'RA2\'s team-skin icon lookup, which asked gi.imageindex for '
+                      '"<skin>_i" off the client\'s own userinfo every frame and '
+                      'so REGISTERED any name a client chose, until the image '
+                      'configstrings ran out and the level dropped.  RA_SkinIcon '
+                      'matches the skin by name against the icons RA_Precache '
+                      'registered and asks the engine for nothing (R-SEC-13)',
     'reconnected':    'tourney\'s player-facing "%s reconnected" broadcast, '
                       'deliberately not carried: it is the second console line '
                       'R-LOG-1 exists to remove, and what it announced is '
@@ -465,9 +476,10 @@ EXEMPT = {
 #            "Open, deliberately" two entries before the one that closed it.  An
 #            absence is a finding only once you know what else could be
 #            answering the question, and no line-level rule can know that.
-#   2.  Closed.  RA2's chat-spam counter now runs after
-#            FloodProtect(), as the donor does. It remains outside this check's
-#            ABSENT-line space because every identifier involved exists here.
+#   2.  Closed.  RA2's chat-spam counter is gone, as the pinned donor
+#            removed it (rocketarena2@fa01a64): FloodProtect() alone limits
+#            chat.  It stays outside this check's ABSENT-line space because the
+#            counter's fields still exist here, for the savegame layout.
 #
 # Closed, and listed because a reader of this file should be able to
 # tell "this check never saw it" from "this check still cannot see it":

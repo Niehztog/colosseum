@@ -46,8 +46,9 @@ byte P_DamageModifier(edict_t *ent)
         damage_multiplier *= 4;
         is_quad = 1;
 
-        // if we're quad and DF_NO_STACK_DOUBLE is on, return now.
-        if (((int)(dmflags->value) & DF_NO_STACK_DOUBLE))
+        // if we're quad and DF_NO_STACK_DOUBLE is on, return now.  Asked of
+        // G_RogueDMFlag: under `ctf` the bit is DF_ARMOR_PROTECT.
+        if (G_RogueDMFlag(DF_NO_STACK_DOUBLE))
             return damage_multiplier;
     }
     if (ent->client->double_framenum > level.framenum) {
@@ -176,15 +177,17 @@ bool Pickup_Weapon(edict_t *ent, edict_t *other)
 
     if (!(ent->spawnflags & DROPPED_ITEM)) {
         // give them some ammo with it
-        // Two guards union.  Ground Zero's `if (ent->item->ammo)` is needed
-        // because its chainfist and disruptor have no ammo item, so the
-        // unguarded FindItem() dereferences NULL.  Xatrix's trap exception is
-        // needed because the Trap's "ammo" is itself, and DF_INFINITE_AMMO
-        // would hand out 1000 of them.
+        // Ground Zero's `if (ent->item->ammo)` is needed because its chainfist
+        // has no ammo item, so the unguarded FindItem() dereferences NULL.
+        // Xatrix's "no infinite ammo for the trap" exception is not carried:
+        // it could never fire.  The Trap is `ammo_trap`, whose pickup is
+        // Pickup_Ammo, so it never reaches this function, and the test
+        // compared the pickup name against "ammo_trap" when the Trap's is
+        // "Trap" -- a condition that was always true, which is Ground Zero's
+        // and id's line.
         if (ent->item->ammo) {                                  // ROGUE
             ammo = FindItem(ent->item->ammo);
-            // XATRIX -- no infinite ammo for the trap
-            if (((int)dmflags->value & DF_INFINITE_AMMO) && Q_stricmp(ent->item->pickup_name, "ammo_trap"))
+            if ((int)dmflags->value & DF_INFINITE_AMMO)
                 Add_Ammo(other, ammo, 1000);
             else
                 Add_Ammo(other, ammo, ammo->quantity);
@@ -230,10 +233,35 @@ void ChangeWeapon(edict_t *ent)
 {
     int i;
 
+    // Tourney's match-state sweeps reach here with `pers.weapon` NULL after
+    // InitClientPersistant has taken the inventory away, and grenade_framenum
+    // lives in the client rather than in `pers`, so it survives that: a
+    // grenade cooked in the second before the match started dereferenced the
+    // NULL weapon below.  With no weapon there is nothing left to throw.
+    if (ent->client->grenade_framenum && !ent->client->pers.weapon)
+        ent->client->grenade_framenum = 0;
+
     if (ent->client->grenade_framenum) {
+        // The throw is this client's, and so is its damage factor.  The
+        // statics are set by Think_Weapon only once it reaches a weaponthink,
+        // and the death arm calls this first -- so a dying player's grenade
+        // was multiplied by whichever client had thought last (id's bug).
+        P_DamageModifier(ent);
+
         ent->client->grenade_framenum = level.framenum;
         ent->client->weapon_sound = 0;
-        weapon_grenade_fire(ent, false);
+        // Dispatched on the weapon in hand, because three weapons cook through
+        // grenade_framenum and weapon_grenade_fire knows two of them: its
+        // switch sends anything else to Ground Zero's fire_prox, so a Trap
+        // held at death was thrown as a prox mine.  The Reckoning's own
+        // ChangeWeapon reached fire_grenade2 for it -- a hand grenade going
+        // off where the player died -- and the Trap's own fire does the same
+        // thing in its own model: its timer is spent, so fire_trap explodes
+        // it on the spot.
+        if (ent->client->pers.weapon->tag == AMMO_TRAP)
+            weapon_trap_fire(ent, false);
+        else
+            weapon_grenade_fire(ent, false);
         ent->client->grenade_framenum = 0;
     }
 
@@ -343,6 +371,27 @@ static void NoAmmoWeaponChange(edict_t *ent)
         ent->client->newweapon = FindItem("phalanx");
         return;
     }
+    // Tourney reorders id's chain: the chaingun and the super shotgun move up
+    // ahead of the hyperblaster, with the donor's own ammo tests
+    // (`port_osp:p_weapon.c` NoAmmoWeaponChange), so its order is railgun,
+    // chaingun, super shotgun, hyperblaster, machinegun, shotgun, blaster.
+    // The packs' weapons keep their places beside their siblings, which puts
+    // the pair after the phalanx -- the railgun's slot -- and ahead of the
+    // cells weapons.  The same two tests stay in id's place below for every
+    // other ruleset; under tourney they are asked there a second time and
+    // cannot match what they did not match here.
+    if (G_IsOspRuleset()) {
+        if (ent->client->pers.inventory[ITEM_INDEX(FindItem("bullets"))]
+            &&  ent->client->pers.inventory[ITEM_INDEX(FindItem("chaingun"))]) {
+            ent->client->newweapon = FindItem("chaingun");
+            return;
+        }
+        if (ent->client->pers.inventory[ITEM_INDEX(FindItem("shells"))] > 1
+            &&  ent->client->pers.inventory[ITEM_INDEX(FindItem("super shotgun"))]) {
+            ent->client->newweapon = FindItem("super shotgun");
+            return;
+        }
+    }
     // RAFAEL
     if (ent->client->pers.inventory[ITEM_INDEX(FindItem("cells"))]
         && ent->client->pers.inventory[ITEM_INDEX(FindItem("ionripper"))]) {
@@ -451,6 +500,16 @@ void Use_Weapon(edict_t *ent, const gitem_t *item)
 
     // see if we're already using it
     if (item == ent->client->pers.weapon)
+        return;
+
+    // RA2's Grapple cannot be selected: its row has no `use`, so `use Grapple`
+    // answered "Item is not usable" and the weapon keys passed over it.
+    // Arena's hook is the offhand one (RA_HookThink), and give_ammo puts the
+    // item in the inventory for that.  The merged row is Threewave's, which
+    // CTF selects through here, so arena's refusal is here too -- silently,
+    // because the weapon keys call this for every weapon they pass.
+    if (G_Ruleset() == RULESET_ARENA &&
+        Q_stricmp(item->pickup_name, "Grapple") == 0)
         return;
 
     if (item->ammo && !g_select_empty->value && !(item->flags & IT_AMMO)) {
@@ -582,6 +641,18 @@ static void Weapon_Generic2(edict_t *ent, int FRAME_ACTIVATE_LAST, int FRAME_FIR
         ent->client->resp.fightstate != FIGHT_ALIVE)
         return;
 
+    // VWep animations screw up corpses
+    //
+    // The spine's guard, beside RA2's test and not replaced by it: RA2, CTF,
+    // Ground Zero, tourney and gladq2_src all keep it, and the merge had taken
+    // Xatrix's copy of this function, which is the one donor without it.  Its
+    // non-player-model half is what keeps the weapon still for a living
+    // client with no body on screen, which Ground Zero's hunter sphere makes
+    // of its owner (FL_SAM_RAIMI, modelindex 0); a dead client reaches no
+    // weaponthink anyway, because Think_Weapon's death arm takes the weapon
+    // away first.
+    if (ent->deadflag || ent->s.modelindex != MODELINDEX_PLAYER)
+        return;
 
     if (ent->client->weaponstate == WEAPON_DROPPING) {
         if (ent->client->ps.gunframe == FRAME_DEACTIVATE_LAST) {
@@ -828,21 +899,37 @@ static void weapon_grenade_fire(edict_t *ent, bool held)
     float   timer;
     int     speed;
     float   radius;
+    bool    id_throw;
 
     radius = damage + 40;
     if (is_quad)
 //      damage *= 4;
         damage *= damage_multiplier;        // PGM
 
+    // Where the throw leaves the hand.  Ground Zero moved it for every
+    // thrown weapon -- (2, 6, -14) along the view's own axes, the tesla lower
+    // still -- where id threw the hand grenade from (8, 8, -8) with a
+    // vertical drop.  The tesla and the prox are Ground Zero's own and keep its
+    // origin; id's grenade takes it only where the rogue layer is on, which is
+    // the merge rule with id's line as the fallback arm.  A player weapon, so
+    // the server's layer selects rather than an entity's latch.
+    id_throw = ent->client->pers.weapon->tag == AMMO_GRENADES &&
+               !G_LayerEnabled(LAYER_ROGUE);
+
     AngleVectors(ent->client->v_angle, forward, right, up);
     if (ent->client->pers.weapon->tag == AMMO_TESLA) {
 //      VectorSet(offset, 0, -12, ent->viewheight-26);
         VectorSet(offset, 0, -4, ent->viewheight - 22);
+    } else if (id_throw) {
+        VectorSet(offset, 8, 8, ent->viewheight - 8);
     } else {
 //      VectorSet(offset, 8, 8, ent->viewheight-8);
         VectorSet(offset, 2, 6, ent->viewheight - 14);
     }
-    P_ProjectSource2(ent->client, ent->s.origin, offset, forward, right, up, start);
+    if (id_throw)
+        P_ProjectSource(ent->client, ent->s.origin, offset, forward, right, start);
+    else
+        P_ProjectSource2(ent->client, ent->s.origin, offset, forward, right, up, start);
 
     timer = (ent->client->grenade_framenum - level.framenum) * FRAMETIME;
     speed = GRENADE_MINSPEED + (GRENADE_TIMER - timer) * ((GRENADE_MAXSPEED - GRENADE_MINSPEED) / GRENADE_TIMER);
@@ -872,6 +959,10 @@ static void weapon_grenade_fire(edict_t *ent, bool held)
 
     ent->client->grenade_framenum = level.framenum + 1.0f * BASE_FRAMERATE;
 
+    // VWep animations screw up corpses -- the spine's, restored with the one
+    // in Weapon_Generic2.
+    if (ent->deadflag || ent->s.modelindex != MODELINDEX_PLAYER)
+        return;
 
     if (ent->health <= 0)
         return;
@@ -1086,7 +1177,14 @@ void Throw_Generic(edict_t *ent, int FRAME_FIRE_LAST, int FRAME_IDLE_LAST, int F
 
         if (ent->client->ps.gunframe == FRAME_THROW_FIRE) {
             ent->client->weapon_sound = 0;
-            fire(ent, true);
+            // `false`: this is the throw, and `held` means the grenade went off
+            // in the hand.  Ground Zero passes `true` here, which marks every
+            // thrown hand grenade spawnflags 3 and kills with
+            // MOD_HELD_GRENADE -- "feels X's pain", "tried to put the pin
+            // back in" -- and its own tesla and prox ignore the flag, so the
+            // grenade is the only thing it reached.  id, the Reckoning, CTF,
+            // RA2 and tourney all pass `false`.
+            fire(ent, false);
         }
 
         if ((ent->client->ps.gunframe == FRAME_FIRE_LAST) && (level.framenum < ent->client->grenade_framenum))
@@ -1222,6 +1320,15 @@ void Weapon_ProxLauncher(edict_t *ent)
     static int      fire_frames[]   = {6, 0};
 
     Weapon_Generic(ent, 5, 16, 59, 64, pause_frames, fire_frames, weapon_grenadelauncher_fire);
+
+    // The Reckoning's Quad Fire is a second pass through Weapon_Generic, which
+    // each of id's and the Reckoning's fired weapons makes, and Ground Zero's
+    // five were written without it: with both layers on, a Quad Fire carrier
+    // fired them at the normal rate.  The disruptor makes the same second
+    // call; the chainfist, the ETF rifle and the plasma beam run their whole
+    // frame twice, for the reason Weapon_ChainFist gives.
+    if (is_quadfire)
+        Weapon_Generic(ent, 5, 16, 59, 64, pause_frames, fire_frames, weapon_grenadelauncher_fire);
 }
 //PGM
 //==========
@@ -1956,8 +2063,12 @@ void weapon_ionripper_fire(edict_t *ent)
         damage = 50;
     }
 
+    // `damage_multiplier`, not the Reckoning's `* 4`: Ground Zero's
+    // P_DamageModifier sets `is_quad` for Double Damage too and puts the real
+    // factor here, so the pack's literal quadrupled a doubled shot and capped a
+    // quad-plus-double one at four.  Every other weapon reads the factor.
     if (is_quad)
-        damage *= 4;
+        damage *= damage_multiplier;
 
     // XATRIX, and a latent bug in the shipped game rather than a merge artifact.
     // The original computes a `kick` here -- 40 in deathmatch, 60 otherwise,
@@ -2033,9 +2144,10 @@ void weapon_phalanx_fire(edict_t *ent)
     radius_damage = 120;
     damage_radius = 120;
 
+    // The factor, as weapon_ionripper_fire says.
     if (is_quad) {
-        damage *= 4;
-        radius_damage *= 4;
+        damage *= damage_multiplier;
+        radius_damage *= damage_multiplier;
     }
 
     AngleVectors(ent->client->v_angle, forward, right, NULL);
@@ -2054,6 +2166,12 @@ void weapon_phalanx_fire(edict_t *ent)
 
         radius_damage = 30;
         damage_radius = 120;
+        // The second ball's own splash, and it is multiplied like the first's:
+        // the Reckoning assigns it after the quad block above, which made the
+        // second ball the one shot of a Quad or Double Damage Phalanx with an
+        // unmultiplied splash.
+        if (is_quad)
+            radius_damage *= damage_multiplier;
 
         fire_plasma(ent, start, forward, damage, 725, damage_radius, radius_damage);
 
@@ -2114,8 +2232,9 @@ static void weapon_trap_fire(edict_t *ent, bool held)
     float   radius;
 
     radius = damage + 40;
+    // The factor, as weapon_ionripper_fire says.
     if (is_quad)
-        damage *= 4;
+        damage *= damage_multiplier;
 
     VectorSet(offset, 8, 8, ent->viewheight - 8);
     AngleVectors(ent->client->v_angle, forward, right, NULL);
@@ -2286,7 +2405,7 @@ void chainfist_smoke(edict_t *ent)
 
 #define HOLD_FRAMES         0
 
-void Weapon_ChainFist(edict_t *ent)
+static void Weapon_ChainFist_Frame(edict_t *ent)
 {
     static int  pause_frames[]  = {0};
     static int  fire_frames[]   = {8, 9, 16, 17, 18, 30, 31, 0};
@@ -2369,6 +2488,23 @@ void Weapon_ChainFist(edict_t *ent)
 
 }
 
+void Weapon_ChainFist(edict_t *ent)
+{
+    const gitem_t *held = ent->client->pers.weapon;
+
+    Weapon_ChainFist_Frame(ent);
+
+    // Quad Fire, as Weapon_ProxLauncher says -- the whole frame a second
+    // time and not only Weapon_Generic, because the jumps around that call
+    // are what end each of the three attacks and chain the next one; a bare
+    // second call would step across them and saw on after the button was let
+    // go.  Not after a first pass that finished a weapon change: this frame
+    // sets the saw's sound, which would then play over the new weapon.  The
+    // ETF rifle and the plasma beam are built the same way.
+    if (is_quadfire && ent->client->pers.weapon == held)
+        Weapon_ChainFist_Frame(ent);
+}
+
 //
 // Disintegrator
 //
@@ -2433,7 +2569,12 @@ void weapon_tracker_fire(edict_t *self)
     PlayerNoise(self, start, PNOISE_WEAPON);
 
     self->client->ps.gunframe++;
-    self->client->pers.inventory[self->client->ammo_index] -= self->client->pers.weapon->quantity;
+    // DF_INFINITE_AMMO, which Ground Zero's disruptor and ETF rifle were the
+    // two weapons to ignore -- every other one tests it where it spends, and
+    // under the same dmflag SpawnItem takes the flechette boxes off the map,
+    // so the rifle simply ran dry.
+    if (!((int)dmflags->value & DF_INFINITE_AMMO))
+        self->client->pers.inventory[self->client->ammo_index] -= self->client->pers.weapon->quantity;
 }
 
 void Weapon_Disintegrator(edict_t *ent)
@@ -2443,6 +2584,10 @@ void Weapon_Disintegrator(edict_t *ent)
     static int  fire_frames[]   = {5, 0};
 
     Weapon_Generic(ent, 4, 9, 29, 34, pause_frames, fire_frames, weapon_tracker_fire);
+
+    // Quad Fire, as Weapon_ProxLauncher says.
+    if (is_quadfire)
+        Weapon_Generic(ent, 4, 9, 29, 34, pause_frames, fire_frames, weapon_tracker_fire);
 }
 
 /*
@@ -2520,7 +2665,9 @@ void weapon_etf_rifle_fire(edict_t *ent)
     PlayerNoise(ent, start, PNOISE_WEAPON);
 
     ent->client->ps.gunframe++;
-    ent->client->pers.inventory[ent->client->ammo_index] -= ent->client->pers.weapon->quantity;
+    // DF_INFINITE_AMMO, as weapon_tracker_fire says.
+    if (!((int)dmflags->value & DF_INFINITE_AMMO))
+        ent->client->pers.inventory[ent->client->ammo_index] -= ent->client->pers.weapon->quantity;
 
     ent->client->anim_priority = ANIM_ATTACK;
     if (ent->client->ps.pmove.pm_flags & PMF_DUCKED) {
@@ -2533,7 +2680,7 @@ void weapon_etf_rifle_fire(edict_t *ent)
 
 }
 
-void Weapon_ETF_Rifle(edict_t *ent)
+static void Weapon_ETF_Rifle_Frame(edict_t *ent)
 {
     static int  pause_frames[]  = {18, 28, 0};
     static int  fire_frames[]   = {6, 7, 0};
@@ -2555,6 +2702,20 @@ void Weapon_ETF_Rifle(edict_t *ent)
         ent->client->ps.gunframe = 6;
 
 //  gi.dprintf("etf rifle %d\n", ent->client->ps.gunframe);
+}
+
+void Weapon_ETF_Rifle(edict_t *ent)
+{
+    const gitem_t *held = ent->client->pers.weapon;
+
+    Weapon_ETF_Rifle_Frame(ent);
+
+    // Quad Fire, the whole frame as Weapon_ChainFist says: the loop back to
+    // frame 6 is what keeps the rifle firing, and a bare second call, made
+    // before it, would find the rifle at frame 8 and put it back to READY --
+    // no faster than without the powerup.
+    if (is_quadfire && ent->client->pers.weapon == held)
+        Weapon_ETF_Rifle_Frame(ent);
 }
 
 // pgm - this now uses ent->client->pers.weapon->quantity like all the other weapons
@@ -2634,7 +2795,7 @@ void Heatbeam_Fire(edict_t *ent)
 
 }
 
-void Weapon_Heatbeam(edict_t *ent)
+static void Weapon_Heatbeam_Frame(edict_t *ent)
 {
 //  static int  pause_frames[]  = {38, 43, 51, 61, 0};
 //  static int  fire_frames[]   = {5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 0};
@@ -2689,4 +2850,21 @@ void Weapon_Heatbeam(edict_t *ent)
 
 //  Weapon_Generic (ent, 8, 9, 39, 44, pause_frames, fire_frames, Heatbeam_Fire);
     Weapon_Generic(ent, 8, 12, 39, 44, pause_frames, fire_frames, Heatbeam_Fire);
+}
+
+void Weapon_Heatbeam(edict_t *ent)
+{
+    const gitem_t *held = ent->client->pers.weapon;
+
+    Weapon_Heatbeam_Frame(ent);
+
+    // Quad Fire, the whole frame as Weapon_ChainFist says, and for one more
+    // reason here: Heatbeam_Fire spends without looking -- Ground Zero
+    // commented its test out -- because the `>= 2` test above it ran once
+    // per beam, and a bare second Weapon_Generic would fire on the first
+    // pass's test and drive the cells below zero.  This frame also sets the
+    // view model, which after a weapon change would put the beamer on the
+    // new weapon.
+    if (is_quadfire && ent->client->pers.weapon == held)
+        Weapon_Heatbeam_Frame(ent);
 }

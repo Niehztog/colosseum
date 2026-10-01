@@ -29,8 +29,18 @@ question might be being asked through a proxy.  So they are reported as a
 census, not a failure: a number that should fall as phases convert the sites that
 turn out to be ruleset questions, and that must not silently rise.
 
+HOW EACH HALF IS CHECKED, and what it used to be
+
+The census is a ceiling PER FILE (LEGACY_BUDGET), not a total: a total let a
+`deathmatch->value` test deleted in one file pay for a new one in another.
+The `bq2_` gate is read as the if/else it has to be -- a latch condition, one
+arm assigning the table and the other its `bq2_` twin -- not as "the twin is
+named within 240 characters", which an ungated site beside a gated one passed.
+`--selftest` holds a control for every rule.
+
 USAGE
-    tools/gates.py [--tree src] [--budget N]
+    tools/gates.py [--tree src]
+    tools/gates.py --selftest
 """
 import argparse
 import os
@@ -55,6 +65,31 @@ OWNER = 'g_ruleset.c'
 # `->value` / `->integer` on a ruleset cvar, or a bare `cvarname->` deref.
 RULESET_TEST = re.compile(
     r'\b(' + '|'.join(RULESET_CVARS) + r')\s*->\s*(value|integer|string)\b')
+
+# The ratchet, per file (path under src/).  It moves only with a recorded
+# reason, and only for genuinely inherited sites.  History of the total:
+#   110  baseq2 alone, after 27 monster-gate conversions
+#   115  xatrix merged: +5, each checked individually and each a
+#        real deathmatch rule rather than a ruleset question in disguise --
+#        g_items.c's `deathmatch && DF_NO_HEALTH`, two weapon behaviours,
+#        and one `coop || deathmatch` spawn test.
+#   174  rogue merged: +59 across 12 files.  Ground Zero is 12,263
+#        diff lines and carries its own deathmatch rules throughout -- the
+#        DM ball and tag rulesets, the sphere and nuke DM behaviours, the
+#        no-armour/no-items dmflags.  The five monster gates it brought
+#        (kamikaze, carrier, stalker, turret, widow) were converted, which is
+#        the check that matters; the rest are inherited deathmatch rules.
+#   166  where it stands, split by file so a site cannot move unseen.
+LEGACY_BUDGET = {
+    'rogue/dm_ball.c': 6, 'rogue/dm_tag.c': 1, 'g_ai.c': 4, 'g_cmds.c': 10,
+    'g_combat.c': 4, 'g_func.c': 5, 'g_items.c': 29, 'g_main.c': 2,
+    'g_misc.c': 4, 'rogue/g_newai.c': 2, 'rogue/g_newtarg.c': 2,
+    'rogue/g_newweap.c': 6, 'g_spawn.c': 5, 'g_target.c': 7,
+    'g_trigger.c': 1, 'g_weapon.c': 4, 'rogue/m_carrier.c': 2,
+    'm_medic.c': 1, 'rogue/m_widow.c': 4, 'rogue/m_widow2.c': 3,
+    'p_client.c': 32, 'p_hud.c': 10, 'p_trail.c': 1, 'p_view.c': 1,
+    'p_weapon.c': 19, 'tourney/stdlog.c': 1,
+}
 
 # The legacy pair: allowed, counted.
 LEGACY_TEST = re.compile(r'\b(deathmatch|coop)\s*->\s*(value|integer)\b')
@@ -136,6 +171,41 @@ ASSIGN = re.compile(r'self->monsterinfo\.currentmove\s*=\s*&(\w+);')
 TERNARY = re.compile(r'currentmove\s*=\s*[^;\n]*\?[^;\n]*&')
 
 
+# `if (<latch>) <arm> else <arm>`, an arm being one statement or one braced
+# block with no block inside it -- the shape every gated site has.  The latch
+# is the entity's own flavour or the predicate over it.
+# The medic asks its own predicate over the same latch (medic_UsesRogueBehavior).
+LATCH = re.compile(r'content_flavour\s*&\s*CONTENT_ROGUE|'
+                   r'\b\w*_UsesRogueBehavior\s*\(')
+_COND = r'\((?:[^;{}()]|\([^;{}()]*(?:\([^;{}()]*\)[^;{}()]*)*\))*\)'
+_ARM = r'(?:\{[^{}]*\}|[^;{}]*;)'
+# The other arm may be an else-if chain -- `if (ROGUE) a; else if (XATRIX)
+# xatrix_a; else bq2_a;` is the three-way form, and bq2_ is its last arm.
+IFELSE = re.compile(r'\bif\s*(?P<cond>' + _COND + r')\s*(?P<a>' + _ARM +
+                    r')\s*else\s*(?P<b>(?:if\s*' + _COND + r'\s*' + _ARM +
+                    r'\s*else\s*)*' + _ARM + r')')
+
+
+def gated_spans(text, tbl):
+    """Spans of every arm that assigns `tbl` inside a latch if/else whose
+    other arm assigns `bq2_<tbl>`."""
+    spans = []
+    # Tried at EVERY `if`, not left to finditer: an outer if/else whose arms
+    # hold the latch's own -- `if (range <= 125) {...} else {...}`, an `else
+    # if` chain -- would otherwise be consumed first and the inner one never
+    # tried on its own.
+    for start in re.finditer(r'\bif\s*\(', text):
+        m = IFELSE.match(text, start.start())
+        if not m or not LATCH.search(m.group('cond')):
+            continue
+        for mine, other in (('a', 'b'), ('b', 'a')):
+            if (re.search(r'=\s*&%s\s*;' % re.escape(tbl), m.group(mine)) and
+                    re.search(r'=\s*&bq2_%s\s*;' % re.escape(tbl),
+                              m.group(other))):
+                spans.append((m.start(mine), m.end(mine)))
+    return spans
+
+
 def gate_violations(name, text):
     out = []
     for m in TERNARY.finditer(text):
@@ -159,15 +229,14 @@ def gate_violations(name, text):
         if fn.startswith('bq2_') or fn.endswith(('_duck', '_sidestep',
                                                  '_blocked', '_duck_up')):
             continue
-        # a gated site has the bq2_ alternative within a few lines
-        seg = text[m.end():m.end() + 240]
-        if f'&bq2_{tbl};' not in seg:
-            before = text[max(0, m.start() - 240):m.start()]
-            if f'&bq2_{tbl};' not in before:
-                out.append((name, text[:m.start()].count('\n') + 1,
-                            f'`{tbl}` has a bq2_ counterpart but this assignment '
-                            f'is ungated -- the latch has to '
-                            f'select at every site'))
+        # a gated site is an arm of the latch's if/else, and the other arm
+        # assigns the bq2_ twin
+        if not any(a <= m.start() < b for a, b in gated_spans(text, tbl)):
+            out.append((name, text[:m.start()].count('\n') + 1,
+                        f'`{tbl}` has a bq2_ counterpart but this assignment '
+                        f'is not an arm of a latch if/else whose other arm '
+                        f'assigns bq2_{tbl} -- the latch has to select at '
+                        f'every site'))
     return out
 
 
@@ -210,32 +279,19 @@ def sources(tree):
     return out
 
 
-def main():
-    ap = argparse.ArgumentParser()
-    ap.add_argument('--tree', default=os.path.join(REPO, 'src'))
-    # The ratchet.  It moves only with a recorded reason, and only for genuinely
-    # inherited sites.  History:
-    #   110  baseq2 alone, after 27 monster-gate conversions
-    #   115  xatrix merged: +5, each checked individually and each a
-    #        real deathmatch rule rather than a ruleset question in disguise --
-    #        g_items.c's `deathmatch && DF_NO_HEALTH`, two weapon behaviours,
-    #        and one `coop || deathmatch` spawn test.
-    #   174  rogue merged: +59 across 12 files.  Ground Zero is 12,263
-    #        diff lines and carries its own deathmatch rules throughout -- the
-    #        DM ball and tag rulesets, the sphere and nuke DM behaviours, the
-    #        no-armour/no-items dmflags.  The five monster gates it brought
-    #        (kamikaze, carrier, stalker, turret, widow) were converted, which is
-    #        the check that matters; the rest are inherited deathmatch rules.
-    ap.add_argument('--budget', type=int, default=166,
-                    help='ceiling on inherited deathmatch/coop test sites')
-    a = ap.parse_args()
+def read_tree(tree):
+    tree = os.path.abspath(tree)
+    return {os.path.relpath(p, tree).replace(os.sep, '/'):
+            open(p, encoding='latin-1').read() for p in sources(tree)}
 
+
+def analyse(texts):
+    """{relpath: source} -> (violations, legacy, idiom, frozen)."""
     violations, legacy, idiom, frozen = [], {}, [], []
 
-    for path in sources(os.path.abspath(a.tree)):
-        name = os.path.basename(path)
-        raw = open(path, encoding='latin-1').read()
-        text = strip_comments(raw)
+    for rel in sorted(texts):
+        name = os.path.basename(rel)
+        text = strip_comments(texts[rel])
 
         if name != OWNER:
             for m in RULESET_TEST.finditer(text):
@@ -249,7 +305,7 @@ def main():
         if name != OWNER:
             n = len(LEGACY_TEST.findall(text))
             if n:
-                legacy[name] = n
+                legacy[rel] = n
 
         for v in frozen_key_violations(name, text):
             frozen.append(v)
@@ -262,6 +318,87 @@ def main():
             if not is_monster_context(name, fn):
                 continue        # baseq2's own deathmatch content rules
             idiom.append((name, text[:m.start()].count('\n') + 1, fn))
+    return violations, legacy, idiom, frozen
+
+
+def over_budget(legacy):
+    return [(rel, n, LEGACY_BUDGET.get(rel, 0)) for rel, n in sorted(legacy.items())
+            if n > LEGACY_BUDGET.get(rel, 0)]
+
+
+def selftest(tree):
+    texts = read_tree(tree)
+    bad = 0
+
+    def fires(label, rel, old, new, want=True):
+        nonlocal bad
+        if rel not in texts or old not in texts[rel]:
+            print('  !! control "%s": its mutation no longer applies -- the '
+                  'control has rotted' % label)
+            bad += 1
+            return
+        mutated = dict(texts)
+        mutated[rel] = texts[rel].replace(old, new, 1)
+        v, legacy, idiom, frozen = analyse(mutated)
+        hit = bool(v or idiom or frozen or over_budget(legacy))
+        if hit == want:
+            print('  ok  control "%s" %s' % (label, 'fires' if want else
+                                             'is quiet'))
+        else:
+            print('  !! control "%s" %s' % (label, 'did NOT fire' if want
+                                            else 'fired on clean input'))
+            bad += 1
+
+    v, legacy, idiom, frozen = analyse(texts)
+    if v or idiom or frozen or over_budget(legacy):
+        print('  !! control "the tree is clean" fired on the tree itself')
+        bad += 1
+    else:
+        print('  ok  control "the tree is clean" is quiet')
+    fires('a ruleset cvar tested at a call site', 'g_items.c',
+          'bool Pickup_Health(edict_t *ent, edict_t *other)\n{\n',
+          'bool Pickup_Health(edict_t *ent, edict_t *other)\n{\n'
+          '    if (ctf->value) return false;\n')
+    fires('a legacy site moved into another file', 'g_ai.c',
+          'void AI_SetSightClient(void)\n{\n',
+          'void AI_SetSightClient(void)\n{\n    if (deathmatch->value) return;\n')
+    fires('an ungated bq2_ site beside a gated one', 'm_boss2.c',
+          '    if (self->content_flavour & CONTENT_ROGUE)\n'
+          '        self->monsterinfo.currentmove = &boss2_move_walk;\n'
+          '    else\n'
+          '        self->monsterinfo.currentmove = &bq2_boss2_move_walk;\n',
+          '    self->monsterinfo.currentmove = &boss2_move_walk;\n'
+          '    if (self->content_flavour & CONTENT_ROGUE)\n'
+          '        self->monsterinfo.currentmove = &boss2_move_walk;\n'
+          '    else\n'
+          '        self->monsterinfo.currentmove = &bq2_boss2_move_walk;\n')
+    fires('a gate on something that is not the latch', 'm_boss2.c',
+          '    if (self->content_flavour & CONTENT_ROGUE)\n'
+          '        self->monsterinfo.currentmove = &boss2_move_walk;\n',
+          '    if (random() < 0.5f)\n'
+          '        self->monsterinfo.currentmove = &boss2_move_walk;\n')
+    fires('a ternary currentmove', 'm_boss2.c',
+          '    if (self->content_flavour & CONTENT_ROGUE)\n'
+          '        self->monsterinfo.currentmove = &boss2_move_walk;\n'
+          '    else\n'
+          '        self->monsterinfo.currentmove = &bq2_boss2_move_walk;\n',
+          '    self->monsterinfo.currentmove = (self->content_flavour & '
+          'CONTENT_ROGUE) ? &boss2_move_walk : &bq2_boss2_move_walk;\n')
+    fires('the stale spawn_temp_t member', 'g_spawn.c', '"pausetime"',
+          '"pausetime"; int x = st.pause_framenum')
+    print('gates.py --selftest: %d wrong' % bad)
+    return bad
+
+
+def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument('--tree', default=os.path.join(REPO, 'src'))
+    ap.add_argument('--selftest', action='store_true')
+    a = ap.parse_args()
+    if a.selftest:
+        return 1 if selftest(a.tree) else 0
+
+    violations, legacy, idiom, frozen = analyse(read_tree(a.tree))
 
     total = sum(legacy.values())
     print(f'gates.py: {len(violations)} forbidden ruleset-cvar test(s); '
@@ -281,12 +418,13 @@ def main():
               f'back. `deathmatch` is 1 under ctf, so this suppresses the '
               f'monsters that are promised there. Use !G_MonstersAllowed().')
 
-    if total > a.budget:
-        print(f'  !! inherited legacy sites rose above the budget of '
-              f'{a.budget}: new code must ask a named question, not test '
-              f'`deathmatch`')
+    over = over_budget(legacy)
+    for rel, n, cap in over:
+        print(f'  !! {rel}: {n} inherited deathmatch/coop test(s) against a '
+              f'ceiling of {cap} -- new code must ask a named question, not '
+              f'test `deathmatch`')
 
-    ok = not violations and not idiom and not frozen and total <= a.budget
+    ok = not violations and not idiom and not frozen and not over
     if ok:
         print('  every ruleset decision goes through the dispatch or a '
               'predicate')

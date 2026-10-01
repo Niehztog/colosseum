@@ -199,6 +199,13 @@ bool CameraCmd(edict_t *ent, bool force)
 
         if (cl->resp.osp_entered == ENTERED_ENTERED) {
             active_clients--;
+            // Out of the camera's subject list too, as every other way out of
+            // the game takes a player (OSP_ChaseCam, OSP_removeChaseCam).  The
+            // donor left them in it: leaving the autocam added them a second
+            // time, and EntityListRemove runs only from ENTERED, so the stale
+            // entry outlived them -- an invisible observer, or a freed slot,
+            // that PlayerToFollow could pick and ulCount counted.
+            EntityListRemove(ent);
             if (G_Ruleset() == RULESET_DUEL)
                 OSP_1v1Remove(ent, false);
         }
@@ -863,6 +870,21 @@ void EntityListAdd(edict_t *ent)
     entry->next = pEntityListHead;
     pEntityListHead = entry;
     ulCount++;
+}
+
+// Every node, at ShutdownGame.  The list is malloc'd, not a level tag, and only
+// a departing client takes its own node out, so the players still on the server
+// when the game shuts down left theirs behind on every restart.
+void EntityListClear(void)
+{
+    entity_list_t   *next;
+
+    while (pEntityListHead) {
+        next = pEntityListHead->next;
+        free(pEntityListHead);
+        pEntityListHead = next;
+    }
+    ulCount = 0;
 }
 
 unsigned long EntityListNumber(void)

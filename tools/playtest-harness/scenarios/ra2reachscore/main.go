@@ -77,7 +77,7 @@ func writeAAS(src, dst string, strip bool) error {
 			binary.LittleEndian.PutUint32(out[8+lump*8+4:], 0)
 		}
 	}
-	return os.WriteFile(dst, out, 0o644)
+	return playtest.WriteFixture(dst, out, 0o644)
 }
 
 // botlibPaks is how many paks the BRAIN looks at, which is not how many the
@@ -183,7 +183,7 @@ func install(dir, baseq2, ra2dir, glad, lib string) (string, error) {
 		if err != nil {
 			continue
 		}
-		if err := os.WriteFile(filepath.Join(game, f), src, 0o644); err != nil {
+		if err := playtest.WriteFixture(filepath.Join(game, f), src, 0o644); err != nil {
 			return game, err
 		}
 	}
@@ -191,10 +191,10 @@ func install(dir, baseq2, ra2dir, glad, lib string) (string, error) {
 	if err != nil {
 		return game, err
 	}
-	if err := os.WriteFile(filepath.Join(game, "botcfg", "bots.cfg"), cfg, 0o644); err != nil {
+	if err := playtest.WriteFixture(filepath.Join(game, "botcfg", "bots.cfg"), cfg, 0o644); err != nil {
 		return game, err
 	}
-	if err := link(filepath.Join(glad, "release", "gladiator.so"),
+	if err := link(playtest.Brain(glad),
 		filepath.Join(game, "gladiator.so")); err != nil {
 		return game, err
 	}
@@ -242,9 +242,10 @@ func hammer(b *playtest.Bot, srv *playtest.Server, mark int, limit time.Duration
 
 // responsive is the witness that the server is still there: a dead q2proded
 // answers no console command.
+// responsive asks the server now; an answer already in the log from before
+// the build is not one (Server.Ask).
 func responsive(srv *playtest.Server) bool {
-	srv.Console("sv ruleset")
-	_, err := srv.WaitLog(`^world `, 15*time.Second)
+	_, err := srv.Ask("sv ruleset", `^world `, 15*time.Second)
 	return err == nil
 }
 

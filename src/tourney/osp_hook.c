@@ -40,9 +40,15 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "g_local.h"
 #include "tourney/osp_types.h"
 
+// `resp.osp_r240 == 2` is "has a body", the gate the weapons are behind
+// (ClientBeginServerFrame's Think_Weapon test); ENTERED alone is not enough, as
+// a player whose placement was refused is entered, invisible and frozen until
+// a spot frees up (R-OSP-1).  The donor tested ENTERED only, so that player
+// could fire the hook and do its damage, and take the frags, unseen.
 void OSP_hookon_cmd(edict_t *ent)
 {
     if (ent->client->resp.osp_entered != ENTERED_ENTERED ||
+        ent->client->resp.osp_r240 != 2 ||
         ent->client->resp.osp_r2dc ||
         level.intermission_framenum ||
         sync_stat == 2 || sync_stat == 1 ||
@@ -69,7 +75,11 @@ void OSP_hookoff_cmd(edict_t *ent)
 void PlayerResetGrapple(edict_t *ent)
 {
     if (ent->client && ent->client->ctf_grapple) {
-        ResetGrapple(ent->client->ctf_grapple);
+        // The pointer is believed only while it names this player's own hook
+        // (CTFOwnsGrapple): one freed by a mover leaves it pointing at a slot
+        // that may hold anything by now.
+        if (CTFOwnsGrapple(ent))
+            ResetGrapple(ent->client->ctf_grapple);
         ent->client->ctf_grapple = NULL;
         ent->client->ctf_grapplereleasetime = level.time;
         ent->client->ctf_grapplestate = CTF_GRAPPLE_STATE_FLY;
@@ -112,10 +122,10 @@ void GrappleTouch(edict_t *self, edict_t *other, cplane_t *plane, csurface_t *su
     PlayerNoise(self->owner, self->s.origin, PNOISE_IMPACT);
 
     if (other->takedamage) {
-        G_Spawn_Sparks(TE_BLOOD, self->s.origin, plane->normal, self->s.origin);
+        G_Spawn_Sparks(TE_BLOOD, self->s.origin, plane ? plane->normal : NULL, self->s.origin);
 
         if (self->dmg) {
-            T_Damage(other, self, self->owner, self->velocity, self->s.origin, plane->normal, self->dmg, 1, 0, MOD_GRAPPLE);
+            T_Damage(other, self, self->owner, self->velocity, self->s.origin, plane ? plane->normal : NULL, self->dmg, 1, 0, MOD_GRAPPLE);
             self->health = self->dmg;
             self->count = level.framenum + (int)(10.0f * hook_holdplayertime->value);
         } else {
@@ -220,6 +230,51 @@ void GrapplePull(edict_t *self)
             VectorScale(hookdir, 425.0f, hookdir);
         VectorCopy(hookdir, self->owner->velocity);
     }
+}
+
+/*
+=================
+OSP_HookFrame
+
+The donor's per-frame hook arm, from its G_RunFrame (port_osp:g_main.c:670).
+The hook is an RF_BEAM entity, drawn from `s.old_origin` to `s.origin`, and
+old_origin is its owner's hand -- so it is re-projected every frame, or the
+cable is drawn from wherever the hook was fired and never from the player it is
+pulling.  And a hook whose owner has gone or no longer holds it is freed here,
+because nothing else in the world would: G_RunFrame's own old_origin copy skips
+a beam, and the hook has no think.  Returns false when it freed the hook.
+=================
+*/
+bool OSP_HookFrame(edict_t *hook)
+{
+    edict_t *owner = hook->owner;
+    vec3_t  forward, right, offset;
+
+    if (!owner || !owner->inuse || !owner->client ||
+        owner->client->ctf_grapple != hook) {
+        G_FreeEdict(hook);
+        return false;
+    }
+
+    AngleVectors(owner->client->v_angle, forward, right, NULL);
+    VectorSet(offset, 24, 8, owner->viewheight - 8);
+    P_ProjectSource(owner->client, owner->s.origin, offset, forward, right,
+                    hook->s.old_origin);
+    return true;
+}
+
+/*
+=================
+OSP_IsHook
+
+A tourney hook, told by the touch FireGrapple gives it and nothing else does.
+`ctf_grapple` can outlive the hook it names, and by then the slot can hold the
+same player's rocket (CTFOwnsGrapple).
+=================
+*/
+bool OSP_IsHook(edict_t *ent)
+{
+    return ent->touch == GrappleTouch;
 }
 
 void FireGrapple(edict_t *self, vec3_t start, vec3_t dir, int damage, int speed, int effect)

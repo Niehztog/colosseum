@@ -58,7 +58,7 @@ jobs:
   # `make <target>` runs the audits itself, so each leg is also a `make check`.
   build:
     name: build ${{ matrix.name }}
-    runs-on: ubuntu-24.04
+    runs-on: ${{ matrix.runner || 'ubuntu-24.04' }}
     timeout-minutes: 30
     strategy:
       fail-fast: false
@@ -69,6 +69,9 @@ jobs:
           # place the second compiler is asked.
           - {name: native gcc,   target: native,  packages: '',                     make: ''}
           - {name: native clang, target: native,  packages: 'clang',                make: 'CC_NATIVE=clang'}
+          # The release ships an arm64 Linux package built natively on this
+          # runner, and without this leg nothing built it between tags.
+          - {name: native arm64, target: native,  packages: '',                     make: '', runner: ubuntu-24.04-arm}
           - {name: linux32,      target: linux32, packages: 'gcc-i686-linux-gnu',   make: ''}
           - {name: win32,        target: win32,   packages: 'gcc-mingw-w64-i686',   make: ''}
           - {name: win64,        target: win64,   packages: 'gcc-mingw-w64-x86-64', make: ''}

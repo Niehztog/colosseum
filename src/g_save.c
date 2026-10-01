@@ -19,6 +19,8 @@ with this program; if not, write to the Free Software Foundation, Inc.,
 #include "g_local.h"
 #include "g_ptrs.h"
 #include "bot/bl_main.h"
+// ClearIndexes, for ReadLevel's FreeTags(TAG_LEVEL).
+#include "bot/bl_redirgi.h"
 
 #if USE_ZLIB
 #include <zlib.h>
@@ -65,7 +67,7 @@ typedef struct {
 
 static const save_field_t entityfields[] = {
 #define _OFS FOFS
-    // Content_flavour is latched at monster_start and decides which
+    // Content_flavour is latched in ED_CallSpawn and decides which
     // frame tables a monster uses, so it must persist: a monster
     // reloaded without it would silently change flavour mid-game, which is the
     // class of defect this list exists to catch.  Type is int, macro is I().
@@ -108,7 +110,12 @@ static const save_field_t entityfields[] = {
     V(monsterinfo.blind_fire_target),   // ROGUE -- ditto
     I(monsterinfo.monster_slots),       // ROGUE
     I(monsterinfo.monster_used),        // ROGUE
+    // The Widow's powerup timers (WidowPowerups).  Ground Zero's own table
+    // saves double_framenum alone, so a game saved with the Widow under quad
+    // or invulnerability loaded her without it.
+    I(monsterinfo.quad_framenum),       // ROGUE
     I(monsterinfo.double_framenum),     // ROGUE
+    I(monsterinfo.invincible_framenum), // ROGUE
     V(s.origin),
     V(s.angles),
     V(s.old_origin),
@@ -150,18 +157,12 @@ static const save_field_t entityfields[] = {
 
     I(timestamp),
 
-    // ROGUE
-    E(bad_area),
-    // while the hint_path stuff could be reassembled on the fly, no reason to be different
-    E(hint_chain),
-    E(monster_hint_chain),
-    E(target_hint_chain),
-    //
-    E(monsterinfo.goal_hint),
+    // ROGUE -- Ground Zero's own rows, less the seven the block at the top
+    // already carries (bad_area, the three hint chains, goal_hint,
+    // last_player_enemy, commander): the record is positional, so a second row
+    // for a field is a second copy of it in every savegame.
     E(monsterinfo.badMedic1),
     E(monsterinfo.badMedic2),
-    E(monsterinfo.last_player_enemy),
-    E(monsterinfo.commander),
     P(monsterinfo.blocked, P_monsterinfo_blocked),
     P(monsterinfo.duck, P_monsterinfo_duck),
     P(monsterinfo.unduck, P_monsterinfo_unduck),
@@ -295,7 +296,6 @@ static const save_field_t entityfields[] = {
 
     P(monsterinfo.currentmove, P_monsterinfo_currentmove),
     I(monsterinfo.aiflags),
-    I(monsterinfo.double_framenum),   // ROGUE
     I(monsterinfo.nextframe),
     F(monsterinfo.scale),
 
@@ -310,16 +310,16 @@ static const save_field_t entityfields[] = {
     P(monsterinfo.sight, P_monsterinfo_sight),
     P(monsterinfo.checkattack, P_monsterinfo_checkattack),
 
-    F(monsterinfo.pause_framenum),
+    I(monsterinfo.pause_framenum),
     F(monsterinfo.attack_finished),
 
     V(monsterinfo.saved_goal),
-    F(monsterinfo.search_framenum),
-    F(monsterinfo.trail_framenum),
+    I(monsterinfo.search_framenum),
+    I(monsterinfo.trail_framenum),
     V(monsterinfo.last_sighting),
     I(monsterinfo.attack_state),
     I(monsterinfo.lefty),
-    F(monsterinfo.idle_framenum),
+    I(monsterinfo.idle_framenum),
     I(monsterinfo.linkcount),
 
     I(monsterinfo.power_armor_type),
@@ -370,8 +370,6 @@ static const save_field_t levelfields[] = {
     I(body_que),
 
     I(power_cubes),
-
-    E(disguise_violator),    // ROGUE
 
     {0}
 
@@ -526,7 +524,8 @@ static const save_field_t clientfields[] = {
 
     O(showscores),
     I(scoremode),
-    // RA2's ZBot samples and its own spam counter.  `menuqueue`, `curmenulink`,
+    // RA2's ZBot samples, and its spam counter's fields, which nothing reads
+    // any more but which the layout keeps.  `menuqueue`, `curmenulink`,
     // `selected`, `ra_menutime`, `menuusetime` and `menutext` are not saved for
     // the same reason the CTF menu handle above is not.
     I(zbotscore),
@@ -593,10 +592,6 @@ static const save_field_t clientfields[] = {
     F(trap_time),                       // XATRIX -- the merge brought
                                         // quadfire_framenum and trap_blew_up
                                         // but not this one
-    I(double_framenum),                 // ROGUE
-    I(ir_framenum),                     // ROGUE
-    I(nuke_framenum),                   // ROGUE
-    I(tracker_pain_framenum),           // ROGUE
     I(pers.max_tesla),                  // ROGUE
     I(pers.max_prox),                   // ROGUE
     I(pers.max_mines),                  // ROGUE
@@ -608,8 +603,6 @@ static const save_field_t clientfields[] = {
     I(weapon_sound),
 
     I(pickup_msg_framenum),
-
-    E(owned_sphere),         // ROGUE
 
     {0}
 
@@ -993,11 +986,15 @@ static void read_fields(gzFile f, const save_field_t *fields, void *base)
 
 #define SAVE_MAGIC1     MakeLittleLong('S','S','V','1')
 #define SAVE_MAGIC2     MakeLittleLong('S','A','V','1')
-// level.rogue_sight_client is part of the serialized level state.
+// level.rogue_sight_client is part of the serialized level state, the entity
+// record carries the Widow's two other powerup timers, and no record carries a
+// field twice (fourteen did: eight entity, five client, one level --
+// `tools/dsweep.py` checks it).  The record is positional: a layout change is
+// a version change, or an older savegame is misread instead of refused.
 #if USE_NEW_GAME_API
-#define SAVE_VERSION    0x101
+#define SAVE_VERSION    0x102
 #else
-#define SAVE_VERSION    9
+#define SAVE_VERSION    10
 #endif
 
 static void check_gzip(int magic)
@@ -1201,6 +1198,14 @@ void ReadLevel(const char *filename)
     // free any dynamic memory allocated by loading the level
     // base state
     gi.FreeTags(TAG_LEVEL);
+
+    // ...which includes every string the bot layer's index tables point at:
+    // SpawnEntities ran first and filled them with TAG_LEVEL copies.  Cleared
+    // the way SpawnEntities pairs the same free, so what G_RefreshPrecaches
+    // registers below is recorded afresh rather than refused as already
+    // present over a freed pointer.  Missing, it cost nothing only because
+    // sp has no bots, so no brain reads the tables.
+    ClearIndexes();
 
     f = gzopen(filename, "rb");
     if (!f)

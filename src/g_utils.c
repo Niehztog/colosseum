@@ -55,11 +55,20 @@ the matching string at fieldofs (use the FOFS() macro) in the structure.
 Searches beginning at the edict after from, or the beginning if NULL
 NULL will be returned if the end of the list is reached.
 
+A NULL match finds nothing.  In baseq2 every caller passes a key it has
+already required, but the merged donors hand it optional ones -- a target
+that is legitimately absent under one ruleset and not another -- and
+Q_stricmp dereferences both arguments, so "not found" is the only answer
+that does not take the server with it.
+
 =============
 */
 edict_t *G_Find(edict_t *from, int fieldofs, char *match)
 {
     char    *s;
+
+    if (!match)
+        return NULL;
 
     if (!from)
         from = g_edicts;
@@ -257,7 +266,6 @@ void G_UseTargets(edict_t *ent, edict_t *activator)
 {
     edict_t     *t;
     edict_t     *master;
-    bool    done = false;
 
 //
 // check for a delay
@@ -314,26 +322,22 @@ void G_UseTargets(edict_t *ent, edict_t *activator)
         t = NULL;
         while ((t = G_Find(t, FOFS(targetname), ent->killtarget))) {
             // PMM - if this entity is part of a train, cleanly remove it
+            //
+            // Ground Zero's loop, made safe.  It walked on until it found the
+            // target, with one `done` for the whole call.  G_Find answers in
+            // edict order, so a killtarget naming a team's master and its slaves
+            // -- biggun's "llama" doors, city2's "traphider" -- frees the master
+            // first, and the next slave's walk ran off the end of the master's
+            // cleared chain into NULL; and from the second slave on `done` was
+            // already set and the slave stayed linked.  Each target now walks
+            // its own master's chain, and a master that is gone has no chain
+            // left to walk (R-MP-11).
             if (t->flags & FL_TEAMSLAVE) {
-//              if ((g_showlogic) && (g_showlogic->value))
-//                  gi.dprintf ("Removing %s from train!\n", t->classname);
-
-                if (t->teammaster) {
-                    master = t->teammaster;
-                    while (!done) {
-                        if (master->teamchain == t) {
-                            master->teamchain = t->teamchain;
-                            done = true;
-                        }
-                        master = master->teamchain;
-                        if (!master) {
-//                          if ((g_showlogic) && (g_showlogic->value))
-//                              gi.dprintf ("Couldn't find myself in master's chain, ignoring!\n");
-                        }
+                for (master = t->teammaster; master && master->inuse; master = master->teamchain) {
+                    if (master->teamchain == t) {
+                        master->teamchain = t->teamchain;
+                        break;
                     }
-                } else {
-//                  if ((g_showlogic) && (g_showlogic->value))
-//                      gi.dprintf ("No master to free myself from, ignoring!\n");
                 }
             }
             // PMM
@@ -597,6 +601,128 @@ void G_FreeEdict(edict_t *ed)
     ed->classname = "freed";
     ed->freetime = level.time;
     ed->inuse = false;
+}
+
+/*
+=============
+G_RemoveDeployables
+
+The mines, teslas, traps and thrown nukes the two mission packs let a player
+leave in the world outlive the rounds and matches other rulesets are made of: a
+prox mine lasts 45 seconds and a tesla or trap 30, against arena's three
+seconds of results and five of countdown, and against OSP's match start.  Left
+there, a device laid in one round kills in the next and credits its layer.  This
+takes them out of the world without a bang, with the trigger fields a prox and
+a tesla carry on `teamchain`, for every layer `mine` answers true for -- or
+every one at all when `mine` is NULL.  A layer is the device's `teammaster` for
+Ground Zero's three and its `owner` for The Reckoning's trap, and may be NULL.
+
+Ground Zero's doppleganger and spheres are devices too.  A doppleganger lives
+30 seconds, names its layer in `teammaster` and its body on `teamchain`, and
+when shot spawns a hunter or vengeance sphere that hits for 10000 credited to
+that layer -- by then perhaps the slot's next occupant.  A sphere names its
+layer in `owner`, or in `teammaster` when a doppleganger spawned it, and can
+outlive the `owned_sphere` link that would otherwise have freed it; that link
+is cleared with it.  (R-RA-15, R-MP-8.)
+=============
+*/
+void G_RemoveDeployables(bool (*mine)(edict_t *layer, void *arg), void *arg)
+{
+    edict_t *e, *c, *next, *layer;
+    int     i;
+    bool    tesla, prox, dopple, sphere;
+
+    for (i = game.maxclients + 1, e = g_edicts + i; i < globals.num_edicts; i++, e++) {
+        if (!e->inuse || !e->classname)
+            continue;
+        tesla = !strcmp(e->classname, "tesla");
+        prox = !strcmp(e->classname, "prox");
+        dopple = !strcmp(e->classname, "doppleganger");
+        sphere = !strcmp(e->classname, "sphere");
+        if (tesla || prox || dopple || !strcmp(e->classname, "nuke"))
+            layer = e->teammaster;
+        else if (!strcmp(e->classname, "htrap"))
+            layer = e->owner;
+        else if (sphere)
+            layer = (e->spawnflags & SPHERE_DOPPLEGANGER) ? e->teammaster : e->owner;
+        else
+            continue;
+        if (mine && !mine(layer, arg))
+            continue;
+        // tesla_remove frees its whole chain; Prox_Explode frees the one field
+        // it owns.  The same here, without the explosion either would make.
+        if (tesla || prox) {
+            for (c = e->teamchain; c; c = next) {
+                next = c->teamchain;
+                if (tesla || c->owner == e)
+                    G_FreeEdict(c);
+                if (prox)
+                    break;
+            }
+        }
+        // doppleganger_timeout frees the body with the base.
+        if (dopple && e->teamchain && e->teamchain->teammaster == e)
+            G_FreeEdict(e->teamchain);
+        if (sphere && layer && layer->client && layer->client->owned_sphere == e)
+            layer->client->owned_sphere = NULL;
+        G_FreeEdict(e);
+    }
+}
+
+/*
+=============
+G_PlayerResetGrapple
+
+Let go of the offhand hook, whichever one the ruleset hands out.  Under the
+four OSP rulesets `ctf_grapple` holds tourney's hook, which tourney releases
+quietly; everywhere else it is Threewave's grapple, whose reset also plays the
+CTF pak's grreset.wav -- a sound the OSP rulesets neither ship nor precache,
+so asking Threewave to release tourney's hook registered it mid-game.
+=============
+*/
+void G_PlayerResetGrapple(edict_t *ent)
+{
+    if (G_IsOspRuleset())
+        OSP_hookoff_cmd(ent);
+    else
+        CTFPlayerResetGrapple(ent);
+}
+
+/*
+=============
+G_LoginThrottled
+
+R-SEC-12: no login is a password oracle.  The engine takes eight string
+commands a packet and puts no limit of its own on them, so an unthrottled
+password test is hundreds of guesses a second, and four of them in this library
+hand out control of the server -- tourney's `referee`, which also accepts the
+rcon password, Threewave's `admin`, RA2's admin code and the bot menu's rcon
+password.  They share one backoff: a wrong answer costs 2 seconds, doubling to
+30, on the connection's own clock (`pers.login_fails`), and a right one
+clears it.
+=============
+*/
+bool G_LoginThrottled(edict_t *ent)
+{
+    const client_persistant_t *p = &ent->client->pers;
+
+    return p->login_fails && (int64_t)time(NULL) < p->login_retry;
+}
+
+void G_LoginFailed(edict_t *ent)
+{
+    client_persistant_t *p = &ent->client->pers;
+
+    if (p->login_fails < 5)
+        p->login_fails++;
+    p->login_retry = (int64_t)time(NULL) +
+                     (p->login_fails >= 5 ? 30 : 1 << p->login_fails);
+}
+
+void G_LoginSucceeded(edict_t *ent)
+{
+    ent->client->pers.login_fails = 0;
+    ent->client->pers.login_retry = 0;
 }
 
 /*

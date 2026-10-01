@@ -277,7 +277,9 @@ static void flyer_kamikaze_explode(edict_t *self)
 //  gi.dprintf ("boom!\n");
 //  T_RadiusDamage(self, self->owner, 125, self, self->dmg_radius, MOD_NUKE);
 //  T_RadiusDamage(self, self->owner, 125, self, 150, MOD_NUKE);
-    if (self->enemy) {
+    // flyer_kamikaze_check also detonates because the enemy is gone, and a
+    // gone enemy -- a co-op player who disconnected -- is not hurt.
+    if (self->enemy && self->enemy->inuse) {
         VectorSubtract(self->enemy->s.origin, self->s.origin, dir);
 //void T_Damage (edict_t *targ, edict_t *inflictor, edict_t *attacker, vec3_t dir, vec3_t point,
 //             vec3_t normal, int damage, int knockback, int dflags, int mod)
@@ -672,7 +674,8 @@ bool flyer_blocked(edict_t *self, float dist)
     return false;
 }
 
-static void flyer_precache(void)
+// Run by CarrierPrecache as well, for the minions it launches.
+void flyer_precache(void)
 {
     sound_sight = gi.soundindex("flyer/flysght1.wav");
     sound_idle = gi.soundindex("flyer/flysrch1.wav");
@@ -747,13 +750,9 @@ void SP_monster_kamikaze(edict_t *self)
         return;
     }
 
-    sound_sight = gi.soundindex("flyer/flysght1.wav");
-    sound_idle = gi.soundindex("flyer/flysrch1.wav");
-    sound_pain1 = gi.soundindex("flyer/flypain1.wav");
-    sound_pain2 = gi.soundindex("flyer/flypain2.wav");
-    sound_slash = gi.soundindex("flyer/flyatck2.wav");
-    sound_sproing = gi.soundindex("flyer/flyatck1.wav");
-    sound_die = gi.soundindex("flyer/flydeth1.wav");
+    // The flyer's own sound indices, registered rather than written here so
+    // that a load re-reads them (SP_monster_carrier).
+    G_AddPrecache(flyer_precache);
 
     gi.soundindex("flyer/flyatck3.wav");
 

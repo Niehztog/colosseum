@@ -17,7 +17,7 @@ along with this program; if not, write to the Free Software
 Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 */
-// osp_acc.c -- the accuracy table's two entry points.
+// osp_acc.c -- the accuracy table's entry points.
 //
 // Why this file exists.  Tourney's accuracy report needs three numbers per
 // weapon per player: shots fired, shots that hit, and damage given and taken.
@@ -28,10 +28,12 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 //
 // Fifteen copies of a table write in shared files is exactly what the gate
 // discipline avoids, and the fifteen are not even consistent with each other.  So the
-// concept is expressed once, here, and the spine calls two functions:
+// concept is expressed once, here, and the spine calls two functions -- the
+// third is for the one weapon whose damage comes after its hit:
 //
-//   OSP_accShot(self, mod, count)             count shots left the weapon
-//   OSP_accDamage(targ, attacker, mod, take)  damage landed on a player
+//   OSP_accShot(self, mod, count)                       count shots left
+//   OSP_accDamage(targ, inflictor, attacker, mod, take) damage landed on a player
+//   OSP_accHit(targ, attacker, mod)                     a shot landed, its damage later
 //
 // The mapping from `mod` to the ACC_ column lives here too, which is what makes
 // the call sites one line: the spine already knows the MOD it is firing or
@@ -106,11 +108,18 @@ static int acc_column(int mod)
 
     // Ground Zero.  The Disruptor's two MODs share one column the way the BFG's
     // three do: MOD_TRACKER is the beam, MOD_DISINTEGRATOR the finishing blow.
+    //
+    // MOD_TESLA has no column either, like MOD_NUKE, though for a reason of
+    // its own: a tesla is a device and not a shot.  It is thrown once and
+    // zaps everything in its field every frame, so "hits per throw" ran to
+    // thousands of percent and no count could make it a ratio of anything.
+    // Its damage still reaches the two running totals, and fire_tesla counts
+    // no shot.  ACC_TESLA is left allocated, and empty, so no other column
+    // moves.
     case MOD_ETF_RIFLE:     return ACC_ETF_RIFLE;
     case MOD_PROX:          return ACC_PROX;
     case MOD_HEATBEAM:      return ACC_HEATBEAM;
     case MOD_CHAINFIST:     return ACC_CHAINFIST;
-    case MOD_TESLA:         return ACC_TESLA;
     case MOD_TRACKER:
     case MOD_DISINTEGRATOR: return ACC_DISRUPTOR;
 
@@ -145,7 +154,8 @@ void OSP_accShot(edict_t *self, int mod, int count)
         p_acc[self->client->resp.clientid].shots[col] += count;
 }
 
-void OSP_accDamage(edict_t *targ, edict_t *attacker, int mod, int take)
+void OSP_accDamage(edict_t *targ, edict_t *inflictor, edict_t *attacker,
+                   int mod, int take)
 {
     int col;
 
@@ -164,7 +174,45 @@ void OSP_accDamage(edict_t *targ, edict_t *attacker, int mod, int take)
     if (col < 0)
         return;
 
-    p_acc[attacker->client->resp.clientid].hits[col]++;
+    // Grenade_Explode is the grenades' and two devices': a tesla and a
+    // Reckoning trap go out through it too, and their blast reads as grenade
+    // splash.  Neither was a grenade shot, so the two grenade columns take only
+    // their own projectiles; the running totals above still carry the damage.
+    if ((col == ACC_GRENADE || col == ACC_GRENADELAUNCHER) &&
+        inflictor && inflictor->classname &&
+        strcmp(inflictor->classname,
+               col == ACC_GRENADE ? "hgrenade" : "grenade"))
+        return;
+
+    // A hit is a shot arriving, and for most columns that is the damage it
+    // does.  Two weapons deal theirs after the shot has arrived, as damage
+    // that is not a hit.  The Disruptor's bolt lands for nothing and leaves a
+    // pain daemon that deals the damage over the next five frames, which
+    // counted five hits for one bolt; its hit is OSP_accHit's, where the bolt
+    // lands.  The BFG's ball lasers every target in reach every frame and its
+    // blast lasers everything it can see, and the donor credited a BFG hit for
+    // the blast alone (osp-tourney@a8d1725 g_combat.c, T_RadiusDamage).
+    if (col != ACC_DISRUPTOR &&
+        (mod & ~MOD_FRIENDLY_FIRE) != MOD_BFG_LASER &&
+        (mod & ~MOD_FRIENDLY_FIRE) != MOD_BFG_EFFECT)
+        p_acc[attacker->client->resp.clientid].hits[col]++;
     p_acc[attacker->client->resp.clientid].given[col] += take;
     p_acc[targ->client->resp.clientid].taken[col] += take;
+}
+
+// A hit with no damage of its own, for the one weapon whose shot and damage
+// arrive apart -- the Disruptor's bolt, from tracker_touch -- behind the same
+// gates as a hit OSP_accDamage counts.
+void OSP_accHit(edict_t *targ, edict_t *attacker, int mod)
+{
+    int col;
+
+    if (sync_stat <= 2)
+        return;
+    if (!accountable(targ) || !accountable(attacker) || targ == attacker)
+        return;
+
+    col = acc_column(mod);
+    if (col >= 0)
+        p_acc[attacker->client->resp.clientid].hits[col]++;
 }

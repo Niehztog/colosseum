@@ -233,7 +233,8 @@ void actor_pain(edict_t *self, edict_t *other, float kick, int damage)
         else
             self->monsterinfo.currentmove = &actor_move_taunt;
         name = actor_names[(self - g_edicts) % MAX_ACTOR_NAMES];
-        gi.cprintf(other, PRINT_CHAT, "%s: %s!\n", name, messages[Q_rand() % 3]);
+        // id's `% 3` never picked the fourth, "Check your targets".
+        gi.cprintf(other, PRINT_CHAT, "%s: %s!\n", name, messages[Q_rand() % q_countof(messages)]);
         return;
     }
 

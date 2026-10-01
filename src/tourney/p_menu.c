@@ -56,7 +56,10 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 //     admin row's SelectFunc -- the only gate between a player and the
 //     kick/ban menu, since nothing downstream re-checks `osp_e39c` -- is
 //     written from the same globals.  Open now deep-copies the rows and their
-//     strings, so what a client sees is the client's own.
+//     strings, so what a client sees is the client's own.  A row's `arg` is
+//     the exception: it is copied as the pointer it is, so what it points at is
+//     shared, and nothing that differs per client may be kept there -- the
+//     invitation's team is read from the client instead (OSP_joinTeam_menu).
 //
 //  3. The redraw is rate-limited.  The donor rebuilds and unicasts
 //     ~1300 reliable bytes on every cursor keypress.  Update() now marks the
@@ -248,7 +251,9 @@ void osp_PMenu_Do_Update(edict_t *ent)
 {
     char string[OSP_MENU_MAX];
     char item[128];
+    char text[64];
     size_t len;
+    size_t n;
     int i;
     osp_pmenu_t *p;
     int x;
@@ -276,6 +281,20 @@ void osp_PMenu_Do_Update(edict_t *ent)
             alt = true;
             t++;
         }
+
+        // A row is drawn as `string "<text>"`, and a layout string cannot carry
+        // a double quote: one closes the string early and the rest of the row
+        // is read as layout commands.  Rows carry text a client chose -- a
+        // vote's map or config, a player's name -- so a quote is drawn as an
+        // apostrophe, the MOTD's answer (osp_display.c), and no row can reach
+        // past its own item (R-SEC-11).  64 bytes is more than any row the
+        // tables or their builders' 32-byte statics hold, and keeps the item
+        // inside its 128, so it is never cut before its closing quote either
+        // (departure 1).
+        for (n = 0; t[n] && n < sizeof(text) - 1; n++)
+            text[n] = (t[n] == '"') ? '\'' : t[n];
+        text[n] = 0;
+        t = text;
 
         if (p->align == osp_PMENU_ALIGN_CENTER)
             x = 196 / 2 - strlen(t) * 4 + 60;

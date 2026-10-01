@@ -440,7 +440,12 @@ static bool SV_movestep(edict_t *ent, vec3_t move, bool relink)
         // use AI_BLOCKED to tell the calling layer that we're now mad at a tesla
         new_bad = CheckForBadArea(ent);
         if (!current_bad && new_bad) {
-            if (new_bad->owner) {
+            // Only a monster turns on the tesla.  `health > 0` is Ground
+            // Zero's test for "alive", and a misc_explobox passes it -- a
+            // shoved barrel reaches SV_movestep through M_walkmove -- and
+            // TargetTesla on it ran FoundTarget into HuntTarget's NULL `run`.
+            // The barrel's move is still refused, as Ground Zero refuses it.
+            if (new_bad->owner && (ent->svflags & SVF_MONSTER)) {
 //              if ((g_showlogic) && (g_showlogic->value))
 //                  gi.dprintf("Blocked -");
                 if (!strcmp(new_bad->owner->classname, "tesla")) {
@@ -451,19 +456,21 @@ static bool SV_movestep(edict_t *ent, vec3_t move, bool relink)
 //                          gi.dprintf ("I don't have a valid enemy, attacking tesla!\n");
                         TargetTesla(ent, new_bad->owner);
                         ent->monsterinfo.aiflags |= AI_BLOCKED;
-                    // "telsa", Ground Zero's own typo and still in
-                    // upstream q2pro.  `tesla` is the classname, so this branch
+                    // "telsa" was Ground Zero's own typo, and the pinned
+                    // Ground Zero donor still has it; `q2pro@eefadf25`
+                    // (feature/mission-packs) corrected it, and this is that
+                    // fix.  `tesla` is the classname, so this branch
                     // -- the monster is already angry at a tesla, leave it alone
                     // -- never ran, and control fell through to the final else,
                     // which calls TargetTesla and re-sets AI_BLOCKED on every
                     // blocked frame.  TargetTesla skips the enemy switch when
                     // the tesla is the same one, but its AI_MEDIC bail runs
-                    // Before that test, so a medic called cleanupHealTarget on
+                    // before that test, so a medic called cleanupHealTarget on
                     // a tesla repeatedly; and when the blocking area belongs to
                     // a different tesla the monster switched to it and
                     // overwrote `oldenemy` with a tesla, losing the player it
                     // was chasing.  id's rerelease keeps this branch and spells
-                    // it correctly.  Imported from `q2pro@eefadf25`.
+                    // it correctly.
                     } else if (!strcmp(ent->enemy->classname, "tesla")) {
 //                      if ((g_showlogic) && (g_showlogic->value))
 //                          gi.dprintf ("but we're already mad at a tesla\n");

@@ -129,6 +129,76 @@ bool G_FsGamePath(char *out, size_t size, const char *name)
     return Q_snprintf(out, size, "%s/%s/%s", base, G_FsGameDir(), name) < size;
 }
 
+// The directories on the way to a file about to be written, made the way the
+// engine makes its own on its first write under a root (FS_CreatePath): a
+// server that has written nothing yet has no homedir/<gamedir>, and a stdio
+// fopen does not make one, so every writer above failed there until something
+// else wrote first.  Best effort -- a component that exists, and a drive root,
+// fail their mkdir harmlessly -- so the caller's own open still decides.
+void G_FsCreatePath(const char *path)
+{
+    char buf[MAX_OSPATH];
+    char *p;
+    char c;
+
+    if (Q_strlcpy(buf, path, sizeof(buf)) >= sizeof(buf))
+        return;
+
+    for (p = buf + 1; *p; p++) {
+        if (*p != '/' && *p != '\\')
+            continue;
+        c = *p;
+        *p = 0;
+        os_mkdir(buf);
+        *p = c;
+    }
+}
+
+// An operator's path that names its own place, which no composed root may be
+// put in front of: `/var/log/x.log`, and on Windows `\\x`, `/x` and `C:x`.
+bool G_FsIsAbsolute(const char *path)
+{
+#ifdef _WIN32
+    return path[0] == '/' || path[0] == '\\' ||
+           (Q_isalpha(path[0]) && path[1] == ':');
+#else
+    return path[0] == '/';
+#endif
+}
+
+// Where the library READS a named file of its gamedir from: the first of
+// homedir/<gamedir>/<name> and basedir/<gamedir>/<name> that exists, the
+// engine's order and the pair G_FsOpenStdio tries.  A reader that asked
+// G_FsGamePath instead looked in ONE root -- homedir whenever it is set, which a
+// system-wide Q2PRO sets by default -- so a gamedir installed under basedir had
+// its arena.cfg and motd.txt reported unreadable while the engine exec'd the
+// configs beside them.  When neither exists `out` is the path a writer would use,
+// so the caller's own "could not open" arm still runs and names a real place;
+// false only when the path does not fit, which is G_FsGamePath's contract too.
+bool G_FsReadPath(char *out, size_t size, const char *name)
+{
+    const char *roots[2];
+    FILE *fp;
+    int i;
+
+    roots[0] = G_FsHomeDir();
+    roots[1] = G_FsBaseDir();
+
+    for (i = 0; i < 2; i++) {
+        if (!roots[i] || !*roots[i])
+            continue;
+        if (Q_snprintf(out, size, "%s/%s/%s", roots[i], G_FsGameDir(), name) >= size)
+            continue;
+        fp = fopen(out, "rb");
+        if (fp) {
+            fclose(fp);
+            return true;
+        }
+    }
+
+    return G_FsGamePath(out, size, name);
+}
+
 // The read roots, in the engine's own order: `homedir` before `basedir`, with
 // the gamedir under each.  `G_FsGamePath` composes that same pair for the
 // WRITERS and is deliberately not reused here -- a writer picks one root and

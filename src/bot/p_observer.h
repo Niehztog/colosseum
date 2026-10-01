@@ -1,3 +1,5 @@
+// The Gladiator observer, from gladiator-bot-restored@1cdbba2's game tree; see
+// p_observer.c and SPECS.md section 4.1.
 //===========================================================================
 //
 // Name:        p_observer.h

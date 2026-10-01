@@ -66,6 +66,7 @@ void RA2_Stats_Init(void)
         return;
     }
 
+    G_FsCreatePath(stats_path);
     f = fopen(stats_path, "a");
     if (!f) {
         gi.dprintf("RA2_Stats_Init: couldn't open %s, logging disabled\n", stats_path);

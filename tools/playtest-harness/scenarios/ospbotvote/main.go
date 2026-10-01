@@ -226,7 +226,7 @@ func boot(q2, ref, ctf, lib, glad, aas, dir string, port int, p phase) (*playtes
 			if err := os.MkdirAll(maps, 0o755); err != nil {
 				return nil, err
 			}
-			if err := os.WriteFile(filepath.Join(maps, p.mapname+".aas"),
+			if err := playtest.WriteFixture(filepath.Join(maps, p.mapname+".aas"),
 				src, 0o644); err != nil {
 				return nil, err
 			}

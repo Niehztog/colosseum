@@ -191,10 +191,10 @@ static bot_muzzleflashinfo_t muzzleflashinfo[MAX_MUZZLEFLASHES] =
     // Every name below is the ENGINE'S, read out of q2pro's CL_MuzzleFlash.
     // This table is the brain's copy of the client's, so a name invented here
     // would have the bot listening for a sound no client plays -- and the name
-    // has to be one the GAME precaches too, because the lookup below resolves
-    // it against the live configstring sound table and an unprecached name
-    // silently resolves to 0.  All five are in the itemlist's own precache
-    // strings or in an explicit gi.soundindex.
+    // has to be in the live configstring sound table, because the lookup below
+    // resolves it there and an unregistered name silently resolves to 0.  The
+    // game registers a fire sound only through its weapon's precache, so
+    // BotPrecache registers the whole table whenever a brain is loaded.
     //RAFAEL
     {MZ_IONRIPPER,      "weapons/rippfire.wav"},
     {MZ_BLUEHYPERBLASTER, "weapons/hyprbf1a.wav"},
@@ -236,15 +236,14 @@ static bot_muzzleflashinfo_t muzzleflashinfo[MAX_MUZZLEFLASHES] =
 // The rune->tech translation.  The donor rewrote bue.modelindex to a
 // fixed 251..255 so the brain would recognise an OSP rune as a CTF tech; those
 // constants are indexes into the 1999 256-entry table and mean nothing once
-// The table is sized from game.csr.  The models are looked up by name in
-// the live table instead, which is the same translation expressed against a
-// table whose size is a runtime fact.
+// The table is sized from game.csr.  The models are registered for the level
+// instead (BotPrecache) and shown by the index the engine gives them, which is
+// the same translation expressed against a table whose size is a runtime fact.
 //
 // There is no fifth tech.  OSP has five runes and Threewave has four
 // techs, and the fifth row named `models/ctf/vampire/tris.md2` -- a path that
-// exists in no pak any donor ships.  The lookup below is a strcmp against the
-// live modelindex table, so it could never match and a vampire rune was already
-// reaching the brain as modelindex 0; the name only made it look otherwise.
+// exists in no pak any donor ships and no brain item names, so a vampire rune
+// reached the brain as nothing it knows; the name only made it look otherwise.
 //
 // NULL says the same thing and says it out loud, which is the distinction
 // between a documented NULL and a name that resolves to nothing.  Mapping
@@ -258,6 +257,9 @@ const char *const bot_tech_models[5] = {
     "models/ctf/regeneration/tris.md2",     // RUNE_REGEN    -> tech4
     NULL,                                   // RUNE_VAMPIRE  -> no tech exists
 };
+// ...and their indexes for this level, which BotPrecache registers and
+// ClearIndexes forgets; 0 where nothing was registered.
+int bot_tech_modelindexes[5];
 
 //===========================================================================
 // Allocated at InitGame, after game.csr is chosen, and TAG_GAME so
@@ -308,7 +310,70 @@ void ClearIndexes(void)
     memset(soundindexes, 0, bot_max_soundindexes * sizeof(char *));
     memset(imageindexes, 0, bot_max_imageindexes * sizeof(char *));
     memset(muzzleflashsoundindex, 0, sizeof(muzzleflashsoundindex));
+    memset(bot_tech_modelindexes, 0, sizeof(bot_tech_modelindexes));
 } //end of the function ClearIndexes
+//===========================================================================
+// The layer a flash's weapon comes from, so that BotPrecache asks the clients
+// for no sound out of a pack the server is not running.
+//===========================================================================
+static bool BotMuzzleFlashLayer(int mf)
+{
+    switch (mf)
+    {
+        case MZ_IONRIPPER:
+        case MZ_BLUEHYPERBLASTER:
+        case MZ_PHALANX:
+            return G_LayerEnabled(LAYER_XATRIX);
+        case MZ_ETF_RIFLE:
+        case MZ_TRACKER:
+            return G_LayerEnabled(LAYER_ROGUE);
+        default:
+            return true;
+    } //end switch
+} //end of the function BotMuzzleFlashLayer
+//===========================================================================
+// What the brain must find in the index tables when it is handed a map, and
+// the game does not register for it.  Called where a brain is about to load
+// the level's map: from BotInitMuzzleFlashToSoundindex at SpawnEntities when
+// one is loaded already, and from BotLoadLibrary before a first one is set up.
+//
+//   * Every fire sound in the muzzle-flash table.  The game registers one only
+//     through its weapon item's precache, which a weapon handed out without an
+//     item never gets -- arena's give_ammo fills the inventory directly, and
+//     arena frees its map items before their precache -- so under arena every
+//     flash but the blaster's resolved to 0 and the bots could not hear a shot
+//     they did not see.  The client plays these for the flash anyway; what
+//     registering them adds is the names, in the table the brain reads.  A
+//     pack's rows only with its layer on.
+//   * Under the OSP rulesets with runes on, the four CTF tech models the rune
+//     translation shows the brain (BotRuneModelindex).  The brain resolves its
+//     item models at the map load alone, so a model registered later is never
+//     an item to it -- which is also why runes voted on mid-level reach it as
+//     techs only from the next map.  CTFPrecache registers these under ctf;
+//     here they cost four model configstrings, which a client without the CTF
+//     pak goes without (q2pro reports a missing model only at `developer 2`).
+//===========================================================================
+void BotPrecache(void)
+{
+    int i;
+
+    if (!soundindexes || !modelindexes)
+        return;
+    for (i = 0; muzzleflashinfo[i].muzzleflash >= 0; i++)
+    {
+        if (muzzleflashinfo[i].sound &&
+            BotMuzzleFlashLayer(muzzleflashinfo[i].muzzleflash))
+            gi.soundindex(muzzleflashinfo[i].sound);
+    } //end for
+    if (BotTourneyRunes())
+    {
+        for (i = 0; i < 5; i++)
+        {
+            if (bot_tech_models[i])
+                bot_tech_modelindexes[i] = gi.modelindex(bot_tech_models[i]);
+        } //end for
+    } //end if
+} //end of the function BotPrecache
 //===========================================================================
 //
 // Parameter:               -
@@ -321,6 +386,9 @@ void BotInitMuzzleFlashToSoundindex(void)
 
     if (!soundindexes)
         return;
+    //a brain that is loaded already is handed this map next
+    if (botglobals.firstbotlib)
+        BotPrecache();
     for (i = 0; muzzleflashinfo[i].muzzleflash >= 0; i++)
     {
         mf = muzzleflashinfo[i].muzzleflash;
@@ -970,26 +1038,23 @@ static void Bot_WriteChar(int c)
     BotStageInt(BW_CHAR, c);
 } //end of the function Bot_WriteChar
 
+// An out-of-range value is staged as what the ENGINE would have written, not
+// zeroed as Gladiator did: MSG_WriteByte keeps the low byte and MSG_WriteShort
+// the low sixteen bits.  The case Gladiator's note names is real --
+// target_laser_think writes `self->s.skinnum` as TE_LASER_SPARKS' colour, and
+// that is four palette indices packed into an int, the low one the colour the
+// client draws -- and zeroing it made every laser's sparks palette index 0 on
+// a server with bots loaded and the right colour on one without.  Staged in
+// the type's own range, so the muzzle-flash sniff reads what the wire carries.
 static void Bot_WriteByte(int c)
 {
-    if (c < 0 || c > 255)
-    {
-        //NOTE: in target_laser_think: gi.WriteByte (self->s.skinnum); the
-        // skin number is a LONG value this causes a write byte out of range
-        c = 0;
-    } //end if
-    BotStageInt(BW_BYTE, c);
+    BotStageInt(BW_BYTE, c & 0xff);
 } //end of the function Bot_WriteByte
 
 static void Bot_WriteShort(int c)
 {
-    if (c < INT16_MIN || c > INT16_MAX)
-    {
-        //NOTE: I guess somewhere in the original id code is some sort of bug
-        // that causes a WriteShort out of range error
-        c = 0;
-    } //end if
-    BotStageInt(BW_SHORT, c);
+    // The low sixteen bits, sign-extended: identity for every in-range value.
+    BotStageInt(BW_SHORT, ((c & 0xffff) ^ 0x8000) - 0x8000);
 } //end of the function Bot_WriteShort
 
 static void Bot_WriteLong(int c)

@@ -195,7 +195,7 @@ func unpackBSP(gamedir, mapname string) error {
 			if err := os.MkdirAll(maps, 0o755); err != nil {
 				return err
 			}
-			return os.WriteFile(filepath.Join(maps, mapname+".bsp"),
+			return playtest.WriteFixture(filepath.Join(maps, mapname+".bsp"),
 				f.GetData(), 0o644)
 		}
 	}
@@ -219,7 +219,7 @@ func boot(mesh string) (*playtest.Server, error) {
 		return nil, fmt.Errorf("arena.cfg: %w", err)
 	}
 	os.Remove(*dir + "/colosseum/arena.cfg")
-	if err := os.WriteFile(*dir+"/colosseum/arena.cfg", cfg, 0o644); err != nil {
+	if err := playtest.WriteFixture(*dir+"/colosseum/arena.cfg", cfg, 0o644); err != nil {
 		return nil, err
 	}
 	src, err := os.ReadFile(mesh)
@@ -229,7 +229,7 @@ func boot(mesh string) (*playtest.Server, error) {
 	if err := os.MkdirAll(*dir+"/colosseum/maps", 0o755); err != nil {
 		return nil, err
 	}
-	if err := os.WriteFile(*dir+"/colosseum/maps/ra2map27.aas", src, 0o644); err != nil {
+	if err := playtest.WriteFixture(*dir+"/colosseum/maps/ra2map27.aas", src, 0o644); err != nil {
 		return nil, err
 	}
 	if err := unpackBSP(*dir+"/colosseum", "ra2map27"); err != nil {

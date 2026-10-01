@@ -224,7 +224,13 @@ bool blocked_checkjump(edict_t *self, float dist, float maxDown, float maxUp)
         }
 
         VectorCopy(pt1, pt2);
-        pt2[2] = self->mins[2] - maxDown - 1;
+        // Ground Zero's bug, fixed: it wrote `self->mins[2]`, the hull's own
+        // offset, so the trace ended at a world height near -281 for every
+        // monster -- one standing below that never jumped down, and one far
+        // above it accepted a drop of any depth.  The bound is maxDown below
+        // the feet, as the up branch's absmax already is; the rerelease makes
+        // the same correction.
+        pt2[2] = self->absmin[2] - maxDown - 1;
 
         trace = gi.trace(pt1, vec3_origin, vec3_origin, pt2, self, MASK_MONSTERSOLID | MASK_WATER);
         if (trace.fraction < 1 && !trace.allsolid && !trace.startsolid) {
@@ -772,8 +778,12 @@ bool monsterlost_checkhint(edict_t *self)
             continue;
         }
         r = realrange(self, e);
-        if (r < closest_range)
+        // Ground Zero's bug, fixed: closest_range was never lowered, so every
+        // node passed and the LAST eligible one won, not the closest.
+        if (r < closest_range) {
             closest = e;
+            closest_range = r;
+        }
         e = e->monster_hint_chain;
     }
 
@@ -793,9 +803,15 @@ bool monsterlost_checkhint(edict_t *self)
     e = target_pathchain;
     while (e) {
         if (start->hint_chain_id == e->hint_chain_id) {
-            r = realrange(self, e);
-            if (r < closest_range)
+            // Ground Zero's bug twice over, fixed: the destination is the
+            // node "closest one to the player", as the comment above says,
+            // and it was measured from the monster -- with the same
+            // never-lowered closest_range, so again the last node won.
+            r = realrange(self->enemy, e);
+            if (r < closest_range) {
                 closest = e;
+                closest_range = r;
+            }
         }
         e = e->target_hint_chain;
     }
@@ -1116,7 +1132,7 @@ void SP_hint_path(edict_t *self)
 //int   num_hint_paths;
 
 // ============
-// InitHintPaths - Called by InitGame (g_save) to enable quick exits if valid
+// InitHintPaths - Called by SpawnEntities (g_spawn) to enable quick exits if valid
 // ============
 void InitHintPaths(void)
 {
@@ -1375,10 +1391,17 @@ bool MarkTeslaArea(edict_t *self, edict_t *tesla)
         VectorCopy(trigger->absmin, mins);
         VectorCopy(trigger->absmax, maxs);
 
+        // Ground Zero's bug, fixed: it passed the tesla's end TIME as the
+        // lifespan, which SpawnBadArea adds to now, and once that time was a
+        // frame number SpawnBadArea multiplied it by BASE_FRAMERATE as well.
+        // The lifespan is what is left of the tesla and a second more: the
+        // area is a link in the trigger's teamchain, which tesla_remove frees
+        // a frame after the tesla's last, and an area that freed itself first
+        // left the chain naming a free slot for that walk to free again.
         if (tesla->air_finished_framenum)
-            area = SpawnBadArea(mins, maxs, tesla->air_finished_framenum, tesla);
+            area = SpawnBadArea(mins, maxs, (tesla->air_finished_framenum - level.framenum) * FRAMETIME + 1.0f, tesla);
         else
-            area = SpawnBadArea(mins, maxs, tesla->nextthink, tesla);
+            area = SpawnBadArea(mins, maxs, (tesla->nextthink - level.framenum) * FRAMETIME + 1.0f, tesla);
     }
     // otherwise we just guess at how long it'll last.
     else {
@@ -1689,6 +1712,10 @@ bool has_valid_enemy(edict_t *self)
     if (self->enemy->health < 1)
         return false;
 
+    // An observer is as gone as a corpse -- see ai_checkattack.
+    if (G_IsObserver(self->enemy))
+        return false;
+
     return true;
 }
 
@@ -1697,10 +1724,22 @@ void TargetTesla(edict_t *self, edict_t *tesla)
     if ((!self) || (!tesla))
         return;
 
+    // Only something with monster AI turns on a tesla.  SV_movestep no longer
+    // sends a shoved misc_explobox here; this is the same answer at the
+    // other end, because with no `attack` the code below goes to FoundTarget
+    // and HuntTarget, and the barrel has no `run`.
+    if (!(self->svflags & SVF_MONSTER))
+        return;
+
     // PMM - medic bails on healing things
     if (self->monsterinfo.aiflags & AI_MEDIC) {
-        if (self->enemy)
+        if (self->enemy) {
             cleanupHealTarget(self->enemy);
+            // ...and `owner`, the claim a base medic and the fixbot make --
+            // see M_ReactToDamage.
+            if (self->enemy->owner == self)
+                self->enemy->owner = NULL;
+        }
         self->monsterinfo.aiflags &= ~AI_MEDIC;
     }
 
@@ -1729,8 +1768,12 @@ void TargetTesla(edict_t *self, edict_t *tesla)
 
 edict_t * PickCoopTarget(edict_t *self)
 {
-    // no more than 4 players in coop, so..
-    edict_t *targets[4];
+    // Ground Zero sized this at four, because id's engine caps co-op at four
+    // players.  Q2PRO does not -- it raises `maxclients` only from 1, and
+    // clamps at MAX_CLIENTS -- so a fifth visible player wrote past the end of
+    // the array, from every Widow/Widow2 stalker wave and every Medic
+    // Commander reinforcement.  One slot per client the engine can seat.
+    edict_t *targets[MAX_CLIENTS];
     int     num_targets = 0, targetID;
     edict_t *ent;
     int     player;
@@ -1739,13 +1782,19 @@ edict_t * PickCoopTarget(edict_t *self)
     if (!coop || !coop->value)
         return NULL;
 
-    memset(targets, 0, 4 * sizeof(edict_t *));
+    memset(targets, 0, sizeof(targets));
 
     for (player = 1; player <= game.maxclients; player++) {
         ent = &g_edicts[player];
         if (!ent->inuse)
             continue;
         if (!ent->client)
+            continue;
+        // Ground Zero took any connected client.  A dead player is no one to
+        // send a stalker or a reinforcement after, and an observer -- the
+        // Gladiator observer, at g_observer 1 -- is nobody to fight; see
+        // NextSightClient.
+        if (ent->health <= 0 || G_IsObserver(ent))
             continue;
         if (visible(self, ent)) {
 //          if ((g_showlogic) && (g_showlogic->value))
@@ -1805,6 +1854,10 @@ int CountPlayers(void)
         if (!ent->inuse)
             continue;
         if (!ent->client)
+            continue;
+        // Widow's slots scale with the party fighting her: an observer is not
+        // in it, and a dead player still is -- co-op respawns him.
+        if (G_IsObserver(ent))
             continue;
         count++;
     }

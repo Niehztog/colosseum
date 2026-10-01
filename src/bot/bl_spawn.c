@@ -34,6 +34,8 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "bot/bl_botcfg.h"
 #include "bot/p_menulib.h"
 #include "arena/arena.h"
+// ...and its round statistics, which a relocated bot has to take with it.
+#include "arena/ra2stats.h"
 // CTF's half of the fill: the seat count and the balanced removal are CTF's
 // own knowledge, the same way arena.h's are arena's.
 #include "ctf/g_ctf.h"
@@ -77,6 +79,20 @@ static queuedbot_t *queuedbots;
 // Returns:                 the spawned free client edict
 // Changes Globals:     -
 //===========================================================================
+// A slot is free when nothing is in it AND nobody holds it.  `inuse` alone is
+// not the second half: SpawnEntities clears every client edict at a level
+// change, and a connected person stays `!inuse` until the engine delivers their
+// ClientBegin -- a download or a slow load is seconds -- while `pers` (in
+// game.clients, which a level change does not touch) still says connected.  A
+// bot handed that slot had its ClientConnect rewrite the person's gclient_t,
+// and the person's own ClientBegin then ran on a bot.  ClientDisconnect and
+// G_FreeClientEdict both clear `connected`, so a slot that is really empty
+// reads free.
+bool G_ClientSlotFree(int i)
+{
+    return !DF_CLIENTENT(i)->inuse && !game.clients[i].pers.connected;
+}
+
 static edict_t *G_SpawnClient(void)
 {
     int i;
@@ -85,7 +101,7 @@ static edict_t *G_SpawnClient(void)
     for (i = game.maxclients - 1; i >= 0; i--)
     {
         cl_ent = DF_CLIENTENT(i);
-        if (!cl_ent->inuse)
+        if (G_ClientSlotFree(i))
         {
             memset(cl_ent, 0, sizeof(*cl_ent));
             G_InitEdict(cl_ent);
@@ -119,6 +135,25 @@ static void BotSetSvFlags(edict_t *ent)
     if (game.csr.extended)
         ent->svflags |= SVF_BOT;
 }
+//===========================================================================
+// `botglobals.numbots` from the bot states, which are what it counts.  A bot
+// leaving goes through ClientDisconnect, and under the OSP rulesets that
+// recounts the same number from the clients (OSP_clientLeft) with the leaver
+// already gone -- so the decrement that used to follow took one bot off twice.
+// With one bot left that read none, and BotRunFrame and G_RunFrame skip the
+// bot frame on none: the last bot stood still and never respawned, and nothing
+// recounts per frame.  A recount is right whatever ran before it.
+//===========================================================================
+static void BotCountBots(void)
+{
+    int i, n;
+
+    for (i = n = 0; i < game.maxclients; i++)
+    {
+        if (botglobals.botstates[i].active) n++;
+    } //end for
+    botglobals.numbots = n;
+} //end of the function BotCountBots
 //===========================================================================
 // the entity will become a bot
 //
@@ -160,7 +195,7 @@ static void BotBecome(edict_t *ent, bot_library_t *lib)
 // still holds the pointer, so it works, but every step between the memset and
 // the release is running against a client structure that has already been
 // zeroed.  The order here is the requirement's: shut the brain's client down,
-// disconnect, decrement, release the library, then clear.
+// disconnect, recount, release the library, then clear.
 //
 // Parameter:               bot             : bot to destroy
 // Returns:                 -
@@ -187,8 +222,8 @@ void BotDestroy(edict_t *bot)
     //remove botstate active flag
     bs->active = false;
     bs->started = false;
-    //there is a bot less
-    botglobals.numbots--;
+    //there is a bot less -- counted, not decremented (BotCountBots)
+    BotCountBots();
     //free the library used by the bot, and forget it before the clear
     lib = bs->library;
     bs->library = NULL;
@@ -202,6 +237,40 @@ void BotDestroy(edict_t *bot)
     //free up the client edict
     G_FreeClientEdict(bot);
 } //end of the function BotDestroy
+//===========================================================================
+// A bot client leaving through ClientDisconnect rather than through
+// BotDestroy: a person who typed `becomebot` and then disconnected, whom the
+// engine drops like any other client, or a tourney kick or ban that calls
+// ClientDisconnect itself.  BotDestroy calls ClientDisconnect and so cannot
+// be used from inside it; this is its bot half -- the brain's client, the
+// state, the library reference and the count -- and ClientDisconnect does the
+// rest as it does for anybody.  Left, the state stayed active with the library
+// held, and at the next level change BotSpawn marked whoever had the slot by
+// then FL_BOT | FL_BOTCLIENT: the brain drove them and Bot_unicast swallowed
+// every message sent to them.  FL_BOTCLIENT stays for ClientDisconnect's
+// readers, as it does through BotDestroy's call.
+//===========================================================================
+void BotClientLeaving(edict_t *ent)
+{
+    bot_state_t *bs;
+    bot_library_t *lib;
+
+    if (!(ent->flags & FL_BOT)) return;
+    if (!ent->client || !botglobals.botstates) return;
+    bs = &botglobals.botstates[DF_ENTCLIENT(ent)];
+    //shutdown the bot client in the library while it is still a bot
+    if (bs->active) BotLib_BotShutdownClient(ent);
+    //nothing the rest of the disconnect sends it may go to a brain
+    ent->flags &= ~(FL_BOT | FL_BOTINPUT);
+    ent->svflags &= ~SVF_BOT;
+    if (!bs->active) return;
+    bs->active = false;
+    bs->started = false;
+    BotCountBots();
+    lib = bs->library;
+    bs->library = NULL;
+    BotFreeLibrary(lib);
+} //end of the function BotClientLeaving
 //===========================================================================
 // Every bot, in one call.  ShutdownGame needs it -- a level change that does
 // not go through here leaks the brain's per-client state -- and so does
@@ -230,16 +299,41 @@ void BotDestroyAll(void)
 // Changes Globals:     botglobals.states
 //                              botglobals.numbots
 //===========================================================================
-static edict_t *BotCreate(char *userinfo, bot_library_t *lib)
+// The edict BotCreate is connecting, for the length of its ClientConnect call
+// -- and of the ClientDisconnect that undoes a connect the brain then refused,
+// which is still that bot's arrival -- and no longer.  ClientConnect asks this
+// rather than reading the edict's
+// flags, because the flags can belong to somebody else: a person the engine
+// hands a live bot's slot arrives with that bot's FL_BOTCLIENT still on the
+// edict until the bot is moved off it, and FL_BOTCLIENT is what lets a client
+// past `password`.  Only this function connects a bot, so only it can say so.
+static edict_t *bot_connecting;
+
+bool BotConnecting(const edict_t *ent)
+{
+    return ent && ent == bot_connecting;
+}
+
+// `who` is the client that asked, or NULL for the console: each refusal below
+// says why to them, which the one line AddQueuedBots used to print for all
+// three -- "can't create bot, maxclients = N" -- did not.
+static edict_t *BotCreate(edict_t *who, char *userinfo, bot_library_t *lib)
 {
     edict_t *ent;
     bot_state_t *bs;
     int arena;
+    bool connected;
 
     //spawn a client entity
     ent = G_SpawnClient();
     //check if there was a free client entity
-    if (!ent) return NULL;
+    if (!ent)
+    {
+        gi.cprintf(who, PRINT_HIGH, "can't create bot %s: no free client slot "
+                   "(maxclients %d)\n", Info_ValueForKey(userinfo, "name"),
+                   game.maxclients);
+        return NULL;
+    } //end if
     //remove bot flag before calling ClientConnect to make sure
     //BotMoveToFreeClientEdict won't be called there
     ent->flags &= ~FL_BOT;
@@ -248,10 +342,21 @@ static edict_t *BotCreate(char *userinfo, bot_library_t *lib)
     //NOTE: set entity inuse flag to false because the bot isn't spawned
     //          from a savegame
     ent->inuse = false;
-    if (!ClientConnect(ent, userinfo))
+    bot_connecting = ent;
+    connected = ClientConnect(ent, userinfo);
+    bot_connecting = NULL;
+    if (!connected)
     {
+        //the flag set for the call goes with the refusal: a slot left free
+        //with FL_BOTCLIENT on it is a slot the next person inherits it from
+        ent->flags &= ~FL_BOTCLIENT;
         //free the client edict
         G_FreeClientEdict(ent);
+        //ClientConnect gives its reason in `rejmsg`, as it does to a person
+        gi.cprintf(who, PRINT_HIGH, "can't create bot %s: %s\n",
+                   Info_ValueForKey(userinfo, "name"),
+                   *Info_ValueForKey(userinfo, "rejmsg") ?
+                   Info_ValueForKey(userinfo, "rejmsg") : "refused at connect");
         return NULL;
     } //end if
     //set the inuse flag after connecting
@@ -275,6 +380,23 @@ static edict_t *BotCreate(char *userinfo, bot_library_t *lib)
         bs->active = false;
         //remove library pointer
         bs->library = NULL;
+        //The brain refused the character after ClientConnect had already
+        //run, and nothing undid the connect: the arrival stayed in the console
+        //log, in arena's stdlog and in tourney's admin log, and the slot's skin
+        //in the configstrings.  Undone the way BotDestroy's disconnect undoes
+        //it, with FL_BOT off so nothing is routed to a brain that has no such
+        //client -- and the skin cleared, which no corpse can be wearing for a
+        //bot that never spawned.  Not in use for the call either, so it
+        //leaves no logout flash at the origin it never left.
+        ent->flags &= ~FL_BOT;
+        ent->inuse = false;
+        //...and still connecting while it is undone, so the departure is
+        //recorded where the arrival was and announced to nobody
+        //(BotConnecting): no player saw this bot arrive
+        bot_connecting = ent;
+        ClientDisconnect(ent);
+        bot_connecting = NULL;
+        gi.configstring(game.csr.playerskins + DF_ENTCLIENT(ent), "");
         //clear the entity
         memset(ent, 0, sizeof(*ent));
         //pointer to gclient_t structure
@@ -283,6 +405,12 @@ static edict_t *BotCreate(char *userinfo, bot_library_t *lib)
         memset(ent->client, 0, sizeof(gclient_t));
         //free the client edict
         G_FreeClientEdict(ent);
+        //the brain prints its own reason; this names the bot it was about
+        gi.cprintf(who, PRINT_HIGH, "can't create bot %s: the bot library "
+                   "refused character \"%s\" from %s\n",
+                   Info_ValueForKey(userinfo, "name"),
+                   Info_ValueForKey(userinfo, "charname"),
+                   Info_ValueForKey(userinfo, "charfile"));
         return NULL;
     } //end if
     //
@@ -341,6 +469,18 @@ bool BotMoveToFreeClientEdict(edict_t *bot)
     newcl = G_SpawnClient();
     //if there isn't a free client edict available
     if (!newcl) return false;
+    //a grapple in flight names this EDICT as its owner, and the edict is about
+    //to become the arriving person's: let it go first, as a death would.  The
+    //ruleset's own release -- Threewave's plays the CTF pak's grreset.wav,
+    //which the OSP four do not have, and their hook is tourney's anyway.
+    G_PlayerResetGrapple(bot);
+    //...and so do the mines, teslas, traps, nukes, dopplegangers and spheres
+    //it laid or owns, which the copy
+    //cannot re-point: left, they credited their kills to the arriving person,
+    //judged team-mates by that person's side under ctf, and were out of reach
+    //of arena's per-arena sweep, which reads the person's arena and not the
+    //bot's.  They go as they go with a client who leaves (ClientDisconnect).
+    G_RemoveDeployables(G_DeployableLaidBy, bot);
     //copy the bot to the new client edict.  The gclient_t pointer G_SpawnClient
     //just installed is the NEW slot's and must survive the copy -- the donor
     //overwrites it with the old one and then relies on the memcpy of the
@@ -352,21 +492,59 @@ bool BotMoveToFreeClientEdict(edict_t *bot)
     newcl->client = newclient;
     //copy the contents of the g_client_t structure
     *newcl->client = *bot->client;
+    //Two lists run THROUGH gclient_t, and the copy made second nodes that
+    //neither list knows about: arena's team roster (resp.teammember, whose
+    //`it` is the edict) and arena's menu queue (menuqueue is the head).  Each
+    //list still points into the gclient_t cleared below -- which is the
+    //arriving person's -- so the next roster walk read a zeroed node's NULL
+    //`it`.  Re-point the neighbours at the copies, and the member at its owner.
+    //Both lists are arena's and are empty under every other ruleset.
+    if (G_Ruleset() == RULESET_ARENA)
+    {
+        qmenu_t *node = &newcl->client->resp.teammember;
+        team_t *team;
+
+        if (node->prev)
+            node->prev->next = node;
+        if (node->next)
+            node->next->prev = node;
+        if (node->it == bot)
+            node->it = newcl;
+        if (newcl->client->menuqueue.next)
+            newcl->client->menuqueue.next->prev = &newcl->client->menuqueue;
+        //...and the round's statistics, which are keyed by edict number.  The
+        //record counting for the old slot is retired and one opened for the
+        //new, on the terms remove_from_team and the team join use, so the
+        //bot's numbers so far stay its own and the rest of the round reaches
+        //it rather than the arriving person.
+        team = RA_TeamOf(newcl);
+        if (team && team->fighting)
+        {
+            RA2_Stats_RemovePlayer(arenas[newcl->client->resp.context].stats,
+                                   DF_ENTNUMBER(bot));
+            RA2_Stats_AddPlayer(arenas[newcl->client->resp.context].stats,
+                                newcl, newcl->client->resp.teamnum);
+        } //end if
+    }
     //the edict's own identity does not travel with it
     newcl->s.number = DF_ENTNUMBER(newcl);
     //copy bot state
     bs = &botglobals.botstates[DF_ENTCLIENT(bot)];
     newbs = &botglobals.botstates[DF_ENTCLIENT(newcl)];
     *newbs = *bs;
+    //move the bot client in the library before the old state lets go of it:
+    //BotLib_BotMoveClient finds the library through the OLD client's state, so
+    //clearing `library` first handed the brain nothing.  It kept the old
+    //number in use and never heard of the new one -- the moved bot stood still
+    //and never respawned, and the next bot seated in the old slot was refused
+    //as "already setup".  Both edicts still exist here, as the brain expects.
+    BotLib_BotMoveClient(bot, newcl);
     //old bot state isn't used anymore
     bs->active = false;
     bs->started = false;
     bs->library = NULL;
     //the new state is
     newbs->active = true;
-    //move the bot client in the library before the old edict is cleared: the
-    //brain is told the new client number while both still exist
-    BotLib_BotMoveClient(bot, newcl);
     //change the user info
     ClientUserinfoChanged(newcl, newcl->client->pers.userinfo);
     gi.linkentity(newcl);
@@ -419,6 +597,9 @@ void BotSpawn(void)
     //because a server with no bot states yet still changes map.  This is
     //arena's clear too now -- arena_init() used to zero a second copy.
     botfill_ceiling = 0;
+    //...and so is whether a brain could load the map, which the next line of
+    //SpawnEntities asks again (CheckMinimumPlayers)
+    botglobals.mapfailed = false;
     if (!botglobals.botstates) return;
     for (i = 0; i < game.maxclients; i++)
     {
@@ -428,8 +609,15 @@ void BotSpawn(void)
             cl_ent = DF_CLIENTENT(i);
             //set started to false
             botglobals.botstates[i].started = false;
-            //entity is used
-            cl_ent->inuse = true;
+            //entity is used.  G_InitEdict rather than the bare flag, because
+            //SpawnEntities has just zeroed this edict and the bot is not begun
+            //until its library reports ready -- on a first visit to a map that
+            //is the whole reachability build -- so until then it was an in-use
+            //edict with no classname, which a classname test walking the
+            //clients dereferences: ctf's autocam (Cam_Cycle) crashed on it.
+            //This is the state G_SpawnClient gives a bot BotCreate connects,
+            //and ClientBegin replaces both the same way.
+            G_InitEdict(cl_ent);
             //set the bot flag
             cl_ent->flags |= FL_BOT | FL_BOTCLIENT;
             BotSetSvFlags(cl_ent);
@@ -505,6 +693,43 @@ void AddBotToQueue(edict_t *ent, const char *library, const char *userinfo)
     queuedbots = bot;
 } //end of the function AddBotToQueue
 //===========================================================================
+// Seats a bot could still be given: the slots G_SpawnClient would hand out,
+// by its own predicate, less the bots already queued for one.  `addrandom N`
+// is bounded by it -- a queued bot is a request that always succeeds, so the
+// count alone queued as many as were asked for, one TagMalloc and one
+// "loading..." each, and drained for as long as that took.
+//===========================================================================
+int BotSeatsFree(void)
+{
+    queuedbot_t *bot;
+    int i, n;
+
+    for (i = n = 0; i < game.maxclients; i++)
+    {
+        if (G_ClientSlotFree(i)) n++;
+    } //end for
+    for (bot = queuedbots; bot; bot = bot->next) n--;
+    return n > 0 ? n : 0;
+} //end of the function BotSeatsFree
+//===========================================================================
+// A queued bot has its name already -- the one BotUniqueName chose -- and
+// holds it as surely as a client in the game does, so the two checks that
+// pick a name or a character ask about the queue as well.  Without it, two
+// bots queued in one frame were each checked against the clients alone and
+// could both be seated under one name.
+//===========================================================================
+bool BotNameQueued(const char *name)
+{
+    queuedbot_t *bot;
+
+    for (bot = queuedbots; bot; bot = bot->next)
+    {
+        if (!Q_strcasecmp(Info_ValueForKey(bot->userinfo, "name"), name))
+            return true;
+    } //end for
+    return false;
+} //end of the function BotNameQueued
+//===========================================================================
 // Spawning is deferred to frame start, so no bot is created inside
 // SpawnEntities or inside a ClientConnect.
 //
@@ -527,14 +752,20 @@ void AddQueuedBots(void)
     lib = BotUseLibrary(bot->library);
     if (!lib)
     {
-        gi.cprintf(bot->ent, PRINT_HIGH, "%s not available\n", bot->library);
+        //a brain that loaded and could not take this map is a different
+        //failure from one that is not there, and the one an operator can act on
+        if (botglobals.mapfailed)
+            gi.cprintf(bot->ent, PRINT_HIGH, "%s could not load map %s -- no "
+                       "bots on this map\n", bot->library, level.mapname);
+        else
+            gi.cprintf(bot->ent, PRINT_HIGH, "%s not available\n", bot->library);
     } //end if
     else
     {
-        botent = BotCreate(bot->userinfo, lib);
+        //BotCreate says why when it refuses
+        botent = BotCreate(bot->ent, bot->userinfo, lib);
         if (!botent)
         {
-            gi.cprintf(bot->ent, PRINT_HIGH, "can't create bot, maxclients = %d\n", game.maxclients);
             //free the library used by the bot
             BotFreeLibrary(lib);
         } //end if
@@ -565,7 +796,8 @@ static bool ClientNameExists(const char *name)
             } //end if
         } //end if
     } //end for
-    return false;
+    //...or one on its way in (BotNameQueued)
+    return BotNameQueued(name);
 } //end of the function ClientNameExists
 //===========================================================================
 // Block 5 of seventeen: a duplicate bot name.  The SDK refuses it; tourney
@@ -606,6 +838,23 @@ static bool BotUniqueName(const char *want, char *out, size_t outsize)
     } //end else
     return false;
 }
+//===========================================================================
+// One key of a new bot's userinfo, or a refusal that says which.
+// Info_SetValueForKey takes no value of 64 characters or more, nor one holding
+// a backslash, a quote or a semicolon, and says so only by its return -- which
+// the donor ignored, so a bots.cfg row naming a long character file (the file
+// allows 143 characters) became a bot with no `charfile` that the brain then
+// refused, and a name with a `;` in it a bot with no name.
+//===========================================================================
+static bool BotSetUserinfo(edict_t *ent, char *uinfo, const char *key,
+                           const char *value)
+{
+    if (Info_SetValueForKey(uinfo, key, value)) return true;
+    gi.cprintf(ent, PRINT_HIGH, "can't add bot: its %s \"%s\" cannot go into "
+               "a userinfo (%d characters at most, and no \\ \" or ;)\n",
+               key, value, MAX_QPATH - 1);
+    return false;
+} //end of the function BotSetUserinfo
 //===========================================================================
 // add a deathmatch bot
 //
@@ -650,10 +899,11 @@ void BotAddDeathmatch(edict_t *ent)
         gi.cprintf(ent, PRINT_HIGH, "client name %s is already used\n", gi.argv(i + 1));
         return;
     } //end if
-    Info_SetValueForKey(uinfo, "name", bname);
-    Info_SetValueForKey(uinfo, "skin", gi.argv(i + 2));
-    Info_SetValueForKey(uinfo, "charfile", gi.argv(i + 3));
-    Info_SetValueForKey(uinfo, "charname", gi.argv(i + 4));
+    if (!BotSetUserinfo(ent, uinfo, "name", bname) ||
+        !BotSetUserinfo(ent, uinfo, "skin", gi.argv(i + 2)) ||
+        !BotSetUserinfo(ent, uinfo, "charfile", gi.argv(i + 3)) ||
+        !BotSetUserinfo(ent, uinfo, "charname", gi.argv(i + 4)))
+        return;
     //
     // The donor's two #ifdef fences, as the resolution's answer.  `arena` and
     // `botctfteam` are cvars a server operator sets; the userinfo key is how
@@ -715,6 +965,14 @@ void BotBecomeDeathmatch(edict_t *ent)
     if (!ent)
     {
         gi.dprintf("only a client can become a bot\n");
+        return;
+    } //end if
+    //a client the brain already drives would be set up a second time: its
+    //library reference leaks, the brain answers "already setup" and the bot
+    //count goes up by one for a bot that was already counted
+    if (ent->flags & FL_BOT)
+    {
+        gi.cprintf(ent, PRINT_HIGH, "you are a bot already\n");
         return;
     } //end if
     //load the default library
@@ -862,8 +1120,8 @@ int BotFillTarget(void)
         case RULESET_DM:
         case RULESET_DMPRO: want = DM_BotFillSeats(); break;
         // ...and `tdm` and `duel` do declare one, so that is what is used.
-        // `duel` forces team_maxplayers to 1 CVAR_NOSET, so this is 2 there by
-        // construction.
+        // A duel's team is one player whatever `team_maxplayers` says
+        // (OSP_TeamMaxPlayers), so this is 2 there by construction.
         case RULESET_TDM:
         case RULESET_DUEL: want = 2 * OSP_TeamMaxPlayers(); break;
         case RULESET_ARENA:
@@ -927,22 +1185,28 @@ void BotFillDescribe(char *buf, size_t len)
                        G_SpawnPointPool("info_player_deathmatch"));
             break;
         case RULESET_TDM:
-        case RULESET_DUEL:
             Q_snprintf(buf, len, "2 * team_maxplayers %d",
+                       OSP_TeamMaxPlayers());
+            break;
+        // Not the cvar's name: a duel does not read `team_maxplayers`, and
+        // printing it beside a 1 the cvar does not hold would send an operator
+        // to change a setting that cannot move this.
+        case RULESET_DUEL:
+            Q_snprintf(buf, len, "2 * %d, a duel's team size",
                        OSP_TeamMaxPlayers());
             break;
         case RULESET_ARENA:
         {
             int n = RA_BotFillArena();
 
-            // 0 is an answer now -- no arena on the map will take bots
+            // 0 is an answer now -- no arena on the map will seat a bot
             // -- and it is worth saying so in words, because the numbers that
             // would otherwise be printed beside it are those of arena 0, which
             // is the observers' non-arena and never a fill target.
             if (!n)
             {
-                Q_strlcpy(buf, "nothing -- every arena has bots switched off",
-                          len);
+                Q_strlcpy(buf, "nothing -- no arena will seat a bot (bots "
+                          "switched off, locked, full, ping window)", len);
                 break;
             } //end if
 
@@ -1015,21 +1279,25 @@ void CheckMinimumPlayers(void)
     bool fillon;
     char buf[32];
 
+    // A map no brain could load takes no bots, and every one the fill asked
+    // for there was a whole library load: dlopen, BotSetupLibrary, a failed
+    // BotLoadMap and, with `freebotlib` 1, the unload -- every 32 frames for
+    // the rest of the level, because a queued bot is a request that succeeds
+    // and the fill never hears that its bot did not.  So the fill stops for
+    // the level; BotSpawn clears the latch at the next one, and `addbot` still
+    // tries and says why it cannot.
+    if (botglobals.mapfailed) return;
+
     minplayers = BotMinPlayers();
 
-    // Which arena the fill is feeding, and it is asked for first
-    // because under `arena` it is also the CENSUS that changes: a target
-    // belonging to one of up to 32 games on the map has to be compared against
-    // that game's head count and not the server's.  That is the one asymmetry
-    // left between the rulesets now that there is one cvar and one target
-    // function -- and it is an asymmetry of counting, not of switching.
-    fillarena = G_Ruleset() == RULESET_ARENA ? RA_BotFillArena() : 0;
-
-    // Only the switch is read here.  Everything above the frame gate below runs
-    // on every frame, and the target is not a cvar read: BotFillTarget() walks
-    // the entity list once per spawn-point class -- three times under `ctf` --
-    // so it is asked for on a fill tick and not before.
+    // Only the switches are read here.  Everything above the frame gate below
+    // runs on every frame, and neither number is a cvar read: BotFillTarget()
+    // walks the entity list once per spawn-point class -- three times under
+    // `ctf` -- and under `arena` the fill's ARENA is a census of every arena on
+    // the map, with a spawn-point walk per bot in transit (RA_BotFillArena),
+    // so both are asked for on a fill tick and not before.
     fill = 0;
+    fillarena = 0;
     // `!fillarena` used to mean "not the arena ruleset", and now it can
     // also mean "the arena ruleset declined".  Until this feature there was no
     // difference: with `botfill` on and a map loaded, RA_BotFillArena() always
@@ -1039,12 +1307,26 @@ void CheckMinimumPlayers(void)
     // map can now refuse while `botfill` is still on, and reading that 0 as
     // "some other ruleset" would hand the arena map to the FLAT count, whose
     // census spans every arena at once and whose bots RA_BotJoinArena is busy
-    // refusing to seat.  The ruleset is asked instead of inferred.
-    fillon = !fillarena && BotFillEnabled() && G_Ruleset() != RULESET_ARENA;
+    // refusing to seat.  The ruleset is asked instead of inferred -- which is
+    // also what lets this be settled above the gate, before the arena's answer
+    // has been asked for.
+    fillon = BotFillEnabled() && G_Ruleset() != RULESET_ARENA;
 
-    if (!minplayers->value && !fillarena && !fillon) return;
+    // `arena`'s half of this test is its answer, so it is asked below the gate.
+    if (!minplayers->value && !fillon && G_Ruleset() != RULESET_ARENA) return;
+    // Under the OSP four, tourney's own gate first: its delay, no intermission,
+    // and `bots_autoload` for the flat count (OSP_BotFillReady).
+    if (G_IsOspRuleset() && !OSP_BotFillReady(!fillon)) return;
     //
     if (level.framenum & 31) return;
+    // Which arena the fill is feeding, and it is asked for first on a fill tick
+    // because under `arena` it is also the CENSUS that changes: a target
+    // belonging to one of up to 32 games on the map has to be compared against
+    // that game's head count and not the server's.  That is the one asymmetry
+    // left between the rulesets now that there is one cvar and one target
+    // function -- and it is an asymmetry of counting, not of switching.
+    fillarena = G_Ruleset() == RULESET_ARENA ? RA_BotFillArena() : 0;
+    if (!minplayers->value && !fillarena && !fillon) return;
     //arena used to return here, and rightly: with no bot able to reach an
     //arena roster, a bot added under `arena` stood in arena 0 forever and
     //adding "a body mid-round" was the only thing it could have meant.
@@ -1065,13 +1347,13 @@ void CheckMinimumPlayers(void)
     {
         cl_ent = DF_CLIENTENT(i);
         // Seats taken, by G_SpawnClient()'s own predicate rather than by a
-        // second opinion about what a client is: `!inuse` is the slot that
-        // function hands out, so a count made any other way could say there
-        // is room where the allocator finds none.  Counted for every client,
-        // above the player test, because a client that is not a player still
-        // occupies the seat -- an observer, a bot on its way in, somebody
-        // still at the team menu.
-        if (cl_ent->inuse) seated++;
+        // second opinion about what a client is: G_ClientSlotFree is the slot
+        // that function hands out, so a count made any other way could say
+        // there is room where the allocator finds none.  Counted for every
+        // client, above the player test, because a client that is not a player
+        // still occupies the seat -- an observer, a bot on its way in, somebody
+        // still at the team menu, somebody still loading the map.
+        if (!G_ClientSlotFree(i)) seated++;
         if (!BotCountsAsPlayer(cl_ent))
         {
             // A bot that is not yet a player is still a bot on its way in, and
@@ -1166,7 +1448,8 @@ void CheckMinimumPlayers(void)
     // map whose other arenas hold the clients therefore reads as short here
     // while the server is full, and the fill asks for a bot every 32 frames
     // that AddQueuedBots then refuses -- G_SpawnClient finds no free edict and
-    // the console says `can't create bot, maxclients = N` until a seat frees.
+    // the console says `can't create bot <name>: no free client slot` until a
+    // seat frees.
     // Nothing runs away, because nothing is created; what it costs is a
     // request made in the knowledge it cannot be met, and a console saying so.
     //

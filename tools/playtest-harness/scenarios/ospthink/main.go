@@ -84,8 +84,8 @@ func main() {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(2)
 	}
-	os.WriteFile(filepath.Join(d, "tourney", name), body, 0o755)
-	os.WriteFile(filepath.Join(d, "tourney", "maps.txt"), []byte("q2dm1\n"), 0o644)
+	playtest.WriteFixture(filepath.Join(d, "tourney", name), body, 0o755)
+	playtest.WriteFixture(filepath.Join(d, "tourney", "maps.txt"), []byte("q2dm1\n"), 0o644)
 
 	args := []string{"+set", "basedir", d, "+set", "game", "tourney",
 		"+set", "dedicated", "1", "+set", "deathmatch", "1",
@@ -105,6 +105,7 @@ func main() {
 		bin, binArgs = "stdbuf", append([]string{"-oL", "-eL", *binary}, args...)
 	}
 	cmd := exec.Command(bin, binArgs...)
+	playtest.OwnChild(cmd)
 	cmd.Dir = d
 	logf, _ := os.Create(filepath.Join(d, "server.log"))
 	cmd.Stdout, cmd.Stderr = logf, logf

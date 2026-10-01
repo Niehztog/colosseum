@@ -239,6 +239,15 @@ void SP_turret_breach(edict_t *self)
 
     self->blocked = turret_blocked;
 
+    // A breach is a whole turret on its own, pitch and yaw, but every part of
+    // it reaches the rest through `teammaster` -- its damage, its driver, the
+    // driver's link -- and only G_FindTeams sets that, for a breach with a
+    // `team`.  One without ended the server a frame in.  So a breach with no
+    // team is a team of one, the way SP_func_door makes a door one; every
+    // retail breach has a team.
+    if (!self->team)
+        self->teammaster = self;
+
     self->think = turret_breach_finish_init;
     self->nextthink = level.framenum + 1;
     gi.linkentity(self);
@@ -442,25 +451,27 @@ void turret_brain_think(edict_t *self)
             self->enemy = NULL;
     }
 
-    if (!self->enemy) {
-        if (!FindTarget(self))
-            return;
-        self->monsterinfo.trail_framenum = level.framenum;
-        self->monsterinfo.aiflags &= ~AI_LOST_SIGHT;
-    } else {
-        VectorAdd(self->enemy->absmax, self->enemy->absmin, endpos);
-        VectorScale(endpos, 0.5f, endpos);
+    // "Does not search for targets", says the entity's own doc above: its
+    // target is its killtarget, and with that gone the brain is idle.  Ground
+    // Zero's arm asked FindTarget here, which for a brain -- no monster, no
+    // `run` -- ended in HuntTarget's NULL call the moment a player came into
+    // view, and with that call backstopped would have hunted the player
+    // instead.  Closed here, where it starts (HuntTarget).
+    if (!self->enemy)
+        return;
 
-        trace = gi.trace(self->target_ent->s.origin, vec3_origin, vec3_origin, endpos, self->target_ent, MASK_SHOT);
-        if (trace.fraction == 1 || trace.ent == self->enemy) {
-            if (self->monsterinfo.aiflags & AI_LOST_SIGHT) {
-                self->monsterinfo.trail_framenum = level.framenum;
-                self->monsterinfo.aiflags &= ~AI_LOST_SIGHT;
-            }
-        } else {
-            self->monsterinfo.aiflags |= AI_LOST_SIGHT;
-            return;
+    VectorAdd(self->enemy->absmax, self->enemy->absmin, endpos);
+    VectorScale(endpos, 0.5f, endpos);
+
+    trace = gi.trace(self->target_ent->s.origin, vec3_origin, vec3_origin, endpos, self->target_ent, MASK_SHOT);
+    if (trace.fraction == 1 || trace.ent == self->enemy) {
+        if (self->monsterinfo.aiflags & AI_LOST_SIGHT) {
+            self->monsterinfo.trail_framenum = level.framenum;
+            self->monsterinfo.aiflags &= ~AI_LOST_SIGHT;
         }
+    } else {
+        self->monsterinfo.aiflags |= AI_LOST_SIGHT;
+        return;
     }
 
     // let the turret know where we want it to aim

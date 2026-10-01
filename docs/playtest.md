@@ -6,7 +6,7 @@ The harness itself is `tools/playtest-harness`, with its dependencies vendored; 
 
 ## The scenarios this tree ships
 
-Fifty-one, each one a `main` package under `tools/playtest-harness/scenarios/`. Four are generic diagnostics rather than checks: `mapinfo` lists a map's spawn points grouped by the arena key they carry, read straight out of a pak; `csdump` connects once and prints every configstring the server sent, so the numbering itself can be read; and `netlag` points at a server that is ALREADY RUNNING -- `-host`/`-port`, starting nothing -- and reports what a client there experiences. It is how "it felt laggy on that one" becomes a number: the pm_type and pm_flags the server holds the client on, the distribution of snapshot arrivals against the 100 ms server frame, and the delay from an input to its effect.  `liveprobe` points at a running server the same way and takes ONE reading -- `pm_type`, the configstrings, the playerstate stats and the layout -- which is how "the server is up but nothing is happening" becomes `pm_type = 4 (FREEZE)`, the intermission, with the map name it has been stuck on.  It sends no button, deliberately: under every ruleset but tourney and `arena` a press is what ENDS an intermission, so a probe that pressed one would destroy the state it was sent to look at.
+Fifty-three, each one a `main` package under `tools/playtest-harness/scenarios/`. Four are generic diagnostics rather than checks: `mapinfo` lists a map's spawn points grouped by the arena key they carry, read straight out of a pak; `csdump` connects once and prints every configstring the server sent, so the numbering itself can be read; and `netlag` points at a server that is ALREADY RUNNING -- `-host`/`-port`, starting nothing -- and reports what a client there experiences. It is how "it felt laggy on that one" becomes a number: the pm_type and pm_flags the server holds the client on, the distribution of snapshot arrivals against the 100 ms server frame, and the delay from an input to its effect.  `liveprobe` points at a running server the same way and takes ONE reading -- `pm_type`, the configstrings, the playerstate stats and the layout -- which is how "the server is up but nothing is happening" becomes `pm_type = 4 (FREEZE)`, the intermission, with the map name it has been stuck on.  It sends no button, deliberately: under every ruleset but tourney and `arena` a press is what ENDS an intermission, so a probe that pressed one would destroy the state it was sent to look at.
 
 **The battery, and the two content layers:**
 
@@ -57,7 +57,7 @@ Fifty-one, each one a `main` package under `tools/playtest-harness/scenarios/`. 
 | `scenarios/ra2twins` | Do two arrivals land on the same spot, and can they walk out of each other? Reports overlapping pairs, then asks every client to move |
 | `scenarios/ra2pickuptwins` | The same question on a PICKUP arena, which is the other selector and the sharper case: spawns are chosen by side rather than by distance |
 | `scenarios/ra2waitroom` | Where does a player killed MID-ROUND land, and can it move? The other half of `ra2twins` |
-| `scenarios/ra2menuleak` | Does a respawn free the menu it throws away? Drives respawns through `spectator 1` (RA2 dispatches no `kill`) and reads the live allocation count out of Q2PRO's `z_stats`, then checks the menu still opens and closes |
+| `scenarios/ra2menuleak` | Does a respawn free the menu it throws away? **The respawn half is a stated skip**: it was driven through `spectator 1`, which arena no longer honours (R-RA-17), and every other way into `PutClientInServer` under arena is a death -- whose only reliable killer, a Gladiator bot, allocates in the same `z_stats` row the check counts. What runs is the second half: the menu still opens, closes and reopens, and the server still answers |
 | `scenarios/ra2queuefire` | Can a client waiting out a round shoot the fighters it stands among? Asserts in both signs off `ps.gunframe`: an observer's never leaves zero, a fighter's does |
 | `scenarios/ra2prefire` | Can a PERSON shoot during the round countdown? Damage is granted exactly once per round, on the frame the countdown reaches zero |
 | `scenarios/ra2holdfire` | The same question asked of a BOT, plus whether a shot before the bell is spent ammo and nothing else |
@@ -70,6 +70,8 @@ Fifty-one, each one a `main` package under `tools/playtest-harness/scenarios/`. 
 | `scenarios/ra2botvote` | Does an arena's own `bots` switch actually keep bots out? The refusal lives in five separate places |
 | `scenarios/ra2botkeep` | Does the fill take apart a game it has no reason to touch (R-RA-11)? Bots stage in ra2map27's pickup arena, one person joins a ppt=1 arena, and the pickup game has to survive both the visit and the departure. Sampled until the head count stops moving, because a count taken once cannot tell a server that settled from one still draining |
 | `scenarios/nextlevel` | Does the level end when there is nobody to press a key (R-RA-10, R-OSP-15, R-CTF-9)? Three phases: `arena` with only bots, which never send BUTTON_ANY; `dm` where the last client quits while the scoreboard is up, after which no ClientThink runs at all; and `ctf`, the same hole reached by a third ruleset. All three fail on the library without the fix |
+| `scenarios/samelevel` | Does `dmflags`' same-map flag outrank the ruleset's own rotation? Four arms -- `arena` and tourney, each with the flag clear and set: the clear arms prove the rotation is live (`q2dm1` to `q2dm3`, which no fall-through reaches) and the set arms that the flag wins; every arm refuses `q2dm2`, the answer when nothing chose (R-RA-12). `tools/dispatch.py` question E is the same rule checked in the source |
+| `scenarios/hardening` | The crash and injection fixes, asked from a client: an RA2 map's targetless teleporter pads freed under `dm` and kept under `arena` (R-RA-14); a `teamskin` carrying a command separator refused and never stuffed to a teammate (R-SEC-11); both referee paths answering "disabled" with no password configured; a bot joining a password-protected server while a person without the password is refused (R-BOT-14); accuracy surviving a death (R-OSP-19); the referee backoff (R-SEC-12); a skin cycle allocating no image index (R-SEC-13). Every row ends on `Server.Alive`, and every row fails against the library without its fix |
 | `scenarios/ra2botchat` | How many times does one bot chat line reach a client? The dedicated console cannot tell four sends from one |
 | `scenarios/ra2gslog` | Does the stdlog record what it claims to? `gslog.c` has six entry points and a dropped call site leaves a function that compiles, links and never runs |
 | `scenarios/ra2gskill` | The sixth entry point `ra2gslog` cannot reach: does a round still log DEATHS? |
@@ -96,6 +98,10 @@ go run ./scenarios/colosseum -q2proded $Q2 \
     -lib <colosseum>/release/game<cpu>.so                 # every ruleset
 go run ./scenarios/colosseum -q2proded $Q2 -lib ... -rulesets arena -keep
 ```
+
+### A crash says nothing
+
+q2proded installs no handler for SIGSEGV, SIGFPE or SIGABRT (`Sys_Init` in `src/unix/system.c` catches TERM, INT, HUP and USR1 only), so a server that crashes prints **nothing** -- there is no `Segmentation fault` line in its log to look for, and a row that greps for one cannot fail. And `Server.WaitLog` counts lines already logged, which is right for a race against a fast server and wrong for a probe: a wait for a census line after sending `sv ruleset` is satisfied by the census some earlier section printed, whether or not the server is still there to answer. A row that asserts the server survived something reads the process's exit, and reads only the lines logged after a mark it took before sending its probe.
 
 ## Testing one binary that serves several rulesets
 
@@ -148,9 +154,9 @@ all three agree *and at which they would still agree if the arithmetic were
 deleted*. `scenarios/votematrix` is the shape that answers it: the same proposal
 put at one, two and three connected players, per ruleset. What that turned up
 was not a defect but three donor rules a single-count test cannot see -- each
-system counts a different set (tourney counts connected clients under `dm` and
-`dmpro` and ENTERED ones under `tdm` and `duel`, because `vote_countspectators`
-is registered with a different default for a teams ruleset; Threewave counts
+system counts a different set (tourney counts the connected people under `dm`
+and `dmpro` and the ENTERED ones under `tdm` and `duel`, because
+`vote_countspectators`, left empty, is answered per ruleset; Threewave counts
 every client including the proposer, who may not vote; Rocket Arena counts one
 arena), `(count * electpercentage) / 100` truncates so two players and three
 players need the same single yes, and OSP's fail arm divides the nay tally by

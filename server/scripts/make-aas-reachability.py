@@ -35,7 +35,7 @@ figure is gone a finished mesh is just a file of some size.
 Environment: BUILD (q2proded.exe's directory), GAME (gamedir name under it),
 MAPS (that gamedir's maps/), PORT, MAXWAIT, STABLE.
 """
-import os, socket, subprocess, sys, time
+import os, secrets, socket, subprocess, sys, time
 
 # BUILD has no default: it is a path on the WORKSTATION's Windows side, which
 # nothing here can guess.  GAME is read before MAPS because MAPS is built from
@@ -47,7 +47,13 @@ BUILD = os.environ.get('BUILD') or sys.exit(
 GAME  = os.environ.get('GAME', 'colosseum-aas')
 MAPS  = os.environ.get('MAPS', os.path.join(BUILD, GAME, 'maps'))
 PORT  = int(os.environ.get('PORT', '27930'))
-PW    = 'aasgen'
+# The rcon password is made per run, not written down: a fixed one here is a
+# password for a server listening on a real port for as long as the run takes.
+# It reaches the engine through a cfg of its own, exec'd AFTER aasgen.cfg,
+# because q2pro applies every `+set` before any `+exec` -- a command-line one
+# would lose to whatever aasgen.cfg sets.
+PW    = os.environ.get('RCON_PASSWORD') or secrets.token_hex(12)
+PWCFG = 'aasgen-rcon.cfg'
 DONEFILE = os.environ.get('DONEFILE', os.path.join(BUILD, GAME, 'aas-done.txt'))
 MAXWAIT  = int(os.environ.get('MAXWAIT', '180'))
 # How long to give a map to come up.  15s was too short: kitchen, polka and
@@ -91,11 +97,13 @@ def killstale():
 
 def start(first):
     killstale()
+    with open(os.path.join(BUILD, GAME, PWCFG), 'w') as f:
+        f.write('set rcon_password "%s"\n' % PW)
     log = open(os.path.join(BUILD, 'q2proded-aas.log'), 'ab')
     p = subprocess.Popen(
         ['./q2proded.exe', '+set', 'dedicated', '1', '+set', 'game', GAME,
          '+set', 'net_port', str(PORT), '+set', 'port', str(PORT),
-         '+exec', 'aasgen.cfg', '+map', first],
+         '+exec', 'aasgen.cfg', '+exec', PWCFG, '+map', first],
         cwd=BUILD, stdout=log, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL)
     for _ in range(40):
         time.sleep(1)

@@ -226,6 +226,9 @@ static const mframe_t floater_frames_activate[] = {
     { ai_move,    0,  NULL },
     { ai_move,    0,  NULL },
     { ai_move,    0,  NULL },
+    { ai_move,    0,  NULL },
+    // id's table has thirty entries for the move's 31 frames, so running it
+    // would read one past the end; the 31st is the same no-op as the rest.
     { ai_move,    0,  NULL }
 };
 const mmove_t floater_move_activate = {FRAME_actvat01, FRAME_actvat31, floater_frames_activate, NULL};
@@ -530,6 +533,11 @@ static void floater_zap(edict_t *self)
     vec3_t  dir;
     vec3_t  offset;
 
+    // ai_charge's early return for a gone enemy does not stop this frame's
+    // callback, and the zap lands eight frames after floater_melee chose it.
+    if (!self->enemy || !self->enemy->inuse)
+        return;
+
     VectorSubtract(self->enemy->s.origin, self->s.origin, dir);
 
     AngleVectors(self->s.angles, forward, right, NULL);
@@ -549,6 +557,9 @@ static void floater_zap(edict_t *self)
     gi.WriteByte(1);    //sparks
     gi.multicast(origin, MULTICAST_PVS);
 
+    // No reach test, unlike floater_wham's fire_hit: every donor lands the zap
+    // on the enemy wherever it has got to by this frame, and id's floater on
+    // id's maps is the spine's (R-BASE-1).
     T_Damage(self->enemy, self, self, dir, self->enemy->s.origin, vec3_origin, 5 + Q_rand() % 6, -10, DAMAGE_ENERGY, MOD_UNKNOWN);
 }
 

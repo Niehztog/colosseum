@@ -31,7 +31,10 @@ int num_names = 0;
 char    pl_bname[200][16];
 char    pl_names[200][16];
 char    pl_pass[200][32];
-char    pl_addr[200][16];
+// As wide as the latched address it is matched against: v2.75's 16 held a
+// dotted quad and nothing else, and an IPv6 peer's `rban` stored its first
+// fifteen characters -- a prefix that banned everyone who shared it.
+char    pl_addr[200][MAX_CLIENT_ADDRESS];
 
 // `filename` is the third %s of the path, i.e. player_file's value; the caller
 // passes it, this function does not read the cvar itself.
@@ -46,7 +49,7 @@ void OSP_loadPlayers(char *filename)
     num_names = 0;
 
     {
-        if (!G_FsGamePath(pathbuf, sizeof(pathbuf), filename)) {
+        if (!G_FsReadPath(pathbuf, sizeof(pathbuf), filename)) {
             gi.dprintf("\nPlayer list path too long, no players loaded.\n\n");
             return;
         }
@@ -136,7 +139,7 @@ int read_player_entry(FILE *f, char *name, char *pass, char *addr)
     u = scanp;
 
     Q_strlcpy(pass, s, 32);
-    Q_strlcpy(addr, u, 16);
+    Q_strlcpy(addr, u, sizeof(pl_addr[0]));
     return 2;
 }
 

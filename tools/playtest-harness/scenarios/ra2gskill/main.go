@@ -203,7 +203,7 @@ func run(q2, ref, lib, dir, mapname, weapon string, arena, port int, label strin
 		pickup: 1;
 		rounds: 9;
 	}`, arena) + string(refCfg)[end:]
-	if err := os.WriteFile(filepath.Join(dir, "arena", cfgName), []byte(patched), 0o644); err != nil {
+	if err := playtest.WriteFixture(filepath.Join(dir, "arena", cfgName), []byte(patched), 0o644); err != nil {
 		return err
 	}
 	fmt.Printf("  ..    %s: %s arena %d rewritten with healthprotect 0, armor 0, health 100\n",

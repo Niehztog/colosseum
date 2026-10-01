@@ -140,11 +140,19 @@ install_data() {
   # Named members only, each written straight to its place.  Nothing else in
   # either archive -- the 1998 executables, id's own game DLLs -- is wanted, and
   # a member that is never asked for cannot be written anywhere.
-  rm -rf "$dir"; mkdir -p "$dir"
+  #
+  # Nothing is DELETED to get there.  This was `rm -rf "$dir"` whenever the
+  # tree did not verify, which is also what a real Quake II install handed to
+  # this script by mistake does not do -- so it removed the install.  The
+  # manifest is six files and verify() reads those six, so writing exactly
+  # those (each through a temporary beside it, so a failed write leaves no
+  # half-file) repairs a tree that failed, and touches nothing else in it.
+  mkdir -p "$dir"
   echo "$LAYOUT" | while read -r out archive member; do
     mkdir -p "$dir/$(dirname "$out")"
-    unzip -p "$tmp/$archive" "$member" > "$dir/$out"
-  done
+    unzip -p "$tmp/$archive" "$member" > "$dir/$out.part" &&
+      mv -f "$dir/$out.part" "$dir/$out" || { rm -f "$dir/$out.part"; exit 1; }
+  done || exit 1
 }
 
 case ${1:-} in

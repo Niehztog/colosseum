@@ -69,10 +69,16 @@ TAG_ALLOC = ('gi.TagMalloc',)
 TAG_WRAPPERS = ('G_CopyString',)
 TAG_FREE = ('gi.TagFree',)
 
+# A cast between the `=` and the allocator -- `p = (map_t *)realloc(...)`,
+# the C++-portable spelling -- is not a reason to stop seeing the allocation;
+# it was, and a casted gi.TagMalloc freed with free() passed.  So is one on the
+# free's operand.
+CAST = r'(?:\(\s*(?:const\s+|struct\s+|unsigned\s+)*[A-Za-z_]\w*[\s*]*\)\s*)?'
 ALLOC_RE = re.compile(
     r'(?P<lhs>[A-Za-z_]\w*(?:\s*(?:->|\.)\s*\w+|\s*\[[^\]]*\])*)'
-    r'\s*=\s*(?!=)\s*(?P<fn>gi\s*\.\s*TagMalloc|[A-Za-z_]\w*)\s*\(')
-FREE_RE = re.compile(r'(?P<fn>gi\s*\.\s*TagFree|free)\s*\(\s*(?P<arg>[^;]*?)\s*\)\s*;')
+    r'\s*=\s*(?!=)\s*' + CAST + r'(?P<fn>gi\s*\.\s*TagMalloc|[A-Za-z_]\w*)\s*\(')
+FREE_RE = re.compile(r'(?P<fn>gi\s*\.\s*TagFree|free)\s*\(\s*' + CAST +
+                     r'(?P<arg>[^;]*?)\s*\)\s*;')
 ALIAS_RE = re.compile(
     r'(?:^|[;{}]|\)\s*)\s*(?:(?:const\s+)?\w[\w \t*]*?\*\s*)?'
     r'(?P<lhs>[A-Za-z_]\w*(?:\s*(?:->|\.)\s*\w+|\s*\[[^\]]*\])*)'
@@ -258,6 +264,11 @@ SELFTESTS = [
      ('s = strdup(sv_maplist->string);',
       's2 = strdup(sv_maplist->string);'),
      'frees a pointer this file never allocates'),
+    # The live case again, spelled with a cast.
+    ('mix through a cast', 'g_ctf.c',
+     ('mlist = G_CopyString(warp_list->string);',
+      'mlist = (char *)strdup(warp_list->string);'),
+     'the families do not match'),
 ]
 
 

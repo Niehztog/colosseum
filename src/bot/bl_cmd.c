@@ -356,16 +356,24 @@ static bool BotServerCmd(const char *cmd, edict_t *ent, int server)
     {
         if (!BotCmdRefused(ent, "randomly add bots"))
         {
-            int i, num;
+            int i, num, room;
 
             if (!Q_stricmp(gi.argv(0), "sv")) num = 2;
             else num = 1;
-            if (gi.argc() <= num) AddRandomBot(ent);
-            else
+            num = gi.argc() <= num ? 1 : Q_atoi(gi.argv(num));
+            // No more than there are seats for.  AddRandomBot only QUEUES, and
+            // a queued bot is not "in the game" to its roster walk, so the
+            // count alone was the bound: `sv addrandom 100000` queued a
+            // hundred thousand bots and drained them for hours, and with
+            // `serveronlybotcmds 0` any client could ask.
+            room = BotSeatsFree();
+            if (num > room)
             {
-                num = Q_atoi(gi.argv(num));
-                for (i = 0; i < num; i++) if (!AddRandomBot(ent)) break;
-            } //end else
+                gi.cprintf(ent, PRINT_HIGH, "%d free client slot%s, adding %d\n",
+                           room, room == 1 ? "" : "s", room);
+                num = room;
+            } //end if
+            for (i = 0; i < num; i++) if (!AddRandomBot(ent)) break;
         } //end if
     } //end else if
     else if (Q_stricmp(cmd, "becomebot") == 0)

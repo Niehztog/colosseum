@@ -1,3 +1,20 @@
+/*
+Copyright (C) 1997-2001 Id Software, Inc.
+
+This program is free software; you can redistribute it and/or modify
+it under the terms of the GNU General Public License as published by
+the Free Software Foundation; either version 2 of the License, or
+(at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+GNU General Public License for more details.
+
+You should have received a copy of the GNU General Public License along
+with this program; if not, write to the Free Software Foundation, Inc.,
+51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+*/
 // osp_hooks.h -- the tourney surface a SHARED file is allowed to see.
 //
 // Why this is not osp_types.h.  osp_types.h is the donor's own private header:
@@ -51,10 +68,10 @@ bool    OSP_IsMatch(void);
 // RULESET_TDM alone: see the comment on G_TeamplayEnabled().
 bool    OSP_IsTeams(void);
 
-// The declared roster size of one OSP team: `team_maxplayers`, 4 by default and
-// forced to 1 CVAR_NOSET under `duel`.  Reached through a function because the
-// cvar's DEFAULT is ruleset-dependent, so a call site that spelled one would be
-// the collision -- one cvar registered twice with two values.
+// The roster size of one OSP team: 1 under `duel` whatever the cvar says, and
+// `team_maxplayers` (one default, 4) otherwise.  An answer rather than a
+// write, because a value forced into the cvar outlives the ruleset that forced
+// it (R-OSP-22) -- which is why every team-size read asks this.
 int     OSP_TeamMaxPlayers(void);
 
 // The match state machine: <2 warmup, 2 countdown, >2 live, 4 fully underway.
@@ -63,8 +80,18 @@ extern  int     sync_stat;
 extern  int     rune_stat;
 // Refresh the cached bitmask after a configuration has changed runes_enable.
 void    OSP_SyncRuneState(void);
-// 0 running, 1 paused by a rule, 2 frozen, 3 paused by a player.
+// 0 running; 1 a pause asked for this frame -- by a player's timeout, a
+// referee or the wait for a reconnect -- which OSP_frameEnd makes 2 once the
+// frame is done; 2 frozen; 3 the five-second restart countdown.
 extern  int     match_paused;
+// The OSP hook's per-frame upkeep (osp_hook.c); false when it freed the hook.
+bool    OSP_HookFrame(edict_t *hook);
+// Whether an edict is a tourney hook, by its touch (osp_hook.c).
+bool    OSP_IsHook(edict_t *ent);
+// Re-derive what OSP_gameInit computes from the config (osp_main.c).
+void    OSP_configReloaded(void);
+// Tourney's own gate on its bot fill; `flat` asks for bots_minplayers (osp_main.c).
+bool    OSP_BotFillReady(bool flat);
 extern  float   pause_time;
 // The hi-score board's mode; 0 means there is none.
 extern  int     hs_mode;
@@ -94,9 +121,11 @@ bool     OSP_teamLost(int team);
 // `numgibs` under tourney, 4 everywhere else -- one question so that
 // p_client.c's two gib loops do not each carry a ruleset test.
 int      OSP_GibCount(void);
-// Sudden death: the number the team fraglimit is offset by once a drawn match
-// runs out of overtime.  Non-zero means "the next frag ends it".
+// Sudden death: the tied team score plus one, which OSP_overtimeWork sets when a
+// drawn match runs out of overtime.  Not the flag -- a match tied at -1 starts
+// sudden death with it at 0 -- `osp_suddendeath` is (osp_main.c).
 extern  int     frag_offset;
+extern  bool    osp_suddendeath;
 // Which of the four statusbar variants the server composed; a client's own
 // choice starts here and `hud` toggles it.
 extern  cvar_t  *client_hud;
@@ -187,6 +216,7 @@ bool     OSP_runesHasHaste(struct edict_s *ent);
 bool     OSP_runesHasRegeneration(struct edict_s *ent);
 bool     OSP_runesHasVampire(struct edict_s *ent);
 bool     OSP_runesHoldHealth(struct edict_s *ent);
+int      OSP_runesHealthCeiling(struct edict_s *ent);
 void     OSP_runesApplyRegeneration(struct edict_s *ent);
 bool     OSP_Pickup_Rune(struct edict_s *ent, struct edict_s *other);
 const gitem_t *OSP_What_Rune(struct edict_s *ent);
@@ -194,10 +224,11 @@ void     OSP_Drop_Rune(struct edict_s *ent, const gitem_t *item);
 void     OSP_runeThink(struct edict_s *self);
 void     OSP_deadDropRune(struct edict_s *ent);
 
-// The accuracy table's two entry points -- src/tourney/osp_acc.c.
+// The accuracy table's entry points -- src/tourney/osp_acc.c.
 void     OSP_accShot(struct edict_s *self, int mod, int count);
-void     OSP_accDamage(struct edict_s *targ, struct edict_s *attacker,
-                       int mod, int take);
+void     OSP_accDamage(struct edict_s *targ, struct edict_s *inflictor,
+                       struct edict_s *attacker, int mod, int take);
+void     OSP_accHit(struct edict_s *targ, struct edict_s *attacker, int mod);
 
 // The HUD panels tourney owns above baseq2's stats.
 void     OSP_clearStats(struct edict_s *ent);
@@ -240,6 +271,8 @@ void     OSP_botReady(void);
 void     OSP_userinfoChanged(struct edict_s *ent, char *userinfo);
 bool     OSP_clientAllowed(struct edict_s *ent, char *userinfo);
 void     OSP_clientConnected(struct edict_s *ent);
+// A connect refused after OSP_clientAllowed passed it (osp_main.c).
+void     OSP_clientRefused(struct edict_s *ent);
 void     OSP_clientLeaving(struct edict_s *ent, int *out_team);
 bool     OSP_clientLeft(struct edict_s *ent, int tno);
 void     OSP_seedPlayer(gclient_t *client);

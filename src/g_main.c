@@ -38,6 +38,11 @@ int meansOfDeath;
 
 edict_t     *g_edicts;
 
+// True from the top of ShutdownGame until the next InitGame: a client leaving
+// then is the server going away, and the ruleset leave hooks stand down.  See
+// ShutdownGame.
+bool        g_shutting_down;
+
 cvar_t  *deathmatch;
 cvar_t  *coop;
 cvar_t  *dmflags;
@@ -132,6 +137,44 @@ static void ShutdownGame(void)
 {
     gi.dprintf("==== ShutdownGame ====\n");
 
+    // From here until the library unloads, a client leaving is the server
+    // going away and not a departure.  The engine has dropped every person
+    // without a disconnect, and BotShutdown below takes the bots out through
+    // one, so the ruleset hooks that turn a departure into a log record, a
+    // forfeit or a fresh match -- OSP_clientLeaving, OSP_clientLeft and
+    // GSLogExit -- ask this and stand down: each log ends on its own shutdown
+    // record and nothing starts after it.  A global rather than a `game`
+    // field, because `game` is wiped below; InitGame clears it.
+    g_shutting_down = true;
+
+    // Tourney's accuracy table, written while every client is still here --
+    // the bots included, whose teardown below no longer writes one.
+    //
+    // The donor's guard is the whole point of the call: `if
+    // (!level.intermission_framenum) q2log_logAccuracy();`
+    // (`port_osp:g_main.c:79`, between sl_GameEnd and the game-end event).
+    // Every one of the six OSP_Stats_AccuracyAll() callers in osp_main.c is a
+    // MATCH-end condition, so the table is written whenever a match finishes
+    // -- and a `map` typed with a match still running ended the log without
+    // it.  Outside intermission is exactly the case nothing else covers; at
+    // intermission the match-end caller has already written the table and the
+    // guard keeps it from being written twice.
+    //
+    // Ahead of sl_GameEnd rather than after it, because the donor never
+    // disconnects a bot and this tree does, below; the two write different
+    // files, so the order between them is not observable.
+    if (G_IsOspRuleset() && !level.intermission_framenum)
+        OSP_Stats_AccuracyAll();
+
+    // Every bot is destroyed and every library unloaded here, and in
+    // that order -- the brain gets a shutdown per client while its library is
+    // still mapped.  Before every log below is closed, so that nothing a
+    // bot's ClientDisconnect writes can follow a shutdown record or reopen a
+    // file that has been closed (the donor unloads its brains first and never
+    // disconnects a bot at all); and before the FreeTags, which would
+    // otherwise pull the bot states out from under BotDestroy.
+    BotShutdown();
+
     if (G_Ruleset() == RULESET_ARENA) {
         GSLogShutdown();
         RA2_Stats_Shutdown();
@@ -151,31 +194,22 @@ static void ShutdownGame(void)
 
         sl_GameEnd(&gi, level);
 
-        // The donor's guard is the whole point of the call: `if
-        // (!level.intermission_framenum) q2log_logAccuracy();`
-        // (`port_osp:g_main.c:79`, between sl_GameEnd and the game-end event,
-        // which is where this sits).  Every one of the six
-        // OSP_Stats_AccuracyAll() callers in osp_main.c is a MATCH-end
-        // condition, so the table is written whenever a match finishes -- and
-        // a `map` typed with a match still running ended the log without it.
-        // Outside intermission is exactly the case nothing else covers; at
-        // intermission the match-end caller has already written the table and
-        // the guard keeps it from being written twice.
-        //
-        // Before OSP_Stats_Shutdown, which closes stats_f.
-        if (!level.intermission_framenum)
-            OSP_Stats_AccuracyAll();
-
         OSP_Stats_Shutdown(reason);
-        if (server_log)
+        // ...and the admin log is closed as well as signed off.  Every
+        // InitGame opens it afresh (OSP_setupAdminLog), so leaving it open
+        // cost a descriptor per game restart -- as it does in the donor, whose
+        // ShutdownGame writes the same line and stops there.
+        if (server_log) {
             OSP_logAdminLog("Shutdown: %s", reason);
-    }
+            fclose(server_log);
+            server_log = NULL;
+        }
 
-    // Every bot is destroyed and every library unloaded here, and in
-    // that order -- the brain gets a shutdown per client while its library is
-    // still mapped.  Before the FreeTags below, which would otherwise pull the
-    // bot states out from under BotDestroy.
-    BotShutdown();
+        // Tourney's camera list is malloc'd rather than tagged, and only a
+        // departing client removes its own node, so the players still here
+        // at a shutdown left theirs behind on every restart.
+        EntityListClear();
+    }
 
     memset(&game, 0, sizeof(game));
 
@@ -197,6 +231,11 @@ static void InitGame(void)
     int features = G_FEATURES;
 
     gi.dprintf("==== InitGame %s====\n", GAMEVERSION);
+
+    // A library that stays mapped across a restart -- a hard-linked build, or
+    // a dlclose that does not unmap -- still holds the last ShutdownGame's
+    // flag, and this game is not shutting down.
+    g_shutting_down = false;
 
     Q_srand(time(NULL));
 
@@ -224,7 +263,9 @@ static void InitGame(void)
     // latched vars
     sv_cheats = gi.cvar("cheats", "0", CVAR_SERVERINFO | CVAR_LATCH);
 
-    logfile = gi.cvar("logfile", "0", CVAR_SERVERINFO);
+    // No CVAR_SERVERINFO, which RA2 gave both of its logging cvars: that is
+    // RA2's line and is added under arena below, for `netlog` alone.
+    logfile = gi.cvar("logfile", "0", 0);
     // The 1999 module's LOGFILE, as a cvar.  A name opens the log;
     // "" leaves it closed, which is every server that does not ask for one.
     g_gamelog = gi.cvar("g_gamelog", "", 0);
@@ -244,7 +285,7 @@ static void InitGame(void)
     g_triggercounting = gi.cvar("g_triggercounting", "0", CVAR_LATCH);
     g_triggerlog = gi.cvar("g_triggerlog", "0", CVAR_LATCH);
     g_rotatingbutton = gi.cvar("g_rotatingbutton", "0", CVAR_LATCH);
-    netlog = gi.cvar("netlog", "", CVAR_SERVERINFO);
+    netlog = gi.cvar("netlog", "", 0);
     gi.cvar("gamename", GAMEVERSION, CVAR_SERVERINFO | CVAR_LATCH);
     gi.cvar("gamedate", __DATE__, CVAR_SERVERINFO | CVAR_LATCH);
 
@@ -350,6 +391,16 @@ static void InitGame(void)
         // still obtained because RA2's log header counts it and the engine
         // reads it.
         gi.cvar("public", "1", 0);
+
+        // RA2's serverinfo flag, under RA2's ruleset only, and on `netlog`
+        // only.  RA2 flagged `logfile` too, but that is the ENGINE's
+        // console-log cvar: Q2PRO ORs a flag into an existing cvar and the
+        // game API cannot take one out, so on an engine cvar the flag would
+        // outlive this library and advertise the console log's mode under
+        // every ruleset run after an arena session -- and nothing reads it
+        // there.  An empty `netlog`, the default, is not advertised at all.
+        gi.cvar("netlog", "", CVAR_SERVERINFO);
+
         if (netlog->string[0])
             gi.dprintf("netlog is set to \"%s\": the UDP event forwarding it "
                        "named has been removed.  `logfile 2` still "
@@ -364,8 +415,16 @@ static void InitGame(void)
 
 //======
 //ROGUE
+    // Ground Zero's DM rules run only under `ctf` (R-MODE-3), and a
+    // `gamerules` set under any other ruleset is said to be ignored, once,
+    // here.  The warning is this gate's because only the gate sees that case:
+    // InitGameRules is never reached under a ruleset that ignores it.
     if (G_UsesRogueGameRules()) {
         InitGameRules(); // if there are game rules to set up, do so now.
+    } else if (gamerules->value) {
+        gi.dprintf("Colosseum: gamerules %d runs only under 'ctf'; "
+                   "ignored under '%s'\n", (int)gamerules->value,
+                   G_RulesetName(G_Ruleset()));
     }
 //ROGUE
 //======
@@ -373,10 +432,12 @@ static void InitGame(void)
     game.helpmessage1[0] = 0;
     game.helpmessage2[0] = 0;
 
-    // Threewave's own init.  No donor tree calls this -- not port_ctf, not
-    // q2pro/src/ctf -- so every CTF cvar pointer stays null and SpawnEntities'
-    // CTFSpawn() dereferences `competition->value` on the first map load, before
-    // a player can connect.  Found by running it.
+    // Threewave's own init, which Threewave calls from the tail of its
+    // InitGame.  The pinned donor, port_ctf, does not call it -- q2pro/src/ctf
+    // has since put the call back at the same place -- so every CTF cvar
+    // pointer stayed null and SpawnEntities' CTFSpawn() dereferenced
+    // `competition->value` on the first map load, before a player could
+    // connect.  Found by running it.
     //
     // Called unconditionally rather than under `ctf`, because CTF's flag and
     // tech drop paths are reached from shared code -- player_die and
@@ -405,6 +466,14 @@ static void InitGame(void)
             InitClientPersistant(&game.clients[i], true);
             InitClientResp(&game.clients[i]);
             game.clients[i].resp.entered = false;
+            // Initialised is not connected.  InitClientPersistant is id's and
+            // ends by marking the client connected, which is right for the
+            // client it is called for and wrong for every slot nobody has
+            // joined: `connected` is what says a person holds a slot -- to the
+            // bot allocator (G_ClientSlotFree), to ClientDisconnect's
+            // second-call guard, and to `players`, which otherwise listed every
+            // slot on the server.
+            game.clients[i].pers.connected = false;
         }
 
     }
@@ -487,11 +556,15 @@ Q2PRO's extended entry point.  Guaranteed to be called after
 GetGameAPI and before Init, and the structure it hands over stays valid for as
 long as the library is loaded, so it is kept by pointer rather than copied.
 
-Colosseum implements no game_export_ex_t entry point yet -- CanSave() is the
-one it will want, because saving while a bot exists is refused and the
-engine is the only thing that can be told so before the file is opened.  That
-lands with the savegame work; declaring the table now is what makes the import
-side reachable, and an all-NULL export table is what the header asks for.
+Colosseum implements no game_export_ex_t entry point yet.  CanSave() is the
+one it will want: G_SavegamesAllowed() also answers no while a bot exists, and
+CanSave() is the only way to tell the engine so before the file is opened.
+Nothing refuses that save today, and nothing has to -- the engine refuses
+every save under `deathmatch`, which is every ruleset but sp, and no bot can
+exist under sp (G_BotsAllowed) -- so the predicate has no caller but `sv
+ruleset`.  Wiring it lands with the savegame work; declaring the table now is
+what makes the import side reachable, and an all-NULL export table is what the
+header asks for.
 =================
 */
 // Not static: src/g_fs.c is what reaches through it, and one entry point owning
@@ -695,7 +768,15 @@ static void CheckNeedPass(void)
 
         if (*password->string && Q_stricmp(password->string, "none"))
             need |= 1;
-        if (ruleset != RULESET_CTF &&
+        // Bit 2 says a spectator needs a password, and the one thing that asks
+        // for it is baseq2's spectator admission -- so this is ClientConnect's
+        // own test, its `deathmatch` asked as the named question it is (the
+        // ruleset is not sp).  No ruleset reaches that admission: ctf, arena
+        // and the OSP four have their own observers, and sp has deathmatch 0.
+        // Excluding ctf alone advertised a spectator password everywhere else,
+        // for a spectator slot nobody could take.
+        if (!G_IsCampaign() && ruleset != RULESET_CTF &&
+            ruleset != RULESET_ARENA && !G_IsOspRuleset() &&
             *spectator_password->string &&
             Q_stricmp(spectator_password->string, "none"))
             need |= 2;
@@ -987,6 +1068,13 @@ static void G_RunFrame(void)
             continue;
 
         level.current_entity = ent;
+
+        // OSP's hook keeps its cable on its owner's hand, and goes when its
+        // owner does (OSP_HookFrame).  Before the old_origin step, which it
+        // replaces for the hook: a beam is skipped there anyway.
+        if (G_IsOspRuleset() && ent->classname && !strcmp(ent->classname, "hook") &&
+            !OSP_HookFrame(ent))
+            continue;
 
         // Step 3.  A debug line stores its far end in old_origin
         // (bl_debug.c), so overwriting it with the origin every frame collapses

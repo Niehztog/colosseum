@@ -176,8 +176,12 @@ func run(q2, ref, lib, dir, mapname string, arena, port int, label string) error
 	check("a fighter's weapon does think", fighter.GunFrameHigh() > 0,
 		fmt.Sprintf("gunframe high water %d", fighter.GunFrameHigh()))
 
-	check("server survived", len(srv.Grep(`Segmentation|assertion`)) == 0,
-		"no crash in the console")
+	// q2proded says nothing on SIGSEGV, so "no crash in the console" is not
+	// evidence of anything; the server answering now is.
+	aliveErr := srv.Alive(5 * time.Second)
+	check("server survived", aliveErr == nil &&
+		len(srv.Grep(`Segmentation|assertion`)) == 0,
+		fmt.Sprintf("answering: %v", aliveErr))
 	return nil
 }
 

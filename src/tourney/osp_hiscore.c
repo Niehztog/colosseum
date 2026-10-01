@@ -26,7 +26,9 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 //
 // Ten entries of name/score/date plus a "set this session" flag, kept in the
 // global p_table, rendered into the layout string hs_table, and written to
-//   <basedir>/<gamedir>/<client_highscoredir>/<port>/<mapname>
+//   <homedir-or-basedir>/<gamedir>/<client_highscoredir>/<port>/<mapname>
+// -- G_FsGamePath's root, and read back from the first of homedir and basedir
+// that holds it (R-ENG-4) --
 // as one "FL\t<n>" or "TL\t<n>" header line followed by ten tab-separated
 // rows.  hs_mode 1 = fraglimit (score is frags per hour), 2 = timelimit (score
 // is the raw frag count); hs_limit caches whichever limit is in force, and a
@@ -212,6 +214,7 @@ void OSP_loadHighScores(void)
     char    name[OSP_HS_FIELD];
     char    score[OSP_HS_FIELD];
     char    date[OSP_HS_FIELD];
+    char    rel[MAX_OSPATH];
     char    file[MAX_OSPATH];
     char    dir[MAX_OSPATH];
     int     i;
@@ -223,9 +226,15 @@ void OSP_loadHighScores(void)
     hsdir = gi.cvar("client_highscoredir", "highscores", 0);
 
     {
-        Q_snprintf(dir, sizeof(dir), "%s/%s", G_FsBaseDir(), G_FsGameDir());
-        if (Q_snprintf(file, sizeof(file), "%s/%s/%d/%s", dir, hsdir->string,
-                       (int)port->value, level.mapname) >= sizeof(file)) {
+        // R-ENG-4.  Read from the first of homedir and basedir that holds the
+        // table; a missing one is made, directories and all, under the one
+        // root the engine writes to.  The donor composed basedir's path only,
+        // which a system-wide Q2PRO does not let a server write: the mkdir
+        // failed, and its "aborting" turned client_highscores off every map.
+        if (Q_snprintf(rel, sizeof(rel), "%s/%d/%s", hsdir->string,
+                       (int)port->value, level.mapname) >= sizeof(rel) ||
+            !G_FsReadPath(file, sizeof(file), rel) ||
+            !G_FsGamePath(dir, sizeof(dir), hsdir->string)) {
             gi.dprintf("High score path too long.\n");
             return;
         }
@@ -273,6 +282,7 @@ void OSP_loadHighScores(void)
 void OSP_writeHighScores(void)
 {
     char    line[256];
+    char    rel[MAX_OSPATH];
     char    file[MAX_OSPATH];
     char    dir[MAX_OSPATH];
     int     i;
@@ -284,14 +294,21 @@ void OSP_writeHighScores(void)
     hsdir = gi.cvar("client_highscoredir", "highscores", 0);
 
     {
-        Q_snprintf(dir, sizeof(dir), "%s/%s", G_FsBaseDir(), G_FsGameDir());
-        if (Q_snprintf(file, sizeof(file), "%s/%s/%d/%s", dir, hsdir->string,
-                       (int)port->value, level.mapname) >= sizeof(file)) {
+        // Under G_FsGamePath's root, the one the engine writes to (R-ENG-4).
+        if (Q_snprintf(rel, sizeof(rel), "%s/%d/%s", hsdir->string,
+                       (int)port->value, level.mapname) >= sizeof(rel) ||
+            !G_FsGamePath(file, sizeof(file), rel) ||
+            !G_FsGamePath(dir, sizeof(dir), hsdir->string)) {
             gi.dprintf("High score path too long.\n");
             return;
         }
 
         f = fopen(file, "w+");
+
+        // The reader takes the first root that holds the table, which can be
+        // basedir's, so the directories under this root need not exist yet.
+        if (!f && errno == ENOENT && OSP_makeHSDir(dir))
+            f = fopen(file, "w+");
 
         if (!f) {
             gi.dprintf("Couldn't write high score table (%d)\n", errno);
@@ -314,17 +331,23 @@ void OSP_writeHighScores(void)
     }
 }
 
+// `base` is the table's directory, client_highscoredir under the root the
+// table is written to, and the per-port directory is made inside it.  The
+// donor's `base` was the gamedir and this appended client_highscoredir; the
+// caller composes that now, through G_FsGamePath.
 bool OSP_makeHSDir(char *base)
 {
     char    num[32];
     char    dir[MAX_OSPATH];
     cvar_t  *port;
-    cvar_t  *hsdir;
 
     port = gi.cvar("port", "27910", 0);
-    hsdir = gi.cvar("client_highscoredir", "highscores", 0);
 
-    Q_snprintf(dir, sizeof(dir), "%s/%s", base, hsdir->string);
+    Q_strlcpy(dir, base, sizeof(dir));
+
+    // The root and its gamedir first, which under homedir need not exist yet
+    // (G_FsCreatePath); the two levels below are the donor's own.
+    G_FsCreatePath(dir);
 
     // mkdir() is called unprototyped, and the original really did write two
     // different call shapes per platform.

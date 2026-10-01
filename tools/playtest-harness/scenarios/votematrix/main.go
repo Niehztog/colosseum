@@ -17,7 +17,7 @@
 // WHY THE HEAD COUNT IS THE AXIS.  Every one of those three divides by a count
 // of the people on the server, and each counts a DIFFERENT set: OSP counts
 // connected clients under `dm`/`dmpro` and ENTERED ones under `tdm`/`duel`
-// (`vote_countspectators` defaults differently for a teams ruleset), ctf counts
+// (`vote_countspectators` unset answers differently for a teams ruleset), ctf counts
 // every `inuse` client including the proposer who may not vote, and arena
 // counts the clients in ONE arena.  A test with a single client cannot see any
 // of that: one voter makes every threshold 100% and every divisor 1, which is
@@ -351,8 +351,8 @@ func ospEnter(srv *playtest.Server, b *playtest.Bot, rs, team string) bool {
 // ruleset and is the reason this scenario asserts a number rather than merely
 // "it passed".
 //
-// `vote_countspectators` is registered with a default of 1 for a free-for-all
-// and 0 for a teams ruleset -- `if (!OSP_IsTeams())` in OSP_gameInit -- so
+// `vote_countspectators` defaults to "", which OSP_CountSpectators answers as
+// yes for a free-for-all and no for a teams ruleset -- `!OSP_IsTeams()` -- so
 // dm and dmpro divide by everybody CONNECTED while tdm and duel divide by the
 // people who actually entered.  The clamp to at least one is the target's, and
 // it is what kept an empty server from dividing by zero.
@@ -461,8 +461,9 @@ func ospPhase(rs string, p int) error {
 	}
 	defer b.Disconnect()
 	// THE OTHER TEAM, and under `duel` that is not a stylistic choice:
-	// `team_maxplayers` is 1 there against 4 elsewhere, so a second client
-	// asking for the team the first is on is refused and never enters.
+	// a duel's teams are one player each against `team_maxplayers` (4)
+	// elsewhere, so a second client asking for the team the first is on is
+	// refused and never enters.
 	if !ospEnter(srv, b, rs, teamB) {
 		return fmt.Errorf("%s: bravo never entered the game", rs)
 	}
@@ -517,13 +518,13 @@ func ospPhase(rs string, p int) error {
 	// `duel` both teams are now full, which is the point of the row below.
 	entered3 := ospEnter(srv, c, rs, teamA)
 
-	// Under `duel` the third client CANNOT enter: team_maxplayers is 1 there
+	// Under `duel` the third client CANNOT enter: a team is one player there
 	// (4 everywhere else), so both teams are full and the arrival stays an
 	// observer.  That is not a failure to assert around -- it is the ruleset,
 	// and it changes both halves of the arithmetic below.
 	if rs == "duel" {
 		check(rs+"/3 players: the third cannot enter a 1-vs-1", !entered3,
-			"team_maxplayers is 1: %s", pmName(c.PMType()))
+			"a duel's team is one player: %s", pmName(c.PMType()))
 	} else {
 		check(rs+"/3 players: the third enters like the others", entered3,
 			"%s", pmName(c.PMType()))
@@ -787,7 +788,7 @@ func arenaPhase(p int) error {
 		// colosseum.Install symlinks the reference install's .cfg files in, so
 		// the link (if there is one) is replaced by a real file.
 		os.Remove(path)
-		return os.WriteFile(path, []byte(arenaCfg), 0o644)
+		return playtest.WriteFixture(path, []byte(arenaCfg), 0o644)
 	})
 	if err != nil {
 		return err

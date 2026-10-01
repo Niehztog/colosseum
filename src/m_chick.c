@@ -275,8 +275,13 @@ void chick_pain(edict_t *self, edict_t *other, float kick, int damage)
     else
         gi.sound(self, CHAN_VOICE, sound_pain3, 1, ATTN_NORM, 0);
 
+    // id's chick and Ground Zero's play no pain animation on nightmare; The
+    // Reckoning's dropped that return.  With both layers on, Ground Zero's line
+    // runs -- the precedence infantry_attack gives it, and the line gladq2_src's
+    // merge of all three packs has (R-CORE-11c).
     if (skill->value == 3 &&
-        !(self->content_flavour & CONTENT_XATRIX))
+        (!(self->content_flavour & CONTENT_XATRIX) ||
+         (self->content_flavour & CONTENT_ROGUE)))
         return;     // no pain anims in nightmare
 
     if (damage <= 10)
@@ -491,7 +496,8 @@ static void ChickSlash(edict_t *self)
 
 // The Reckoning's heat-seeking chick is a separate entity, not a variant:
 // SP_monster_chick_heat is SP_monster_chick plus s.skinnum = 3, and nothing
-// else on a chick sets a skin above 1, so the skin is the selector.  The
+// else on a chick sets a skin above 1, so the skin is the selector
+// (R-CORE-11d).  The
 // Reckoning left chick_pain's s.skinnum = 1 alone, so a heat chick hurt below
 // half health drops to skin 1 and fires plain rockets from then on -- that is
 // The Reckoning's own behaviour and is deliberate here.
@@ -963,7 +969,14 @@ void SP_monster_chick(edict_t *self)
 
     self->movetype = MOVETYPE_STEP;
     self->solid = SOLID_BBOX;
-    self->s.modelindex = gi.modelindex("models/monsters/bitch2/tris.md2");
+    // id's model for every chick, as the spine, The Reckoning and gladq2_src
+    // have it.  Ground Zero's bitch2 is the same mesh, skins and first 208
+    // frames with the 80 trailing recln* frames dropped -- no frame this file
+    // names is among them -- but it ships only in Ground Zero's pak, so without
+    // that pak every chick was invisible, and its two skins put the heat
+    // chick's skin 3 out of range.  bitch is in id's pak and The Reckoning's,
+    // whose copy carries the heat chick's skins.
+    self->s.modelindex = gi.modelindex("models/monsters/bitch/tris.md2");
     VectorSet(self->mins, -16, -16, 0);
     VectorSet(self->maxs, 16, 16, 56);
 
@@ -1010,5 +1023,10 @@ void SP_monster_chick(edict_t *self)
 void SP_monster_chick_heat(edict_t *self)
 {
     SP_monster_chick(self);
+    // SP_monster_chick frees the edict where monsters are not allowed, and a
+    // skin written into a free slot is inherited by whatever G_Spawn puts there
+    // next -- G_InitEdict does not clear it.
+    if (!self->inuse)
+        return;
     self->s.skinnum = 3;
 }

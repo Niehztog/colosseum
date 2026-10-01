@@ -142,7 +142,7 @@ func boot(k kind, sub string, port int, dmflags string) (*playtest.Server, error
 	if err := colosseum.Install(d, *ref, "", *lib); err != nil {
 		return nil, err
 	}
-	if err := os.WriteFile(filepath.Join(d, "colosseum", k.file),
+	if err := playtest.WriteFixture(filepath.Join(d, "colosseum", k.file),
 		[]byte(k.body), 0o644); err != nil {
 		return nil, err
 	}

@@ -167,8 +167,15 @@ jobs:
       # which on that row is the host's and not the target's.  GLAD_SERVERFIX=1
       # crosses `botlib:`'s re-entry into make unaided -- a variable set on
       # make's command line is handed to sub-makes through MAKEFLAGS.
+      # CFLAGS are the Makefile's BOTLIB_CFLAGS, read out of it rather than
+      # copied: the submodule's release defaults plus a stack protector, which
+      # was the toolchain's choice until it was this build's (see the Makefile).
       - name: Build the botlib
-        run: make -C vendor/gladiator-bot-restored botlib GLAD_SERVERFIX=1 ${{ matrix.botmake }}
+        run: |
+          flags=$(printf 'p:\n\t@echo $(BOTLIB_CFLAGS)\n' | make -s -f Makefile -f - p)
+          make -C vendor/gladiator-bot-restored botlib GLAD_SERVERFIX=1 CFLAGS="$flags" ${{ matrix.botmake }}
+      - name: Check the botlib has a stack protector
+        run: nm -D vendor/gladiator-bot-restored/release/gladiator.so | grep -q __stack_chk_fail || { echo 'the botlib was built without a stack protector'; exit 1; }
       - name: Fetch the navigation meshes
         run: .github/aas.sh
       - name: Package
@@ -186,8 +193,8 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - {arch: x86,    target: win32, packages: gcc-mingw-w64-i686,   botmake: 'CC=i686-w64-mingw32-gcc'}
-          - {arch: x86_64, target: win64, packages: gcc-mingw-w64-x86-64, botmake: 'CC=x86_64-w64-mingw32-gcc'}
+          - {arch: x86,    target: win32, packages: gcc-mingw-w64-i686,   botmake: 'CC=i686-w64-mingw32-gcc',   objdump: i686-w64-mingw32-objdump}
+          - {arch: x86_64, target: win64, packages: gcc-mingw-w64-x86-64, botmake: 'CC=x86_64-w64-mingw32-gcc', objdump: x86_64-w64-mingw32-objdump}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -202,8 +209,18 @@ jobs:
       # runner's own compiler it would emit an ELF `gladiator.so`, and
       # package.sh would fail this job for want of a `gladiator.dll`.
       # GLAD_SERVERFIX=1 -- see the header and the linux job.
+      #
+      # CFLAGS and LDFLAGS are the Makefile's BOTLIB_CFLAGS and
+      # BOTLIB_PE_LDFLAGS: mingw adds no stack protector unless asked, so the
+      # shipped DLLs had none, and asking pulls in libssp, which is linked in
+      # rather than imported -- the next step is what holds that.
       - name: Build the botlib
-        run: make -C vendor/gladiator-bot-restored botlib GLAD_SERVERFIX=1 ${{ matrix.botmake }}
+        run: |
+          flags=$(printf 'p:\n\t@echo $(BOTLIB_CFLAGS)\n' | make -s -f Makefile -f - p)
+          ldflags=$(printf 'p:\n\t@echo $(BOTLIB_PE_LDFLAGS)\n' | make -s -f Makefile -f - p)
+          make -C vendor/gladiator-bot-restored botlib GLAD_SERVERFIX=1 CFLAGS="$flags" LDFLAGS="$ldflags" ${{ matrix.botmake }}
+      - name: Check the botlib has a stack protector
+        run: ${{ matrix.objdump }} -t vendor/gladiator-bot-restored/release/gladiator.dll | grep -q __stack_chk_fail || { echo 'the botlib was built without a stack protector'; exit 1; }
       - name: Check what the botlib imports (R-SEC-6a, for the DLL that ships)
         run: sh tools/pedeps.sh vendor/gladiator-bot-restored/release/gladiator.dll
       - name: Fetch the navigation meshes
@@ -223,18 +240,25 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # THE OLDEST IMAGE STILL SERVED, PER ARCHITECTURE, and that is a
-          # compatibility decision rather than a scheduling one: the Makefile
-          # sets no `-mmacosx-version-min`, so the minimum macOS an operator
-          # needs to load the library is whatever the runner's SDK says.  A
-          # newer image narrows the set of Macs the package works on for
-          # nothing.  `macos-13` was that choice until it was retired, and a
-          # retired label does not fail -- the job sits unassigned until the
-          # run expires, which is what it did (run 35190547919, cancelled after
-          # 83 minutes with six siblings already finished).  So a label here is
-          # re-checked when a run queues rather than when it fails.
-          - {runner: macos-15-intel, arch: x86_64}
-          - {runner: macos-14,       arch: arm64}
+          # THE MINIMUM macOS IS SET, not inherited.  With no deployment
+          # target the library and the brain required whatever the runner's
+          # SDK said -- macOS 15 on Intel and 14 on Apple Silicon with these
+          # images -- and nothing told an operator.  Apple clang reads
+          # MACOSX_DEPLOYMENT_TARGET from the environment, and the botlib's
+          # sub-make keeps it, so one variable covers all three builds: 11.0
+          # is the first macOS on Apple Silicon, 10.13 the oldest the current
+          # SDKs target.  README.md states the same two numbers.
+          #
+          # The image is still the oldest one served per architecture:
+          # `macos-13` was until it was retired, and a retired label does not
+          # fail -- the job sits unassigned until the run expires, which is
+          # what it did (run 35190547919, cancelled after 83 minutes with six
+          # siblings already finished).  So a label here is re-checked when a
+          # run queues rather than when it fails.
+          - {runner: macos-15-intel, arch: x86_64, macos: "10.13"}
+          - {runner: macos-14,       arch: arm64,  macos: "11.0"}
+    env:
+      MACOSX_DEPLOYMENT_TARGET: ${{ matrix.macos }}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -252,7 +276,11 @@ jobs:
       # name the game dlopens.  GLAD_SERVERFIX=1 -- see the header and the
       # linux job.
       - name: Build the botlib
-        run: make -C vendor/gladiator-bot-restored botlib GLAD_SERVERFIX=1
+        run: |
+          flags=$(printf 'p:\n\t@echo $(BOTLIB_CFLAGS)\n' | make -s -f Makefile -f - p)
+          make -C vendor/gladiator-bot-restored botlib GLAD_SERVERFIX=1 CFLAGS="$flags"
+      - name: Check the botlib has a stack protector
+        run: nm -u vendor/gladiator-bot-restored/release/gladiator.dylib | grep -q ___stack_chk_fail || { echo 'the botlib was built without a stack protector'; exit 1; }
       - name: Fetch the navigation meshes
         run: .github/aas.sh
       - name: Package
@@ -273,8 +301,10 @@ jobs:
     # the seven packages are built, checked and uploaded as workflow artifacts,
     # which is what a rehearsal wants; the `version` input still names them, so
     # the file names are the ones a real tag would produce.  Only
-    # `push: tags: ['v*']` reaches this job.
-    if: startsWith(github.ref, 'refs/tags/')
+    # `push: tags: ['v*']` reaches this job -- and the EVENT is tested as well
+    # as the ref, because a dispatch can be started ON a tag ("Use workflow
+    # from" lists them), and then its ref is refs/tags/... too.
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')
     needs: [linux, windows, macos]
     runs-on: ubuntu-24.04
     permissions:

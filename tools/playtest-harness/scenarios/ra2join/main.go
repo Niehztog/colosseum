@@ -132,16 +132,11 @@ func run() (bool, error) {
 
 	// the server must still be up: a bad spawn selection in this mod indexes
 	// past the end of the spot list and dereferences NULL, which shows up here
-	// as a dead server rather than as a bad position
-	if _, err := srv.WaitLog(`.`, 500*time.Millisecond); err != nil {
-		// no new output is fine; a crash is not
-	}
-	if err := srv.Console("status"); err != nil {
-		fmt.Printf("    FAIL: server is gone (%v)\n", err)
-		return false, nil
-	}
-	if _, err := srv.WaitLog(`(?i)map\s*:|players|num score`, 5*time.Second); err != nil {
-		fmt.Printf("    FAIL: server did not answer a console command -- likely crashed\n")
+	// as a dead server rather than as a bad position.  Asked NOW: the wait
+	// this replaced accepted any line already in the log, so the boot banner
+	// answered for a server that had since died.
+	if err := srv.Alive(5 * time.Second); err != nil {
+		fmt.Printf("    FAIL: server did not answer a console command -- %v\n", err)
 		return false, nil
 	}
 	fmt.Printf("    server still answering the console\n")

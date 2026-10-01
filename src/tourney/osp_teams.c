@@ -34,6 +34,43 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "bot/bl_botcfg.h"
 // The two bot entry points.
 void BotServerCommand(char *str, ...);
+
+// A team's name and skin leave the server through two channels a client's
+// string must not reach unfiltered: other clients' consoles, by stufftext
+// (`skin`, `set default_teamname`, `set default_teamskin`), and every HUD, by
+// `string "%s"` layouts.  They arrive as command ARGUMENTS -- `teamname`,
+// `teamskin`, `_default_team_info` -- or from a captain's netname, and only the
+// netname has been through the engine's userinfo filter, which passes `$`.  A
+// Q2PRO client expands `$cvar` in whatever it executes, so a team skin of
+// `$rcon_password` would publish each teammate's own password in their
+// userinfo, and a `;` in one runs any command on their console.  The donor
+// copies all of it raw.  So the characters are chosen once, here, and every
+// way in goes through these two.
+void OSP_CleanTeamName(char *dst, size_t size, const char *src)
+{
+    size_t  n = 0;
+    int     c;
+
+    while ((c = (unsigned char)*src++) && n + 1 < size)
+        if (c > ' ' && c < 127 && c != '"' && c != ';' && c != '\\' && c != '$')
+            dst[n++] = c;
+    dst[n] = 0;
+}
+
+// `model/skin`, each half a path component.  Shorter than MAX_QPATH, which is
+// what a skin in userinfo may hold.
+bool OSP_ValidTeamSkin(const char *s)
+{
+    const char  *slash = strchr(s, '/');
+
+    if (!slash || slash == s || !slash[1] || strchr(slash + 1, '/') ||
+        strlen(s) >= MAX_QPATH)
+        return false;
+    for (; *s; s++)
+        if (*s != '/' && !Q_ispath(*s))
+            return false;
+    return true;
+}
 void BotDestroy(edict_t *bot);
 
 int overtime_timer;
@@ -109,8 +146,8 @@ bool OSP_addTeamMember(edict_t *ent, int requested_team)
             return false;
         }
 
-        if (OSP_teamCount(0) >= (int)team_maxplayers->value &&
-            OSP_teamCount(1) >= (int)team_maxplayers->value) {
+        if (OSP_teamCount(0) >= OSP_TeamMaxPlayers() &&
+            OSP_teamCount(1) >= OSP_TeamMaxPlayers()) {
             if (!(ent->flags & FL_BOT))
                 gi.cprintf(ent, PRINT_HIGH, "Sorry, both teams are full!\n");
             else
@@ -132,25 +169,38 @@ bool OSP_addTeamMember(edict_t *ent, int requested_team)
             team = 1;
         else
             team = 0;
+
+        // A lock on one team leaves the other as the only choice, and that one
+        // can be full.  Refused like the both-full case above; the donor seated
+        // the joiner anyway, one over team_maxplayers.  Unlocked, the smaller
+        // team is never the full one, so this is only ever the lock's case.
+        if (OSP_teamCount(team) >= OSP_TeamMaxPlayers()) {
+            if (!(ent->flags & FL_BOT))
+                gi.cprintf(ent, PRINT_HIGH,
+                           "Sorry, one team is locked and the other is full!\n");
+            else
+                BotDestroy(ent);
+            return false;
+        }
     }
 
     ent->client->resp.team = team;
     OSP_Stats_TeamJoin(ent);
 
     if (!(ent->flags & FL_BOT)) {
-        Q_snprintf(tmp, sizeof(tmp), "skin %s\n", osp_teams[team].skin);
+        Q_snprintf(tmp, sizeof(tmp), "skin \"%s\"\n", osp_teams[team].skin);
         gi.WriteByte(svc_stufftext);
         gi.WriteString(tmp);
         gi.unicast(ent, true);
 
-        Q_snprintf(tmp, sizeof(tmp), "set default_teamname %s\n",
+        Q_snprintf(tmp, sizeof(tmp), "set default_teamname \"%s\"\n",
                    osp_teams[team].netname);
         Q_strlcpy(ent->osp_e3a0, osp_teams[team].netname, sizeof(ent->osp_e3a0));
         gi.WriteByte(svc_stufftext);
         gi.WriteString(tmp);
         gi.unicast(ent, true);
 
-        Q_snprintf(tmp, sizeof(tmp), "set default_teamskin %s\n",
+        Q_snprintf(tmp, sizeof(tmp), "set default_teamskin \"%s\"\n",
                    osp_teams[team].skin);
         Q_strlcpy(ent->osp_e3b0, osp_teams[team].skin, sizeof(ent->osp_e3b0));
         gi.WriteByte(svc_stufftext);
@@ -227,9 +277,16 @@ bool OSP_defaultTeam(edict_t *ent)
     if (!ent->osp_e3a0[0])
         return false;
 
+    // A default is a name or a skin to MATCH, and a match is all it is: a
+    // locked team is passed over unless this client is invited to it, and a
+    // default that matches neither team goes to the balancer in
+    // OSP_addTeamMember, as no default does.  The donor fell back to the
+    // lowest-numbered team with anybody on it, locked or bigger, and
+    // `_default_team_info` is a client command, so that was a way onto either
+    // team at will.
     for (k = 1; k >= 0; k--) {
-        if (OSP_teamCount(k))
-            team = k;
+        if (osp_teams[k].osp_m0f4 && ent->client->resp.osp_r078 != k + 1)
+            continue;
         if (!Q_stricmp(osp_teams[k].skin, ent->osp_e3b0) ||
             !Q_stricmp(osp_teams[k].netname, ent->osp_e3a0)) {
             team = k;
@@ -255,8 +312,19 @@ bool OSP_defaultTeam(edict_t *ent)
             gi.configstring(OSP_CS(5) + team * 2, msgbuf);
         } else if (!OSP_teamCount(1 - team)) {
             // The name we want is the OTHER team's and that team is empty, so
-            // hand it our name and take theirs.
+            // hand it our name and take theirs.  Its half of the swap is a
+            // rename like ours -- logged, re-greened and re-sent; the donor
+            // changed its plain name only, so its green name and its HUD cell
+            // went on showing the name this team was about to take.
+            OSP_Stats_TeamRename(osp_teams[1 - team].netname, osp_teams[team].netname);
             Q_strlcpy(osp_teams[1 - team].netname, osp_teams[team].netname, 16);
+            Q_strlcpy(osp_teams[1 - team].greenname, osp_teams[team].netname, 16);
+            for (i = 0; i < strlen(osp_teams[1 - team].greenname); i++)
+                osp_teams[1 - team].greenname[i] += 128;
+            Q_snprintf(msgbuf, sizeof(msgbuf), "%15s", osp_teams[1 - team].greenname);
+            gi.configstring(OSP_CS(5) + (1 - team) * 2, msgbuf);
+
+            OSP_Stats_TeamRename(osp_teams[team].netname, ent->osp_e3a0);
             Q_strlcpy(osp_teams[team].netname, ent->osp_e3a0, 16);
             Q_strlcpy(osp_teams[team].greenname, ent->osp_e3a0, 16);
             {
@@ -275,14 +343,14 @@ bool OSP_defaultTeam(edict_t *ent)
                       sizeof(osp_teams[1 - team].skin));
             Q_strlcpy(osp_teams[team].skin, ent->osp_e3b0, sizeof(osp_teams[team].skin));
         }
-    } else if (OSP_teamCount(team) >= (int)team_maxplayers->value)
+    } else if (OSP_teamCount(team) >= OSP_TeamMaxPlayers())
         return false;
 
     ent->client->resp.team = team;
     OSP_Stats_TeamJoin(ent);
 
     if (!(ent->flags & FL_BOT)) {
-        Q_snprintf(msgbuf, sizeof(msgbuf), "skin %s\n", osp_teams[team].skin);
+        Q_snprintf(msgbuf, sizeof(msgbuf), "skin \"%s\"\n", osp_teams[team].skin);
         gi.WriteByte(svc_stufftext);
         gi.WriteString(msgbuf);
         gi.unicast(ent, true);
@@ -346,6 +414,7 @@ bool OSP_defaultTeam(edict_t *ent)
 bool OSP_1v1Team(edict_t *ent)
 {
     char        tmp[64];
+    char        clean[16];
     int         t;
     int         team;
 
@@ -357,11 +426,18 @@ bool OSP_1v1Team(edict_t *ent)
     if (team == 2)
         return false;
 
-    if (Q_stricmp(osp_teams[1 - team].netname, ent->client->pers.netname)) {
-        if (strcmp(osp_teams[team].netname, ent->client->pers.netname))
-            OSP_Stats_TeamRename(osp_teams[team].netname, ent->client->pers.netname);
-        Q_strlcpy(osp_teams[team].netname, ent->client->pers.netname, 16);
-        Q_strlcpy(osp_teams[team].greenname, ent->client->pers.greenname, 16);
+    // The duellist's slot takes the duellist's name -- cleaned, because a
+    // team name is drawn in layouts and stuffed to whoever joins the team
+    // (OSP_CleanTeamName).  A name that cleans to nothing leaves the slot the
+    // name it had.
+    OSP_CleanTeamName(clean, sizeof(clean), ent->client->pers.netname);
+    if (clean[0] && Q_stricmp(osp_teams[1 - team].netname, clean)) {
+        if (strcmp(osp_teams[team].netname, clean))
+            OSP_Stats_TeamRename(osp_teams[team].netname, clean);
+        Q_strlcpy(osp_teams[team].netname, clean, 16);
+        Q_strlcpy(osp_teams[team].greenname, clean, 16);
+        for (t = 0; osp_teams[team].greenname[t]; t++)
+            osp_teams[team].greenname[t] += 128;
         Q_snprintf(tmp, sizeof(tmp), "%15s", osp_teams[team].greenname);
         gi.configstring(OSP_CS(5) + team * 2, tmp);
     }
@@ -461,11 +537,18 @@ void OSP_1v1Remove(edict_t *ent, int mode)
         }
     }
 
-    if (mode == 1) {
-        if (p_order[25] > 0)
-            p_order[25]--;
-    } else if (p_order[25] > 0)
-        p_order[p_order[25] - 1] = ent - g_edicts - 1;
+    // Only a client the queue holds has a place in it to give up.  Q2PRO
+    // reports every departure (GMF_WANT_ALL_DISCONNECTS), so this also runs for
+    // a client that never reached ClientBegin and was never queued, and for one
+    // the full queue turned away; the donor ran the tail for them too, dropping
+    // the last player in line (mode 1) or writing over them (otherwise).
+    if (i < p_order[25]) {
+        if (mode == 1) {
+            if (p_order[25] > 0)
+                p_order[25]--;
+        } else if (p_order[25] > 0)
+            p_order[p_order[25] - 1] = ent - g_edicts - 1;
+    }
 
     if (!mode)
         ent->client->resp.team = 2;
@@ -477,31 +560,40 @@ void OSP_1v1Remove(edict_t *ent, int mode)
 // whose client has gone away -- gone meaning not in the game, and either the
 // edict is free and we are more than 30 seconds into the level, or the client
 // slot is null, or the client is no longer connected.
+//
+// The gone test is the entry's own and is asked outside the duplicate loop.
+// The donor asked it inside, which runs no times for entry 0, so a head who
+// had gone was never dropped here.  A dropped head's claim deadline goes with
+// it, as in OSP_1v1Remove, rather than passing to whoever moves up.
 void OSP_1v1QueueCheck(void)
 {
     int         i;
     int         j;
     int         k;
+    bool        drop;
 
     if (!(int)team_nextuptime->value)
         return;
 
     for (i = 0; i < p_order[25]; i++) {
-        for (j = 0; j < i; j++) {
-            edict_t *queued = &g_edicts[p_order[i] + 1];
+        edict_t *queued = &g_edicts[p_order[i] + 1];
 
-            if (!(p_order[i] == p_order[j] || !queued->client ||
-                  (queued->client->resp.osp_entered != ENTERED_ENTERED &&
-                   ((!queued->inuse && level.framenum - level_start >= 300) ||
-                    !queued->client->pers.connected))))
-                continue;
+        drop = !queued->client ||
+               (queued->client->resp.osp_entered != ENTERED_ENTERED &&
+                ((!queued->inuse && level.framenum - level_start >= 300) ||
+                 !queued->client->pers.connected));
+        for (j = 0; j < i && !drop; j++)
+            drop = p_order[i] == p_order[j];
 
-            for (k = i; k < p_order[25] - 1; k++)
-                p_order[k] = p_order[k + 1];
-            i--;
-            p_order[25]--;
-            break;
-        }
+        if (!drop)
+            continue;
+
+        if (i < 2)
+            p_order[26 + i] = 0;
+        for (k = i; k < p_order[25] - 1; k++)
+            p_order[k] = p_order[k + 1];
+        i--;
+        p_order[25]--;
     }
 }
 
@@ -575,7 +667,7 @@ bool OSP_readdTeamMember(edict_t *ent)
     if (team == 2)
         return false;
 
-    if (OSP_teamCount(team) >= (int)team_maxplayers->value) {
+    if (OSP_teamCount(team) >= OSP_TeamMaxPlayers()) {
         if (ent->client->resp.osp_r078) {
             ent->client->resp.osp_r078 = 0;
             gi.cprintf(ent, PRINT_HIGH, "Sorry, the inviting team is now full!\n");
@@ -584,11 +676,15 @@ bool OSP_readdTeamMember(edict_t *ent)
         return false;
     }
 
-    OSP_Stats_TeamJoin(ent);
+    // The team first and then the log line, as every other join writes them:
+    // OSP_Stats_TeamJoin reads resp.team, and in the donor's order it read the
+    // team the client was coming from -- "no team" for every switchteam and
+    // every rejoin from observer.
     ent->client->resp.team = ent->client->resp.osp_r2cc;
+    OSP_Stats_TeamJoin(ent);
 
     if (!(ent->flags & FL_BOT)) {
-        Q_snprintf(tmp, sizeof(tmp), "skin %s\n", osp_teams[team].skin);
+        Q_snprintf(tmp, sizeof(tmp), "skin \"%s\"\n", osp_teams[team].skin);
         gi.WriteByte(svc_stufftext);
         gi.WriteString(tmp);
         gi.unicast(ent, true);
@@ -646,6 +742,10 @@ void OSP_initTeamFrags(edict_t *ent)
     int         teamidx;
 
     teamidx = ent->client->resp.team;
+    // R-SEC-4: a client on no team has no own cell to send, and reaches here
+    // after a rejoin that was refused (a reconnect onto a full team).
+    if (teamidx != 0 && teamidx != 1)
+        return;
     if (!(ent->flags & FL_BOT)) {
         if (!(int)fraglimit->value) {
             Q_snprintf(tmp, sizeof(tmp), "(%i) %i", ent->client->resp.score, osp_teams[teamidx].osp_m0f8);
@@ -776,8 +876,13 @@ void OSP_defaultteam_cmd(edict_t *ent)
     if (gi.argc() != 3)
         return;
 
-    Q_strlcpy(ent->osp_e3a0, gi.argv(1), sizeof(ent->osp_e3a0));
-    Q_strlcpy(ent->osp_e3b0, gi.argv(2), sizeof(ent->osp_e3b0));
+    // Both halves are the CLIENT's cvars, expanded on its side and sent back
+    // as arguments, and both are later stuffed to the team's other members.
+    OSP_CleanTeamName(ent->osp_e3a0, sizeof(ent->osp_e3a0), gi.argv(1));
+    if (OSP_ValidTeamSkin(gi.argv(2)))
+        Q_strlcpy(ent->osp_e3b0, gi.argv(2), sizeof(ent->osp_e3b0));
+    else
+        ent->osp_e3b0[0] = 0;
 }
 
 void OSP_defaultjoincode_cmd(edict_t *ent)
@@ -801,6 +906,11 @@ void OSP_joincode_cmd(edict_t *ent)
         return;
 
     if (ent->client->resp.osp_entered == ENTERED_ENTERED) {
+        // R-SEC-4: an entered client is on team 0 or 1, but one a failed
+        // reconnect re-add left teamless carries team 2, and osp_teams[] has
+        // two rows.
+        if (teamidx != 0 && teamidx != 1)
+            return;
         if (!ent->client->resp.osp_r2c4 || gi.argc() == 1) {
             if (osp_teams[teamidx].joincode[0])
                 gi.cprintf(ent, PRINT_HIGH, "You're team's joincode is \"%s\"\n",
@@ -840,7 +950,8 @@ void OSP_joincode_cmd(edict_t *ent)
 }
 
 // `teamname <words>` -- warmup only. The argument is squeezed to at most 15
-// non-space characters before it is accepted, so "Red Team" becomes "RedTeam".
+// characters by OSP_CleanTeamName before it is accepted, so "Red Team" becomes
+// "RedTeam".
 void OSP_teamname_cmd(edict_t *ent)
 {
     char        buf[128];
@@ -848,7 +959,6 @@ void OSP_teamname_cmd(edict_t *ent)
     char        cmd[64];
     edict_t     *player;
     int         i;
-    int         j;
     int         tnum;
 
     tnum = ent->client->resp.team;
@@ -868,14 +978,13 @@ void OSP_teamname_cmd(edict_t *ent)
         return;
     }
 
-    Q_strlcpy(buf, gi.args(), 31);
-
-    for (i = 0, j = 0; i < strlen(buf) && j < 15; i++) {
-        if (buf[i] == ' ')
-            continue;
-        pname[j++] = buf[i];
+    // Squeezed to at most 15 characters, spaces dropped, and nothing that
+    // can escape the stufftext and layouts it is written into.
+    OSP_CleanTeamName(pname, 16, gi.args());
+    if (!pname[0]) {
+        gi.cprintf(ent, PRINT_HIGH, "A team name needs a letter or a digit in it.\n");
+        return;
     }
-    pname[j] = 0;
 
     if (!Q_stricmp(pname, osp_teams[1 - tnum].netname)) {
         gi.cprintf(ent, PRINT_HIGH, "Sorry, cannot use same name for both teams.\n");
@@ -915,11 +1024,11 @@ void OSP_teamname_cmd(edict_t *ent)
 }
 
 // `teamskin <skin>` -- warmup only, and only when the server has not set
-// team_lockskin.  Two faults faithfully reproduced from the real image: the
-// bot arm rewrites the CALLER's userinfo rather than the client it is looping
-// over, and the skin it installs is indexed by the CLIENT loop counter
-// (`osp_teams[i]`) rather than by `team`, which walks off the end of osp_teams[] for
-// every client past the second.
+// team_lockskin.  The real image has two faults here and both are fixed, as
+// they are at the donor's pin (R-OSP-4): its bot arm rewrote the CALLER's
+// userinfo rather than that of the client it was looping over, and installed
+// the skin indexed by the client loop counter rather than by the team -- past
+// the end of the two-team array from the second client on.
 void OSP_teamskin_cmd(edict_t *ent)
 {
     char        stuff[320];
@@ -948,6 +1057,12 @@ void OSP_teamskin_cmd(edict_t *ent)
         return;
     }
 
+    if (!OSP_ValidTeamSkin(gi.argv(1))) {
+        gi.cprintf(ent, PRINT_HIGH, "A team skin is model/skin, in letters, "
+                   "digits, '_' and '-'.\n");
+        return;
+    }
+
     if (!Q_stricmp(gi.argv(1), osp_teams[1 - teamidx].skin)) {
         gi.cprintf(ent, PRINT_HIGH, "Sorry, cannot use same skin for both teams.\n");
         return;
@@ -956,7 +1071,7 @@ void OSP_teamskin_cmd(edict_t *ent)
     gi.bprintf(PRINT_HIGH, "Team %s skin changed to \"%s\"\n",
                osp_teams[teamidx].greenname, gi.argv(1));
     Q_strlcpy(osp_teams[teamidx].skin, gi.argv(1), sizeof(osp_teams[teamidx].skin));
-    Q_snprintf(stuff, sizeof(stuff), "skin %s; set default_teamskin %s\n",
+    Q_snprintf(stuff, sizeof(stuff), "skin \"%s\"; set default_teamskin \"%s\"\n",
                osp_teams[teamidx].skin, osp_teams[teamidx].skin);
 
     for (t = 1; t <= game.maxclients; t++) {
@@ -992,7 +1107,11 @@ void OSP_teamjoin_cmd(edict_t *ent, char *name)
     int         i;
     int         invited;
 
+    // R-SEC-4: an invitation names team 0 or 1 and indexes osp_teams[] below,
+    // so any other value is no invitation at all.
     invited = ent->client->resp.osp_r078;
+    if (invited != 1 && invited != 2)
+        invited = 0;
 
     if (G_Ruleset() == RULESET_DUEL && ent->client->resp.osp_entered != ENTERED_ENTERED) {
         if (!OSP_1v1AllowJoin(ent))
@@ -1020,16 +1139,20 @@ void OSP_teamjoin_cmd(edict_t *ent, char *name)
 
     for (i = 0; i < 2; i++) {
         if (!Q_stricmp(teamname, osp_teams[i].netname)) {
-            if (!((OSP_teamCount(i) >= (int)team_maxplayers->value && !invited &&
+            if (!((OSP_teamCount(i) >= OSP_TeamMaxPlayers() && !invited &&
                    (G_Ruleset() != RULESET_TDM ||
                     ((int)match_latejoin->value <= 2 &&
                      (sync_stat <= 2 ||
                       (int)match_latejoin->value != 2 ||
-                      OSP_teamCount(i) >= (int)team_maxplayers->value)))) ||
-                  (osp_teams[i].osp_m0f4 && !invited))) {
+                      OSP_teamCount(i) >= OSP_TeamMaxPlayers())))) ||
+                  // A lock is lifted by an invitation to THAT team only: the
+                  // donor's `!invited` let an invitation to either team open
+                  // the other one's lock, though its own "invited only to
+                  // team %s" refusal below shows invitations are per team.
+                  (osp_teams[i].osp_m0f4 && invited != i + 1))) {
                 if (invited) {
                     if (i != invited - 1 &&
-                        OSP_teamCount(i) >= (int)team_maxplayers->value) {
+                        OSP_teamCount(i) >= OSP_TeamMaxPlayers()) {
                         gi.cprintf(ent, PRINT_HIGH,
                                    "You have been invited to join only team %s\n",
                                    osp_teams[invited - 1].greenname);
@@ -1075,7 +1198,7 @@ void OSP_teamjoin_cmd(edict_t *ent, char *name)
                 return;
             }
 
-            if (osp_teams[i].osp_m0f4 && !invited)
+            if (osp_teams[i].osp_m0f4 && invited != i + 1)
                 gi.cprintf(ent, PRINT_HIGH, "\"%s\" is locked.\n", osp_teams[i].netname);
             else
                 gi.cprintf(ent, PRINT_HIGH, "\"%s\" is full.\n", osp_teams[i].netname);
@@ -1089,12 +1212,21 @@ void OSP_teamjoin_cmd(edict_t *ent, char *name)
 void OSP_switchteam_cmd(edict_t *ent)
 {
     int         team;
+    bool        invited;
 
+    // R-SEC-4: `1 - team` indexes osp_teams[] below.
     team = ent->client->resp.team;
-    if (team == 2) {
+    if (team != 0 && team != 1) {
         gi.cprintf(ent, PRINT_HIGH, "You have not joined any team yet.\n");
         return;
     }
+
+    // And the invitation that gets a player past the lock and the latejoin
+    // rule is one to the team they are switching TO, resp.osp_r078 being that
+    // team + 1.  The donor took any non-zero value, so the standing invitation
+    // a reconnect is given back onto the player's OWN team (osp_main.c) opened
+    // the other team's lock as well.
+    invited = ent->client->resp.osp_r078 == 2 - team;
 
     if (who_paused == -2) {
         gi.cprintf(ent, PRINT_HIGH,
@@ -1102,7 +1234,7 @@ void OSP_switchteam_cmd(edict_t *ent)
         return;
     }
 
-    if (OSP_teamCount(1 - team) < (int)team_maxplayers->value) {
+    if (OSP_teamCount(1 - team) < OSP_TeamMaxPlayers()) {
         // v2.75 refuses in warmup and says the other team is full, which it
         // is not -- the head count above just proved otherwise.  Only the
         // wording is corrected here: whether "switchteam" ought to work in
@@ -1115,13 +1247,13 @@ void OSP_switchteam_cmd(edict_t *ent)
             return;
         }
 
-        if (osp_teams[1 - team].osp_m0f4 && !ent->client->resp.osp_r078) {
+        if (osp_teams[1 - team].osp_m0f4 && !invited) {
             gi.cprintf(ent, PRINT_HIGH, "Sorry, \"%s\" is locked.\n",
                        osp_teams[1 - team].netname);
             return;
         }
 
-        if (!ent->client->resp.osp_r078 && (int)match_latejoin->value < 2) {
+        if (!invited && (int)match_latejoin->value < 2) {
             gi.cprintf(ent, PRINT_HIGH,
                        "You need to be invited to switch teams.\n");
             return;
@@ -1181,10 +1313,10 @@ void OSP_teaminvite_cmd(edict_t *ent)
 
     {
         if (OSP_teamCount(ent->client->resp.team) >=
-            (int)team_maxplayers->value) {
+            OSP_TeamMaxPlayers()) {
             gi.cprintf(ent, PRINT_HIGH,
                        "Sorry, your team is already full (max %d players).\n",
-                       (int)team_maxplayers->value);
+                       OSP_TeamMaxPlayers());
             return;
         }
         if (target->client->resp.osp_r078) {
@@ -1603,18 +1735,34 @@ void OSP_kickplayer_cmd(edict_t *ent)
         return;
     }
 
-    gi.bprintf(PRINT_HIGH, "%s has been removed from \"%s\"\n",
-               pname, osp_teams[tnum].netname);
+    // The victim's own name from here on, not what was typed: OSP_findPlayer
+    // also matches a client id, and `removebot` takes a name, so the donor's
+    // `kickplayer 3` found the bot and then removed nobody.  The argument list
+    // ends in NULL, not the donor's int 0, because it is read back as char *
+    // through va_arg, which an int is not on LP64.  And the line is printed
+    // once the removal has happened: the donor printed it first, and its human
+    // arm was OSP_startObserve, which turns away an injured victim during a
+    // match and one with no body yet, so a kick could fail after it had been
+    // announced.  OSP_forceObserve has neither refusal.
+    Q_strlcpy(pname, victim->client->pers.netname, sizeof(pname));
 
     if (victim->flags & FL_BOT) {
-        BotServerCommand("sv", "removebot", pname, 0);
+        BotServerCommand("sv", "removebot", pname, NULL);
         // The target's own oddity, reproduced: the counter is subtracted from
         // itself and the (always zero) result clamped.
         bots_votedin -= bots_votedin;
         if (bots_votedin < 0)
             bots_votedin = 0;
-    } else
-        OSP_startObserve(victim);
+        if (victim->inuse)
+            return;
+    } else {
+        OSP_forceObserve(victim);
+        if (victim->client->resp.osp_entered == ENTERED_ENTERED)
+            return;
+    }
+
+    gi.bprintf(PRINT_HIGH, "%s has been removed from \"%s\"\n",
+               pname, osp_teams[tnum].netname);
 }
 
 // `queue` -- print the 1v1 waiting line. The two slots at the head of it also
@@ -1809,7 +1957,10 @@ void OSP_findTeamWinner(void)
 
 // A tied match: mode 1 is sudden death straight away, mode 2 always adds time,
 // anything else adds time until `count` reaches team_overtime_count and then
-// falls back to sudden death. `frag_offset` is what makes the next frag win.
+// falls back to sudden death. `frag_offset` is what makes the next frag win,
+// and `osp_suddendeath` what says that it is sudden death -- set here, where
+// the arm is chosen, rather than inferred from a period that added no time,
+// which a runtime `team_overtime_time 0` makes of an ordinary period.
 bool OSP_overtimeWork(int count)
 {
     if (!(int)team_overtime_mode->value)
@@ -1817,7 +1968,19 @@ bool OSP_overtimeWork(int count)
 
     if ((int)team_overtime_mode->value == 1) {
         frag_offset = osp_teams[0].osp_m0f8 + 1;
+        osp_suddendeath = true;
         gi.bprintf(PRINT_HIGH, "Tied match!! Sudden Death mode in effect!!!\n");
+        return true;
+    }
+
+    // A period of no time cannot be played: the clock is still past the limit
+    // on the next frame, which would add another, and another.  The clamp to 1
+    // runs at InitGame and a config reload, and an operator's `set` afterwards
+    // goes round it, so such a tie is sudden death and is announced as one.
+    if ((int)team_overtime_time->value < 1) {
+        frag_offset = osp_teams[0].osp_m0f8 + 1;
+        osp_suddendeath = true;
+        gi.bprintf(PRINT_HIGH, "Tied match!! Sudden Death mode now in effect!!!\n");
         return true;
     }
 
@@ -1838,6 +2001,7 @@ bool OSP_overtimeWork(int count)
 
     if (count >= (int)team_overtime_count->value) {
         frag_offset = osp_teams[0].osp_m0f8 + 1;
+        osp_suddendeath = true;
         gi.bprintf(PRINT_HIGH, "Tied match!! Sudden Death mode now in effect!!!\n");
         return true;
     }
@@ -1920,7 +2084,7 @@ The three gates are the donor's, and they are not the same gate:
   * `sync_stat != 2` guards the PRINTING.  2 is the ten-second countdown, and a
     kill during it is not part of the match, so it is not announced.
   * `sync_stat > 2` guards the ACCOUNTING -- a match that is actually live.
-  * `frag_offset && teams differ` is checked by the CALLER (OSP_obituaryHush),
+  * `osp_suddendeath && teams differ` is checked by the CALLER (OSP_obituaryHush),
     because once sudden death has a winner the match is over and further
     obituaries would announce a match nobody is playing.
 
@@ -1936,7 +2100,9 @@ throughout: FL_BOT has no connection to unicast to.
 // already produced a winner and the rules row is about to end the level.
 bool OSP_obituaryHush(void)
 {
-    return frag_offset && osp_teams[0].osp_m0f8 != osp_teams[1].osp_m0f8;
+    // osp_suddendeath, not frag_offset: the offset is 0 for teams tied at
+    // -1, which is a sudden death all the same.
+    return osp_suddendeath && osp_teams[0].osp_m0f8 != osp_teams[1].osp_m0f8;
 }
 
 // The team half of a death charged to `self`.  Shared by the two shapes that
@@ -1954,8 +2120,10 @@ static void osp_selfDeathTeams(edict_t *self)
     if (G_Ruleset() == RULESET_TDM)
         OSP_playerTeamFrags(self);
 
-    // Sudden death is "the next frag decides it", so a frag GIVEN BACK has to
-    // move the bar with it or the offset drifts away from the scores.
+    // The donor's sudden-death bar, moved with a frag given back.  Nothing
+    // reads it while sudden death runs -- OSP_CheckRules ends that the moment
+    // the totals differ, by `osp_suddendeath` -- and it is 0 at every other
+    // time, so this keeps the donor's arithmetic and decides nothing.
     if (frag_offset)
         frag_offset--;
 }

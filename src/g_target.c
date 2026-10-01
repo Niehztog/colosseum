@@ -797,8 +797,13 @@ void SP_target_lightramp(edict_t *self)
         return;
     }
 
-    // The ruleset decides, not `deathmatch`.
-    if (!G_MonstersAllowed()) {
+    // id frees a ramp in deathmatch for the reason SP_light frees the lights
+    // it drives -- every step is a configstring sent to every client -- so it
+    // asks SP_light's question, through the same predicate: a campaign keeps
+    // both and every other ruleset drops both.  The monster predicate it asked
+    // instead kept the ramps under ctf, where their lights are gone, and each
+    // one printed "target not found" when it was first used (R-SP-7).
+    if (!G_IsCampaign()) {
         G_FreeEdict(self);
         return;
     }

@@ -1180,8 +1180,11 @@ void OSP_sayteam_cmd(edict_t *ent, char *msg)
         msg++;
     }
 
+    // A `%` with nothing after it is copied as itself.  CTFSay_Team's loop,
+    // which this is, stepped onto the terminator to read the escape, copied
+    // it, and the loop's own msg++ then read the byte past the end.
     for (p = outmsg; *msg && (p - outmsg) < sizeof(outmsg) - 1; msg++) {
-        if (*msg == '%') {
+        if (*msg == '%' && msg[1]) {
             switch (*++msg) {
             case 'l':
             case 'L':

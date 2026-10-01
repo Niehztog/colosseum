@@ -271,11 +271,13 @@ extern  int     sync_stat;
 extern  int     active_clients;
 extern  p_acc_t p_acc[256];
 
-// osp_acc.c -- the two entry points the spine calls instead of writing p_acc
+// osp_acc.c -- the entry points the spine calls instead of writing p_acc
 // at fifteen sites.  `mod` is the means of death the shot or the damage was
 // tagged with; the ACC_ column is derived here.
 void     OSP_accShot(edict_t *self, int mod, int count);
-void     OSP_accDamage(edict_t *targ, edict_t *attacker, int mod, int take);
+void     OSP_accDamage(edict_t *targ, edict_t *inflictor, edict_t *attacker,
+                       int mod, int take);
+void     OSP_accHit(edict_t *targ, edict_t *attacker, int mod);
 
 // Not id CTF's 34.
 
@@ -571,7 +573,7 @@ extern  int     overtime_timer;
 extern  char    pl_bname[200][16];
 extern  char    pl_names[200][16];
 extern  char    pl_pass[200][32];
-extern  char    pl_addr[200][16];
+extern  char    pl_addr[200][MAX_CLIENT_ADDRESS];
 extern  int     next_map;
 
 // osp_hiscore.c (filename assigned by this tree). One entry of the per-map high
@@ -592,11 +594,6 @@ extern  int         manual_map;
 // osp_cmds.c (filename assigned by this tree). The client/vote/referee commands.
 // FL_OSP_NOCMD is edict_t.flags bit 0x2000, the mod's own.  <invented name>.
 // edict_t.flags bit 0x10000 -- the mod's "this client is a bot" flag.
-
-// The three configstring slots the match status line uses.
-#define CS_OSP_STATUS_DM    0x623
-#define CS_OSP_STATUS_A     0x626
-#define CS_OSP_STATUS_B     0x628
 
 // item_settings bits, read off the vote handlers' and/or masks.
 #define ITEM_SET_QUAD   1
@@ -646,7 +643,8 @@ void     OSP_allready_svcmd(void);
 void     OSP_allnotready_svcmd(bool announce);
 void     OSP_rmpause_cmd(void);
 void     OSP_rstopmatch_cmd(edict_t *ent);
-void     OSP_playerlist_svcmd(void);
+// `command` is `sv playerlist [file]`, the one caller with a file argument.
+void     OSP_playerlist_svcmd(bool command);
 // `BotCmd` was declared here, by the donor, with `char *` where the SDK's own
 // bl_cmd.h says `const char *`.  The same shape a third time -- a name
 // declared outside the header that owns it -- and this one had a signature that
@@ -769,14 +767,18 @@ void    OSP_yes_cmd(edict_t *ent);
 void    OSP_no_cmd(edict_t *ent);
 void    OSP_ChaseCam(edict_t *ent);
 void    OSP_startObserve(edict_t *ent);
+void    OSP_forceObserve(edict_t *ent);
 void    OSP_removeChaseCam(edict_t *ent);
 bool CameraCmd(edict_t *ent, bool force);
 int     OSP_votePercent(edict_t *ent, int what);
 void     EntityListAdd(edict_t *ent);
 void     EntityListRemove(edict_t *ent);
+void     EntityListClear(void);
 void    EnitityListClean(void);
 bool OSP_1v1AllowJoin(edict_t *ent);
 void     OSP_1v1Remove(edict_t *ent, int mode);
+void OSP_CleanTeamName(char *dst, size_t size, const char *src);
+bool OSP_ValidTeamSkin(const char *s);
 bool OSP_addTeamMember(edict_t *ent, int team);
 bool OSP_defaultTeam(edict_t *ent);
 bool OSP_readdTeamMember(edict_t *ent);
@@ -911,6 +913,15 @@ int      OSP_teamCount(int team);
 // The bots on the server, counted rather than read off `botglobals.numbots`,
 // which is a cache that sits one low across a removal (R-OSP-16).
 int      OSP_botCount(void);
+// ...and the people, connected or (`entered`) playing, counted the same way.
+int      OSP_humanCount(bool entered);
+// Settings answered per ruleset rather than written into their cvars or
+// registered with a ruleset's default: spawn protection is RegularDM's, strict
+// mode the match system's, and whether observers vote the ruleset's unless the
+// operator says.
+int      OSP_ClientProtect(void);
+bool     OSP_StrictMode(void);
+bool     OSP_CountSpectators(void);
 int      OSP_teamReady(int team);
 bool OSP_1v1Team(edict_t *ent);
 void     OSP_1v1Add(edict_t *ent);

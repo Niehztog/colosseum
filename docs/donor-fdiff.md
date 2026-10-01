@@ -20,7 +20,7 @@ tools/fnsweep.py --selftest   # the extractor and corpus controls
 
 **Three texts per record.** For every top-level function, data object, type, or function-like macro that a donor added, changed or removed relative to the spine, three versions are extracted by brace matching over a comment/string- masked copy: the spine's, the donor's, and this tree's. The tree record is found by exact name across all of `src/`, so a same-named record that **moved** file (`stuffcmd` did) is still compared against the right body. It does not resolve a renamed record without a shared name. Comparison is on comment-stripped, whitespace-collapsed lines; string literals are kept, because a literal is what a player reads.
 
-The current inventory contains **2,942 functions, 1,110 data objects, 104 types and 150 macros**. "Definition" below is retained as the tool's term; it does not mean a C AST, compiled function inventory, or call graph.
+The current inventory contains **3,027 functions, 1,112 data objects, 104 types and 151 macros**. "Definition" below is retained as the tool's term; it does not mean a C AST, compiled function inventory, or call graph.
 
 **Verdicts.**
 
@@ -45,7 +45,7 @@ The current inventory contains **2,942 functions, 1,110 data objects, 104 types 
 
 **And one more diagnostic, because text is not behaviour.** For every touched record, a regex-derived multiset of tokens followed by `(` is compared across The three versions: which tokens did the donor **add** that this tree does not have at that site, and does the token occur elsewhere in `src/`? It is a review queue, not resolved call-graph or reachability evidence: declarations, function-pointer calls, callbacks, strings, conditions, arguments and ordering are outside its model. `tools/lostref.py` asks a related question for symbols a donor *deleted*.
 
-**The extractor is the load-bearing part and it carries its own control.** `--selftest` asserts it reads the shape that broke it -- a function whose signature ends in a trailing `//PGM` after the closing paren, under a commented-out prototype, which a name-by-regex extractor merges into its predecessor (it did, to `check_dodge`, and the fix is to decide the name from the MASKED text as well as scan it) -- and then asserts the real tree still yields **4,306** definitions with two anonymous ones on this re-run, so an extractor that stops reading `src/` cannot report a clean sweep.
+**The extractor is the load-bearing part and it carries its own control.** `--selftest` asserts it reads the shape that broke it -- a function whose signature ends in a trailing `//PGM` after the closing paren, under a commented-out prototype, which a name-by-regex extractor merges into its predecessor (it did, to `check_dodge`, and the fix is to decide the name from the MASKED text as well as scan it) -- and then asserts the real tree still yields **4,394** definitions with two anonymous ones on this re-run, so an extractor that stops reading `src/` cannot report a clean sweep.
 
 ---
 
@@ -57,11 +57,11 @@ The current inventory contains **2,942 functions, 1,110 data objects, 104 types 
 
 | donor | defs | as_donor | merged | of those, partial | as_spine | absent | donor_deleted | median similarity |
 |---|---:|---:|---:|---:|---:|---:|---:|---:|
-| ctf | 99 | 7 | 78 | 59 | 6 | 2 | 6 | 0.73 |
-| xatrix | 222 | 132 | 86 | 43 | 1 | 2 | 1 | 0.87 |
-| rogue | 555 | 336 | 178 | 69 | 4 | 1 | 36 | 0.91 |
-| ra2 | 116 | 7 | 95 | 81 | 11 | 3 | 0 | 0.66 |
-| osp | 233 | 17 | 131 | 117 | 16 | 13 | 56 | 0.69 |
+| ctf | 99 | 7 | 78 | 58 | 6 | 2 | 6 | 0.72 |
+| xatrix | 222 | 124 | 93 | 47 | 1 | 3 | 1 | 0.86 |
+| rogue | 555 | 309 | 204 | 92 | 4 | 2 | 36 | 0.90 |
+| ra2 | 116 | 6 | 97 | 82 | 10 | 3 | 0 | 0.64 |
+| osp | 233 | 17 | 132 | 119 | 15 | 13 | 56 | 0.70 |
 
 "partial" is the subset of `merged` where at least one donor-added line is not at its own site or a donor-deleted line is still there; the rest carry the donor's whole delta and add to it.
 
@@ -69,69 +69,70 @@ The current inventory contains **2,942 functions, 1,110 data objects, 104 types 
 
 | donor | defs | as_donor | merged | of those, partial | absent | median similarity |
 |---|---:|---:|---:|---:|---:|---:|
-| ctf | 163 | 79 | 72 | 26 | 12 | 0.81 |
-| xatrix | 252 | 239 | 13 | 11 | 0 | 0.96 |
-| rogue | 518 | 488 | 29 | 11 | 1 | 0.97 |
-| ra2 | 176 | 75 | 78 | 50 | 23 | 0.83 |
-| osp | 541 | 126 | 395 | 272 | 20 | 0.78 |
+| ctf | 163 | 67 | 84 | 37 | 12 | 0.81 |
+| xatrix | 252 | 233 | 19 | 15 | 0 | 0.94 |
+| rogue | 518 | 447 | 69 | 31 | 2 | 0.93 |
+| ra2 | 176 | 72 | 81 | 55 | 23 | 0.79 |
+| osp | 541 | 122 | 398 | 281 | 21 | 0.75 |
 
 A further **337** definitions -- 183 of RA2's and 154 of tourney's -- are in donor files this tree carries no file of that name for, and the tool counts them outside the matrix rather than reporting each one: that is a **file**-level decision (section 4.1), and per definition it would arrive as several hundred rows saying one thing.
 
-**What the shape says.** The two mission packs are carried; the two mods and CTF are *re-expressed*. Rogue's 336 verbatim definitions out of 555 shared, at 0.91 median similarity, is a merge that took the donor's hunks; CTF's 7 out of 99 is not a worse merge, it is the gating rule -- a CTF hunk lands behind `G_Ruleset() == RULESET_CTF` or as a call into `src/ctf/`, so almost nothing can be textually identical. RA2 and tourney are lower again for the same reason plus one more: they are the two donors whose infrastructure this tree replaced outright (section 4).
+**What the shape says.** The two mission packs are carried; the two mods and CTF are *re-expressed*. Rogue's 309 verbatim definitions out of 555 shared, at 0.90 median similarity, is a merge that took the donor's hunks; CTF's 7 out of 99 is not a worse merge, it is the gating rule -- a CTF hunk lands behind `G_Ruleset() == RULESET_CTF` or as a call into `src/ctf/`, so almost nothing can be textually identical. RA2 and tourney are lower again for the same reason plus one more: they are the two donors whose infrastructure this tree replaced outright (section 4).
 
-`ra2`'s 23 and `osp`'s 20 `absent` in their own files are what is left once those whole files are set aside: RA2's dead menu helpers and `gslog.c`'s deleted socket layer, and tourney's `q2log_stdlog_*` writers, `OSP_ngStatsView` and the two `PMenu_*` names section 4.4 resolves.
+`ra2`'s 23 and `osp`'s 21 `absent` in their own files are what is left once those whole files are set aside: RA2's dead menu helpers and `gslog.c`'s deleted socket layer, and tourney's `q2log_stdlog_*` writers, `OSP_ngStatsView` and the two `PMenu_*` names section 4.4 resolves.
 
 ### 1.3 Where the donor's lines went
 
-For the `merged` definitions, **4,119** donor-added lines are not present at their own site. Asked again against the whole of `src/`:
+For the `merged` definitions, **4,594** donor-added lines are not present at their own site. Asked again against the whole of `src/`:
 
 | donor | missing at site | relocated | adapted | rephrased | ABSENT anywhere |
 |---|---:|---:|---:|---:|---:|
-| ctf | 203 | 57 | 11 | 59 | 76 |
-| xatrix | 68 | 13 | 31 | 23 | 1 |
-| rogue | 123 | 65 | 13 | 27 | 18 |
-| ra2 | 486 | 108 | 51 | 180 | 147 |
-| osp | 3239 | 950 | 284 | 859 | 1146 |
-| **all** | 4119 | 1193 | 390 | 1148 | 1388 |
+| ctf | 228 | 71 | 17 | 63 | 77 |
+| xatrix | 86 | 22 | 35 | 28 | 1 |
+| rogue | 300 | 160 | 28 | 89 | 23 |
+| ra2 | 548 | 115 | 64 | 216 | 153 |
+| osp | 3432 | 1008 | 298 | 939 | 1187 |
+| **all** | 4594 | 1376 | 442 | 1335 | 1441 |
 
 The `adapted`/`rephrased` split is the one figure here that is a lower bound rather than a measurement: the >=0.80 pass compares a line only against tree lines that share its first identifier; comparing every donor line against every source line costs four minutes and neither bucket is a finding either way.
 
 Xatrix has one attributed ABSENT line: the donor's `monster_fire_heat` call is the deliberately prefixed `xatrix_monster_fire_heat` call (section 4.4), so it is a collision-resolution spelling difference rather than an unresolved behavior.
 
-### 1.4 The 1,388 ABSENT lines, attributed
+### 1.4 The 1,441 ABSENT lines, attributed
 
-Every line is mechanically attributed, and **an unattributed line is what `--check` fails on**. The seven in the first row are associated with two identifiers in the tool's `EXEMPT` table. This is not a behavioral disposition: The broad cluster rules can associate an unrelated identifier on the same line, which is one reason section 7 reviews the behavior separately. An exemption that stops matching any donor line is itself reported, because an exemption that has quietly stopped applying is how a check rots.
+Every line is mechanically attributed, and **an unattributed line is what `--check` fails on**. The 22 in the first row are associated with six identifiers in the tool's `EXEMPT` table. This is not a behavioral disposition: The broad cluster rules can associate an unrelated identifier on the same line, which is one reason section 7 reviews the behavior separately. An exemption that stops matching any donor line is itself reported, because an exemption that has quietly stopped applying is how a check rots.
 
 | what removed it | lines |
 |---|---:|
-| **findings -- two exempt identifiers** | **7** |
-| unsafe libc replaced (`sprintf`/`strcat`/`strncpy`/`vsprintf`, the bounded-string rule) | 494 |
-| `match_mode` deleted, four values of `g_ruleset` instead | 222 |
-| the ngLog / ngWorldStats stack, replaced by `osp_stats.c` | 167 |
+| **findings -- six exempt identifiers** | **22** |
+| unsafe libc replaced (`sprintf`/`strcat`/`strncpy`/`vsprintf`, the bounded-string rule) | 501 |
+| `match_mode` deleted, four values of `g_ruleset` instead | 223 |
+| the ngLog / ngWorldStats stack, replaced by `osp_stats.c` | 168 |
 | `STAT_*` macros replaced by the `SID_*` map | 83 |
 | symbol collisions prefixed (section 7 rule 4: `xatrix_fire_heat`, `TECH*_INDEX`, ...) | 72 |
 | `trigger_push` bit collision resolved by `targetname` | 1 |
-| verified present under another name (section 4.4) | 64 |
-| locals and `goto` labels -- no behaviour | 59 |
+| verified present under another name (section 4.4) | 61 |
+| locals and `goto` labels -- no behaviour | 62 |
 | RA2's GameSpy / remote stats | 61 |
 | donor build switches resolved statically | 52 |
-| the menu engines' renames (the menu-engine rule, section 7 rule 4) | 41 |
-| the reconstructions' placeholder field names | 36 |
-| donor file I/O replaced by `g_fs.c` | 23 |
+| the menu engines' renames (the menu-engine rule, section 7 rule 4) | 42 |
+| the reconstructions' placeholder field names | 57 |
+| donor file I/O replaced by `g_fs.c` | 25 |
 | statusbar literals replaced by the composed bar | 6 |
+| Ground Zero's Reckoning stand-ins, unreachable behind the itemlist | 5 |
 
 ### 1.5 The call delta -- what the donor *does* that this tree does not
 
 | donor | defs losing >=1 donor call | calls | made elsewhere in `src/` | made nowhere |
 |---|---:|---:|---:|---:|
-| ctf | 61 | 93 | 63 | 30 |
-| xatrix | 2 | 2 | 1 | 1 |
-| rogue | 16 | 20 | 18 | 2 |
-| ra2 | 61 | 117 | 74 | 43 |
-| osp | 302 | 821 | 538 | 283 |
-| **all** | 442 | 1053 | 694 | 359 |
+| ctf | 64 | 100 | 70 | 30 |
+| xatrix | 5 | 5 | 4 | 1 |
+| rogue | 26 | 39 | 37 | 2 |
+| ra2 | 65 | 123 | 80 | 43 |
+| osp | 308 | 852 | 563 | 289 |
+| **all** | 468 | 1119 | 754 | 365 |
 
-The 359 "made nowhere" mostly reduce to the same clusters -- the libc replacements, the two logging stacks, the renames of section 4.4 and the dead donor code of section 4.3. The 694 made **elsewhere** are useful leads for a human reviewer, not proof that an act is reached one call further in: the regex neither resolves callees nor models the active ruleset/path. The historical call-site findings in section 3.3 and section 3.6 were closed by the first closeout.
+The 365 "made nowhere" mostly reduce to the same clusters -- the libc replacements, the two logging stacks, the renames of section 4.4 and the dead donor code of section 4.3. The 754 made **elsewhere** are useful leads for a human reviewer, not proof that an act is reached one call further in: the regex neither resolves callees nor models the active ruleset/path. The historical call-site findings in section 3.3 and section 3.6 were closed by the first closeout.
 
 ---
 
@@ -139,11 +140,11 @@ The 359 "made nowhere" mostly reduce to the same clusters -- the libc replacemen
 
 ### 2.1 Xatrix -- carried textually; the semantic pass found three repaired differences
 
-474 touched definitions, **371 byte-identical** to the donor after comment and whitespace normalisation, 239 of the 252 in its own seven files. One `as_spine` (`SP_func_timer`, which is the frozen key -- the donor renamed `st.pausetime` to `st.pause_framenum` and section 7 rule 1 refuses it), two `absent` (both the `fire_heat`/`monster_fire_heat` collision resolved by prefixing, section 7 rule 4), and one attributed ABSENT line (the donor's `monster_fire_heat` spelling is the prefixed Xatrix call). That is a clean textual result, not "nothing to report": section 7.3 records the disconnected Heat Chick fire path, the missing Infantry table, and the two Nightmare pain paths that the second closeout restored.
+474 touched definitions, **357 byte-identical** to the donor after comment and whitespace normalisation, 233 of the 252 in its own seven files. One `as_spine` (`SP_func_timer`, which is the frozen key -- the donor renamed `st.pausetime` to `st.pause_framenum` and section 7 rule 1 refuses it), three `absent`, all names this tree prefixes -- the `fire_heat`/`monster_fire_heat` collision resolved by prefixing (section 7 rule 4), and the Reckoning's `infantry_set_firetime`, which is `xatrix_infantry_set_firetime` here beside the table that calls it -- and one attributed ABSENT line (the donor's `monster_fire_heat` spelling is the prefixed Xatrix call). That is a clean textual result, not "nothing to report": section 7.3 records the disconnected Heat Chick fire path, the missing Infantry table, and the two Nightmare pain paths that the second closeout restored.
 
 ### 2.2 Rogue -- carried, with the biggest deliberate deletion set
 
-1,073 definitions, 824 identical, median similarity 0.91 in the shared files. The 36 `donor_deleted` records are Ground Zero replacing baseq2's per-monster `*_dodge` / `*_duck_*` functions with its own `M_MonsterDodge` system: the tree took the deletions, so both sides agree, which is why they read as "the tree lacks it too". 18 ABSENT lines, all of them `KILL_DISRUPTOR` and its two consequences (`AMMO_DISRUPTOR`, `pers.max_rounds`) -- resolved statically and recorded at `src/g_local.h:93` and `src/p_client.c:993`, because Ground Zero `#define`s the switch to 1 and every branch behind it was already dead in the donor.
+1,073 definitions, 756 identical, median similarity 0.90 in the shared files. The 36 `donor_deleted` records are Ground Zero replacing baseq2's per-monster `*_dodge` / `*_duck_*` functions with its own `M_MonsterDodge` system: the tree took the deletions, so both sides agree, which is why they read as "the tree lacks it too". 23 ABSENT lines. Fifteen are `KILL_DISRUPTOR` and its two consequences (`AMMO_DISRUPTOR`, `pers.max_rounds`) -- resolved statically and recorded at `src/g_local.h:88` and `src/p_client.c:1120`, because Ground Zero `#define`s the switch to 1 and every branch behind it was already dead in the donor. Five are its spawn table's `SP_xatrix_item` rows, stand-ins for five of the Reckoning's item classnames that spawn through the itemlist, which `ED_CallSpawn` checks first, so no such row could run (section 1.4). The other three are `trigger_push`'s message (the `targetname` resolution), `monsterlost_checkhint`'s dead counters (section 4.3) and the `item_spehre_defender` typo (section 3.7).
 
 One deviation in the tree's favour, in `FindSubstituteItem`, and it is section 3.7.
 
@@ -166,13 +167,13 @@ The 12 `absent` in CTF's own files are the menu API: `ctf_PMenu_*` and `ctf_pmen
 
 ### 2.4 Rocket Arena 2 -- the arena's own files are carried, the network stack is not
 
-292 definitions in files this tree carries, and 183 more in files it does not. 20 of RA2's 27 added files are not carried and every one is a recorded decision (section 4). Of the 11 `as_spine` verdicts, seven are RA2's monster deletions reaching inside shared files -- `ai_move` and `flymonster_start_go` emptied, `barrel_touch`'s `M_walkmove` gone, `turret_driver_die`'s `infantry_die` gone, `G_CheckChaseStats` emptied because RA2 deletes `g_chase.c` -- which is exactly what the retention rule and `tools/lostref.py` exist to refuse, and they did. Two are `q_unused` markers on functions whose callers RA2 deleted. The historic sweep queued section 3.1 from the remaining record, but its fire-gate conclusion was withdrawn; section 7.5 records the current RA2 behavioral differences instead.
+292 definitions in files this tree carries, and 183 more in files it does not. 20 of RA2's 27 added files are not carried and every one is a recorded decision (section 4). Of the 10 `as_spine` verdicts, five are RA2's monster deletions reaching inside shared files -- `ai_move` and `flymonster_start_go` emptied, `barrel_touch`'s `M_walkmove` gone, `turret_driver_die`'s `infantry_die` gone, `G_CheckChaseStats` emptied because RA2 deletes `g_chase.c` -- which is exactly what the retention rule and `tools/lostref.py` exist to refuse, and they did. Two are `q_unused` markers on functions whose callers RA2 deleted. The historic sweep queued section 3.1 from the remaining record, but its fire-gate conclusion was withdrawn; section 7.5 records the current RA2 behavioral differences instead.
 
 RA2's obituary rewrite is the largest single `merged` record in the sweep (69 donor lines missing at the site, 120 spine lines the donor deleted that the tree keeps) and it is fully accounted for: `RA_Obituary` in `src/arena/arena.c` carries all six announcer sounds, `scorebydamage`, the team-kill taunt `stuffcmd` and a per-weapon kill breakdown that is *better* than the donor's -- RA2 buckets kills by the inflictor's model index, which mis-files a held grenade, and the tree switches on `meansOfDeath` (section 7 rule 3). The obituary **text** stays baseq2's, deliberately, and `arena.c:3393` says so.
 
-### 2.5 OSP Tourney DM -- 526 of 774 definitions merged, and the log was rebuilt
+### 2.5 OSP Tourney DM -- 530 of 774 definitions merged, and the log was rebuilt
 
-774 definitions in files this tree carries, 526 of them `merged`. The most re-expressed donor, for three reasons that are all recorded: fifteen inline `p_acc[]` writes became two calls, the NetGames USA logging stack became `osp_stats.c` with 27 entry points, and `match_mode` became four values of `g_ruleset` -- which alone accounts for 222 ABSENT lines.
+774 definitions in files this tree carries, 530 of them `merged`. The most re-expressed donor, for three reasons that are all recorded: fifteen inline `p_acc[]` writes became two calls, the NetGames USA logging stack became `osp_stats.c` with 27 entry points, and `match_mode` became four values of `g_ruleset` -- which alone accounts for 223 ABSENT lines.
 
 **The log replacement checks out.** All 27 `OSP_Stats_*` entry points have at least one caller. The call delta's donor `q2log_*` paths map either to the replacement at their original site or to an the gating rule relocation into `src/tourney/` -- `G_FreeEdict` calls `OSP_itemFreed()`, `ClientDisconnect`'s events are raised from `osp_main.c`, and so on. The historic residuals drove section 3.3 and section 3.6; the first closeout closed them, and section 7.6 records the current runtime status.
 
@@ -193,7 +194,7 @@ This is retained as the historical queue that drove the first closeout, **not** 
 | entry | what it found | now |
 |---|---|---|
 | section 3.1 | RA2's four fire gates absent | **withdrawn** -- the arena fire gate answers it at the latch |
-| section 3.2 | `spamcount`/`spamtime` with no reader and no writer | **closed** by the second closeout: the donor's post-`FloodProtect()` counter is restored |
+| section 3.2 | `spamcount`/`spamtime` with no reader and no writer | **closed**: the counter is gone -- `rocketarena2@fa01a64` deleted it as a defect and section 7 rule 7 keeps the fix; the two fields stay declared because `g_save.c`'s client table names them |
 | section 3.3 | `stats_logchat` logs `talkto` only | **closed** by the first closeout: one call in `Cmd_Say_f` |
 | section 3.4 | tourney's second ZBot heuristic, `osp_r008` | **open**, exempt by name with its reason |
 | section 3.5 | the exclusions reach the refusal, not the selection | **closed** by the first closeout: `ent` threaded through three signatures |
@@ -246,9 +247,9 @@ if (level.time < ent->client->spamtime + 2.0f) {
         stuffcmd(ent, "disconnect\n");
 ```
 
-This tree has `gclient_t.spamcount` and `.spamtime` (`src/g_local.h:1839-1840`) and persists both (`src/g_save.c:532-533`) and **reads and writes neither**: `grep -rn 'spamcount\|spamtime' src --include='*.c'` returns the two savegame descriptor rows and nothing else. Six chat lines in two seconds disconnect you in `rocketarena2` and do nothing here.
+This tree has `gclient_t.spamcount` and `.spamtime` (`src/g_local.h`) and persists both (`src/g_save.c`'s client table) and **reads and writes neither**: `grep -rn 'spamcount\|spamtime' src --include='*.c'` returns the two savegame descriptor rows and a comment. Six chat lines in two seconds disconnect you in `port_ra2` and do nothing here, deliberately: the counter is the defect the pinned donor deleted -- `rocketarena2@fa01a64`, because with the default cvars it was unreachable behind `FloodProtect()` and with `flood_msgs 0` it was a session-long mute enforced by a `stuffcmd` the client can ignore. `FloodProtect` alone remains, as there: it is configurable, it expires, and the server enforces it (section 7 rule 7).
 
-Two things follow. The behaviour is a decision to make either way -- RA2's punishment is harsher than `flood_*` and self-disconnecting a client from a game library is worth thinking about -- but it is currently made by omission. And the shape is one `tools/deadvalue.py` cannot see: its space is *values a field can hold*, and this field holds none because nothing writes it. **A field declared and persisted with no reader and no writer is a fifth resolver**, and this is its first specimen.
+The shape is still one `tools/deadvalue.py` cannot see: its space is *values a field can hold*, and this field holds none because nothing writes it. **A field declared and persisted with no reader and no writer is a fifth resolver**, and this is its first specimen -- kept, here, because the savegame layout names it.
 
 ### 3.3 `stats_logchat` logs private messages only
 
@@ -316,13 +317,13 @@ The donors' `shared_shared.c` / `shared_m_flash.c` and `shared/*.h` are their fl
 ### 4.2 Subsystems replaced, and every event checked
 
 * **RA2's GameSpy / remote stats** (`gstats.c` + the four container libraries + `gslog.c`'s seven `net_*` helpers): the GameSpy removal, the RA2 network removal, the outbound rule. 61 ABSENT lines; the remaining remote-stat stack lives in files the matrix sets aside entirely (section 4.1). `logfile 2`'s local log is untouched and the `netlog` cvar still parses.
-* **Tourney's NetGames USA logging** (`q2log.c`, `nglog.c`, `ngmark.c`): replaced by `src/tourney/osp_stats.c`, one JSON object per line, four cvars. 167 ABSENT lines. **All 27 `OSP_Stats_*` entry points have a caller**; donor log paths are either represented at their original site, relocated through the gating rule, or covered by the historic section 3.3/section 3.6 closeout.
-* **The accuracy table**: 15 inline `p_acc[]` writes -> `OSP_accShot` / `OSP_accDamage`. The sweep's three `as_spine` verdicts in `T_RadiusDamage`, `Grenade_Explode` and `fire_lead` are that reduction, and the CTF import note already records the two behaviour changes it makes.
-* **`match_mode`** -> four values of `g_ruleset`: 222 ABSENT lines, every one an `m_mode` comparison.
+* **Tourney's NetGames USA logging** (`q2log.c`, `nglog.c`, `ngmark.c`): replaced by `src/tourney/osp_stats.c`, one JSON object per line, four cvars. 168 ABSENT lines. **All 27 `OSP_Stats_*` entry points have a caller**; donor log paths are either represented at their original site, relocated through the gating rule, or covered by the historic section 3.3/section 3.6 closeout.
+* **The accuracy table**: 15 inline `p_acc[]` writes -> `OSP_accShot` / `OSP_accDamage`, plus `OSP_accHit` for the one weapon whose damage arrives after its hit (the Disruptor). `OSP_accDamage` takes the inflictor, so a grenade column credits only its own projectiles. The sweep's three `as_spine` verdicts in `T_RadiusDamage`, `Grenade_Explode` and `fire_lead` are that reduction, and the CTF import note already records the two behaviour changes it makes.
+* **`match_mode`** -> four values of `g_ruleset`: 223 ABSENT lines, every one an `m_mode` comparison.
 * **The `STAT_*` macros** -> the `SID_*` map and the composed statusbar: 83 + 6 ABSENT lines. The four OSP bar variants are present -- `sb_tourney_tail(sb, alt, team)` and `G_StatusbarVariant(alt, team)`.
 * **Both menu engines**: `ctf_PMenu_*` / `osp_PMenu_*`, `ra_MenuClose` / `close_menus` for RA2's `clear_menus` (section 7 rule 4, the menu-engine rule).
 * **The donors' file I/O**: `glob`/`_findfirst`/`getcwd`/`CreateProcess` -> `g_fs.c`. `autolaunchbspc` stays off.
-* **`sprintf`/`strcat`/`strncpy`/`vsprintf`**: 494 ABSENT lines, the single largest cluster, all replaced by `Q_snprintf` / `Q_strlcpy` / `Q_strlcat`.
+* **`sprintf`/`strcat`/`strncpy`/`vsprintf`**: 501 ABSENT lines, the single largest cluster, all replaced by `Q_snprintf` / `Q_strlcpy` / `Q_strlcat`.
 
 ### 4.3 Donor code that is dead in the donor
 
@@ -331,7 +332,7 @@ Eight cases where the sweep says "missing" and the donor's own copy cannot run. 
 | donor | definition | why it is dead there |
 |---|---|---|
 | ctf | `TH_viewthing`'s robotron cycle | `static int robotron[4]` is never written, so `modelindex` becomes 0 |
-| rogue | everything behind `#ifndef KILL_DISRUPTOR` | Ground Zero `#define`s it to 1 (the build-switch rule, `g_local.h:93`) |
+| rogue | everything behind `#ifndef KILL_DISRUPTOR` | Ground Zero `#define`s it to 1 (the build-switch rule, `g_local.h:88`) |
 | ra2 | `DisplaySimpMenu`, `MySelect`, `MySelect2`, `MySelect3`, `PrintMenu*` | defined in `menu.c`, prototyped in `menu.h`, called from nowhere |
 | ra2 | `checkvwepmodel`, `mylcase` | same: `arena.c` + `arena.h`, no caller |
 | ra2 | `InitBodyQue`'s `movetype = MOVETYPE_TOSS` | `CopyToBodyQue` assigns `body->movetype = ent->movetype` before linking |
@@ -380,29 +381,29 @@ References earlier in this document to "section 7 rule *N*" mean section 7 of `S
 
 | donor | current path | donor behavior versus current tree | disposition | confidence |
 |---|---|---|---|---:|
-| CTF | `CheckNeedPass` | CTF now omits the inert generic spectator-password bit and recomputes it when a latched ruleset changes. | resolved by the second closeout | high |
+| CTF | `CheckNeedPass` | No ruleset sets the generic spectator-password bit -- none reaches baseq2's spectator admission -- and it is recomputed when a latched ruleset changes. | resolved | high |
 | CTF | `ClientLagThink` -> `GetChaseTarget` | CTF observers consume ATTACK and bypass inherited jump chase acquisition; the CTF menu remains the explicit chase route. | resolved by the second closeout | high |
 | Xatrix | `SP_monster_chick_heat` -> `ChickRocket` | A Heat Chick now emits the Xatrix heat projectile while `skinnum > 1`; base/Xatrix aiming no longer inherits Rogue behavior. | resolved | high |
 | Xatrix | `infantry_attack` | Xatrix-flavoured Infantry now selects its donor fire table and timing. | resolved by the second closeout | high |
-| Xatrix | `brain_pain`, `chick_pain` | Xatrix Brain and Chick now select pain moves on Nightmare, as the donor does. | resolved by the second closeout | high |
+| Xatrix | `brain_pain`, `chick_pain` | With only the Reckoning's layer on, its Brain and Chick select pain moves on Nightmare, as the donor does; with both layers on, Ground Zero's early return wins. | resolved | high |
 | Rogue | `SP_monster_medic` -> `medic_*` | A Medic Commander selects its Rogue donor state, callbacks, patient policy, and attack selection by its classname even under `rogue 0`. | resolved | high |
 | Rogue | `SP_monster_hover` -> `hover_*` | A Daedalus selects its Rogue donor pain, circle-strafe, reattack, and blocked behavior by its classname even under `rogue 0`. | resolved | high |
 | Rogue | `flyer_attack` | The Kamikaze mass guard precedes the base Flyer layer arm, as in the donor. | resolved | high |
 | Rogue | shared `g_ai.c` | Base/Xatrix actors regain id's AI arm under `rogue 0`; all eight live Rogue-exclusive identities keep Ground Zero's arm, with separate disguise-filtered sight rotation. | resolved | high |
-| Rogue | `Killed`, `M_ReactToDamage`, shared map entities | Medic ownership and retaliation follow the target's donor arm; stateful Tesla/minion effects remain available; barrels and corpses select their donor behavior by flavour. | resolved | high |
+| Rogue | `Killed`, `M_ReactToDamage`, shared map entities | Medic healing and retaliation follow the target's donor arm: the `owner` claim is released at death under both, and on damage only under Ground Zero's, id's shot medic keeping id's leak; stateful Tesla/minion effects remain available; barrels and corpses select their donor behavior by flavour. | resolved | high |
 | Rogue | `MakronToss` -> `MakronSpawn` | Jorg's delayed direct Makron spawn preserves its parent layer flavor before shared Makron initialization. | resolved | high |
 | RA2 | `menuAddtoTeam` -> `add_to_team` | A stale menu snapshot copies its label before re-creating a team, so menu teardown cannot free the live team name. | resolved | high |
 | RA2 | connect, spectator placement, observer predicate | A fresh generic spectator is refused with the donor text; a post-connect update reaches native Arena placement and its `fightstate` observer. | resolved by the second closeout | high |
-| RA2 | `Cmd_Say_f` | The donor's six accepted messages in two seconds counter and self-disconnect are restored after Q2PRO flood protection. | resolved by the second closeout | high |
+| RA2 | `Cmd_Say_f` | Q2PRO's `FloodProtect()` alone; the bundle's six-messages-in-two-seconds counter and self-disconnect are the defect `rocketarena2@fa01a64` deleted. | resolved | high |
 | OSP | intermission, observer, chat, command, combat, item, and filesystem boundaries | The retained OSP paths now preserve donor state/order or the documented secure local replacement. | resolved | high |
 | OSP | generic `hook` -> native `hook_enable` | A latched one-way OSP-only baseline request survives fresh config baselines without overriding live votes or CTF/Arena hook authorities. | policy resolved | high |
 | OSP | config `exec` -> `SpawnEntities` | A queued configuration transition synchronizes the capped rune cache before feature publication and rune setup. | resolved | high |
 | OSP | bot readiness and ZBot paths | The tree intentionally drops the false-positive `osp_r008` heuristic and intentionally extends `bots_warmuptime 0`; its bot scheduler also polls at 32-frame cadence. | deliberate policy/latency differences | high |
-| OSP | Ground Zero `DMGame` callbacks | OSP owns its match protocol; nonzero `gamerules` cannot install or invoke Tag callbacks outside CTF/Arena. | resolved | high |
+| OSP | Ground Zero `DMGame` callbacks | OSP owns its match protocol; nonzero `gamerules` cannot install or invoke Tag callbacks outside CTF. | resolved | high |
 
 ### 6.2 CTF
 
-**Observer-password metadata is resolved.** Under `RULESET_CTF`, `ClientUserinfoChanged()` makes the generic `spectator` key inert and `ClientConnect()` does not apply generic spectator admission, so `CheckNeedPass()` now omits the corresponding spectator-password bit. Its `checked_ruleset` state also forces a recomputation immediately after `G_InitRuleset()`: restarting from another ruleset into CTF cannot retain stale browser metadata. A passworded DM-to-CTF latched restart observes `needpass` changing from `2` to `0`.
+**Observer-password metadata is resolved.** `CheckNeedPass()` sets bit 2 only where `ClientConnect()`'s generic spectator admission runs -- its own test, with `deathmatch` asked as `!G_IsCampaign()` -- and no ruleset reaches that admission: `ctf`, `arena` and the OSP four have their own observers, and `sp` has deathmatch 0. So `needpass` never carries bit 2, and a `spectator_password` does not advertise a spectator slot nobody can take. Its `checked_ruleset` state also forces a recomputation immediately after `G_InitRuleset()`, so a latched restart into another ruleset cannot retain stale browser metadata.
 
 **Observer input is resolved.** `ClientLagThink()` consumes ATTACK for a CTF observer and excludes CTF from inherited jump/upmove chase acquisition. `Cmd_InvUse_f()` and its CTF "Chase Camera" menu row remain the only chase entry point, as in Threewave. A direct `q2ctf1` probe starts on the join menu and leaves `PMF_NO_PREDICTION` clear after both ATTACK and jump.
 
@@ -414,7 +415,7 @@ The direct `ctfgrapple`, `ctfidview`, and `ctfteams` scenarios pass. Their asset
 
 **Infantry is resolved.** The new Xatrix table arms its hold timer at frame 101 with `(Q_rand() & 15) + 5`, fires at frame 103, and cocks at frame 109. `infantry_attack()` selects it for `CONTENT_XATRIX` after the Rogue arm, so the Ground Zero table retains precedence when both content layers are enabled. The move is a visible generated save-pointer target and `g_ptrs.c` was regenerated.
 
-**Nightmare pain is resolved.** Xatrix Brain and Chick now continue through their donor pain-move selection at skill 3. Brain's pain-time duck cleanup is also Rogue-only, so an Xatrix Brain completes its base-style duck animation. Xatrix Infantry still keeps the Nightmare early return because its donor does.
+**Nightmare pain is resolved.** With only The Reckoning's layer on, the Brain and Chick continue through their donor pain-move selection at skill 3. With both layers on, both keep the early return id and Ground Zero share -- Ground Zero's precedence, as in `infantry_attack`. Brain's pain-time duck cleanup is also Rogue-only, so an Xatrix Brain completes its base-style duck animation. Xatrix Infantry still keeps the Nightmare early return because its donor does.
 
 `refinery` and `xcompnd2` both boot through frame 152 under `g_ruleset sp` and `xatrix 1`, covering the Heat Chick, Brain, and Infantry spawn paths. Their random combat behavior remains evidenced by exact replay-pinned function/table comparison rather than a synthetic map claim.
 
@@ -454,21 +455,21 @@ The remaining material Rogue differences are deliberate repairs or composition c
 
 **The shared-AI repair restores the shared base/Xatrix AI arm.** The pre-repair `g_ai.c` contained Ground Zero behavior globally: all actors used its manual steering, blindfire, visibility result, attack callback ordering, slide behavior, hint-path handling and long idle interval. That was wrong under `rogue 0` for baseq2 actors and for Xatrix's Gekks, while the newly repaired Commander and Daedalus still required the Rogue arm. Gladiator resolves every conflict in its shared monster files with `#ifdef ROGUE` / `#else`; the tree now maps those branches to the effective actor instead of a server-wide bit.
 
-The split covers `AI_SetSightClient`, `ai_stand`, `ai_walk`, `ai_charge`, `visible`, `FoundTarget`, `FindTarget`, `M_CheckAttack`, all three run helpers, `ai_checkattack`, and `ai_run`. Base/Xatrix actors regain id's target-before-checkattack ordering, direct visibility test, and 15-to-30 second idle/search interval. Rogue-effective actors retain the donor's blindfire, hint-path, manual-steering and strafe behavior, including existing Q2PRO timing repairs. The normal sight cache excludes only `FL_NOTARGET`; the separate Rogue cache also excludes `FL_DISGUISED`, and a Rogue actor cannot acquire a disguised client through a base actor's shared sight relay. The new cache is serialized, which deliberately advances `SAVE_VERSION` to `0x101` / `9` so older layouts fail cleanly rather than shift every following saved field.
+The split covers `AI_SetSightClient`, `ai_stand`, `ai_walk`, `ai_charge`, `visible`, `FoundTarget`, `FindTarget`, `M_CheckAttack`, all three run helpers, `ai_checkattack`, and `ai_run`. Base/Xatrix actors regain id's target-before-checkattack ordering, direct visibility test, and 15-to-30 second idle/search interval. Rogue-effective actors retain the donor's blindfire, hint-path, manual-steering and strafe behavior, including existing Q2PRO timing repairs. The normal sight cache excludes `FL_NOTARGET` and observers; the separate Rogue cache also excludes `FL_DISGUISED`, and a Rogue actor cannot acquire a disguised client through a base actor's shared sight relay. The new cache is serialized, which deliberately advances `SAVE_VERSION` to `0x101` / `9` so older layouts fail cleanly rather than shift every following saved field.
 
-**Shared combat gets the same split without suppressing live relationships.** Base Medics once again claim patients through `owner`, release that claim on damage or death, and preserve base Tank/Supertank/Makron/Jorg retaliation exclusions; Rogue Medics retain `monsterinfo.healer` and their cleanup policy. Tesla response, spawned-minion slot recovery, `AI_IGNORE_SHOTS`, and `AI_DO_NOT_COUNT` describe runtime relationships, not an actor donor arm, and remain available under either layer setting. Ground Zero's barrel thinker and dead-soldier `-30` gib threshold likewise become Rogue-flavour choices, leaving The base/Xatrix `M_droptofloor` and `-80` behavior intact.
+**Shared combat gets the same split without suppressing live relationships.** Base Medics once again claim patients through `owner` and release that claim on death -- `Killed`'s release, because id's `medic_die` tested an `enemy` that `Killed` had already pointed at the attacker, and so never freed a patient. On damage they run id's line, which has no medic block: the claim and AI_MEDIC stay, the medic turns on its attacker and `ai_checkattack` drops AI_MEDIC a frame later, as id and Xatrix do. The corpse stays claimed -- id's leak, and the reason id's shot medic fights rather than going back to it; a release on damage sent it straight back (R-CORE-11f). The Xatrix fixbot's `owner` claim is released under Ground Zero's arm, beside `cleanupHealTarget`, and by `TargetTesla` too. Base Medics also preserve base Tank/Supertank/Makron/Jorg retaliation exclusions; Rogue Medics retain `monsterinfo.healer` and their cleanup policy. Tesla response, spawned-minion slot recovery, `AI_IGNORE_SHOTS`, and `AI_DO_NOT_COUNT` describe runtime relationships, not an actor donor arm, and remain available under either layer setting. Ground Zero's barrel thinker and dead-soldier `-30` gib threshold likewise become Rogue-flavour choices, leaving The base/Xatrix `M_droptofloor` and `-80` behavior intact.
 
-**The Tag exception is now a rule, not a comment.** Ground Zero's `DMGame` callback table is valid only when nonzero `gamerules` runs under CTF or Arena. `G_UsesRogueGameRules()` gates its installation and every consumer: post-spawn setup, rule checks, damage/knockback, effects, dog tags, scoring, death, begin, and disconnect. An OSP-family ruleset therefore cannot run Tag because a raw `gamerules` cvar happens to be set.
+**The Tag exception is now a rule, not a comment.** Ground Zero's `DMGame` callback table is valid only when nonzero `gamerules` runs under CTF. `G_UsesRogueGameRules()` gates its installation and every consumer: post-spawn setup, rule checks, damage/knockback, effects, dog tags, scoring, death, begin, and disconnect. An OSP-family ruleset therefore cannot run Tag because a raw `gamerules` cvar happens to be set.
 
-**The dynamic-flavour repair closes the one dynamic actor path that bypasses the normal layer latch.** `MakronToss()` creates phase-two Makron with `G_Spawn()` and schedules `MakronSpawn()`, which calls `SP_monster_makron()` directly. That does not reach `ED_CallSpawn()`, so a Rogue-flavoured Jorg previously produced a zero-flavour Makron; the shared-AI repair then selected base shared AI and skipped Rogue `AI_IGNORE_SHOTS`. The child now copies the complete parent `content_flavour` between allocation and its delayed initializer. The direct inventory found no second actor path: normal Carrier/Commander/Widow minions and target-spawner actors use `CreateMonster()`/`ED_CallSpawn()`, while direct wrappers, resurrections, probes, projectiles, and non-AI entities do not need a parent flavor. This is static donor/control-flow evidence rather than a claimed Jorg-combat harness assertion.
+**The dynamic-flavour repair closes the one dynamic actor path that bypasses the normal layer latch.** `MakronToss()` creates phase-two Makron with `G_Spawn()` and schedules `MakronSpawn()`, which calls `SP_monster_makron()` directly. That does not reach `ED_CallSpawn()`, so a Rogue-flavoured Jorg previously produced a zero-flavour Makron; the shared-AI repair then selected base shared AI and skipped Rogue `AI_IGNORE_SHOTS`. The child now copies the complete parent `content_flavour` between allocation and its delayed initializer. It is also named `monster_makron`: `SP_monster_makron` sets no classname, so the child kept `G_InitEdict`'s `noclass`, which base `M_ReactToDamage`'s Makron exemption never matched and which `ED_CallSpawn` freed when a Medic healed the corpse. The direct inventory found no second actor path: normal Carrier/Commander/Widow minions and target-spawner actors use `CreateMonster()`/`ED_CallSpawn()`, while direct wrappers, resurrections, probes, projectiles, and non-AI entities do not need a parent flavor. This is static donor/control-flow evidence rather than a claimed Jorg-combat harness assertion.
 
 ### 6.5 Rocket Arena 2
 
 **Generic spectator admission and placement are resolved.** `ClientConnect()` now refuses a fresh nonzero `spectator` key after IP filtering with the donor's exact `"id Spectator Mode not Supported"` rejection. Later userinfo updates still reach `spectator_respawn()`, but Arena bypasses generic spectator placement and continues through `init_player`/`reinit_player` and `move_to_arena`, establishing `FIGHT_SPECTATING` and a real `PM_SPECTATOR` observer. The inherited `pers.spectator`/`resp.spectator` mismatch is retained: The pinned RA2 donor has the same legacy-state behavior, including its non-generic `spectator 0` result.
 
-**Chat spam is resolved in donor order.** Arena increments `spamcount` only after Q2PRO's `FloodProtect()` accepts the message, then stuffs `disconnect` after the sixth accepted message in two seconds. The shipped flood defaults can block an earlier message and mask this harsher counter; that ordering and interaction are byte-for-byte donor behavior, not a remaining policy difference.
+**Chat spam is FloodProtect's alone.** RA2's counter -- six accepted lines in two seconds, then a stuffed `disconnect` -- is the defect `rocketarena2@fa01a64` deleted, and this tree keeps the deletion (section 7 rule 7).
 
-**Runtime separation.** A raw fresh-connect probe receives the exact refusal, a post-connect `spectator 1` observer does not advance its weapon gunframe, and the sixth rapid message with `flood_msgs 0` receives `disconnect`. Direct `ra2queuefire`, `ra2prefire`, `ra2spawn`, and `ra2observer` also pass. The donor's defensive reconnect-without-disconnect cleanup remains an engine-lifecycle candidate rather than a demonstrated failure.
+**Runtime separation.** A raw fresh-connect probe receives the exact refusal, and a post-connect `spectator 1` observer does not advance its weapon gunframe. Direct `ra2queuefire`, `ra2prefire`, `ra2spawn`, and `ra2observer` also pass. The donor's defensive reconnect-without-disconnect cleanup remains an engine-lifecycle candidate rather than a demonstrated failure.
 
 **Stale team snapshots now retain their intended behavior safely.** A live team menu may outlast the team it names and deliberately treats that stale row as a request to recreate the team. Its row text is menu-owned, however, so The team-allocation repair gives `add_to_team()` a distinct level allocation and retains it only when that call creates the replacement; teardown can no longer leave the new team with a dangling name.
 

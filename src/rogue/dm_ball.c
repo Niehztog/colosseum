@@ -46,11 +46,12 @@ void DBall_BallDie(edict_t *self, edict_t *inflictor, edict_t *attacker, int dam
 void DBall_BallRespawn(edict_t *self);
 
 // The same shape as dm_tag.c's Tag_Active().  Deathball is commented
-// out of InitGameRules(), so `gamerules 3` used to be reset to 0 by its
-// `default:` arm before any map could spawn a dball entity.  The merge stopped
-// calling InitGameRules() outside CTF/Arena, which removed that reset -- so
-// under OSP the six spawn functions below saw a live 3 and let a dball map
-// build a goal, a ball and its start points with no game running them.
+// out of InitGameRules(), whose `default:` arm resets `gamerules 3` to 0 --
+// but InitGameRules runs only under `ctf`, the one ruleset that has Ground
+// Zero's DM rules, so under every other one a 3 stays live, and the six spawn
+// functions below let a dball map build a goal, a ball and its start points
+// with no game running them.  Under `ctf` the reset makes this false as well:
+// Deathball runs nowhere, and nothing below is installed.
 static bool DBall_Active(void)
 {
     return G_UsesRogueGameRules() && (int)gamerules->value == RDM_DEATHBALL;
@@ -186,8 +187,15 @@ void DBall_GameInit(void)
     dball_team1_goalscore = 0;
     dball_team2_goalscore = 0;
 
-    dmflags->value = (int)dmflags->value | DF_NO_MINES | DF_NO_NUKES | DF_NO_STACK_DOUBLE |
-                     DF_NO_FRIENDLY_FIRE | DF_SKINTEAMS;
+    // Not installed (see DBall_Active), and kept off Threewave's bits for the
+    // day it is.  Ground Zero's DM rules run only under `ctf`, where bits
+    // 17-19 are DF_CTF_FORCEJOIN, DF_ARMOR_PROTECT and DF_CTF_NO_TECH and
+    // G_RogueDMFlag answers false for them: written there, Deathball's no
+    // mines, no nukes and no stacked double would have switched three CTF
+    // rules on and none of its own.
+    dmflags->value = (int)dmflags->value | DF_NO_FRIENDLY_FIRE | DF_SKINTEAMS |
+                     (G_Ruleset() == RULESET_CTF ? 0 :
+                      DF_NO_MINES | DF_NO_NUKES | DF_NO_STACK_DOUBLE);
 
     dball_team1_skin = gi.cvar("dball_team1_skin", "male/ctf_r", 0);
     dball_team2_skin = gi.cvar("dball_team2_skin", "male/ctf_b", 0);

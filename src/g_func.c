@@ -353,8 +353,19 @@ void Think_AccelMove(edict_t *ent)
     ent->moveinfo.remaining_distance -= ent->moveinfo.current_speed;
 
     // PGM 04/21/98  - this should fix sthoms' sinking drop pod. Hopefully it wont break stuff.
-//  if (ent->moveinfo.current_speed == 0)       // starting or blocked
-    plat_CalcAcceleratedMove(&ent->moveinfo);
+    //
+    // It does break stuff, and only on id's side: recomputing the ramp every
+    // frame instead of when the move starts or is blocked throws away the
+    // deceleration, so every accelerating mover -- every func_plat, whose
+    // accel and decel default below its speed -- arrives at full speed and
+    // stops a frame or three early.  q2dm1's big lift takes 20 frames where
+    // id's takes 23.  The latch takes Ground Zero's line while the rogue layer
+    // is on and id's while it is off -- for every mover on the level, id's
+    // plats on id's maps included, because content_flavour is the server's
+    // configuration and not the entity's.  gladq2_src keeps id's alone.
+    if ((ent->content_flavour & CONTENT_ROGUE) ||
+        ent->moveinfo.current_speed == 0)       // starting or blocked
+        plat_CalcAcceleratedMove(&ent->moveinfo);
 
     plat_Accelerate(&ent->moveinfo);
 
@@ -2104,10 +2115,23 @@ void train_wait(edict_t *self)
             self->nextthink = level.framenum + self->moveinfo.wait * BASE_FRAMERATE;
             self->think = train_next;
         } else if (self->spawnflags & TRAIN_TOGGLE) { // && wait < 0
-            // PMM - clear target_ent, let train_next get called when we get used
-//          train_next (self);
-            self->target_ent = NULL;
-            // pmm
+            // Ground Zero's line is for a train that carries its team, asked as
+            // train_next's team block asks it.  id's line sets the train off to
+            // its next corner and then stops it, and would leave the pieces
+            // that block has just set off moving without it; so that train
+            // waits for its next use with no target.  Every other train takes
+            // id's line and stops already pointed at its next corner, which is
+            // where a teleport corner fires: the Reckoning's xhangar2 has 21
+            // toggled "parts" trains whose stop is followed by one, and Ground
+            // Zero's line parked each at the conveyor's end for a cycle.
+            // gladq2_src gates this line on `rogue->value` (R-MP-7).
+            if (self->team && G_TeamTrainCount(self->team) == 1) {
+                // PMM - clear target_ent, let train_next get called when we get used
+                self->target_ent = NULL;
+                // pmm
+            } else {
+                train_next(self);
+            }
             self->spawnflags &= ~TRAIN_START_ON;
             VectorClear(self->velocity);
             self->nextthink = 0;
@@ -2198,12 +2222,32 @@ again:
     self->spawnflags |= TRAIN_START_ON;
 
 //PGM
-    if (self->team) {
-        edict_t *e;
+    // Ground Zero's train carries its team: every member is moved by the
+    // train's own displacement and told to wait for it.  That is its maps'
+    // model -- one func_train and the pieces riding it -- and G_FixTeams makes
+    // that train the master.  On id's maps and the Reckoning's a team holding a
+    // train holds only trains, each on a path of its own, and a train made to
+    // carry the others drags them off their paths (q2dm3, ware2's escalator).
+    // So the team decides: a train whose team has another train in it moves
+    // alone, as id's do.
+    if (self->team && G_TeamTrainCount(self->team) == 1) {
+        edict_t *e, *prev;
         vec3_t  dir, dst;
 
         VectorSubtract(dest, self->s.origin, dir);
-        for (e = self->teamchain; e; e = e->teamchain) {
+        for (prev = self; (e = prev->teamchain) != NULL; prev = e) {
+            // G_FreeEdict takes nothing out of a team, so a member freed by any
+            // path but the two that unlink it (a killtarget, a func_explosive's
+            // own explosion) leaves its slot in the chain, and the slot is soon
+            // somebody else's -- a rocket, a gib -- which this would make a
+            // pusher on the train's path.  A freed slot no longer names the
+            // team's master and neither does a reused one, so the chain ends
+            // at the first member that does not; the members after it went
+            // with the slot's cleared link.
+            if (!e->inuse || e->teammaster != self->teammaster) {
+                prev->teamchain = NULL;
+                break;
+            }
             VectorAdd(dir, e->s.origin, dst);
             VectorCopy(e->s.origin, e->moveinfo.start_origin);
             VectorCopy(dst, e->moveinfo.end_origin);
@@ -2620,9 +2664,15 @@ void SP_func_door_secret(edict_t *ent)
         VectorMA(ent->s.origin, side * width, right, ent->pos1);
     VectorMA(ent->pos1, length, forward, ent->pos2);
 
+    // id's line here is func_door's: door_killed, which opens the door's team
+    // through func_door's mover.  A secret door has no team master unless it
+    // has a team, and is not that mover either way, so the shot that killed
+    // one -- `health` with a `targetname`, which no retail map has -- ended
+    // the server, in door_use(NULL) or on a NULL think.  Its own shot-open is
+    // door_secret_die.
     if (ent->health) {
         ent->takedamage = DAMAGE_YES;
-        ent->die = door_killed;
+        ent->die = door_secret_die;
         ent->max_health = ent->health;
     } else if (ent->targetname && ent->message) {
         gi.soundindex("misc/talk.wav");

@@ -22,12 +22,18 @@ brain's, not the convention's.  Risk 6 offers a `Test()` round trip at load, and
 none of the convention it is meant to prove.  A handshake that cannot fail is
 not a handshake.
 
-WHAT THIS CHECKS.  Both headers declare the ten `bot_import_t` slots and the
-twenty `bot_export_t` ones.  For each slot present in both, the return type and
-the parameter list must agree after normalisation -- and for `Trace`, so must
-the preprocessor condition that selects between the two spellings, character for
-character, because a 64-bit target inside one list and outside the other is a
-crash.
+WHAT THIS CHECKS.  The ten `bot_import_t` slots against the brain's import
+block (be_interface.h), and the twenty `bot_export_t` ones against the brain's
+published game/botlib.h, which is the layout be_interface.c fills.  Both tables
+are compared in ORDER, because a table of function pointers is indexed by
+position and two swapped slots with the right names are every call to either
+landing in the other.  Imports must agree on their parameter lists (four return
+types differ harmlessly: the brain returns an `int` the game ignores); exports
+on return types as well, because there the game reads what comes back.  And
+for `Trace`, the preprocessor condition that selects between the two
+spellings must agree character for character, because a 64-bit target inside
+one list and outside the other is a crash.  The export half was described here
+before it existed; it is the half that was missing.
 
 AND WHAT IT CHECKS SECOND: STRUCT SIZE, MEASURED.  Every struct in the contract
 crosses the boundary by pointer or by value, so both sides must agree on its
@@ -48,6 +54,16 @@ tool does not take those numbers on trust: it COMPILES a probe against the
 brain's own headers and compares what the brain's compiler says.  A number
 copied from a document goes stale; a number a compiler produced this minute does
 not.
+
+AND THIRD: THE STAGED WRITE IS THE ENGINE'S ENCODING.  The import redirection
+(bl_redirgi.c) stages every gi.Write* and replays it at the flush, so what
+reaches the wire is whatever the staging kept.  Gladiator's zeroed an
+out-of-range WriteByte or WriteShort where the engine keeps the low byte and
+the low sixteen bits, and target_laser_think's TE_LASER_SPARKS colour is
+exactly such a byte -- `s.skinnum`, four palette indices in an int -- so with
+bots loaded every laser's sparks went out as palette index 0.  This compiles
+the tree's own Bot_WriteByte and Bot_WriteShort against a stub that records
+what they stage and compares it with q2pro's MSG_WriteByte/MSG_WriteShort.
 
 WHAT IT STILL CANNOT SEE.  Member ORDER at equal size -- two structs of 84 bytes
 with two fields transposed pass -- and a slot the brain calls with the wrong
@@ -223,6 +239,111 @@ def brain_sizes(brain_root, names):
         shutil.rmtree(d, ignore_errors=True)
 
 
+STAGE_PROBE = r"""
+#include <stdio.h>
+#include <stdint.h>
+typedef enum { BW_CHAR, BW_BYTE, BW_SHORT } bot_writekind_t;
+static void BotStageInt(bot_writekind_t kind, int v)
+{
+    printf("%d %d\n", (int)kind, v);
+}
+@FUNCS@
+int main(void)
+{
+    static const int in[] = { @INPUTS@ };
+    unsigned i;
+
+    for (i = 0; i < sizeof(in) / sizeof(in[0]); i++) {
+        Bot_WriteByte(in[i]);
+        Bot_WriteShort(in[i]);
+    }
+    return 0;
+}
+"""
+
+# In range, at both edges, and out of it both ways -- the last is red
+# target_laser's `s.skinnum`, 0xf2f2f0f0.
+STAGE_INPUTS = (0, 1, 127, 128, 255, 256, -1, -128, 32767, 32768, -32768,
+                -32769, 70000, -70000, 0x7fffffff, -0x80000000,
+                0xf2f2f0f0 - (1 << 32))
+
+
+def c_function(text, name):
+    """The full text of `static void <name>(...) { ... }`, brace-matched."""
+    m = re.search(r'^static void %s\s*\([^)]*\)\s*\{' % re.escape(name),
+                  text, re.M)
+    if not m:
+        return None
+    depth, i = 0, m.end() - 1
+    while i < len(text):
+        if text[i] == '{':
+            depth += 1
+        elif text[i] == '}':
+            depth -= 1
+            if depth == 0:
+                return text[m.start():i + 1]
+        i += 1
+    return None
+
+
+def compare_staging(redir_text):
+    """Findings for the staged value of Bot_WriteByte / Bot_WriteShort."""
+    import shutil
+    import subprocess
+    import tempfile
+    funcs = [c_function(redir_text, n) for n in ('Bot_WriteByte',
+                                                 'Bot_WriteShort')]
+    if not all(funcs):
+        return ['bl_redirgi.c: Bot_WriteByte or Bot_WriteShort not found, so '
+                'the staged-write check has nothing to compile']
+    cc = shutil.which("cc") or shutil.which("gcc")
+    if not cc:
+        return ['SKIP: no host compiler for the staged-write probe']
+    src_text = (STAGE_PROBE.replace('@FUNCS@', '\n'.join(funcs))
+                .replace('@INPUTS@', ', '.join('(int)%dLL' % v
+                                               for v in STAGE_INPUTS)))
+    d = tempfile.mkdtemp()
+    try:
+        src = os.path.join(d, "stage.c")
+        exe = os.path.join(d, "stage")
+        with open(src, "w") as f:
+            f.write(src_text)
+        # A probe of OUR code that will not build is a finding, not a skip:
+        # the functions grew a dependency the stub does not carry, and a
+        # check that quietly stops running is the one that lets this back in.
+        r = subprocess.run([cc, "-std=gnu99", "-fwrapv", "-w", "-o", exe, src],
+                           capture_output=True, text=True)
+        if r.returncode or not os.path.exists(exe):
+            return ['the staged-write probe does not compile against its '
+                    'stub: %s' % (r.stderr.strip().split('\n') or ['?'])[0]]
+        r = subprocess.run([exe], capture_output=True, text=True)
+        if r.returncode:
+            return ['the staged-write probe exited %d' % r.returncode]
+    except OSError as e:
+        return ['SKIP: the staged-write probe could not run (%s)' % e]
+    finally:
+        shutil.rmtree(d, ignore_errors=True)
+
+    got = [tuple(int(x) for x in ln.split()) for ln in r.stdout.split('\n')
+           if ln.strip()]
+    out = []
+    if len(got) != 2 * len(STAGE_INPUTS):
+        return ['the staged-write probe staged %d value(s) for %d write(s)'
+                % (len(got), 2 * len(STAGE_INPUTS))]
+    for k, c in enumerate(STAGE_INPUTS):
+        for (kind, v), name, want in (
+                (got[2 * k], 'Bot_WriteByte', c & 0xff),
+                (got[2 * k + 1], 'Bot_WriteShort',
+                 ((c & 0xffff) ^ 0x8000) - 0x8000)):
+            if v != want:
+                out.append('%s(%d) staged %d; the engine writes %d '
+                           '(MSG_Write%s keeps the low %s)'
+                           % (name, c, v, want, name[9:],
+                              'byte' if name.endswith('Byte')
+                              else 'sixteen bits'))
+    return out
+
+
 def compare_sizes(ours_text, brain_root):
     """Our asserted sizes against what the brain's compiler measures."""
     want = {m.group(1): int(m.group(2), 0) for m in ASSERT.finditer(ours_text)}
@@ -266,6 +387,17 @@ def compare(ours_text, brain_text):
             bad.append('%s: arguments differ\n      ours : (%s)\n      brain: (%s)'
                        % (name, a[name][1], b[name][1]))
 
+    # ...and the ORDER, which is the ABI of a table of function pointers: the
+    # other side indexes it by position, so two slots swapped with the right
+    # names and the right arguments is every call to either one landing in
+    # the other.
+    oa = [n for n in a if n in b]
+    ob = [n for n in b if n in a]
+    if oa != ob:
+        bad.append('bot_import_t slots are in a different order\n'
+                   '      ours : %s\n      brain: %s'
+                   % (' '.join(oa), ' '.join(ob)))
+
     ga = guard_condition(ours_text, GUARDED_SLOT)
     gb = guard_condition(brain_text, GUARDED_SLOT)
     if ga is None or gb is None:
@@ -276,6 +408,42 @@ def compare(ours_text, brain_text):
                    '      ours : %s\n      brain: %s'
                    % (GUARDED_SLOT, ga or '(unguarded)', gb or '(unguarded)'))
     return bad
+
+
+def compare_exports(ours_text, brain_pub_text):
+    """bot_export_t against the brain's game/botlib.h, which is the layout
+    the brain fills (be_interface.c assigns `botexport.<slot>` by name) and the
+    game then reads by position.  Every slot, in order, with its return type
+    as well as its arguments: here the GAME reads what the brain returns, so a
+    `char *` against an `int` is a pointer truncated on every 64-bit target."""
+    a = slots(ours_text, 'BotVersion', 'Test')
+    b = slots(brain_pub_text, 'BotVersion', 'Test')
+    if not a:
+        return ['could not find bot_export_t in our botlib.h']
+    if not b:
+        return ["could not find bot_export_t in the brain's game/botlib.h"]
+    bad = []
+    if list(a) != list(b):
+        bad.append('bot_export_t slots differ in name or order\n'
+                   '      ours : %s\n      brain: %s'
+                   % (' '.join(a), ' '.join(b)))
+    for name in (n for n in a if n in b):
+        if a[name] != b[name]:
+            bad.append('%s: bot_export_t slot differs\n      ours : %s (%s)\n'
+                       '      brain: %s (%s)' % (name, a[name][0], a[name][1],
+                                                  b[name][0], b[name][1]))
+    return bad
+
+
+SELFTEST_EXPORTS = '''
+typedef struct bot_export_s {
+    char *(*BotVersion)(void);
+    int (*BotSetupLibrary)(void);
+    int (*BotLibVarSet)(char *var_name, char *value);
+    int (*BotAI)(int client, float thinktime);
+    int (*Test)(int parm0, char *parm1, vec3_t parm2, vec3_t parm3);
+} bot_export_t;
+'''
 
 
 SELFTEST_OURS = '''
@@ -345,9 +513,34 @@ def selftest():
                                'void (*FreeMemory)(void *ptr, int tag);'),
          SELFTEST_BRAIN, 1),
     ]
+    # The order, which is the ABI: two import slots swapped.
+    swapped = SELFTEST_OURS.replace(
+        '    int (*DebugLineCreate)(void);\n    void (*DebugLineDelete)(int line);\n',
+        '    void (*DebugLineDelete)(int line);\n    int (*DebugLineCreate)(void);\n')
+    cases.append(('import slots swapped', swapped, SELFTEST_BRAIN, 1))
     bad = 0
     for label, ours, brain, want in cases:
         got = compare(ours, brain)
+        fired = 1 if got else 0
+        ok = fired == want
+        print('  %-42s %s' % (label, 'ok' if ok else 'DID NOT FIRE'
+                              if want else 'FIRED ON CLEAN INPUT'))
+        for g in got:
+            print('      ' + g.replace('\n', '\n  '))
+        if not ok:
+            bad += 1
+
+    # ...and three for the EXPORT table, which was never compared at all.
+    n_exports = 0
+    for label, ours, want in (
+            ('exports unmutated', SELFTEST_EXPORTS, 0),
+            ('export slots swapped', SELFTEST_EXPORTS.replace(
+                '    int (*BotSetupLibrary)(void);\n    int (*BotLibVarSet)(char *var_name, char *value);\n',
+                '    int (*BotLibVarSet)(char *var_name, char *value);\n    int (*BotSetupLibrary)(void);\n'), 1),
+            ('export return type drift', SELFTEST_EXPORTS.replace(
+                'char *(*BotVersion)(void);', 'int (*BotVersion)(void);'), 1)):
+        n_exports += 1
+        got = compare_exports(ours, SELFTEST_EXPORTS)
         fired = 1 if got else 0
         ok = fired == want
         print('  %-42s %s' % (label, 'ok' if ok else 'DID NOT FIRE'
@@ -363,7 +556,7 @@ def selftest():
     # `qboolean` -> `bool` sweep produced.  Skipped, out loud, when the brain
     # is not beside the repository -- a control that quietly does not run is
     # worse than no control.
-    n = len(cases)
+    n = len(cases) + n_exports
     real = os.path.join(REPO, 'src/bot/botlib.h')
     root = find_brain()
     if os.path.exists(real) and brain_sizes(root, ['bsp_trace_t']):
@@ -387,6 +580,29 @@ def selftest():
     else:
         print('  %-42s %s' % ('the two size controls', 'SKIPPED: no brain'))
 
+    # ...and two for the staged writes: the tree's own text is clean, and
+    # Gladiator's zeroing of an out-of-range byte -- the defect -- is reported.
+    redir = read(os.path.join(REPO, 'src/bot/bl_redirgi.c'))
+    zeroed = redir.replace('BotStageInt(BW_BYTE, c & 0xff);',
+                           'BotStageInt(BW_BYTE, (c < 0 || c > 255) ? 0 : c);')
+    for label, text, want in (('staged writes unmutated', redir, 0),
+                              ("Gladiator's zeroed byte", zeroed, 1)):
+        n += 1
+        if want and zeroed == redir:
+            print('  %-42s %s' % (label, 'ROTTED: the mutation no longer '
+                                  'applies'))
+            bad += 1
+            continue
+        got = [g for g in compare_staging(text) if not g.startswith('SKIP: ')]
+        fired = 1 if got else 0
+        ok = fired == want
+        print('  %-42s %s' % (label, 'ok' if ok else 'DID NOT FIRE'
+                              if want else 'FIRED ON CLEAN INPUT'))
+        for g in got[:3]:
+            print('      ' + g)
+        if not ok:
+            bad += 1
+
     print('botabi.py --selftest: %d control(s), %d wrong' % (n, bad))
     return 1 if bad else 0
 
@@ -401,21 +617,41 @@ def main():
     if a.selftest:
         return selftest()
 
+    # Needs no brain: it is our own redirection measured against the engine.
+    redir = os.path.join(REPO, 'src/bot/bl_redirgi.c')
+    staging = compare_staging(read(redir))
+    for x in staging:
+        print('  %s %s' % ('--' if x.startswith('SKIP: ') else '!!',
+                           x[6:] if x.startswith('SKIP: ') else x))
+    staged_bad = [x for x in staging if not x.startswith('SKIP: ')]
+    if not staging:
+        print('botabi.py: Bot_WriteByte and Bot_WriteShort stage what the '
+              'engine would write, for %d value(s)' % len(STAGE_INPUTS))
+
     brain_hdr = os.path.join(a.brain, 'botlib', 'be_interface.h')
     if not os.path.exists(brain_hdr):
         # A checked-out brain is a convenience, not a dependency -- the same
         # rule audit.py applies to q2pro.  Absent means skipped and said so,
         # never a silent pass.
-        print('botabi.py: %s absent, so there is nothing to compare the '
-              'contract against (git submodule update --init '
-              'vendor/gladiator-bot-restored)' % brain_hdr)
-        return 0
+        # The SKIP form is the one tools/audit.py lists as "not applicable";
+        # this prose used to exit 0 and be counted as a clean comparison.
+        print('botabi.py: SKIP -- %s is absent, so the contract has nothing '
+              'to be compared against (git submodule update --init '
+              'vendor/gladiator-bot-restored); the staged-write half ran'
+              % brain_hdr)
+        return 1 if staged_bad else 0
     if not os.path.exists(a.ours):
         print('botabi.py: %s absent' % a.ours)
         return 1
 
     ours = read(a.ours)
     bad = compare(ours, read(brain_hdr))
+    pub_hdr = os.path.join(a.brain, 'game', 'botlib.h')
+    if os.path.exists(pub_hdr):
+        bad += compare_exports(ours, read(pub_hdr))
+    else:
+        bad.append('%s absent: the export table has nothing to be compared '
+                   'against' % pub_hdr)
     sizes = compare_sizes(ours, a.brain)
     skips = [x for x in sizes if x.startswith('SKIP: ')]
     bad += [x for x in sizes if not x.startswith('SKIP: ')]
@@ -425,10 +661,10 @@ def main():
         print('  !! ' + b)
     for sk in skips:
         print('  -- ' + sk[6:])
-    if bad:
+    if bad or staged_bad:
         return 1
-    print('  the two sides agree on every slot both declare, on the condition '
-          'that selects Trace%s'
+    print('  the two sides agree on every slot both tables declare and on their '
+          'order, on the condition that selects Trace%s'
           % ('' if skips else ', and on the size of every contract struct'))
     return 0
 

@@ -47,6 +47,23 @@ BANNED = {
     'CreateProcessA': 'starts a process', 'CreateProcessW': 'starts a process',
     'ShellExecuteA': 'starts a process', 'ShellExecuteW': 'starts a process',
     'WinExec': 'starts a process',
+    # ...and the spellings a Windows port actually writes: the unsuffixed
+    # macros, which expand to one of the above AFTER this scan has read the
+    # text, and the CRT's underscore family.  `_popen` is MinGW's popen and
+    # `CreateProcess(` the macro; both were missed.
+    'CreateProcess': 'starts a process',
+    'CreateProcessAsUserA': 'starts a process',
+    'CreateProcessAsUserW': 'starts a process',
+    'ShellExecute': 'starts a process', 'ShellExecuteEx': 'starts a process',
+    'ShellExecuteExA': 'starts a process', 'ShellExecuteExW': 'starts a process',
+    '_popen': 'runs a shell command', '_wpopen': 'runs a shell command',
+    '_wsystem': 'runs a shell command',
+    '_execl': 'replaces the process image', '_execv': 'replaces the process image',
+    '_execlp': 'replaces the process image', '_execvp': 'replaces the process image',
+    '_spawnl': 'starts a process', '_spawnlp': 'starts a process',
+    '_spawnv': 'starts a process', '_spawnvp': 'starts a process',
+    'spawnl': 'starts a process', 'spawnlp': 'starts a process',
+    'spawnv': 'starts a process', 'spawnvp': 'starts a process',
     # network
     'socket': 'opens a socket', 'socketpair': 'opens a socket',
     'connect': 'connects a socket', 'bind': 'binds a socket',
@@ -58,10 +75,18 @@ BANNED = {
     'inet_addr': 'parses an address for a socket call',
     'inet_aton': 'parses an address for a socket call',
     'WSAStartup': 'initialises winsock',
+    'WSASocketA': 'opens a socket', 'WSASocketW': 'opens a socket',
+    'WSAConnect': 'connects a socket',
+    'gethostbyaddr': 'resolves a host', 'getnameinfo': 'resolves a host',
+    'inet_pton': 'parses an address for a socket call',
     # and the one that turns any of the above into a dead server
     'exit': 'ends the SERVER process from inside the game library',
     '_exit': 'ends the SERVER process from inside the game library',
     'abort': 'ends the SERVER process from inside the game library',
+    '_Exit': 'ends the SERVER process from inside the game library',
+    'quick_exit': 'ends the SERVER process from inside the game library',
+    'ExitProcess': 'ends the SERVER process from inside the game library',
+    'TerminateProcess': 'ends a process from inside the game library',
 }
 
 CALL = re.compile(r'(?<![\w.>$])(' + '|'.join(sorted(BANNED, key=len, reverse=True)) + r')\s*\(')
@@ -112,6 +137,10 @@ SELFTEST_MUTANTS = [
     ('gethostbyname()', 'void f(char *n) { gethostbyname(n); }'),
     ('exit() from a game library', 'void f(void) { exit(1); }'),
     ('CreateProcessA()', 'void f(void) { CreateProcessA(0,0,0,0,0,0,0,0,0,0); }'),
+    # the two spellings the list did not have
+    ('_popen()', 'void f(void) { FILE *p = _popen("ls", "r"); (void)p; }'),
+    ('CreateProcess(), the macro',
+     'void f(void) { CreateProcess(0,0,0,0,0,0,0,0,0,0); }'),
 ]
 
 

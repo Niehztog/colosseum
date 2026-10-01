@@ -7,8 +7,11 @@ way a warning does."
 
 It is more than four now.  Those four were the imported harness's; every
 phase since has added the check its own defect asked for, and each is registered
-below with the requirement it discharges.  `auditsave` is the one that left:
-`dsweep.py` asks its question better.  The count is not fixed here and is not
+below with the requirement it discharges.  `auditsave` and `keycontract` are
+the two that left: `dsweep.py` asks auditsave's question better, and
+keycontract read statusbar literals and `STAT_` defines this tree no longer
+has, so it read nothing and passed -- it was deleted, and its slot questions
+are `slotkind.py`'s and its type ones `dsweep.py`'s.  The count is not fixed here and is not
 worth publishing from memory -- this driver prints it, and a document that wants
 the figure should quote that line.
 
@@ -42,7 +45,6 @@ TOOLS = os.path.join(REPO, 'tools')
 # in "0 kind mismatch(es)".  Detection is therefore per tool, anchored on the
 # marker each one actually uses for a finding rather than on its prose.
 #
-#   keycontract  prefixes each finding with '!!'
 #   slotkind     prefixes each finding with '!!'
 #   auditems     prints 'TOTAL differing fields across shared items: N'
 #
@@ -106,7 +108,6 @@ PARSERS = {
     'nullattacker.py': _bang,
     'botabi.py': _bang,
     'dsweep.py': _bang,
-    'keycontract.py': _bang,
     'slotkind.py': _bang,
     'dupvalue.py': _bang,
     'itemnames.py': _bang,
@@ -117,6 +118,7 @@ PARSERS = {
     'counts.py': _bang,
     'assets.py': _bang,
     'engineapi.py': _bang,
+    'cfgcvars.py': _bang,
     'auditems.py': _auditems,
 }
 
@@ -155,8 +157,6 @@ def main():
     dflags = [f'--donor={l}={p}' for l, p in donors]
 
     # --- single-tree audits: meaningful with no donor present ------------
-    # keycontract: statusbar slot vs STAT_ macro vs spawn key vs descriptor type
-    results.append(run('keycontract.py', [f'colosseum={tree}'], 'keycontract'))
     # slotkind: does a bar read a slot as a kind the code does not write, and
     # was the slot available to be claimed at all?
     results.append(run('slotkind.py', [f'colosseum={tree}'], 'slotkind'))
@@ -167,6 +167,8 @@ def main():
     # gates: every ruleset decision goes through the dispatch or a predicate,
     # and the monster-suppression idiom has not come back.
     results.append(run('gates.py', ['--tree', tree], 'gates'))
+    results.append(run('gates.py', ['--selftest', '--tree', tree],
+                       'gates/controls'))
     # arenaspawn: fighter-only ranking must still reject an occupied,
     # same-arena solid pad before either arena selector accepts it.
     results.append(run('arenaspawn.py', ['--tree', tree], 'arenaspawn'))
@@ -270,7 +272,7 @@ def main():
     # figure in a document with no build check behind it is the
     # "indicative only" no matter which script first produced it.  --duplicates
     # exits non-zero on a real collision, which is what makes it an audit.
-    results.append(run('counts.py', ['--tree', tree, '--duplicates'], 'counts'))
+    results.append(run('counts.py', ['--tree', tree, '--duplicates', '--docs'], 'counts'))
     results.append(run('counts.py', ['--selftest'], 'counts/controls'))
     # assets: does every literal .md2/.sp2/.wav name a file some donor actually
     # ships?  itemnames.py asks this of the itemlist; this asks it of the
@@ -329,6 +331,11 @@ def main():
     # from inc/shared/gameext.h, the call sites from src/.
     results.append(run('engineapi.py', ['--tree', tree], 'engineapi'))
     results.append(run('engineapi.py', ['--selftest'], 'engineapi/controls'))
+    # The shipped config set against the tree: a `set` of a name nothing
+    # registers is silent at run time, which is how the OSP configs came to
+    # set a stats switch that does not exist (tools/cfgcvars.py).
+    results.append(run('cfgcvars.py', ['--tree', tree], 'cfgcvars'))
+    results.append(run('cfgcvars.py', ['--selftest'], 'cfgcvars/controls'))
 
     # --- comparative audits: need a donor ---------------------------------
     # dsweep, not auditsave: both implement "a persistent field with
@@ -338,6 +345,10 @@ def main():
     # struct bodies and carries its own extractor self-test.  Where a
     # tool and a reviewer disagree, fix the tool.
     results.append(run('dsweep.py', [], 'dsweep/descriptors'))
+    # ...whose first half is the tree's own tables -- every row names a
+    # member, with the macro its type needs, once (R-SAVE-3a) -- and needs no
+    # donor, so its controls always run.
+    results.append(run('dsweep.py', ['--selftest'], 'dsweep/controls'))
     if donors:
         for label, path in donors:
             # This compares against q2pro's baseq2 entries, not
@@ -394,10 +405,27 @@ def main():
         # instead of saying so until the guard in its `__main__` was written,
         # and the traceback arrived here as a finding: a missing input read as
         # a defect in the tree, and every release job failed on it.
-        elif 'dsweep.py: SKIP' in r['out']:
+        #
+        # Only the donor half skips: the tree's descriptor check reads this
+        # repository alone and runs first, so a finding from it is a finding
+        # whatever the workspace holds.
+        elif 'dsweep.py: SKIP' in r['out'] and not r['hits']:
             results.remove(r)
-            vacuous.append(r['out'].strip().replace('dsweep.py: SKIP -- ',
-                                                    'dsweep: '))
+            skip = [l for l in r['out'].split('\n')
+                    if l.startswith('dsweep.py: SKIP')][0]
+            vacuous.append(skip.strip().replace('dsweep.py: SKIP -- ',
+                                                'dsweep: '))
+        # ...and the rule itself, for every tool rather than per tool: a
+        # clean run whose output says `<tool>.py: SKIP -- <why>` compared
+        # nothing, and is listed as such.  It was per tool, so lostref and
+        # botabi -- which printed "skipped" in prose and exited 0 -- were
+        # counted as clean on every machine without their reference trees,
+        # which is every CI runner.
+        elif not r['hits'] and not r['broken'] and \
+                re.search(r'^\S+\.py: SKIP -- ', r['out'], re.M):
+            results.remove(r)
+            skip = re.search(r'^(\S+)\.py: SKIP -- (.*)$', r['out'], re.M)
+            vacuous.append('%s: %s' % (r['label'], skip.group(2).strip()))
 
     # --- report -----------------------------------------------------------
     failed = [r for r in results if r['hits'] or r['broken']]

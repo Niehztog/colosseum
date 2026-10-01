@@ -413,8 +413,9 @@ int AddRandomBot(edict_t *ent)
             if (!(cl_ent->flags & FL_BOT)) continue;
             if (!strcmp(bot->name, cl_ent->client->pers.netname)) break;
         } //end for
-        //if the bot is NOT already in the game
-        if (i >= game.maxclients)
+        //if the bot is NOT already in the game -- nor queued for it, which is
+        //where the ones a counted `addrandom` asked for this frame still are
+        if (i >= game.maxclients && !BotNameQueued(bot->name))
         {
             if (choice <= 0) break;
         } //end if
@@ -422,14 +423,20 @@ int AddRandomBot(edict_t *ent)
         bot = bot->next;
         if (!bot) bot = botlist;
     } //end for
-    // The ORIGINAL count is tested first, and both paths reach one shared
-    // BotServerCommand call.
-    if (nbots > 0 && bot)
+    // Two laps from a start inside the list visit every bot, so a walk that
+    // ran out without settling means every configured bot is already in the
+    // game.  Gladiator refuses there (gladq2_src bl_botcfg.c: `if (numbots >
+    // 0)`, else "no bots to add"), and the refusal is load-bearing: the
+    // cursor's bot is one already playing, BotUniqueName refuses its name
+    // outside tourney, and a `true` here told the fill a bot was coming -- so
+    // its roster-exhausted clamp never fired and it asked again every check.
+    if (numbots > 0 || G_IsOspRuleset())
     {
         // Block 8 of seventeen: when the walk ran out of laps without
-        // settling, tourney re-picks at random instead of taking whatever the
-        // cursor landed on.  Only under tourney -- it changes which bot joins.
-        if (G_IsOspRuleset() && numbots <= 0)
+        // settling, tourney re-picks at random instead of refusing, and
+        // BotUniqueName suffixes the name.  Only under tourney -- it seats a
+        // second copy of a character.
+        if (numbots <= 0)
         {
             choice = frand() * nbots;
             for (i = 0; i < choice; i++)
@@ -442,7 +449,9 @@ int AddRandomBot(edict_t *ent)
                          bot->charname, NULL);
         return true;
     } //end if
-    if (ent) gi.cprintf(ent, PRINT_HIGH, "No configured bots to add!\n");
-    else gi.bprintf(PRINT_HIGH, "No configured bots to add!\n");
+    // To the console, as Gladiator does: the fill reaches this with no
+    // client, and every player need not hear that the roster ran out.
+    if (ent) gi.cprintf(ent, PRINT_HIGH, "Every configured bot is already in the game.\n");
+    else gi.dprintf("Every configured bot is already in the game.\n");
     return false;
 } //end of the function AddRandomBot

@@ -41,6 +41,8 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 //     two seconds of their input; with maxclients at 256 that is a queue the
 //     client controls the length of.  Off, nothing is allocated at all.
 //   * the pool is capped, and says so once.  The donor extended it forever.
+//     A command the full pool cannot hold is not dropped: the store says it
+//     was not queued and ClientThink runs it at once, undelayed.
 //   * `Lag_ForgetGameMemory()`, because the pool is TAG_GAME and `ReadGame`
 //     frees every TAG_GAME block in the library before re-establishing the two
 //     arrays it knows about.  A third owner that
@@ -188,13 +190,16 @@ void Lag_BeginGame(edict_t *ent)
     memset(&clientlag[client], 0, sizeof(clientlag_t));
 }
 
-void Lag_StoreClientInput(edict_t *ent, usercmd_t *ucmd, vec3_t origin, vec3_t v_angle)
+// False when the command was not queued, and then the caller runs it now: a
+// command dropped here was a shot that never happened, where the full-pool
+// warning promises only that it is not delayed.
+bool Lag_StoreClientInput(edict_t *ent, usercmd_t *ucmd, vec3_t origin, vec3_t v_angle)
 {
     delayeducmd_t *ducmd;
     int client = Lag_ClientIndex(ent);
 
     if (client < 0)
-        return;
+        return false;
 
     //update the absolute client time
     clientlag[client].msec += ucmd->msec;
@@ -217,7 +222,7 @@ void Lag_StoreClientInput(edict_t *ent, usercmd_t *ucmd, vec3_t origin, vec3_t v
 
     ducmd = Lag_AllocDelayeducmd();
     if (!ducmd)
-        return;
+        return false;
 
     //copy the ucmd
     memcpy(&ducmd->ucmd, ucmd, sizeof(usercmd_t));
@@ -232,6 +237,7 @@ void Lag_StoreClientInput(edict_t *ent, usercmd_t *ucmd, vec3_t origin, vec3_t v
     else
         clientlag[client].firstucmd = ducmd;
     clientlag[client].lastucmd = ducmd;
+    return true;
 }
 
 bool Lag_GetClientInput(edict_t *ent, usercmd_t *laggeducmd, vec3_t origin, vec3_t v_angle)

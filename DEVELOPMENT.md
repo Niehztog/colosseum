@@ -75,7 +75,7 @@ A second ABI also earns its keep as a check. `-Warray-bounds` at `API=old -O2` r
 
 ## Building in-tree under Q2PRO
 
-`meson.build` mirrors `q2pro/src/ctf/meson.build`: drop this tree at `q2pro/src/colosseum` and it builds through the same mission-pack mechanism, sharing `game_shared_src` and `engine_inc` rather than compiling its own copies of `shared.c` and `m_flash.c`.
+`meson.build` mirrors `q2pro/src/ctf/meson.build`: drop this tree at `q2pro/src/colosseum` and it builds through the same mission-pack mechanism, sharing `game_shared_src` and `engine_inc` rather than compiling its own copies of `shared.c` and `m_flash.c`. That mechanism is NOT upstream q2pro's: the `mission-packs` option and the `game_shared_src` and `engine_inc` variables this file uses come from the `feature/mission-packs` branch of the Niehztog/q2pro fork (added 2026-08-18). Official `q2pro/q2pro` defines `game_deps` and `dll_link_args` and not those three, so against it the in-tree build does not configure. The library itself does not depend on the fork: the `Makefile` builds it standalone, for official Q2PRO and for the old-API engines.
 
 **The standalone `Makefile` stays primary** - it is the one that covers all five build targets, both settings of the game ABI, and the contract audits. The two file lists must stay equal, and the header of `meson.build` carries the `diff` that proves it.
 
@@ -113,7 +113,7 @@ The two PE artifacts are checked for what they **import** the moment they are li
 
 ## The checks
 
-The contract audits run as part of the build, not on request, and a finding fails it the way a warning does. Release packages are built by that same Makefile, so a finding stops a release too - and that is rehearsable without cutting one: `gh workflow run release.yml -f version=<name> --ref <ref>` runs every build and packaging job of `.github/workflows/release.yml` and leaves the seven packages as run artifacts, because the publish job is conditioned on the ref being a tag. Nothing is published and no tag is created; `gh run watch` follows it. Most of them ship a positive control that makes them fail, and each control is a run of its own. **`audit.py` prints the count when it finishes and that is the figure to quote** - the figures that used to be written down here had drifted by the time anything re-read them, so they are gone rather than corrected into the next stale pair. Section 9 of `SPECS.md` says what each check is for.
+The contract audits run as part of the build, not on request, and a finding fails it the way a warning does. Release packages are built by that same Makefile, so a finding stops a release too - and that is rehearsable without cutting one: `gh workflow run release.yml -f version=<name> --ref <ref>` runs every build and packaging job of `.github/workflows/release.yml` and leaves the seven packages as run artifacts, because the publish job runs only for a pushed tag -- a dispatch run on a tag ref included. Nothing is published and no tag is created; `gh run watch` follows it. Most of them ship a positive control that makes them fail, and each control is a run of its own. **`audit.py` prints the count when it finishes and that is the figure to quote** - the figures that used to be written down here had drifted by the time anything re-read them, so they are gone rather than corrected into the next stale pair. Section 9 of `SPECS.md` says what each check is for.
 
 `make check` is static. Six scripts drive a real `q2proded`, and none of them is part of the build because each needs a built engine, game data and a minute or more -- the retail paks locally, or for three of them the free data CI runs on (below). **Every one of them prints its own total when it finishes, and that is the figure to quote.**
 
@@ -146,8 +146,11 @@ All of them read the same environment, all defaulted:
 | `Q2DATA` | `/usr/share/games/quake2/baseq2` | retail baseq2 paks |
 | `CTFDATA` | `/usr/share/games/quake2/ctf` | Threewave paks |
 | `XATRIXDATA`, `ROGUEDATA` | beside `Q2DATA` | mission-pack data, for the layer scenarios |
-| `GLADDIR` | `vendor/gladiator-bot-restored`, else a sibling checkout | the botlib, its assets and its bot list |
+| `ARENADATA` | `/usr/share/games/quake2/arena` | Rocket Arena 2's paks, for the scenarios on `ra2map*` |
+| `GLADDIR` | `vendor/gladiator-bot-restored`, else a sibling checkout | the botlib's assets -- `pak7.pak`, the bot list, the navigation meshes, which fixtures COPY because the botlib writes a mesh back |
 | `LIB` | `release/game<cpu>.so` | the library under test |
+| `BRAIN` | `gladiator.so` beside `LIB`, else `$GLADDIR/release/` | the botlib under test: the Makefile builds one beside every library it builds, while `$GLADDIR/release/` holds whichever target it built last |
+| `PLAYTEST_DIR` | `$TMPDIR/q2playtest` | the harness's scratch installs, and the scenario binaries `playtest.sh` builds |
 | `SPMAP` | `base1` | the campaign map `sp` boots on. `base1` is retail `pak0`'s; id's free demo carries the same level as `demo1` |
 
 `tools/playtest.sh` drives the Go harness in `tools/playtest-harness/`, which ships more scenarios than the six scripts run; `docs/playtest.md` lists them. One thing they need that this project does not carry is the Rocket Arena map pack: the `ra2map*` maps and the team skins are RA2's own distribution, and a scenario that wants one says so rather than failing silently. **OSP Tourney is not in that category**: it ships no assets at all, every path its code names is baseq2's, and the gamedir its scenarios run in - `colosseum`, the same one every other scenario uses - needs nothing in it but the library.
@@ -157,11 +160,11 @@ All of them read the same environment, all defaulted:
 
 ### Continuous integration
 
-`.github/workflows/ci.yml` runs on every push to `main` and every pull request, on Linux runners only:
+`.github/workflows/ci.yml` runs on every push to `main` and every pull request, on Linux runners only -- x86-64, and one arm64 leg:
 
 | job | what it asks |
 |---|---|
-| `build` | every target the release builds -- native with **gcc and clang**, `linux32`, `win32`, `win64` -- each under both game ABIs. Every leg runs `make check` itself, with the submodule checked out so `botabi` compares for real |
+| `build` | every Linux and Windows target the release builds -- native with **gcc and clang**, native **arm64** on an arm64 runner, `linux32`, `win32`, `win64` -- each under both game ABIs. Every leg runs `make check` itself, with the submodule checked out so `botabi` compares for real |
 | `tools` | the play-test harness builds and vets; every tracked shell script parses, by its own shebang; the carried patches apply to exactly the commits `server/Dockerfile` pins |
 | `server-checks` | `bootmatrix.sh`, `smoke.sh`, both of their `--control` runs, and the `playtest.sh` battery, against stock q2pro at the image's pin |
 

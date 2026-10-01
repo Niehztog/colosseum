@@ -87,9 +87,14 @@ static bool StringToFilter(char *s, ipfilter_t *f)
             return false;
         }
 
+        // Bounded: the address is console text, and a long enough run of
+        // digits wrote past `num`.  Digits past the buffer are read and
+        // dropped, so the octet boundaries stay where they were.
         j = 0;
         while (*s >= '0' && *s <= '9') {
-            num[j++] = *s++;
+            if (j < (int)sizeof(num) - 1)
+                num[j++] = *s;
+            s++;
         }
         num[j] = 0;
         b.bytes[i] = Q_atoi(num);
@@ -234,28 +239,24 @@ static void SVCmd_WriteIP_f(void)
 {
     FILE    *f;
     char    name[MAX_OSPATH];
-    size_t  len;
     union {
         byte    b[4];
         unsigned u32;
     } b;
     int     i;
-    cvar_t  *game;
 
-    game = gi.cvar("game", "", 0);
-
-    if (!*game->string)
-        len = Q_snprintf(name, sizeof(name), "%s/listip.cfg", GAMEVERSION);
-    else
-        len = Q_snprintf(name, sizeof(name), "%s/listip.cfg", game->string);
-
-    if (len >= sizeof(name)) {
+    // Under homedir or basedir, like every other writer (R-ENG-4).  The
+    // spine's "<game>/listip.cfg" resolved against the server's working
+    // directory, so a server started from anywhere but the installation wrote
+    // the ban list where `exec listip.cfg` does not look.
+    if (!G_FsGamePath(name, sizeof(name), "listip.cfg")) {
         gi.cprintf(NULL, PRINT_HIGH, "File name too long\n");
         return;
     }
 
     gi.cprintf(NULL, PRINT_HIGH, "Writing %s.\n", name);
 
+    G_FsCreatePath(name);
     f = fopen(name, "wb");
     if (!f) {
         gi.cprintf(NULL, PRINT_HIGH, "Couldn't open %s\n", name);

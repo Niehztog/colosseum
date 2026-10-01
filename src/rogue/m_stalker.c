@@ -673,24 +673,30 @@ static int stalker_check_lz(edict_t *self, edict_t *target, vec3_t dest)
 
     // check under the player's four corners
     // if they're not solid, bail.
-    jumpLZ[0] = self->enemy->mins[0];
-    jumpLZ[1] = self->enemy->mins[1];
-    jumpLZ[2] = self->enemy->mins[2] - 0.25f;
+    //
+    // In the world, from the linked box.  Ground Zero read `mins` and `maxs`,
+    // which are relative to the origin, so the four probes landed around
+    // (+-16, +-16, -24) on the map whoever the target was, and whether a
+    // stalker would pounce depended on what the map had there; q2pro and
+    // Gladiator keep that.
+    jumpLZ[0] = target->absmin[0];
+    jumpLZ[1] = target->absmin[1];
+    jumpLZ[2] = target->absmin[2] - 0.25f;
     if (!(gi.pointcontents(jumpLZ) & MASK_SOLID))
         return false;
 
-    jumpLZ[0] = self->enemy->maxs[0];
-    jumpLZ[1] = self->enemy->mins[1];
+    jumpLZ[0] = target->absmax[0];
+    jumpLZ[1] = target->absmin[1];
     if (!(gi.pointcontents(jumpLZ) & MASK_SOLID))
         return false;
 
-    jumpLZ[0] = self->enemy->maxs[0];
-    jumpLZ[1] = self->enemy->maxs[1];
+    jumpLZ[0] = target->absmax[0];
+    jumpLZ[1] = target->absmax[1];
     if (!(gi.pointcontents(jumpLZ) & MASK_SOLID))
         return false;
 
-    jumpLZ[0] = self->enemy->mins[0];
-    jumpLZ[1] = self->enemy->maxs[1];
+    jumpLZ[0] = target->absmin[0];
+    jumpLZ[1] = target->absmax[1];
     if (!(gi.pointcontents(jumpLZ) & MASK_SOLID))
         return false;
 
@@ -1083,6 +1089,19 @@ void stalker_die(edict_t *self, edict_t *inflictor, edict_t *attacker, int damag
 // SPAWN
 // ******************
 
+// Registered with G_AddPrecache, for the sound indices this file keeps (see
+// SP_monster_carrier), and run by both Widows' precaches for the stalkers they
+// spawn (see CarrierPrecache).
+void stalker_precache(void)
+{
+    sound_pain = gi.soundindex("stalker/pain.wav");
+    sound_die = gi.soundindex("stalker/death.wav");
+    sound_sight = gi.soundindex("stalker/sight.wav");
+    sound_punch_hit1 = gi.soundindex("stalker/melee1.wav");
+    sound_punch_hit2 = gi.soundindex("stalker/melee2.wav");
+    sound_idle = gi.soundindex("stalker/idle.wav");
+}
+
 /*QUAKED monster_stalker (1 .5 0) (-28 -28 -18) (28 28 18) Ambush Trigger_Spawn Sight OnRoof
 Spider Monster
 
@@ -1096,12 +1115,7 @@ void SP_monster_stalker(edict_t *self)
         return;
     }
 
-    sound_pain = gi.soundindex("stalker/pain.wav");
-    sound_die = gi.soundindex("stalker/death.wav");
-    sound_sight = gi.soundindex("stalker/sight.wav");
-    sound_punch_hit1 = gi.soundindex("stalker/melee1.wav");
-    sound_punch_hit2 = gi.soundindex("stalker/melee2.wav");
-    sound_idle = gi.soundindex("stalker/idle.wav");
+    G_AddPrecache(stalker_precache);
 
     // PMM - precache bolt2
     gi.modelindex("models/proj/laser2/tris.md2");

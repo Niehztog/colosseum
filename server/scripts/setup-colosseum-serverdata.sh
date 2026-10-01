@@ -182,7 +182,11 @@ if [ -f "$ARENA/test-server.cfg" ]; then
     skip "arena/test-server.cfg already present, keeping it"
 else
     log "writing arena/test-server.cfg (fresh rcon password)"
-    cat > "$ARENA/test-server.cfg" <<EOF
+    # QUOTED, so nothing below is expanded: the comments are full of
+    # backticked names, and an unquoted heredoc RAN each one as a command
+    # substitution -- `set` among them, which wrote every shell variable into
+    # this file.  The one generated value goes in through the placeholder.
+    sed "s/@RCON_PASSWORD@/$(newpass)/" > "$ARENA/test-server.cfg" <<'EOF'
 // Non-public Colosseum test server -- Rocket Arena 2 ruleset.
 // Stands in for an RA2 server, which colosseum's `arena` ruleset replaces.
 //
@@ -200,7 +204,7 @@ set public 0
 set hostname "Colosseum TEST - Rocket Arena 2 [non-public]"
 set password ""
 // Generated per gamedir; see newpass() above for why it is not carried in.
-set rcon_password "$(newpass)"
+set rcon_password "@RCON_PASSWORD@"
 
 // Latched, read at map load, and the ceiling on everything else. Match it to
 // the server this stands in for.
@@ -310,7 +314,11 @@ if [ -f "$DM/test-server.cfg" ]; then
     skip "xatrix/test-server.cfg already present, keeping it"
 else
     log "writing xatrix/test-server.cfg (fresh rcon password)"
-    cat > "$DM/test-server.cfg" <<EOF
+    # QUOTED, so nothing below is expanded: the comments are full of
+    # backticked names, and an unquoted heredoc RAN each one as a command
+    # substitution -- `set` among them, which wrote every shell variable into
+    # this file.  The one generated value goes in through the placeholder.
+    sed "s/@RCON_PASSWORD@/$(newpass)/" > "$DM/test-server.cfg" <<'EOF'
 // Non-public Colosseum test server -- free-for-all deathmatch on The
 // Reckoning's content.  Stands in for an OpenFFA server, which colosseum's
 // `dm` ruleset plus the xatrix content layer replaces.
@@ -326,7 +334,7 @@ set public 0
 set hostname "Colosseum TEST - Xatrix DM [non-public]"
 set password ""
 // Generated per gamedir, so this one and the arena gamedir's differ.
-set rcon_password "$(newpass)"
+set rcon_password "@RCON_PASSWORD@"
 
 // Latched. Match it to the server this stands in for.
 set maxclients 16

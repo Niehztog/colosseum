@@ -1,3 +1,8 @@
+// The Gladiator observer, from gladiator-bot-restored@1cdbba2's game tree (the
+// submodule's pin).  Unlike the menu files beside it this one has no source
+// release behind it: the reconstruction is from the 1999 binary, the public
+// Gladiator source having omitted the file.  SPECS.md section 4.1 records its
+// licence position.
 //===========================================================================
 //
 // Name:				p_observer.c
@@ -369,7 +374,11 @@ edict_t *Cam_Cycle(edict_t *prev)
         e = &g_edicts[i + 1];
         if (e->inuse) {
             if (!(e->flags & FL_OBSERVER)) {
-                if (Q_stricmp(e->classname, "player") == 0)
+                /* Not in either original.  An in-use client edict has carried
+                   no classname -- BotSpawn's, until its brain was ready -- and
+                   Q_stricmp has no NULL test, so the autocam crashed on one.
+                   BotSpawn names it now; this keeps the walk safe regardless. */
+                if (e->classname && Q_stricmp(e->classname, "player") == 0)
                     return e;
             }
         }
@@ -1887,6 +1896,11 @@ void ClientCycleCamera(edict_t *ent)
 
     if (!(ent->flags & FL_OBSERVER))
         ClientToggleObserver(ent);
+    /* Not in either original: the toggle can refuse -- dead, in the
+       campaign -- and a camera verb then has no observer to drive.  The same
+       line in setcam, autocam and chasecam. */
+    if (!(ent->flags & FL_OBSERVER))
+        return;
 
     if (ent->client->camera.flags & CAMFL_AUTOCAM) {
         gi.cprintf(ent, PRINT_HIGH, "cyclecam not available in autocam mode\n");
@@ -1934,6 +1948,8 @@ void ClientSetCamera(edict_t *ent)
 
     if (!(ent->flags & FL_OBSERVER))
         ClientToggleObserver(ent);
+    if (!(ent->flags & FL_OBSERVER))
+        return;
 
     if (ent->client->camera.flags & CAMFL_AUTOCAM) {
         gi.cprintf(ent, PRINT_HIGH, "setcam not available in autocam mode\n");
@@ -2075,7 +2091,21 @@ void ClientToggleObserver(edict_t *ent)
         ent->solid = SOLID_BBOX;
         ent->takedamage = DAMAGE_AIM;
         ent->svflags &= ~SVF_NOCLIENT;
-        PutClientInServer(ent);
+        // In co-op PutClientInServer replaces `pers` outright with the
+        // level-entry snapshot, so the state the entering arm saved is handed
+        // to it AS that snapshot for this one call, and the real one is put
+        // back after: a death later in the level still respawns from the start.
+        // Single player never reads the snapshot, so the campaign question is
+        // the whole test.
+        if (G_IsCampaign()) {
+            client_persistant_t entry = ent->client->resp.coop_respawn;
+
+            ent->client->resp.coop_respawn = ent->client->pers;
+            PutClientInServer(ent);
+            ent->client->resp.coop_respawn = entry;
+        } else {
+            PutClientInServer(ent);
+        }
         // teleport-style spawn-in effect
         ent->client->ps.pmove.pm_flags = PMF_TIME_TELEPORT;
         ent->client->ps.pmove.pm_time = 112 >> PM_TIME_SHIFT;
@@ -2096,6 +2126,38 @@ void ClientToggleObserver(edict_t *ent)
     } //end if
     else {
         // ---- entering observer mode ----
+        //
+        // Under ctf the flag, the tech and the grapple go first, as
+        // CTFObserver lets them go for `observer` -- Threewave's verb there.
+        // The four camera verbs come in through here instead, and a carrier
+        // who typed `chasecam` took the enemy flag out of play: rejoining wipes
+        // the inventory without a drop, nothing returned the flag, and neither
+        // team could capture until the map changed.  A tech went the same way.
+        if (G_Ruleset() == RULESET_CTF) {
+            CTFPlayerResetGrapple(ent);
+            CTFDeadDropFlag(ent);
+            CTFDeadDropTech(ent);
+        }
+        // In the campaign, leaving goes through PutClientInServer, which
+        // restores the LEVEL-ENTRY state -- co-op's `coop_respawn` snapshot,
+        // and in sp the health FetchClientEntData reads out of `pers` -- so
+        // `observer`, `observer` at 5 health was a full heal without dying.
+        // The live state is saved first, the set SaveClientData saves for a
+        // level change (the score is read back in co-op only), and leaving
+        // gives back what was had; the position still resets to a spawn
+        // point.  Not while dead, which the toggle used to undo: in sp dying
+        // is a reload, and there is no live state to give back.
+        if (G_IsCampaign()) {
+            if (ent->deadflag || ent->health <= 0) {
+                gi.cprintf(ent, PRINT_HIGH, "can't enter observer mode while dead\n");
+                return;
+            }
+            ent->client->pers.health = ent->health;
+            ent->client->pers.max_health = ent->max_health;
+            ent->client->pers.savedFlags =
+                ent->flags & (FL_GODMODE | FL_NOTARGET | FL_POWER_ARMOR);
+            ent->client->pers.score = ent->client->resp.score;
+        }
         ent->classname = "observer";
         ent->flags |= FL_OBSERVER;
         ent->solid = SOLID_NOT;
@@ -2177,6 +2239,8 @@ void ClientToggleAutoCam(edict_t *ent)
 
     if (!(ent->flags & FL_OBSERVER))
         ClientToggleObserver(ent);
+    if (!(ent->flags & FL_OBSERVER))
+        return;
 
     ent->client->camera.flags ^= CAMFL_AUTOCAM;
     gi.cprintf(ent, PRINT_HIGH, "autocam ");
@@ -2227,6 +2291,8 @@ void ClientToggleChaseCam(edict_t *ent)
 {
     if (!(ent->flags & FL_OBSERVER))
         ClientToggleObserver(ent);
+    if (!(ent->flags & FL_OBSERVER))
+        return;
 
     ent->client->camera.flags ^= CAMFL_CHASECAM;
     if (ent->client->camera.flags & CAMFL_CHASECAM)

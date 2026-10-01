@@ -1026,8 +1026,18 @@ bool Widow2_CheckAttack(edict_t *self)
     return false;
 }
 
+// Registered with G_AddPrecache rather than called, for the sound indices this
+// file keeps (see SP_monster_carrier).
 static void Widow2Precache(void)
 {
+    sound_pain1 = gi.soundindex("widow/bw2pain1.wav");
+    sound_pain2 = gi.soundindex("widow/bw2pain2.wav");
+    sound_pain3 = gi.soundindex("widow/bw2pain3.wav");
+    sound_death = gi.soundindex("widow/death.wav");
+    sound_search1 = gi.soundindex("bosshovr/bhvunqv1.wav");
+//  sound_disrupt = gi.soundindex ("gladiator/railgun.wav");
+    sound_tentacles_retract = gi.soundindex("brain/brnatck3.wav");
+
     // cache in all of the stalker stuff, widow stuff, spawngro stuff, gibs
     gi.soundindex("parasite/parpain1.wav");
     gi.soundindex("parasite/parpain2.wav");
@@ -1055,6 +1065,9 @@ static void Widow2Precache(void)
     gi.modelindex("models/monsters/blackwidow2/gib2/tris.md2");
     gi.modelindex("models/monsters/blackwidow2/gib3/tris.md2");
     gi.modelindex("models/monsters/blackwidow2/gib4/tris.md2");
+
+    // and her stalkers' indices, as CarrierPrecache does its flyers'
+    stalker_precache();
 }
 
 /*QUAKED monster_widow2 (1 .5 0) (-70 -70 0) (70 70 144) Ambush Trigger_Spawn Sight
@@ -1067,13 +1080,7 @@ void SP_monster_widow2(edict_t *self)
         return;
     }
 
-    sound_pain1 = gi.soundindex("widow/bw2pain1.wav");
-    sound_pain2 = gi.soundindex("widow/bw2pain2.wav");
-    sound_pain3 = gi.soundindex("widow/bw2pain3.wav");
-    sound_death = gi.soundindex("widow/death.wav");
-    sound_search1 = gi.soundindex("bosshovr/bhvunqv1.wav");
-//  sound_disrupt = gi.soundindex ("gladiator/railgun.wav");
-    sound_tentacles_retract = gi.soundindex("brain/brnatck3.wav");
+    G_AddPrecache(Widow2Precache);
 
 //  self->s.sound = gi.soundindex ("bosshovr/bhvengn1.wav");
 
@@ -1120,7 +1127,6 @@ void SP_monster_widow2(edict_t *self)
     self->monsterinfo.currentmove = &widow2_move_stand;
     self->monsterinfo.scale = MODEL_SCALE;
 
-    Widow2Precache();
     WidowCalcSlots(self);
     walkmonster_start(self);
 }

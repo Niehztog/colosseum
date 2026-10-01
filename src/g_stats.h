@@ -1,3 +1,20 @@
+/*
+Copyright (C) 1997-2001 Id Software, Inc.
+
+This program is free software; you can redistribute it and/or modify
+it under the terms of the GNU General Public License as published by
+the Free Software Foundation; either version 2 of the License, or
+(at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+GNU General Public License for more details.
+
+You should have received a copy of the GNU General Public License along
+with this program; if not, write to the Free Software Foundation, Inc.,
+51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+*/
 // Colosseum per-ruleset stat slot map and composed statusbar.
 //
 // The problem, measured.  A statusbar is a program in a configstring and it
@@ -91,7 +108,9 @@ typedef enum {
 // dropped unconditionally and ctf loses the second powerup timer, exactly as
 // upstream does; every other ruleset's column stays inside 32 and is unaffected.
 //
-//     id                        kind     dm  ctf  arena tourney  sp
+// The `osp` column is all four OSP rulesets -- dm, dmpro, tdm and duel.
+//
+//     id                        kind    osp  ctf arena  sp
 #define STATSLOT_MAP(E) \
     E(SID_CHASE,                 SK_CS,  16,  -1,  -1,  16) \
     E(SID_SPECTATOR,             SK_NUM,  -1,  -1,  -1,  17) \

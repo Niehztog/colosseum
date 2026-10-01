@@ -19,6 +19,8 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 */
 #include "g_local.h"
 #include "bot/p_observer.h"
+#include "bot/bl_redirgi.h"
+#include "tourney/osp_hooks.h"
 #include "m_player.h"
 
 typedef enum match_s {
@@ -49,6 +51,7 @@ typedef struct ctfgame_s {
 
     elect_t election;   // election type
     edict_t *etarget;   // for admin election, who's being elected
+    int eframe;         // etarget's resp.enterframe: the requester, not the slot
     char elevel[32];    // for map election, target level
     int evotes;         // votes so far
     int needvotes;      // votes needed
@@ -256,12 +259,14 @@ void CTFInit(void)
     ctf_hook = gi.cvar("ctf_hook", "1", 0);
     laserhook = gi.cvar("laserhook", "0", 0);
 
-    // These two were never registered by any donor tree.  g_main.c declares
-    // `cvar_t *capturelimit` and `cvar_t *instantweap` and nothing ever calls
-    // gi.cvar for either, while CTFCheckRules reads capturelimit->value and
-    // Weapon_Generic reads instantweap->value -- two null dereferences on the
-    // first frame of the first match -- the same class of defect as CTFInit
-    // never being called at all.
+    // These two are not registered by the pinned donor: port_ctf's g_main.c
+    // declares `cvar_t *capturelimit` and `cvar_t *instantweap` and calls
+    // gi.cvar for neither -- nor CTFInit itself -- while CTFCheckRules reads
+    // capturelimit->value and Weapon_Generic reads instantweap->value, two null
+    // dereferences on the first frame of the first match.  The replay's
+    // omission, not Threewave's: upstream q2pro's own CTF game registers both
+    // in InitGame and calls CTFInit from it (src/ctf/g_main.c), and the 1999
+    // module registers capturelimit and calls CTFInit from g_save.c.
     //
     // Registered in every ruleset because a null pointer is what the fix is
     // for; the SERVERINFO flag and the read are both ruleset-gated instead --
@@ -442,7 +447,8 @@ void CTFAssignSkin(edict_t *ent, char *s)
 // Split from CTFAssignTeam, which is how the Gladiator donor has it and why:
 // the balancing body is the answer to "which team is short a player", and a bot
 // needs that answer whether or not DF_CTF_FORCEJOIN is set -- a bot has no join
-// menu to be sent to instead.  Threewave 1.09 has the same pair.
+// menu to be sent to instead.  Threewave itself, 1.02 and 1.09b alike, keeps
+// the body inline in CTFAssignTeam; the split is Gladiator's.
 void CTFForceAssignTeam(gclient_t *who)
 {
     edict_t     *player;
@@ -475,9 +481,16 @@ void CTFForceAssignTeam(gclient_t *who)
 
 void CTFAssignTeam(gclient_t *who)
 {
+    edict_t *ent = g_edicts + 1 + (who - game.clients);
+
     who->resp.ctf_state = 0;
 
-    if (!((int)dmflags->value & DF_CTF_FORCEJOIN)) {
+    // A bot is left for CTFStartClient's bot arm, force-join or not.  That arm
+    // is what reads `botctfteam` and marks a bot ready during MATCH_SETUP --
+    // a bot cannot type `ready` -- and it runs only for a client still on no
+    // team, so a force-join assignment made here skipped it: every bot was
+    // unready for good and a competition match could not start.
+    if (!((int)dmflags->value & DF_CTF_FORCEJOIN) || (ent->flags & FL_BOTCLIENT)) {
         who->resp.ctf_team = CTF_NOTEAM;
         return;
     }
@@ -798,8 +811,11 @@ void CTFFragBonuses(edict_t *targ, edict_t *inflictor, edict_t *attacker)
     }
 
     if (carrier && carrier != attacker) {
+        // v2, not v1: Threewave wrote both distances into v1 (port_ctf and the
+        // 1999 module alike), so the target's distance from the carrier was
+        // never measured and v2 was still attacker->flag from the test above.
         VectorSubtract(targ->s.origin, carrier->s.origin, v1);
-        VectorSubtract(attacker->s.origin, carrier->s.origin, v1);
+        VectorSubtract(attacker->s.origin, carrier->s.origin, v2);
 
         if (VectorLength(v1) < CTF_ATTACKER_PROTECT_RADIUS ||
             VectorLength(v2) < CTF_ATTACKER_PROTECT_RADIUS ||
@@ -1356,31 +1372,67 @@ void SP_info_player_team2(edict_t *self)
 /* GRAPPLE                                                                */
 /*------------------------------------------------------------------------*/
 
+// A player's `ctf_grapple` can outlive the hook it names.  A mover whose blocked
+// arm cannot push a flying hook explodes it (BecomeExplosion1 -> G_FreeEdict)
+// with no word to the owner, and the freed slot is soon somebody's rocket or a
+// dropped item.  So the pointer is believed only while it names an in-use hook
+// that this player owns -- a hook by its touch, because the owner alone is also
+// true of the player's own rocket in that slot; otherwise it is a hook that is
+// already gone, and letting go of it means forgetting it, never freeing what is
+// there now.  Tourney's hook is the same field (G_PlayerResetGrapple).
+bool CTFOwnsGrapple(edict_t *ent)
+{
+    edict_t *hook = ent->client ? ent->client->ctf_grapple : NULL;
+
+    if (!hook || !hook->inuse || hook->owner != ent)
+        return false;
+    return hook->touch == CTFGrappleTouch ||
+           (G_IsOspRuleset() && OSP_IsHook(hook));
+}
+
+void CTFForgetGrapple(gclient_t *cl)
+{
+    cl->ctf_grapple = NULL;
+    cl->ctf_grapplereleasetime = level.time;
+    cl->ctf_grapplestate = CTF_GRAPPLE_STATE_FLY; // we're firing, not on hook
+    cl->ps.pmove.pm_flags &= ~PMF_NO_PREDICTION;
+}
+
 // ent is player
 void CTFPlayerResetGrapple(edict_t *ent)
 {
-    if (ent->client && ent->client->ctf_grapple)
+    if (!ent->client || !ent->client->ctf_grapple)
+        return;
+    if (CTFOwnsGrapple(ent))
         CTFResetGrapple(ent->client->ctf_grapple);
+    else
+        CTFForgetGrapple(ent->client);
 }
 
-// self is grapple, not player
+// self is grapple, not player.  The hook goes whoever still points at it, and
+// only an owner that points at THIS hook is released with it: Threewave freed
+// the hook only while its owner had some grapple, so a hook whose owner had
+// gone -- a disconnect, a bot removed -- stayed in the world for the rest of the
+// level, and one whose owner had fired again took the new hook's pointer.
 void CTFResetGrapple(edict_t *self)
 {
-    if (self->owner->client->ctf_grapple) {
-        float volume = 1.0f;
-        gclient_t *cl;
+    gclient_t *cl;
 
-        if (self->owner->client->silencer_shots)
+    if (!self->inuse)
+        return;
+
+    cl = (self->owner && self->owner->client &&
+          self->owner->client->ctf_grapple == self) ? self->owner->client : NULL;
+    if (cl) {
+        float volume = 1.0f;
+
+        if (cl->silencer_shots)
             volume = 0.2f;
 
         gi.sound(self->owner, CHAN_RELIABLE + CHAN_WEAPON, gi.soundindex("weapons/grapple/grreset.wav"), volume, ATTN_NORM, 0);
-        cl = self->owner->client;
-        cl->ctf_grapple = NULL;
-        cl->ctf_grapplereleasetime = level.time;
-        cl->ctf_grapplestate = CTF_GRAPPLE_STATE_FLY; // we're firing, not on hook
-        cl->ps.pmove.pm_flags &= ~PMF_NO_PREDICTION;
-        G_FreeEdict(self);
+        CTFForgetGrapple(cl);
     }
+    G_FreeEdict(self);
 }
 
 void CTFGrappleTouch(edict_t *self, edict_t *other, cplane_t *plane, csurface_t *surf)
@@ -1389,6 +1441,17 @@ void CTFGrappleTouch(edict_t *self, edict_t *other, cplane_t *plane, csurface_t 
 
     if (other == self->owner)
         return;
+
+    // A hook its owner no longer points at is nobody's, and it goes on its
+    // first contact -- tourney's guard (osp_hook.c), asked here before the
+    // state test because the state is the owner's CURRENT hook's.  Past this
+    // line it wrote PULL into an owner whose other hook was still in the air,
+    // winching them at it, and then hung SOLID_NOT with no think to free it.
+    // CTFResetGrapple releases only an owner pointing at the hook it frees.
+    if (self->owner->client->ctf_grapple != self) {
+        CTFResetGrapple(self);
+        return;
+    }
 
     if (self->owner->client->ctf_grapplestate != CTF_GRAPPLE_STATE_FLY)
         return;
@@ -1403,7 +1466,7 @@ void CTFGrappleTouch(edict_t *self, edict_t *other, cplane_t *plane, csurface_t 
     PlayerNoise(self->owner, self->s.origin, PNOISE_IMPACT);
 
     if (other->takedamage) {
-        T_Damage(other, self, self->owner, self->velocity, self->s.origin, plane->normal, self->dmg, 1, 0, MOD_GRAPPLE);
+        T_Damage(other, self, self->owner, self->velocity, self->s.origin, plane ? plane->normal : NULL, self->dmg, 1, 0, MOD_GRAPPLE);
         CTFResetGrapple(self);
         return;
     }
@@ -1425,7 +1488,7 @@ void CTFGrappleTouch(edict_t *self, edict_t *other, cplane_t *plane, csurface_t 
     if (!plane)
         gi.WriteDir(vec3_origin);
     else
-        gi.WriteDir(plane->normal);
+        gi.WriteDir(plane ? plane->normal : NULL);
     gi.multicast(self->s.origin, MULTICAST_PVS);
 }
 
@@ -1636,7 +1699,15 @@ void CTFGrappleFire(edict_t *ent, const vec3_t g_offset, int damage, int effect)
     vec3_t  offset;
     float volume = 1.0f;
 
-    if (ent->client->ctf_grapplestate > CTF_GRAPPLE_STATE_FLY)
+    // One hook a player, flying or attached.  Threewave refused only
+    // `ctf_grapplestate > FLY`, and FLY is both "no hook" and "a hook in the
+    // air", so a second fire while the first flew -- another `hookon`, which
+    // clears FIRED, or +attack with +hook and the Grapple in hand -- took the
+    // pointer and orphaned the first hook with no think: one edict a command
+    // until ED_Alloc ran out and killed the server.  CTFOwnsGrapple, not the
+    // bare pointer, so a hook a mover freed refuses nothing after it
+    // (R-CTF-11).
+    if (CTFOwnsGrapple(ent))
         return; // it's already out
 
     AngleVectors(ent->client->v_angle, forward, right, NULL);
@@ -1742,14 +1813,21 @@ void CTFWeapon_Grapple(edict_t *ent)
     int prevstate;
 
     // if the the attack button is still down, stay in the firing frame
+    //
+    // The hold asks CTFOwnsGrapple and the release goes through
+    // CTFPlayerResetGrapple, which asks it too (R-CTF-11).  This also runs
+    // from ClientBeginServerFrame, and a client that has sent nothing since a
+    // mover freed its hook has had no ClientThink to forget it -- so the bare
+    // pointer handed to CTFResetGrapple freed whatever had been spawned into
+    // that slot since.
     if ((ent->client->buttons & BUTTON_ATTACK) &&
         ent->client->weaponstate == WEAPON_FIRING &&
-        ent->client->ctf_grapple)
+        CTFOwnsGrapple(ent))
         ent->client->ps.gunframe = 9;
 
     if (!(ent->client->buttons & BUTTON_ATTACK) &&
         ent->client->ctf_grapple) {
-        CTFResetGrapple(ent->client->ctf_grapple);
+        CTFPlayerResetGrapple(ent);
         if (ent->client->weaponstate == WEAPON_FIRING)
             ent->client->weaponstate = WEAPON_READY;
     }
@@ -1811,7 +1889,13 @@ void CTFTeam_f(edict_t *ent)
     }
 
 ////
-    ent->svflags = 0;
+    // Every flag but SVF_BOT, the game's word to the engine that this client
+    // is a bot (BotSetSvFlags), which is set when a bot is made and next at the
+    // following map's BotSpawn -- so a team change made the bot a person to
+    // the engine for the rest of the level.  q2pro does not read the flag yet,
+    // so this keeps the statement true rather than changing play.  Here and
+    // at Threewave's three other resets.
+    ent->svflags &= SVF_BOT;
     ent->flags &= ~FL_GODMODE;
     ent->client->resp.ctf_team = desired_team;
     ent->client->resp.ctf_state = 0;
@@ -1841,6 +1925,27 @@ void CTFTeam_f(edict_t *ent)
 
     gi.bprintf(PRINT_HIGH, "%s changed to the %s team.\n",
                ent->client->pers.netname, CTFTeamName(desired_team));
+}
+
+// Ground Zero's dogtag, on the only board that can show one.  Tag runs under
+// `ctf` alone (G_UsesRogueGameRules), whose board is this one, so the call in
+// DeathmatchScoreboardMessage was never reached.  Asked as that board asks
+// it, minus the "you" and "your killer" plates Threewave's board does without
+// (it marks the viewer's own row itself), and drawn where that board draws
+// it: its top-left at the start of the player's text.  It is 128x32 and a row
+// here is 8 tall, so it backs this row and the three below it; it goes into
+// the row's own entry ahead of the row, so it costs that row's budget and
+// every row drawn after it stays on top.
+static void CTFScoreboardDogTag(char *entry, size_t size, edict_t *cl_ent,
+                                edict_t *killer, int x, int y)
+{
+    char *tag = NULL;
+
+    if (G_UsesRogueGameRules() && DMGame.DogTag)
+        DMGame.DogTag(cl_ent, killer, &tag);
+    if (tag)
+        Q_snprintf(entry + strlen(entry), size - strlen(entry),
+                   "xv %d yv %d picn %s ", x, y, tag);
 }
 
 /*
@@ -1939,6 +2044,7 @@ void CTFScoreboardMessage(edict_t *ent, edict_t *killer)
             cl = &game.clients[sorted[0][i]];
             cl_ent = g_edicts + 1 + sorted[0][i];
 
+            CTFScoreboardDogTag(entry, sizeof(entry), cl_ent, killer, 0, 42 + i * 8);
 #if 0 //ndef NEW_SCORE
             Q_snprintf(entry + strlen(entry), sizeof(entry) - strlen(entry),
                        "xv 0 %s \"%3d %3d %-12.12s\" ",
@@ -1974,6 +2080,11 @@ void CTFScoreboardMessage(edict_t *ent, edict_t *killer)
             cl = &game.clients[sorted[1][i]];
             cl_ent = g_edicts + 1 + sorted[1][i];
 
+            // A fresh entry.  The left side's is in the string already, and
+            // appended again with this one it drew that row twice and charged
+            // it to the budget twice -- the spectator rows' defect, below.
+            *entry = 0;
+            CTFScoreboardDogTag(entry, sizeof(entry), cl_ent, killer, 160, 42 + i * 8);
 #if 0 //ndef NEW_SCORE
             Q_snprintf(entry + strlen(entry), sizeof(entry) - strlen(entry),
                        "xv 160 %s \"%3d %3d %-12.12s\" ",
@@ -2032,7 +2143,12 @@ void CTFScoreboardMessage(edict_t *ent, edict_t *killer)
                 j += 8;
             }
 
-            Q_snprintf(entry + strlen(entry), sizeof(entry) - strlen(entry),
+            // Written at the start of `entry`, not appended to it.  Threewave
+            // appended, so each spectator's entry carried the header and every
+            // spectator before it: the header was drawn twice, the cost grew
+            // with the square of the count, and the budget ran out after a
+            // handful of spectators.
+            Q_snprintf(entry, sizeof(entry),
                        "ctf %d %d %d %d %d ",
                        (n & 1) ? 160 : 0, // x
                        j, // y
@@ -2258,7 +2374,14 @@ void CTFResetTech(void)
             if (ent->item && (ent->item->flags & IT_TECH))
                 G_FreeEdict(ent);
     }
-    SpawnTechs(NULL);
+
+    // The reset respawns the techs only where a level start would have spawned
+    // them: CTFSetupTechSpawn asks DF_CTF_NO_TECH and Threewave's reset did
+    // not, so every match vote, admin reset and setup timeout put all four into
+    // a no-tech server -- while the `runes` modifier and the brain's libvar
+    // still said there were none (R-CTF-1).
+    if (!((int)dmflags->value & DF_CTF_NO_TECH))
+        SpawnTechs(NULL);
 }
 
 int CTFApplyResistance(edict_t *ent, int dmg)
@@ -2497,11 +2620,16 @@ static void CTFSay_Team_Location(edict_t *who, char *buf, size_t size)
             continue;
         VectorSubtract(what->s.origin, who->s.origin, v);
         newdist = VectorLength(v);
+        // `hotindex` holds a PRIORITY, as the first-sighting arm above stores
+        // it and both tests compare it.  Threewave stored the table index here
+        // -- 0 to 36, against priorities of 1 to 8 -- so after one such
+        // replacement any visible item displaced the hot one, and roughly the
+        // last one seen won rather than the most important.
         if (newdist < hotdist ||
             (cansee && loc_names[i].priority < hotindex)) {
             hot = what;
             hotdist = newdist;
-            hotindex = i;
+            hotindex = loc_names[i].priority;
             hotsee = loc_CanSee(hot, who);
         }
     }
@@ -2692,6 +2820,13 @@ void CTFSay_Team(edict_t *who, char *msg)
 
     for (p = outmsg; *msg && (p - outmsg) < sizeof(outmsg) - 2; msg++) {
         if (*msg == '%') {
+            // A `%` that ends the message has no letter after it.  Threewave
+            // stepped onto the terminator anyway, the default arm copied it,
+            // and the loop's own step then walked past the end of the string
+            // into whatever the command buffer held after it.  Dropped, as the
+            // default arm drops the `%` of an escape it does not know.
+            if (!msg[1])
+                break;
             switch (*++msg) {
             case 'l' :
             case 'L' :
@@ -2840,12 +2975,15 @@ bool CTFBeginElection(edict_t *ent, elect_t type, char *msg)
         return false;
     }
 
-    // clear votes
+    // clear votes.  The electorate is the PEOPLE: a bot never votes, so
+    // counting one only raises the bar -- one person and five bots needed four
+    // votes from nobody, and no admin vote, warp or match request could pass on
+    // a server the fill had seated.
     count = 0;
     for (i = 1; i <= game.maxclients; i++) {
         e = g_edicts + i;
         e->client->resp.voted = false;
-        if (e->inuse)
+        if (e->inuse && !(e->flags & FL_BOTCLIENT))
             count++;
     }
 
@@ -2855,9 +2993,14 @@ bool CTFBeginElection(edict_t *ent, elect_t type, char *msg)
     }
 
     ctfgame.etarget = ent;
+    ctfgame.eframe = ent->client->resp.enterframe;
     ctfgame.election = type;
     ctfgame.evotes = 0;
+    // At least one: the test below is `evotes >= needvotes` after a vote, so a
+    // percentage that rounds to zero passes on the first yes rather than never.
     ctfgame.needvotes = (count * electpercentage->value) / 100;
+    if (ctfgame.needvotes < 1)
+        ctfgame.needvotes = 1;
     ctfgame.electtime = level.time + 20; // twenty seconds for election
     Q_strlcpy(ctfgame.emsg, msg, sizeof(ctfgame.emsg));
 
@@ -2892,7 +3035,7 @@ void CTFResetAllPlayers(void)
         ent->client->resp.ctf_team = CTF_NOTEAM;
         ent->client->resp.ready = false;
 
-        ent->svflags = 0;
+        ent->svflags &= SVF_BOT;    // keeping a bot's flag, as CTFTeam_f does
         ent->flags &= ~FL_GODMODE;
         PutClientInServer(ent);
     }
@@ -2971,7 +3114,8 @@ void CTFStartMatch(void)
             // make up a ghost code
             CTFAssignGhost(ent);
             CTFPlayerResetGrapple(ent);
-            ent->svflags = SVF_NOCLIENT;
+            // Keeping a bot's flag, as CTFTeam_f does.
+            ent->svflags = (ent->svflags & SVF_BOT) | SVF_NOCLIENT;
             ent->flags &= ~FL_GODMODE;
 
             ent->client->respawn_framenum = level.framenum + (1.0f + ((Q_rand_uniform(30)) / 10.0f)) * BASE_FRAMERATE;
@@ -3039,6 +3183,16 @@ void CTFWinElection(void)
         break;
 
     case ELECT_ADMIN :
+        // To the client who asked, and that is not "whoever holds the slot
+        // now": one that leaves inside the twenty seconds hands its edict to
+        // the next connection, which Threewave then made an admin.  A new
+        // connection's InitClientResp stamps a later `enterframe`, and nothing
+        // under ctf moves it in between.
+        if (!ctfgame.etarget->inuse ||
+            ctfgame.etarget->client->resp.enterframe != ctfgame.eframe) {
+            gi.bprintf(PRINT_HIGH, "The admin request was cancelled: the player who made it has left.\n");
+            break;
+        }
         ctfgame.etarget->client->resp.admin = true;
         gi.bprintf(PRINT_HIGH, "%s has become an admin.\n", ctfgame.etarget->client->pers.netname);
         gi.cprintf(ctfgame.etarget, PRINT_HIGH, "Type 'admin' to access the adminstration menu.\n");
@@ -3074,7 +3228,7 @@ void CTFVoteYes(edict_t *ent)
     ent->client->resp.voted = true;
 
     ctfgame.evotes++;
-    if (ctfgame.evotes == ctfgame.needvotes) {
+    if (ctfgame.evotes >= ctfgame.needvotes) {
         // the election has been won
         CTFWinElection();
         return;
@@ -3209,7 +3363,7 @@ void CTFGhost(edict_t *ent)
             ent->client->resp.score = ctfgame.ghosts[i].score;
             ent->client->resp.ctf_state = 0;
             ctfgame.ghosts[i].ent = ent;
-            ent->svflags = 0;
+            ent->svflags &= SVF_BOT;    // keeping a bot's flag, as CTFTeam_f does
             ent->flags &= ~FL_GODMODE;
             PutClientInServer(ent);
             gi.bprintf(PRINT_HIGH, "%s has been reinstated to %s team.\n",
@@ -3493,9 +3647,14 @@ int CTFUpdateJoinMenu(edict_t *ent)
         joinmenu[jmenu_reqmatch].SelectFunc = CTFRequestMatch;
     }
 
-    if (num1 > num2)
+    // The team a joiner is pointed at: the short one, either on a tie, which
+    // is CTFForceAssignTeam's answer too.  Threewave compares the other way
+    // round.  1.02 returned CTF_TEAM1 from both arms, so its cursor sat on red
+    // whenever the counts differed; 1.09b mended the second arm, by which time
+    // CTFOpenJoinMenu's rows were unselectable and the hint showed nowhere.
+    if (num1 < num2)
         return CTF_TEAM1;
-    else if (num2 > num1)
+    else if (num2 < num1)
         return CTF_TEAM2;
     return (Q_rand() & 1) ? CTF_TEAM1 : CTF_TEAM2;
 }
@@ -3504,13 +3663,19 @@ void CTFOpenJoinMenu(edict_t *ent)
 {
     int team;
 
+    // The cursor's hint, by row name.  Threewave 1.09b gave the menu a match
+    // row (`jmenu_match`) and kept 1.02's literals 8, 4 and 6, which now
+    // name unselectable rows, so ctf_PMenu_Open always fell back to the first
+    // selectable one: "Join Red" whichever team was short, and never "Leave
+    // Chase Camera" for a client that was chasing.  The hint itself is the
+    // short team (CTFUpdateJoinMenu).
     team = CTFUpdateJoinMenu(ent);
     if (ent->client->chase_target)
-        team = 8;
+        team = jmenu_chase;
     else if (team == CTF_TEAM1)
-        team = 4;
+        team = jmenu_red;
     else
-        team = 6;
+        team = jmenu_blue;
     ctf_PMenu_Open(ent, joinmenu, team, sizeof(joinmenu) / sizeof(ctf_pmenu_t), NULL);
 }
 
@@ -3535,7 +3700,8 @@ bool CTFStartClient(edict_t *ent)
     //
     // The donor's arm is #ifdef BOT and sits exactly here, ahead of the
     // FORCEJOIN test.  The `ctfgame.match` half of that test is not the donor's
-    // -- Threewave 1.09 has no match system, so it cannot decide this -- and
+    // -- the module's Threewave 1.02 has no match system, so it cannot decide
+    // this -- and
     // gating the bot on it would leave the bot an observer holding a menu.
     // Joining mid-match is not the thing the menu branch prevents anyway:
     // CTFJoinTeam lets a human do it and assigns a ghost.  What a bot cannot do
@@ -3575,6 +3741,15 @@ bool CTFStartClient(edict_t *ent)
         CTFOpenJoinMenu(ent);
         return true;
     }
+
+    // Force-join, and a client on no team: a connect has already been given
+    // one (CTFAssignTeam), so this is CTFResetAllPlayers putting everybody back
+    // on none -- a match vote, an admin reset, a setup that timed out.  Threewave
+    // returns here and the client spawns solid and teamless, which this tree's
+    // observer predicate reads as an observer that can be shot: no firing, no
+    // pickups, no join menu.  They are assigned a side as a connect would be.
+    CTFForceAssignTeam(ent->client);
+    CTFAssignSkin(ent, Info_ValueForKey(ent->client->pers.userinfo, "skin"));
     return false;
 }
 
@@ -4232,11 +4407,25 @@ void CTFAdmin(edict_t *ent)
         return;
     }
 
+    // A login, and no password oracle (R-SEC-12): an admin can boot players,
+    // warp the map and rewrite dmflags, and unthrottled this tested the
+    // password eight times a packet.  An attempt inside the backoff is refused
+    // unread, and starts no election either, because unread it is not known to
+    // be wrong; a wrong one costs the connection time and then asks for the
+    // vote, as Threewave's did.
     if (gi.argc() > 1 && admin_password->string && *admin_password->string &&
-        !ent->client->resp.admin && strcmp(admin_password->string, gi.argv(1)) == 0) {
-        ent->client->resp.admin = true;
-        gi.bprintf(PRINT_HIGH, "%s has become an admin.\n", ent->client->pers.netname);
-        gi.cprintf(ent, PRINT_HIGH, "Type 'admin' to access the adminstration menu.\n");
+        !ent->client->resp.admin) {
+        if (G_LoginThrottled(ent)) {
+            gi.cprintf(ent, PRINT_HIGH, "Wait a moment before trying again.\n");
+            return;
+        }
+        if (strcmp(admin_password->string, gi.argv(1)) == 0) {
+            G_LoginSucceeded(ent);
+            ent->client->resp.admin = true;
+            gi.bprintf(PRINT_HIGH, "%s has become an admin.\n", ent->client->pers.netname);
+            gi.cprintf(ent, PRINT_HIGH, "Type 'admin' to access the adminstration menu.\n");
+        } else
+            G_LoginFailed(ent);
     }
 
     if (!ent->client->resp.admin) {
@@ -4432,7 +4621,9 @@ void CTFBoot(edict_t *ent)
         return;
     }
 
-    if (*gi.argv(1) < '0' && *gi.argv(1) > '9') {
+    // `||`: Threewave's `&&` asked for a character below '0' and above '9' at
+    // once, so a name went on to atoi and was told "Invalid player number".
+    if (*gi.argv(1) < '0' || *gi.argv(1) > '9') {
         gi.cprintf(ent, PRINT_HIGH, "Specify the player number to kick.\n");
         return;
     }
@@ -4446,6 +4637,16 @@ void CTFBoot(edict_t *ent)
     targ = g_edicts + i;
     if (!targ->inuse) {
         gi.cprintf(ent, PRINT_HIGH, "That player number is not connected.\n");
+        return;
+    }
+
+    // A bot is a client only the game knows about, and the engine's `kick`
+    // answers a slot it has no client in with "Client slot N is not active"
+    // on the server console -- the bot stayed and the admin was told nothing.
+    // It leaves through the bot layer's `removebot`, by name, as tourney's
+    // kick vote sends it (OSP_kick_vote).
+    if (targ->flags & FL_BOTCLIENT) {
+        BotServerCommand("sv", "removebot", targ->client->pers.netname, NULL);
         return;
     }
 
@@ -4473,9 +4674,9 @@ void CTFSetPowerUpEffect(edict_t *ent, int def)
 //
 
 // CheckRules.  CTF's own rules run first and can end the level on their own
-// (capturelimit, and the match state machine); a running match
-// suppresses fraglimit and timelimit entirely, which is why this is a replaced
-// row rather than an extra test inside CheckDMRules.
+// (capturelimit outside match mode, and the match state machine); a running
+// match suppresses fraglimit and timelimit entirely, which is why this is a
+// replaced row rather than an extra test inside CheckDMRules.
 static void ctf_CheckRules(void)
 {
     if (level.intermission_framenum)
@@ -4489,9 +4690,13 @@ static void ctf_CheckRules(void)
     if (CTFInMatch())
         return;         // no fraglimit or timelimit in match mode
 
-    // Mechanically: capturelimit is checked above, unconditionally,
-    // before this line -- so it ends a match whether or not fraglimit is set.
-    // The 1999 fix is structural here rather than a patched `if`.
+    // Mechanically: CTFCheckRules is called above unconditionally, before
+    // this line, so capturelimit ends a public game whether or not fraglimit
+    // is set -- the 1999 module asked it only inside `if (fraglimit->value)`,
+    // and the fix is structural here rather than a patched `if`.  Not in
+    // match mode: CTFCheckRules returns from its match branch before the
+    // capturelimit test, as Threewave's does, because a match is timed by
+    // `matchtime` and ends in CTFEndMatch (R-CTF-2).
     CheckDMRules();
 }
 

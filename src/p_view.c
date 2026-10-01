@@ -811,7 +811,7 @@ static void G_SetClientEffects(edict_t *ent)
         }
     }
 
-    // CTF's flag and tech effects, and the reason the two powerup effects below
+    // CTF's flag and tech effects, and the reason the three shell powerups below
     // go through CTFSetPowerUpEffect: a flag carrier already has EF_FLAG1 or
     // EF_FLAG2 on s.effects, and EF_QUAD would replace the colour the flag
     // needs.  CTFSetPowerUpEffect keeps both visible; outside ctf it is a
@@ -825,10 +825,15 @@ static void G_SetClientEffects(edict_t *ent)
     }
 
     // RAFAEL
+    //
+    // Through CTFSetPowerUpEffect as well, because Xatrix's shell IS the quad's:
+    // EF_QUAD, which under ctf is the blue team's colour, so a red player
+    // carrying Quad Fire wore the other side's shell.  The team colour it gets
+    // instead is the quad's own answer to the same problem.
     if (ent->client->quadfire_framenum > level.framenum) {
         remaining = ent->client->quadfire_framenum - level.framenum;
         if (remaining > 30 || (remaining & 4))
-            ent->s.effects |= EF_QUAD;
+            CTFSetPowerUpEffect(ent, EF_QUAD);
     }
 //=======
 //ROGUE
@@ -837,7 +842,7 @@ static void G_SetClientEffects(edict_t *ent)
         if (remaining > 30 || (remaining & 4))
             ent->s.effects |= EF_DOUBLE;
     }
-    if ((ent->client->owned_sphere) && (ent->client->owned_sphere->spawnflags == 1)) {
+    if ((G_OwnedSphere(ent)) && (ent->client->owned_sphere->spawnflags == 1)) {    // a live defender
         ent->s.effects |= EF_HALF_DAMAGE;
     }
     if (ent->client->tracker_pain_framenum > level.framenum) {
@@ -1156,8 +1161,9 @@ void ClientEndServerFrame(edict_t *ent)
     // FIXME: with client prediction, the contents
     // should be determined by the client
     if (RA_CameraObserver(ent)) {
-        // EYECAM: arena.c has copied the tracked player's blend in already, so
-        // recomputing it from this client's own contents would undo that.
+        // TRACKCAM and EYECAM see through no blend at all, as RA2 has it: the
+        // contents this client's own camera sits in are not what it is
+        // watching, and nothing hands it the tracked player's blend instead.
         ent->client->ps.blend[0] = ent->client->ps.blend[1] =
             ent->client->ps.blend[2] = ent->client->ps.blend[3] = 0;
     } else {
@@ -1170,8 +1176,16 @@ void ClientEndServerFrame(edict_t *ent)
     // Tourney has no base spectator HUD.  A free observer gets its ordinary
     // OSP stats, but a chase/autocam client receives its target's full array
     // below and must not overwrite that copy on its own later slot pass.
+    //
+    // An arena camera has its stats already, and for the same reason: its own
+    // think ran track_SetStats, which copied the tracked player's whole array
+    // and put the observer's frags, layout bit and id row on it.  RA2 runs
+    // G_SetStats only in the blend's other arm (port_ra2:p_view.c:979-984);
+    // run here as well, it wrote this observer's health, ammo, armour, timers
+    // and icons over the player it was watching.
     if (!(G_IsOspRuleset() &&
-          (ent->client->chase_target || ent->client->osp_t03c))) {
+          (ent->client->chase_target || ent->client->osp_t03c)) &&
+        !RA_CameraObserver(ent)) {
         if (G_IsObserver(ent) && !G_IsOspRuleset())
             G_SetSpectatorStats(ent);
         else

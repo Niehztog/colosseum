@@ -80,7 +80,9 @@ static bool gekk_check_jump(edict_t *self);
 
 static bool gekk_check_melee(edict_t *self)
 {
-    if (!self->enemy && self->enemy->health <= 0)
+    // `||`: the Reckoning's `&&` dereferenced the enemy exactly when there
+    // was none.  Unreachable while gekk_checkattack tests first.
+    if (!self->enemy || self->enemy->health <= 0)
         return false;
 
     if (range(self, self->enemy) == RANGE_MELEE)
@@ -591,8 +593,11 @@ void loogie_touch(edict_t *self, edict_t *other, cplane_t *plane, csurface_t *su
     if (self->owner->client)
         PlayerNoise(self->owner, self->s.origin, PNOISE_IMPACT);
 
+    // No plane when fire_loogie finds the spit already touching something at
+    // launch and calls this with NULL -- fire_blaster's call, which
+    // blaster_touch guards the same way.
     if (other->takedamage)
-        T_Damage(other, self, self->owner, self->velocity, self->s.origin, plane->normal, self->dmg, 1, DAMAGE_ENERGY, MOD_GEKK);
+        T_Damage(other, self, self->owner, self->velocity, self->s.origin, plane ? plane->normal : NULL, self->dmg, 1, DAMAGE_ENERGY, MOD_GEKK);
 
     G_FreeEdict(self);
 };

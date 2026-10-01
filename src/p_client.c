@@ -767,6 +767,20 @@ void player_die(edict_t *self, edict_t *inflictor, edict_t *attacker, int damage
 //  self->solid = SOLID_NOT;
     self->svflags |= SVF_DEADMONSTER;
 
+    // RA2 opens its player_die with these two (rocketarena2@99f8bb2), and both
+    // are about a body the round still counts.  A dead fighter is not an
+    // observer, so ClientBeginServerFrame goes on running its weapon think, and
+    // Think_Weapon's death arm is ChangeWeapon -- which sets off a primed
+    // grenade at the corpse, or lays a tesla, credited to the dead fighter and
+    // able to kill the round's winner after the round was decided.  And a
+    // pending `spawn_recheck` would have check_telefrag() KillBox from the
+    // corpse.  Outside arena a primed grenade still falls with its holder,
+    // which is id's.
+    if (G_Ruleset() == RULESET_ARENA) {
+        self->client->grenade_framenum = 0;
+        self->client->resp.spawn_recheck = 0;
+    }
+
     if (!self->deadflag) {
         if (G_Ruleset() == RULESET_ARENA)
             GSLogDeath(self, inflictor, attacker);
@@ -822,16 +836,19 @@ void player_die(edict_t *self, edict_t *inflictor, edict_t *attacker, int damage
             OSP_deadDropRune(self);
 
         // ...and the grapple, the flag and the tech go with the body.  All three
-        // are no-ops when there is nothing to drop.
-        CTFPlayerResetGrapple(self);
+        // are no-ops when there is nothing to drop.  The grapple is whichever
+        // hook the ruleset hands out: Threewave's reset under tourney played
+        // the CTF pak's grreset.wav for a hook that is not Threewave's.
+        G_PlayerResetGrapple(self);
         CTFDeadDropFlag(self);
         CTFDeadDropTech(self);
         // CTF adds `&& !showscores`: Cmd_Help_f toggles, so a player who already
         // had the scoreboard up got it turned OFF by their own death.
         //
-        // Tourney does the same thing through its own flag rather than through
-        // the help computer: `osp_r2dc` is "this client is dead and looking at
-        // the board", which p_view.c reads to stop pushing HUD panels at them.
+        // Tourney answers through its own flag, and the other way round:
+        // `osp_r2dc` 1 withholds every layout from the death until the HUD
+        // comes back after the respawn (G_SetStats, R-OSP-35), and p_view.c
+        // reads it to stop pushing HUD panels at them.
         if (G_IsOspRuleset()) {
             if (sync_stat != 2 && !(self->flags & FL_BOT))
                 self->client->resp.osp_r2dc = 1;
@@ -869,13 +886,18 @@ void player_die(edict_t *self, edict_t *inflictor, edict_t *attacker, int damage
     // if there's a sphere around, let it know the player died.
     // vengeance and hunter will die if they're not attacking,
     // defender should always die
+    // Only a sphere that is still there and still this player's: the pointer
+    // can outlive it (G_OwnedSphere), and a freed edict's `die` is NULL.
     if (self->client->owned_sphere) {
         edict_t *sphere;
 
         vec3_t zero = { 0 };
 
-        sphere = self->client->owned_sphere;
-        sphere->die(sphere, self, self, 0, zero);
+        sphere = G_OwnedSphere(self);
+        if (sphere && sphere->die)
+            sphere->die(sphere, self, self, 0, zero);
+        else
+            self->client->owned_sphere = NULL;
     }
 
     // if we've been killed by the tracker, GIB!
@@ -1007,6 +1029,8 @@ void InitClientPersistant(gclient_t *client, bool full)
     bool            keep_motd = false;
     bool            keep_listenhost;
     char            keep_address[MAX_CLIENT_ADDRESS];
+    int             keep_login_fails;
+    int64_t         keep_login_retry;
 
 //  gi.dprintf("InitClientPersistant()\n");
 
@@ -1040,6 +1064,11 @@ void InitClientPersistant(gclient_t *client, bool full)
     // empty address for anybody who had respawned once (R-LOG-1).
     memcpy(keep_address, client->pers.address, sizeof(keep_address));
 
+    // ...and the password backoff, which is the connection's too: wiped here
+    // it would hand a guesser a fresh allowance with every respawn.
+    keep_login_fails = client->pers.login_fails;
+    keep_login_retry = client->pers.login_retry;
+
     memset(&client->pers, 0, sizeof(client->pers));
 
     if (G_Ruleset() == RULESET_ARENA)
@@ -1047,6 +1076,8 @@ void InitClientPersistant(gclient_t *client, bool full)
 
     client->pers.listenhost = keep_listenhost;
     memcpy(client->pers.address, keep_address, sizeof(client->pers.address));
+    client->pers.login_fails = keep_login_fails;
+    client->pers.login_retry = keep_login_retry;
 
     if (!full) {
         memcpy(client->pers.userinfo, userinfo, sizeof(userinfo));
@@ -1200,6 +1231,12 @@ void SaveClientData(void)
     for (i = 0; i < game.maxclients; i++) {
         ent = &g_edicts[1 + i];
         if (!ent->inuse)
+            continue;
+        // A Gladiator observer's body carries the observer's stand-in health
+        // of 100, and a level change must not write the stand-in into `pers`.
+        // In the campaign the real state went there when the client entered
+        // observer mode (ClientToggleObserver); elsewhere nothing reads it.
+        if (ent->flags & FL_OBSERVER)
             continue;
         game.clients[i].pers.health = ent->health;
         game.clients[i].pers.max_health = ent->max_health;
@@ -1517,11 +1554,116 @@ edict_t *SelectLavaCoopSpawnPoint(edict_t *ent)
 //ROGUE
 //===============
 
+// R-SP-3: co-op is as large as `maxclients`, and a map has the spots it has --
+// id assumed four, the start and three info_player_coop.  These two keep the
+// clients past them from telefragging the clients on them.
+//
+// Is a living player's body where one placed at `origin` would be?  Asked of
+// the boxes rather than with a trace, because a spot may sit a few units into
+// its floor -- PutClientInServer's floor clip is there for that -- and a trace
+// would call every such spot taken by the world.
+static bool CoopSpotTaken(const edict_t *ent, const vec3_t origin)
+{
+    static const vec3_t mins = { -16, -16, -24 }, maxs = { 16, 16, 32 };
+    const edict_t   *other;
+    int             i, j;
+
+    for (i = 1; i <= game.maxclients; i++) {
+        other = &g_edicts[i];
+        if (other == ent || !other->inuse || other->health <= 0 ||
+            other->solid == SOLID_NOT)
+            continue;
+        for (j = 0; j < 3; j++)
+            if (other->absmin[j] >= origin[j] + maxs[j] ||
+                other->absmax[j] <= origin[j] + mins[j])
+                break;
+        if (j == 3)
+            return true;
+    }
+    return false;
+}
+
+// ...and when one is, the nearest room beside the spot: up to two steps from
+// it, with the way there clear for a whole body, and a floor level with the
+// spot's own or a stair step below it, which PutClientInServer's own clip would
+// find -- dry
+// and level enough by Ground Zero's CheckGroundSpawnPoint, which the Medic
+// Commander's reinforcements stand on -- outside every trigger but an item's.
+// A start often has its way back a few steps behind it, and a body put in that
+// trigger_changelevel, or in a hurt, a teleport or a script's trigger_once,
+// would fire what the map put there.  A body-wide way, because a point would
+// pass between bars a body cannot, and a step of drop, because a ledge further
+// down is one the partner could not climb back from.  With no room at all
+// `origin` is left alone and KillBox has its way, the concession id's
+// deathmatch selector makes when every spot is taken.
+static void CoopMakeRoom(const edict_t *ent, vec3_t origin)
+{
+    static const int    dirs[8][2] = {
+        { 1, 0 }, { 0, 1 }, { -1, 0 }, { 0, -1 },
+        { 1, 1 }, { -1, 1 }, { -1, -1 }, { 1, -1 }
+    };
+    // A stair step, m_move.c's STEPSIZE.  The bodies standing on the spot are
+    // out of the first two traces (the mask leaves CONTENTS_MONSTER out); only
+    // the map can block the way.
+    const float         stepsize = 18;
+    const int           mapmask = MASK_PLAYERSOLID & ~CONTENTS_MONSTER;
+    vec3_t  mins = { -16, -16, -24 }, maxs = { 16, 16, 32 };
+    vec3_t  stand, pos, bottom, absmin, absmax;
+    edict_t *touch[MAX_EDICTS_OLD];
+    trace_t tr;
+    int     step, i, j, n;
+
+    if (!CoopSpotTaken(ent, origin))
+        return;
+
+    // Where a body stands on the spot itself, just off the floor as
+    // PutClientInServer puts it, and the height the way out is traced at.  A
+    // spot with no floor under it is its own height.
+    VectorSet(pos, origin[0], origin[1], origin[2] + 16);
+    VectorSet(bottom, origin[0], origin[1], origin[2] - 64);
+    tr = gi.trace(pos, mins, maxs, bottom, NULL, mapmask);
+    VectorCopy(tr.startsolid || tr.fraction == 1 ? origin : tr.endpos, stand);
+    stand[2] += 1;
+
+    for (step = 1; step <= 2; step++) {
+        for (i = 0; i < 8; i++) {
+            VectorSet(pos, stand[0] + dirs[i][0] * 40 * step,
+                      stand[1] + dirs[i][1] * 40 * step, stand[2]);
+            tr = gi.trace(stand, mins, maxs, pos, NULL, mapmask);
+            if (tr.startsolid || tr.fraction < 1)
+                continue;
+
+            // Level with the spot, or a step down from it -- and a unit past
+            // the step, so a floor exactly one step down is a hit.
+            VectorSet(bottom, pos[0], pos[1], pos[2] - stepsize - 2);
+            tr = gi.trace(pos, mins, maxs, bottom, NULL, MASK_PLAYERSOLID);
+            if (tr.startsolid || tr.fraction == 1 || tr.ent != world ||
+                !CheckGroundSpawnPoint(tr.endpos, mins, maxs, 18, -1))
+                continue;
+
+            VectorAdd(tr.endpos, mins, absmin);
+            VectorAdd(tr.endpos, maxs, absmax);
+            n = gi.BoxEdicts(absmin, absmax, touch, q_countof(touch),
+                             AREA_TRIGGERS);
+            for (j = 0; j < n; j++)
+                if (touch[j]->inuse && touch[j]->touch && !touch[j]->item)
+                    break;
+            if (j < n)
+                continue;
+
+            VectorCopy(tr.endpos, origin);
+            return;
+        }
+    }
+}
+
 static edict_t *SelectCoopSpawnPoint(edict_t *ent)
 {
     int     index;
     edict_t *spot = NULL;
     char    *target;
+    edict_t *best = NULL;
+    float   range, bestrange = -1;
 
 //ROGUE
     // rogue hack, but not too gross...
@@ -1541,7 +1683,7 @@ static edict_t *SelectCoopSpawnPoint(edict_t *ent)
     while (1) {
         spot = G_Find(spot, FOFS(classname), "info_player_coop");
         if (!spot)
-            return NULL;    // we didn't have enough...
+            break;          // we didn't have enough...
 
         target = spot->targetname;
         if (!target)
@@ -1551,10 +1693,24 @@ static edict_t *SelectCoopSpawnPoint(edict_t *ent)
             index--;
             if (!index)
                 return spot;        // this is it
+
+            range = PlayersRangeFromSpot(spot, ent);
+            if (range > bestrange) {
+                bestrange = range;
+                best = spot;
+            }
         }
     }
 
-    return spot;
+    // An index past the map's spots (R-SP-3).  id handed every one of them the
+    // start, and KillBox cleared it: on a level start with more than four
+    // players, one partner telefragged per extra arrival.  It takes the coop
+    // spot of its group farthest from any player instead, or the start when
+    // even that one is taken -- and SelectSpawnPoint makes room beside
+    // whichever it gets.
+    if (best && !CoopSpotTaken(ent, best->s.origin))
+        return best;
+    return NULL;
 }
 
 /*
@@ -1607,6 +1763,15 @@ bool SelectSpawnPoint(edict_t *ent, vec3_t origin, vec3_t angles)
 
     VectorCopy(spot->s.origin, origin);
     VectorCopy(spot->s.angles, angles);
+
+    // ...and in co-op nobody is placed on a partner (R-SP-3).  The spot is
+    // still id's choice for every index that has one; what moves is the body,
+    // beside it, when somebody is standing there -- an arrival past the map's
+    // spots on a level start, or a respawn onto a spot such an arrival took.
+    // Asked of the campaign rather than of `coop`: single player has nobody
+    // to stand on, so there the call finds the spot free and returns.
+    if (G_IsCampaign())
+        CoopMakeRoom(ent, origin);
     return true;
 }
 
@@ -1949,9 +2114,30 @@ void PutClientInServer(edict_t *ent)
     // game" and every scoreboard row was blank.  It is not a bot defect -- a
     // human's first spawn takes the same path -- but a bot is what respawns
     // often enough to make it obvious.
-    if (deathmatch->value) {
+    //
+    // Tourney's arm is also the donor's ORDER (osp-tourney@a8d1725,
+    // port_osp:p_client.c:1171-1178), and the order is what it is for.  The
+    // `resp` snapshot comes after the reset and after the first
+    // ClientUserinfoChanged, because both write `resp`: OSP_seedPlayer stamps
+    // `osp_r23c` -- the `client_protect` spawn protection, which nothing else
+    // sets to a future frame -- and OSP_userinfoChanged `osp_r0f4`, the skin
+    // in force.
+    // Taken before them, the restore after the memset below put the old values
+    // back and nobody was ever spawn-protected.  The warmup loadout goes into
+    // `pers` here for the same reason in the other direction -- ahead of the
+    // FetchClientEntData that copies `pers.health` to the body, or
+    // `warmup_health` never reaches it.  The second ClientUserinfoChanged,
+    // below, is the donor's too and repeats the first.  (Every OSP ruleset is
+    // a deathmatch one; g_ruleset.c forces it.)
+    if (G_IsOspRuleset()) {
+        InitClientPersistant(client, false);
+        if (sync_stat < 2)
+            OSP_warmupItems(ent);
+        ClientUserinfoChanged(ent, userinfo);
         resp = client->resp;
-        InitClientPersistant(client, !G_IsOspRuleset());
+    } else if (deathmatch->value) {
+        resp = client->resp;
+        InitClientPersistant(client, true);
     } else if (coop->value) {
 //      int         n;
 
@@ -2069,6 +2255,15 @@ void PutClientInServer(edict_t *ent)
 
     ent->flags &= ~FL_SAM_RAIMI;        // PGM - turn off sam raimi flag
 
+    // ...and in deathmatch the disguise is the body's as well.  Nothing there
+    // takes FL_DISGUISED off again -- PlayerNoise returns before its clear,
+    // and g_ai.c's needs a monster to see through it -- so without this a
+    // disguise outlived every death.  A trigger_disguise on a Ground Zero map
+    // gives it back to whoever walks through.  Not in the campaign, where
+    // those clears run and Ground Zero keeps the disguise across a respawn.
+    if (!G_IsCampaign())
+        ent->flags &= ~FL_DISGUISED;
+
     VectorCopy(mins, ent->mins);
     VectorCopy(maxs, ent->maxs);
     VectorClear(ent->velocity);
@@ -2077,19 +2272,21 @@ void PutClientInServer(edict_t *ent)
     // handle live and relies on the join menu being reopened over it.
     G_MenuClose(ent);
 
-    // Before the match is live a player spawns with the warmup
-    // loadout rather than a blaster, so that warmup is practice rather than a
-    // different game; and the grapple is let go and the accuracy row is opened.
+    // The warmup loadout is not given here but before the memset above, where
+    // FetchClientEntData can still carry its health to the body.
     //
-    // The HUD panels are not pointed here, and used to be: OSP_restartStats is
-    // at the END of this function, next to the weapon, because `ps` is
-    // memset to zero forty lines below and the panels live in `ps.stats`
-    //These three are safe here -- the loadout is `pers.inventory`,
-    // the accuracy row is p_acc[] and the grapple is an entity.
+    // Nor is the grapple let go here, whatever this call looks like: the
+    // memset above has already forgotten `ctf_grapple`, so OSP_hookoff_cmd
+    // finds no hook to release, and the one still in the world goes on the
+    // entity loop's next pass, from OSP_HookFrame, which frees a hook its
+    // owner no longer holds.  The donor makes the same call after the same
+    // memset.
+    //
+    // And the HUD panels are not pointed here: OSP_restartStats is at the END
+    // of this function, next to the weapon, because `ps` is memset to zero
+    // below and the panels live in `ps.stats`.  The accuracy row the observer
+    // arm opens is p_acc[], which no memset reaches.
     if (G_IsOspRuleset()) {
-        if (sync_stat < 2)
-            OSP_warmupItems(ent);
-        OSP_setSingleAccuracy(ent);
         OSP_hookoff_cmd(ent);
 
         // Tourney's fourth placement, and connecting is not entering.
@@ -2119,6 +2316,13 @@ void PutClientInServer(edict_t *ent)
             ent->clipmask = 0;
             ent->svflags |= SVF_NOCLIENT;
             client->resp.osp_r2bc = 1;
+            // The accuracy row is opened here, on the observer placement, and
+            // on no other: the table is per connection and a respawn is not a
+            // new one.  The donor has it in exactly this arm
+            // (port_osp:p_client.c:1202); run on every spawn, each death wiped
+            // the player's shots, hits and damage and left `accuracy`, the
+            // player card and the stats record describing one life.
+            OSP_setSingleAccuracy(ent);
             client->resp.osp_r240 = 0;
         } else {
             // A client placed as a PLAYER is no longer looking at the
@@ -2219,8 +2423,9 @@ void PutClientInServer(edict_t *ent)
     if (G_Ruleset() == RULESET_CTF && CTFStartClient(ent))
         return;
 
-    // RA2 applies post-connect spectator updates through its native placement
-    // path, which establishes its fightstate observer representation.
+    // Under arena `pers.spectator` is never set (ClientUserinfoChanged keeps the
+    // key inert there): RA2's watchers are its fightstate, which its own
+    // placement path establishes.  The test stays as the donor's guard.
     if (client->pers.spectator && G_Ruleset() != RULESET_ARENA &&
         !G_IsOspRuleset()) {
         client->chase_target = NULL;
@@ -2322,12 +2527,27 @@ void PutClientInServer(edict_t *ent)
     // The donor's own position is `port_osp:p_client.c:1307`, immediately
     // before these two lines.  The arena arm returns above and needs none of
     // this.
-    if (G_IsOspRuleset())
+    //
+    // The line before it there is the debounce every tourney menu key and
+    // observer press reads, `osp_r010`, restarted two frames out so that the
+    // press that ended the last state is not also the first of this one.
+    if (G_IsOspRuleset()) {
+        client->resp.osp_r010 = level.framenum + 2;
         OSP_restartStats(ent);
+    }
 
     // force the current weapon up
     client->newweapon = client->pers.weapon;
     ChangeWeapon(ent);
+
+    // ...and the stats log records the life, last, as the donor does
+    // (osp-tourney@a8d1725): a player placed into a live match is a `respawn`
+    // event.  Its only other callers are OSP_checkHalt's log restarts, which
+    // re-list who is playing, so the log held every death of a match and none
+    // of the respawns between them.
+    if (G_IsOspRuleset() && client->resp.osp_entered == ENTERED_ENTERED &&
+        sync_stat > 2 && !level.intermission_framenum)
+        OSP_Stats_PlayerRespawn(ent);
 }
 
 /*
@@ -2574,7 +2794,17 @@ void ClientUserinfoChanged(edict_t *ent, char *userinfo)
     // client -- `spectator 1` in userinfo would noclip a player that
     // G_IsObserver() still reports as playing, because it asks about the team.
     // Threewave deletes the key outright; here it is simply inert.
+    //
+    // Nor under arena, for the same reason and a worse symptom.  RA2 refuses
+    // the key at connect and watches through `fightstate`, and its placement
+    // writes `resp.spectator = false` every time -- so a `spectator 1` set
+    // after connecting never matched, and ClientBeginServerFrame's toggle
+    // re-ran spectator_respawn every five seconds: a broadcast "moved to the
+    // sidelines", a zeroed score, and a fighter pulled out of a round without
+    // a death.  That leaves baseq2's spectator system with no ruleset that
+    // reaches it, which is the donors' own answer three times over.
     if (deathmatch->value && G_Ruleset() != RULESET_CTF &&
+        G_Ruleset() != RULESET_ARENA &&
         !G_IsOspRuleset() && *s && strcmp(s, "0"))
         ent->client->pers.spectator = true;
     else
@@ -2662,8 +2892,11 @@ void ClientUserinfoChanged(edict_t *ent, char *userinfo)
     // watching somebody read "Sarge\male/red" rather than "Sarge", the skin
     // path and the separator included, and read it wider the longer the model
     // name was.  Threewave hit that in 1998 and answered it with this line;
-    // 1999's Rocket Arena did not, and the answer transfers unchanged.
-    if (G_Ruleset() == RULESET_CTF || G_Ruleset() == RULESET_ARENA)
+    // 1999's Rocket Arena did not, and the answer transfers unchanged.  So
+    // does the campaign's chase plate, the third reader (G_SetSpectatorStats).
+    // Not under the OSP four, whose own strings sit in this range (OSP_CS).
+    if (G_Ruleset() == RULESET_CTF || G_Ruleset() == RULESET_ARENA ||
+        G_Ruleset() == RULESET_SP)
         gi.configstring(game.csr.general + playernum, ent->client->pers.netname);
 
     // fov
@@ -2715,6 +2948,11 @@ static void G_LatchClientAddress(edict_t *ent, const char *userinfo)
 {
     char *port;
 
+    // A new connection starts with no failed logins: the backoff belongs to
+    // the connection, and this slot may still hold the last one's.
+    ent->client->pers.login_fails = 0;
+    ent->client->pers.login_retry = 0;
+
     // A bot has no `ip` at all -- its userinfo is bl_spawn.c's own -- and gets
     // tourney's name for one, because "no address" and "not a person" are
     // precisely the two cases a log reader must be able to tell apart.
@@ -2754,52 +2992,16 @@ loadgames will.
 */
 qboolean ClientConnect(edict_t *ent, char *userinfo)
 {
-    // Never connect as an observer.  The flag lives on the edict and
-    // an edict is reused, so a client taking a slot an observer left would
-    // inherit FL_OBSERVER and its camera.
-    ent->flags &= ~FL_OBSERVER;
-
     char    *value;
+    // Whether this connect is a bot's is BotCreate's to say, not the edict's:
+    // see BotConnecting.
+    bool    bot = BotConnecting(ent);
 
-    // The connect-time half of RA2's ZBot detection.  The cheat client
-    // of the day announced itself by the port it connected from, so RA2 keeps
-    // the port and InitClientResp seeds `resp.isbot` from it.  Before the ban
-    // check, as the donor has it -- a banned client never reaches either.
-    if (G_Ruleset() == RULESET_ARENA) {
-        value = Info_ValueForKey(userinfo, "ip");
-        if (*value) {
-            // "<addr>:<port>", and an address with no port is not an error --
-            // a local client connects without one.
-            char *colon = strchr(value, ':');
-
-            if (colon) {
-                ent->client->zbotscore = atoi(colon + 1);
-                // A cheat REPORT, and it is tagged so that it cannot be read
-                // as the connect record below.  The merge had it as
-                // `"%s connected with ZBOT\n"` with the whole USERINFO
-                // substituted for the name -- a line shaped like an arrival,
-                // naming nobody, carrying a backslash-separated blob of
-                // client-supplied text through the console log and past
-                // anything parsing it.  RA2's own is two lines and prints the
-                // userinfo deliberately, so the detail stays; what changes is
-                // that the player is named and the line says what it is.
-                //
-                // `netname` does not exist yet -- ClientUserinfoChanged has
-                // not run -- so the name comes from the userinfo, which is
-                // what that function is about to read it out of anyway.
-                if (ent->client->zbotscore == RA_ZBOT_PORT) {
-                    char addr[MAX_CLIENT_ADDRESS];
-
-                    // Info_ValueForKey hands back a rotating static buffer, so
-                    // the address is copied before the name is asked for.
-                    Q_strlcpy(addr, value, sizeof(addr));
-                    gi.dprintf("ZBOT: %s from %s -- userinfo \"%s\"\n",
-                               Info_ValueForKey(userinfo, "name"), addr,
-                               userinfo);
-                }
-            }
-        }
-    }
+    // The refusals first, ahead of the bot move below, because a refused
+    // connect must not make that move: it releases the bot's hook, removes
+    // what it laid and, under arena, re-keys its round record.  None of them
+    // touches the slot -- they read the userinfo, and the password exemption
+    // asks BotConnecting rather than the edict's flags.
 
     // check to see if they are on the banned IP list
     value = Info_ValueForKey(userinfo, "ip");
@@ -2841,9 +3043,13 @@ qboolean ClientConnect(edict_t *ent, char *userinfo)
         }
     } else {
         // check for a password
+        // A bot carries no `password` in its userinfo and is exempt, as the
+        // donor's `!(ent->flags & FL_BOTCLIENT)` made it (port_osp
+        // p_client.c:1752) -- asked of BotConnecting, because a person on a
+        // live bot's slot still has that bot's flag here.
         value = Info_ValueForKey(userinfo, "password");
         if (*password->string && strcmp(password->string, "none") &&
-            strcmp(password->string, value)) {
+            strcmp(password->string, value) && !bot) {
             Info_SetValueForKey(userinfo, "rejmsg", "Password required or incorrect.");
             return false;
         }
@@ -2860,12 +3066,76 @@ qboolean ClientConnect(edict_t *ent, char *userinfo)
     // nowhere to move it to; stealing the slot would leave the brain talking
     // about a client that is now somebody else.
     //
+    // Before anything below writes the slot.  Both donors move first of all
+    // (gladq2_src and osp-tourney p_client.c), and both moves destroyed
+    // nothing; this one does, so it waits for the refusals above.  The move
+    // copies the bot's edict and gclient_t and then clears this slot's, so a
+    // write made earlier lands on the live bot and is lost to the arriving
+    // client: the FL_OBSERVER clear, and RA2's connect-time port in
+    // `zbotscore`, which the person's ZBot check then read as 0.
+    //
     // Not for a bot's own ClientConnect: BotCreate clears FL_BOT across the
     // call precisely so this does not recurse.
     if ((ent->flags & FL_BOT) && !BotMoveToFreeClientEdict(ent)) {
+        if (G_IsOspRuleset())
+            OSP_clientRefused(ent);
         Info_SetValueForKey(userinfo, "rejmsg", "Server is full.");
         return false;
     }
+
+    // Never connect as an observer.  The flag lives on the edict and
+    // an edict is reused, so a client taking a slot an observer left would
+    // inherit FL_OBSERVER and its camera.
+    ent->flags &= ~FL_OBSERVER;
+
+    // The connect-time half of RA2's ZBot detection.  The cheat client
+    // of the day announced itself by the port it connected from, so RA2 keeps
+    // the port and InitClientResp seeds `resp.isbot` from it.  The donor has
+    // this before the ban check; it is after every refusal here, with the bot
+    // move, so a refused cheat client goes without the console report and an
+    // admitted one has it as before.
+    if (G_Ruleset() == RULESET_ARENA) {
+        value = Info_ValueForKey(userinfo, "ip");
+        if (*value) {
+            // "<addr>:<port>", and an address with no port is not an error --
+            // a local client connects without one.
+            char *colon = strchr(value, ':');
+
+            if (colon) {
+                ent->client->zbotscore = atoi(colon + 1);
+                // A cheat REPORT, and it is tagged so that it cannot be read
+                // as the connect record below.  The merge had it as
+                // `"%s connected with ZBOT\n"` with the whole USERINFO
+                // substituted for the name -- a line shaped like an arrival,
+                // naming nobody, carrying a backslash-separated blob of
+                // client-supplied text through the console log and past
+                // anything parsing it.  RA2's own is two lines and prints the
+                // userinfo deliberately, so the detail stays; what changes is
+                // that the player is named and the line says what it is.
+                //
+                // `netname` does not exist yet -- ClientUserinfoChanged has
+                // not run -- so the name comes from the userinfo, which is
+                // what that function is about to read it out of anyway.
+                if (ent->client->zbotscore == RA_ZBOT_PORT) {
+                    char addr[MAX_CLIENT_ADDRESS];
+
+                    // Info_ValueForKey hands back a rotating static buffer, so
+                    // the address is copied before the name is asked for.
+                    Q_strlcpy(addr, value, sizeof(addr));
+                    gi.dprintf("ZBOT: %s from %s -- userinfo \"%s\"\n",
+                               Info_ValueForKey(userinfo, "name"), addr,
+                               userinfo);
+                }
+            }
+        }
+    }
+
+    // From here the edict is the arriving client's, and a person carries no
+    // bot flag whatever the slot's last occupant left -- FL_BOTCLIENT exempts
+    // from `password` and from the vote count, and FL_BOT diverts every message
+    // sent to the client into the brain.
+    if (!bot)
+        ent->flags &= ~(FL_BOT | FL_BOTCLIENT | FL_BOTINPUT);
 
     // they can connect
     ent->client = game.clients + (ent - g_edicts - 1);
@@ -2959,6 +3229,13 @@ qboolean ClientConnect(edict_t *ent, char *userinfo)
             ent->client->pers.showmotd = true;
     }
 
+    // Nobody arrives in disguise.  FL_DISGUISED is on the edict, which the
+    // slot's next occupant inherits with everything else on it.  A loadgame's
+    // body -- `inuse` already -- keeps its own, which a trigger_disguise may
+    // have given it before the save.
+    if (!ent->inuse)
+        ent->flags &= ~FL_DISGUISED;
+
     ClientUserinfoChanged(ent, userinfo);
 
     // RA2's stdlog gets the arrival, after the rename that decides what name is
@@ -2990,6 +3267,11 @@ qboolean ClientConnect(edict_t *ent, char *userinfo)
     ent->svflags = 0; // make sure we start with known default
     ent->client->pers.connected = true;
     return true;
+}
+
+bool G_DeployableLaidBy(edict_t *layer, void *arg)
+{
+    return layer == arg;
 }
 
 /*
@@ -3033,6 +3315,14 @@ void ClientDisconnect(edict_t *ent)
     if (!ent->client->pers.connected)
         return;
 
+    // A client a brain is driving leaves the bot layer first -- a `becomebot`
+    // person the engine is dropping, or a bot a tourney kick disconnects
+    // directly -- so that the rest of this runs as it does for anybody.
+    // BotDestroy clears FL_BOT before it calls here, so its own bots do not
+    // come through twice (BotClientLeaving).
+    if (ent->flags & FL_BOT)
+        BotClientLeaving(ent);
+
     // ...and the departure, before anything else may return early.
     if (G_Ruleset() == RULESET_ARENA)
         GSLogExit(ent);
@@ -3052,7 +3342,10 @@ void ClientDisconnect(edict_t *ent)
         // client count -- "wimped out and left. (clients = 3)" -- so the plain
         // line here would be a duplicate.
         OSP_clientLeaving(ent, &osp_team);
-    } else {
+    } else if (!BotConnecting(ent)) {
+        // Not for a bot whose connect is being undone (BotCreate): nobody saw
+        // it arrive, and a refused bots.cfg row is picked again by the fill
+        // every 32 frames.  The console line above still pairs its connect.
         gi.bprintf(PRINT_HIGH, "%s disconnected\n", ent->client->pers.netname);
     }
 
@@ -3060,6 +3353,17 @@ void ClientDisconnect(edict_t *ent)
     // neither, so no gate.
     CTFDeadDropFlag(ent);
     CTFDeadDropTech(ent);
+
+    // ...and the hook does not.  Threewave, RA2 and OSP all keep it on one
+    // pointer in the client, which the slot's next occupant is about to be
+    // given; left out, the hook stayed in the world for the rest of the level,
+    // and one still in flight later wrote PULL into the new player's client and
+    // credited its kills to them.  OSP's own reset for OSP's hook, as its
+    // donor's ClientDisconnect has it; Threewave's for the other two.
+    if (G_IsOspRuleset())
+        OSP_hookoff_cmd(ent);
+    else
+        CTFPlayerResetGrapple(ent);
 
     // A client who quits with a menu open must not leave the handle
     // behind it.  Threewave leaks it.
@@ -3071,11 +3375,19 @@ void ClientDisconnect(edict_t *ent)
     if (ent->client->tracker_pain_framenum)
         RemoveAttackingPainDaemons(ent);
 
-    if (ent->client->owned_sphere) {
-        if (ent->client->owned_sphere->inuse)
-            G_FreeEdict(ent->client->owned_sphere);
+    // `inuse` alone let a reused slot be freed as the sphere (G_OwnedSphere).
+    if (G_OwnedSphere(ent)) {
+        G_FreeEdict(ent->client->owned_sphere);
         ent->client->owned_sphere = NULL;
     }
+
+    // The mines, teslas, traps, nukes, dopplegangers and spheres this client
+    // laid go with it.  They
+    // name the EDICT as their layer, and the edict is the slot's next
+    // occupant's: left, a departed player's tesla credits its kills to
+    // whoever the fill seats there, and under `ctf` judges teammates by the new
+    // occupant's side.
+    G_RemoveDeployables(G_DeployableLaidBy, ent);
 
     if (G_UsesRogueGameRules()) {
         if (DMGame.PlayerDisconnect)
@@ -3143,6 +3455,24 @@ void ClientDisconnect(edict_t *ent)
     // pause that waits for the last member of a team to come back.
     if (G_IsOspRuleset() && OSP_clientLeft(ent, osp_team))
         return;
+
+    // ...and everybody else's chase cams.  A chase cam is driven from its
+    // TARGET's ClientThink, which a departed client no longer has, so its
+    // chasers froze where it left and then followed the slot's next occupant
+    // without a word.  UpdateChaseCam is q2pro's answer to a target that has
+    // gone -- the next player, or the free view when there is none -- and with
+    // `inuse` already false above it gives that answer now.  Tourney's
+    // chasers are OSP_clientLeft's, and an arena camera tracks `track_target`.
+    if (!G_IsOspRuleset() && G_Ruleset() != RULESET_ARENA) {
+        int i;
+
+        for (i = 1; i <= game.maxclients; i++) {
+            edict_t *other = g_edicts + i;
+
+            if (other->inuse && other->client->chase_target == ent)
+                UpdateChaseCam(other);
+        }
+    }
 
     // FIXME: don't break skins on corpses, etc
     //playernum = ent-g_edicts-1;
@@ -3324,7 +3654,24 @@ static void ClientLagThink(edict_t *ent, usercmd_t *ucmd)
             // business -- it consumes the press to change target -- whereas
             // The mode cycle has already read this one, and
             // ClientBeginServerFrame clears it at the end of the frame.
-        } else if (!client->weapon_thunk) {
+        //
+        // ...and the weapon opens for a BODY, by ClientBeginServerFrame's own
+        // test, which is the donor's here as well (port_osp:p_client.c:2493).
+        // Every observer has taken an arm above, but under tourney an entered
+        // client is not yet a body until it is placed -- the frame its join
+        // lands on, or for as long as a refused spawn keeps retrying -- and
+        // `osp_r240` is what says so.  Without it that client fired the press
+        // it had latched.
+        } else if (!client->weapon_thunk &&
+                   (G_IsOspRuleset() ? client->resp.osp_r240 == 2
+                                     : !G_IsObserver(ent))) {
+            // A shot ends tourney's spawn protection once the respawn's own
+            // fifth of a second is past -- the donor's line in this same arm
+            // (osp-tourney@a8d1725), and what keeps `client_protect` from
+            // being a protected player shooting back untouchable.
+            if (G_IsOspRuleset() &&
+                level.framenum > client->respawn_framenum + 0.2f * BASE_FRAMERATE)
+                client->resp.osp_r23c = 0;
             client->weapon_thunk = true;
             Think_Weapon(ent);
         }
@@ -3364,8 +3711,28 @@ void ClientThink(edict_t *ent, usercmd_t *ucmd)
     int     i, j;
     pmove_t pm;
 
+    // A client a brain is driving thinks on the brain's commands alone.  The
+    // engine calls this with network usercmds for every real client, and a
+    // person who typed `becomebot` is still one: without the gate they went on
+    // driving the body with their own keys alongside the brain.  FL_BOTINPUT
+    // is set around BotExecuteInput's calls and nowhere else, and Gladiator's
+    // ClientThink returns on exactly this test (gladq2_src p_client.c).
+    if ((ent->flags & FL_BOT) && !(ent->flags & FL_BOTINPUT))
+        return;
+
     level.current_entity = ent;
     client = ent->client;
+
+    // Tourney's pause freezes the players as well as the world.  G_RunFrame
+    // skips the entity loop while `match_paused >= 2`, but the engine calls
+    // this once per usercmd whatever the game is doing, so without this test a
+    // paused player walks, touches triggers and teleporters, picks items up and
+    // fires -- Think_Weapon runs from here, and a hitscan weapon hits on the same
+    // call.  The donor wraps the whole function in `match_paused < 2`
+    // (port_osp:p_client.c:2074); its other arm serves an admin stats pause,
+    // `who_paused == -3`, that nothing in this tree enters.
+    if (G_IsOspRuleset() && match_paused >= 2)
+        return;
 
     if (level.intermission_framenum) {
         client->ps.pmove.pm_type = PM_FREEZE;
@@ -3752,8 +4119,15 @@ void ClientThink(edict_t *ent, usercmd_t *ucmd)
         // `ctf_grapple` edict and the ruleset chooses which one moves the
         // player on it.  A single pull with tunables would have to reconcile
         // two different state machines rather than one.
+        //
+        // A pointer that no longer names this player's own hook is a hook a
+        // mover freed (CTFOwnsGrapple), and it is forgotten here rather than
+        // handed to a pull: both pulls reset what they are given, and what is in
+        // that slot now is somebody else's.
         if (client->ctf_grapple) {
-            if (G_IsOspRuleset())
+            if (!CTFOwnsGrapple(ent))
+                CTFForgetGrapple(client);
+            else if (G_IsOspRuleset())
                 GrapplePull(client->ctf_grapple);
             else
                 CTFGrapplePull(client->ctf_grapple);
@@ -3840,14 +4214,21 @@ void ClientThink(edict_t *ent, usercmd_t *ucmd)
     if (g_clientlag->value && !(ent->flags & FL_BOTCLIENT)) {
         usercmd_t laggeducmd;
         vec3_t v_angle, origin;
+        bool queued;
 
         VectorCopy(ent->s.origin, origin);
         VectorCopy(client->v_angle, v_angle);
-        Lag_StoreClientInput(ent, ucmd, ent->s.origin, client->v_angle);
+        queued = Lag_StoreClientInput(ent, ucmd, ent->s.origin, client->v_angle);
         while (Lag_GetClientInput(ent, &laggeducmd, ent->s.origin, client->v_angle))
             ClientLagThink(ent, &laggeducmd);
         VectorCopy(v_angle, client->v_angle);
         VectorCopy(origin, ent->s.origin);
+        // A command the full pool could not queue runs now, from the live
+        // position, after the queued ones already due -- a still-delayed one
+        // runs later than it -- because replaying only the queue dropped its
+        // button half, and with it the shot.
+        if (!queued)
+            ClientLagThink(ent, ucmd);
     } else {
         ClientLagThink(ent, ucmd);
     }

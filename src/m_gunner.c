@@ -562,7 +562,10 @@ static void GunnerGrenade(edict_t *self)
 
 // baseq2's, which The Reckoning inherits unchanged -- Ground Zero rewrote
 // GunnerGrenade above to lead the target and to blindfire, so the two ship side
-// by side and `bq2_gunner_frames_attack_grenade` calls this one.
+// by side, and id's arm calls this one: `bq2_gunner_frames_attack_grenade` and
+// the dodge's bq2_gunner_duck_down, which on skill 2 and up lobs one on half
+// its ducks.  Ground Zero's would spread that one 6 degrees right and decline a
+// gone enemy.
 static void bq2_GunnerGrenade(edict_t *self)
 {
     vec3_t start;
@@ -734,8 +737,8 @@ void gunner_attack(edict_t *self)
         self->monsterinfo.aiflags |= AI_MANUAL_STEERING;
         if (gunner_grenade_check(self)) {
             // if the check passes, go for the attack
-            // Both sequences ship; the latch selects (if/else with
-            // literal assignments so genptr.py sees both).
+            // The else is unreachable -- id's arm returned above -- and stays
+            // because tools/gates.py wants the bq2_ twin at every site.
             if (self->content_flavour & CONTENT_ROGUE)
                 self->monsterinfo.currentmove = &gunner_move_attack_grenade;
             else
@@ -759,8 +762,8 @@ void gunner_attack(edict_t *self)
         self->monsterinfo.currentmove = &gunner_move_attack_chain;
     } else {
         if (random() <= 0.5f && gunner_grenade_check(self)) {
-            // Both sequences ship; the latch selects (if/else with
-            // literal assignments so genptr.py sees both).
+            // The else is unreachable -- id's arm returned above -- and stays
+            // because tools/gates.py wants the bq2_ twin at every site.
             if (self->content_flavour & CONTENT_ROGUE)
                 self->monsterinfo.currentmove = &gunner_move_attack_grenade;
             else
@@ -1064,7 +1067,7 @@ static void bq2_gunner_duck_down(edict_t *self)
     self->monsterinfo.aiflags |= AI_DUCKED;
     if (skill->value >= 2) {
         if (random() > 0.5f)
-            GunnerGrenade(self);
+            bq2_GunnerGrenade(self);
     }
 
     self->maxs[2] -= 32;

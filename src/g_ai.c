@@ -61,7 +61,13 @@ static edict_t *NextSightClient(edict_t *previous, int excluded_flags)
         if (check > game.maxclients)
             check = 1;
         ent = &g_edicts[check];
-        if (ent->inuse && ent->health > 0 && !(ent->flags & excluded_flags))
+        // Not an observer either.  baseq2 never had monsters and watchers on
+        // one server -- its spectators are deathmatch's -- so a live client was
+        // a player there; under `ctf` every client starts as a spectator unless
+        // force-join is on, at 100 health and without FL_NOTARGET, and a monster
+        // map woke its monsters for noclipping watchers they could not hurt.
+        if (ent->inuse && ent->health > 0 && !(ent->flags & excluded_flags) &&
+            !G_IsObserver(ent))
             return ent;
         if (check == start)
             return NULL;
@@ -109,8 +115,16 @@ void ai_stand(edict_t *self, float dist)
     bool retval;
     bool rogue = M_UsesRogueBehavior(self);
 
-    if (dist)
+    if (dist) {
         M_walkmove(self, self->s.angles[YAW], dist);
+        // The move touches triggers, and a trigger_hurt can kill a monster
+        // whose die function frees it (a flyer, a floater, the fixbot); what
+        // follows would run FindTarget on the zeroed edict.  The guard Ground
+        // Zero's ai_run has after its moves, here for both arms -- see
+        // bq2_ai_run.
+        if (!self->inuse)
+            return;
+    }
 
     if (self->monsterinfo.aiflags & AI_STAND_GROUND) {
         if (self->enemy) {
@@ -178,6 +192,8 @@ void ai_walk(edict_t *self, float dist)
     bool rogue = M_UsesRogueBehavior(self);
 
     M_MoveToGoal(self, dist);
+    if (!self->inuse)
+        return;         // freed by a trigger the move touched -- see ai_stand
 
     // check for noticing a player
     if (FindTarget(self))
@@ -281,8 +297,11 @@ Distance is for slight position adjustments needed by the animations
 */
 void ai_turn(edict_t *self, float dist)
 {
-    if (dist)
+    if (dist) {
         M_walkmove(self, self->s.angles[YAW], dist);
+        if (!self->inuse)
+            return;     // freed by a trigger the move touched -- see ai_stand
+    }
 
     if (FindTarget(self))
         return;
@@ -398,10 +417,19 @@ void HuntTarget(edict_t *self)
     vec3_t  vec;
 
     self->goalentity = self->enemy;
-    if (self->monsterinfo.aiflags & AI_STAND_GROUND)
-        self->monsterinfo.stand(self);
-    else
+    // A backstop, not the fix.  Things with no run or stand have reached
+    // here -- a misc_explobox shoved into a tesla's bad area, a
+    // turret_invisible_brain through FindTarget, a Makron raised from Jorg's
+    // "noclass" corpse -- and each belongs closed where it starts (the barrel
+    // in SV_movestep and TargetTesla, the brain in turret_brain_think, the
+    // Makron by its classname).  A NULL callback here is a server
+    // crash, and an entity without one has no animation to start.
+    if (self->monsterinfo.aiflags & AI_STAND_GROUND) {
+        if (self->monsterinfo.stand)
+            self->monsterinfo.stand(self);
+    } else if (self->monsterinfo.run) {
         self->monsterinfo.run(self);
+    }
     VectorSubtract(self->enemy->s.origin, self->s.origin, vec);
     self->ideal_yaw = vectoyaw(vec);
     // wait a while before first attack
@@ -453,8 +481,9 @@ void FoundTarget(edict_t *self)
     self->movetarget->targetname = NULL;
     self->monsterinfo.pause_framenum = 0;
 
-    // run for it
-    self->monsterinfo.run(self);
+    // run for it -- tested for the reason HuntTarget tests it
+    if (self->monsterinfo.run)
+        self->monsterinfo.run(self);
 }
 
 /*
@@ -531,6 +560,13 @@ bool FindTarget(edict_t *self)
     if (!client->inuse)
         return false;
 
+    // An observer is nobody to fight -- see NextSightClient.  Asked before
+    // the enemy test below, which would otherwise answer "found" for a
+    // player who turned observer while this monster was angry at him; a
+    // CTF or Gladiator observer keeps his health and goes SOLID_NOT.
+    if (G_IsObserver(client))
+        return false;
+
     if (client == self->enemy)
         return true;    // JDC false;
 
@@ -546,6 +582,10 @@ bool FindTarget(edict_t *self)
         if (!client->enemy)
             return false;
         if (client->enemy->flags & FL_NOTARGET)
+            return false;
+        // ...and no more so second-hand: the sight relay below adopts this
+        // monster's enemy as ours.
+        if (G_IsObserver(client->enemy))
             return false;
     } else if (heardit) {
         // Gladiator's NULL check sits OUTSIDE its ROGUE fence
@@ -1084,8 +1124,19 @@ static bool bq2_ai_checkattack(edict_t *self, float dist)
 
     enemy_vis = false;
     hesDeadJim = false;
-    if (!self->enemy || !self->enemy->inuse) {
+    // An observer is as gone as a corpse, and his health cannot say so: a CTF
+    // or Gladiator observer keeps it and turns SOLID_NOT and noclip, so this
+    // arm chased him for good, and the Ground Zero arm's M_CheckAttack shot
+    // at him every window, taking SOLID_NOT for an info_notnull.  Asked of
+    // the fallbacks too, which only test health.
+    if (!self->enemy || !self->enemy->inuse || G_IsObserver(self->enemy)) {
         hesDeadJim = true;
+        // A medic whose patient is gone -- gibbed and freed, say -- is not
+        // healing any more.  id left AI_MEDIC set here, so the medic hunted
+        // its old enemy with the flag on and its cable "healed" a player:
+        // ED_CallSpawn("player") printed an error and rewrote the player's
+        // spawnflags and aiflags (R-CORE-11f).
+        self->monsterinfo.aiflags &= ~AI_MEDIC;
     } else if (self->monsterinfo.aiflags & AI_MEDIC) {
         if (self->enemy->health > 0) {
             hesDeadJim = true;
@@ -1100,7 +1151,8 @@ static bool bq2_ai_checkattack(edict_t *self, float dist)
 
     if (hesDeadJim) {
         self->enemy = NULL;
-        if (self->oldenemy && self->oldenemy->health > 0) {
+        if (self->oldenemy && self->oldenemy->health > 0 &&
+            !G_IsObserver(self->oldenemy)) {
             self->enemy = self->oldenemy;
             self->oldenemy = NULL;
             HuntTarget(self);
@@ -1180,7 +1232,8 @@ static bool ai_checkattack(edict_t *self, float dist)
 
 // see if the enemy is dead
     hesDeadJim = false;
-    if ((!self->enemy) || (!self->enemy->inuse)) {
+    // An observer is dead to both arms -- see bq2_ai_checkattack.
+    if ((!self->enemy) || (!self->enemy->inuse) || G_IsObserver(self->enemy)) {
         hesDeadJim = true;
     } else if (self->monsterinfo.aiflags & AI_MEDIC) {
         if (!(self->enemy->inuse) || (self->enemy->health > 0)) {
@@ -1201,13 +1254,15 @@ static bool ai_checkattack(edict_t *self, float dist)
         self->monsterinfo.aiflags &= ~AI_MEDIC;
         self->enemy = NULL;
         // FIXME: look all around for other targets
-        if (self->oldenemy && self->oldenemy->health > 0) {
+        if (self->oldenemy && self->oldenemy->health > 0 &&
+            !G_IsObserver(self->oldenemy)) {
             self->enemy = self->oldenemy;
             self->oldenemy = NULL;
             HuntTarget(self);
         }
 //ROGUE - multiple teslas make monsters lose track of the player.
-        else if (self->monsterinfo.last_player_enemy && self->monsterinfo.last_player_enemy->health > 0) {
+        else if (self->monsterinfo.last_player_enemy && self->monsterinfo.last_player_enemy->health > 0 &&
+                 !G_IsObserver(self->monsterinfo.last_player_enemy)) {
 //          if ((g_showlogic) && (g_showlogic->value))
 //              gi.dprintf("resorting to last_player_enemy...\n");
             self->enemy = self->monsterinfo.last_player_enemy;
@@ -1325,6 +1380,19 @@ static void bq2_ai_run(edict_t *self, float dist)
         }
 
         M_MoveToGoal(self, dist);
+        // Ground Zero's "g_touchtrigger free problem" guard, after every move
+        // in this arm.  The move touches triggers; a trigger_hurt kills a
+        // flyer, a floater or the fixbot, whose die functions free it, and
+        // id's line goes on to FindTarget and to self->enemy on the zeroed
+        // edict -- boss1, fact1, fact2, hangar1, jail5, power2, space,
+        // xcompnd2 and xhangar1 have both, and so do five of Ground Zero's
+        // (rhangar1, rhangar2, rsewer1, rsewer2, rware2), which run id's line
+        // with the rogue layer off.  Gladiator fences the guard inside
+        // ROGUE, but a guard on `inuse` can only differ from id's line on a
+        // freed edict, where id's line crashes: the rule FindTarget's heardit
+        // guard states.
+        if (!self->inuse)
+            return;
         if (!FindTarget(self))
             return;
     }
@@ -1339,6 +1407,8 @@ static void bq2_ai_run(edict_t *self, float dist)
 
     if (enemy_vis) {
         M_MoveToGoal(self, dist);
+        if (!self->inuse)
+            return;
         self->monsterinfo.aiflags &= ~AI_LOST_SIGHT;
         VectorCopy(self->enemy->s.origin, self->monsterinfo.last_sighting);
         self->monsterinfo.trail_framenum = level.framenum;
@@ -1354,6 +1424,8 @@ static void bq2_ai_run(edict_t *self, float dist)
         level.framenum > self->monsterinfo.search_framenum +
                          20 * BASE_FRAMERATE) {
         M_MoveToGoal(self, dist);
+        if (!self->inuse)
+            return;
         self->monsterinfo.search_framenum = 0;
         return;
     }
@@ -1626,6 +1698,12 @@ void ai_run(edict_t *self, float dist)
         // PMM - protect against double moves
         if (!alreadyMoved)
             ai_run_slide(self, dist);
+        // Ground Zero guards its other moves, or follows them with nothing a
+        // zeroed edict trips on; not this one.  On a freed self attack_state
+        // reads 0, not AS_SLIDING, so the code below ran on -- to FindTarget
+        // in coop, and to a G_Spawn'd tempgoal.
+        if (!self->inuse)
+            return;         // PGM - g_touchtrigger free problem
         // PMM
         // we're using attack_state as the return value out of ai_run_slide to indicate whether or not the
         // move succeeded.  If the move succeeded, and we're still sliding, we're done in here (since we've
@@ -1820,9 +1898,9 @@ void ai_run(edict_t *self, float dist)
     }
 
     M_MoveToGoal(self, dist);
-    if (!self->inuse)
-        return;         // PGM - g_touchtrigger free problem
-
+    // Ground Zero returned here on a freed self BEFORE freeing tempgoal,
+    // which leaked an edict for every monster a trigger killed on this move.
+    // tempgoal goes either way; the `inuse` test below is the guard.
     G_FreeEdict(tempgoal);
 
     if (self->inuse)

@@ -157,8 +157,12 @@ getarenaname(int arenanum)
 {
     edict_t *spot = NULL;
 
+    // An intermission spot names its arena in `message`, and a mapper who
+    // gave one an arena key and no message left that NULL -- which the arena
+    // list then handed to strlen.  It falls back to the number, as a map with
+    // no spot at all does.
     while ((spot = G_Find(spot, FOFS(classname), "info_player_intermission")) != NULL)
-        if (spot->arena == arenanum)
+        if (spot->arena == arenanum && spot->message)
             return spot->message;
 
     return va("Arena Number %d", arenanum);
@@ -503,9 +507,14 @@ menuChangeMap(edict_t *ent, qmenu_t *menu, qmenu_t *item, int arg)
     // The map name comes out of arena.cfg and the block was sized by the
     // menu's placeholder, so a long entry truncates here rather than running
     // off the end of a TAG_LEVEL allocation.
-    Q_strlcpy(((menuitem_t *)item->it)->value,
-              get_next_map(((menuitem_t *)item->it)->value),
-              ((menuitem_t *)item->it)->valuesize);
+    // get_next_map answers NULL when there is no maploop -- an arena.cfg that
+    // failed to load, or one with no `maploop:` line -- and the row then keeps
+    // the map it shows.
+    const char *next = get_next_map(((menuitem_t *)item->it)->value);
+
+    if (next)
+        Q_strlcpy(((menuitem_t *)item->it)->value, next,
+                  ((menuitem_t *)item->it)->valuesize);
 
     return 1;
 }
@@ -577,9 +586,20 @@ Cmd_admin_f(edict_t *ent)
     if (admincode->value == 0)
         return;
 
+    // R-SEC-12.  The code unlocks the map, both limits and every arena's
+    // settings, it is a number, and the donor said "incorrect" to each guess as
+    // fast as the engine would carry them -- eight a packet.  A wrong one costs
+    // the connection the backoff every login here shares, and an attempt inside
+    // it is refused unread, the right code included.
+    if (G_LoginThrottled(ent)) {
+        gi.cprintf(ent, PRINT_HIGH, "Wait a moment before trying the admin code again\n");
+        return;
+    }
+
     code = atoi(gi.argv(1));
 
     if ((float) code == admincode->value) {
+        G_LoginSucceeded(ent);
         m = CreateQMenu(ent, "Admin Menu");
 
         AddMenuItem(m, "Fraglimit:        ", NULL, (int) fraglimit->value, menuChangeValue10AZ);
@@ -594,8 +614,29 @@ Cmd_admin_f(edict_t *ent)
         AddMenuItem(m, "Cancel", NULL, -1, menuCancel);
 
         FinishMenu(ent, m, 1);
-    } else
+    } else {
+        G_LoginFailed(ent);
         gi.cprintf(ent, PRINT_HIGH, "Sorry, incorrect admin code\n");
+    }
+}
+
+// A weapon row sets or clears its own bit, and only its own.
+//
+// The donor rebuilt the mask at the "Arena:" row instead: every weapon whose
+// `allowvoting*` flag was set lost its bit there, every other kept it, and the
+// rows only ever OR'd theirs back in.  That flag is the rule the PLAYER menu
+// draws a row by, and the admin menu (mode 0) draws every row -- so a weapon
+// whose flag was 0 kept its bit AND had a row, and an admin's NO could not
+// switch it off.  The pack six inherited the shape.  With each row deciding
+// its own bit, a bit is carried exactly when this menu has no row for it,
+// which is the rule by construction rather than a copy of the one that drew
+// the menu.
+static void menu_weapon_row(int *settings, int bit, const menuitem_t *it)
+{
+    if (it->value[0] == 'Y')
+        settings[2] |= weapon_vals[bit];
+    else
+        settings[2] &= ~weapon_vals[bit];
 }
 
 int
@@ -605,8 +646,6 @@ menuApplyArenaAdmin(edict_t *ent, qmenu_t *menu, qmenu_t *item, int arg)
     menuitem_t  *it;
     int         *settings = NULL;
     int         arenanum = 0;
-    int         weapons;
-    int         i;              // the pack-weapon walk
 
     node = (qmenu_t *)menu->it;
 
@@ -636,40 +675,14 @@ menuApplyArenaAdmin(edict_t *ent, qmenu_t *menu, qmenu_t *item, int arg)
             }
 
             settings[41] = 1;
-            weapons = 0;
 
-            if (!settings[28])
-                weapons |= (settings[2] & weapon_vals[0]) ? weapon_vals[0] : 0;
-            if (!settings[29])
-                weapons |= (settings[2] & weapon_vals[1]) ? weapon_vals[1] : 0;
-            if (!settings[30])
-                weapons |= (settings[2] & weapon_vals[2]) ? weapon_vals[2] : 0;
-            if (!settings[31])
-                weapons |= (settings[2] & weapon_vals[3]) ? weapon_vals[3] : 0;
-            if (!settings[32])
-                weapons |= (settings[2] & weapon_vals[4]) ? weapon_vals[4] : 0;
-            if (!settings[33])
-                weapons |= (settings[2] & weapon_vals[5]) ? weapon_vals[5] : 0;
-            if (!settings[34])
-                weapons |= (settings[2] & weapon_vals[6]) ? weapon_vals[6] : 0;
-            if (!settings[35])
-                weapons |= (settings[2] & weapon_vals[7]) ? weapon_vals[7] : 0;
-            if (!settings[36])
-                weapons |= (settings[2] & weapon_vals[8]) ? weapon_vals[8] : 0;
-
-            // The same rule the nine above follow: a bit is carried
-            // when the menu has no row to re-set it from, and cleared when it
-            // has one.  For the six that is two questions -- is the layer on,
-            // and does this arena allow voting on them -- and getting it wrong
-            // in either direction is silent: carry when there is a row and a
-            // player cannot switch the weapon off, clear when there is none and
-            // an admin changing the round count strips every pack weapon from
-            // the arena.
-            for (i = 0; i < RA_NUM_PACK_WEAPONS; i++)
-                if (!settings[49] || !RA_PackWeaponOffered(i))
-                    weapons |= settings[2] & weapon_vals[9 + i];
-
-            settings[2] = weapons;
+            // The weapon mask is not rebuilt here: each weapon row below
+            // decides its own bit (menu_weapon_row) and every bit this menu has
+            // no row for is carried as it stands.  Getting that wrong is silent
+            // in either direction -- carry a bit that has a row and its weapon
+            // cannot be switched off, clear one that has none (a layer that is
+            // off, a row the arena does not let players vote on) and whoever
+            // came to change the round count strips it from the arena.
         } else if (!settings) {
             continue;       // no "Arena:" row, so there is no base to write to
         } else if (!Q_stricmp(it->text, "Players per team:      ")) {
@@ -685,23 +698,23 @@ menuApplyArenaAdmin(edict_t *ent, qmenu_t *menu, qmenu_t *item, int arg)
         } else if (!Q_stricmp(it->text, "Rounds:                ")) {
             settings[1] = (it->num / 2) * 2 + 1;
         } else if (!Q_stricmp(it->text, "Allow Shotgun:         ")) {
-            settings[2] |= (it->value[0] == 'Y') ? weapon_vals[0] : 0;
+            menu_weapon_row(settings, 0, it);
         } else if (!Q_stricmp(it->text, "Allow Super Shotgun:   ")) {
-            settings[2] |= (it->value[0] == 'Y') ? weapon_vals[1] : 0;
+            menu_weapon_row(settings, 1, it);
         } else if (!Q_stricmp(it->text, "Allow Machine gun:     ")) {
-            settings[2] |= (it->value[0] == 'Y') ? weapon_vals[2] : 0;
+            menu_weapon_row(settings, 2, it);
         } else if (!Q_stricmp(it->text, "Allow Chain gun:       ")) {
-            settings[2] |= (it->value[0] == 'Y') ? weapon_vals[3] : 0;
+            menu_weapon_row(settings, 3, it);
         } else if (!Q_stricmp(it->text, "Allow Grenade Launcher:")) {
-            settings[2] |= (it->value[0] == 'Y') ? weapon_vals[4] : 0;
+            menu_weapon_row(settings, 4, it);
         } else if (!Q_stricmp(it->text, "Allow Rocket Launcher: ")) {
-            settings[2] |= (it->value[0] == 'Y') ? weapon_vals[5] : 0;
+            menu_weapon_row(settings, 5, it);
         } else if (!Q_stricmp(it->text, "Allow Hyperblaster:    ")) {
-            settings[2] |= (it->value[0] == 'Y') ? weapon_vals[6] : 0;
+            menu_weapon_row(settings, 6, it);
         } else if (!Q_stricmp(it->text, "Allow Railgun:         ")) {
-            settings[2] |= (it->value[0] == 'Y') ? weapon_vals[7] : 0;
+            menu_weapon_row(settings, 7, it);
         } else if (!Q_stricmp(it->text, "Allow BFG10K:          ")) {
-            settings[2] |= (it->value[0] == 'Y') ? weapon_vals[8] : 0;
+            menu_weapon_row(settings, 8, it);
         } else if (!Q_stricmp(it->text, "Health: ")) {
             settings[17] = NumForProtect(it->value);
         } else if (!Q_stricmp(it->text, "Armor:  ")) {
@@ -724,7 +737,7 @@ menuApplyArenaAdmin(edict_t *ent, qmenu_t *menu, qmenu_t *item, int arg)
             int k = RA_PackWeaponRow(it->text);
 
             if (k >= 0)
-                settings[2] |= (it->value[0] == 'Y') ? weapon_vals[9 + k] : 0;
+                menu_weapon_row(settings, 9 + k, it);
         }
     }
 
@@ -777,11 +790,22 @@ Cmd_arenaadmin_f(edict_t *ent, unsigned mode)
         if (admincode->value == 0)
             return;
 
+        // The same code as `admin`, so the same backoff (Cmd_admin_f).  A
+        // wrong code says nothing here, as the donor's does; the menu that
+        // does not open is the answer either way.
+        if (G_LoginThrottled(ent)) {
+            gi.cprintf(ent, PRINT_HIGH, "Wait a moment before trying the admin code again\n");
+            return;
+        }
+
         code = atoi(gi.argv(1));
         arenanum = atoi(gi.argv(2));
 
-        if ((float) code != admincode->value)
+        if ((float) code != admincode->value) {
+            G_LoginFailed(ent);
             return;
+        }
+        G_LoginSucceeded(ent);
 
         if (!arenanum) {
         case 1:
@@ -948,11 +972,13 @@ Cmd_arenaadmin_f(edict_t *ent, unsigned mode)
         // whether it is also something the people in it may propose.
         //
         // Placed here, beside the other whole-arena yes/no, rather than after
-        // the last row: menu.c draws a window of MAXMENUITEMS (18) and this
+        // the last row: menu.c draws a window of MAXMENUITEMS (17) and this
         // menu is longer than that, so the tail of the list is behind a
         // "(More)" the reader has to scroll to.  Appended, the new row landed
         // there; next to Falling Damage it is on the first page for every arena
-        // that does not also allow voting on all nine weapons.
+        // that does not also allow voting on all nine weapons -- and, with a
+        // mission pack's layer on, on fewer than that, since its weapon rows
+        // come first.
         if (!mode || vals[43])
             AddMenuItem(m, "Allow Bots:            ", vals[42] ? "YES" : "NO ", -1, changeyesno);
         if (!mode)
@@ -1086,10 +1112,12 @@ menu_centerprint(edict_t *ent, char *message)
     m = CreateQMenu(ent, "Message");
     AddMenuItem(m, "---------Continue----------", NULL, -1, menuNo);
 
-    // The kept-bug list only names half of it: it says `lastspace` is never
-    // reset after a wrap, which is why this buffer is 2048 bytes and the text
-    // is never compacted back to the start.  The other half is that `dst` was
-    // never bounded at all: `message` reaches here from `va()` and, through
+    // The kept-bug list names half of it: `lastspace` is never reset after a
+    // wrap, so a later run of 27 characters with no space in it "ended" the
+    // line at a space BEFORE `line` and handed AddMenuItem an unterminated
+    // string that ran on into stack garbage, which the client then drew.  It
+    // is reset below.  The other half is that `dst` was never bounded at all:
+    // `message` reaches here from `va()` and, through
     // G_UseTargets, from an entity's `message` key -- so a map with a long
     // enough string on a trigger overflowed 2048 bytes of stack under `arena`.
     // `bounded.py` cannot see this one: it is a hand-rolled copy loop and not
@@ -1119,6 +1147,7 @@ menu_centerprint(edict_t *ent, char *message)
                 line = lastspace + 1;
             else
                 line = dst;
+            lastspace = NULL;
         }
     }
 

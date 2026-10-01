@@ -155,8 +155,8 @@ func main() {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(2)
 	}
-	os.WriteFile(filepath.Join(d, "tourney", name), body, 0o755)
-	os.WriteFile(filepath.Join(d, "tourney", "maps.txt"), []byte("q2dm1\nq2dm5\n"), 0o644)
+	playtest.WriteFixture(filepath.Join(d, "tourney", name), body, 0o755)
+	playtest.WriteFixture(filepath.Join(d, "tourney", "maps.txt"), []byte("q2dm1\nq2dm5\n"), 0o644)
 
 	args := []string{"+set", "basedir", d, "+set", "game", "tourney",
 		"+set", "dedicated", "1", "+set", "deathmatch", "1",
@@ -176,6 +176,7 @@ func main() {
 	}
 	s := &srv{}
 	s.cmd = exec.Command(bin, binArgs...)
+	playtest.OwnChild(s.cmd)
 	s.cmd.Dir = d
 	out, _ := s.cmd.StdoutPipe()
 	s.cmd.Stderr = s.cmd.Stdout
@@ -226,8 +227,13 @@ func main() {
 
 	// Still in the server's own client list: this separates "dropped" from
 	// "connected but deaf", which are different bugs with the same symptom.
+	// A `status` ROW for it, counted from before the command: "survivor" alone
+	// was already in the log twice -- its connect line and its entry line --
+	// so any two lines naming it satisfied the wait whatever `status` said.
+	row := `^\s*\d+\s+-?\d+\s+\S+\s+survivor\b`
+	rows := s.count(row)
 	s.console("status")
-	stillListed := s.waitCount(`survivor`, 2, 5*time.Second)
+	stillListed := s.waitCount(row, rows+1, 5*time.Second)
 	ck("after/still-connected", stillListed, "client still in `status`")
 
 	// Measured WITHIN the new level, not across the change: a server restarts

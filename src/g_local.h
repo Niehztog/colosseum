@@ -170,8 +170,8 @@ with this program; if not, write to the Free Software Foundation, Inc.,
 #define FL_BOTCLIENT            BIT(21)     // this CLIENT is a bot
 
 // FL_OSP_BOT and FL_OSP_NOCMD are not defined: the duplicate aliases are
-// removed rather than kept as synonyms.  FL_BOT is the one name for "is a
-// bot", and osp_* code that said FL_OSP_BOT or FL_OSP_NOCMD uses it.
+// removed rather than kept as synonyms.  osp_* code that said FL_OSP_NOCMD
+// says FL_BOT, and code that said FL_OSP_BOT says FL_BOTCLIENT.
 //
 // Free after this: BIT(22)..BIT(30).  BIT(31) is FL_RESPAWN.
 // ---------------------------------------------------------------------------
@@ -594,11 +594,13 @@ typedef struct {
     float       maxpitch;
 
     // Tourney's five extra keys, and all five are parsed -- including
-    // `botlib`, whose consumer is the bot layer.  A key that is not in
-    // temp_fields[] is rejected outright with "not a field", so leaving the row
-    // out would reject every tourney map that names a bot library
-    // rather than ignoring the setting: storing the string and not yet reading
-    // it is the difference between a map that loads and one that does not.
+    // `botlib`, which nothing reads: SP_bot hands the other four to `addbot`
+    // and takes the library from the `botlib` cvar, as the donor's does.  A
+    // key that is not in temp_fields[] is rejected outright with "not a
+    // field", so leaving the row out would reject every tourney map that
+    // names a bot library rather than ignoring the setting: storing the string
+    // and not reading it is the difference between a map that loads and one
+    // that does not.
     //
     // These four share their names with four members of edict_t that tourney
     // also owns, which is legal and is the donor's own shape: the entity parser
@@ -810,6 +812,10 @@ extern  int meansOfDeath;
 
 extern  edict_t         *g_edicts;
 
+// ShutdownGame is running: a client leaving now is the server going away, and
+// the ruleset leave hooks write no departure for it (g_main.c).
+extern  bool            g_shutting_down;
+
 #define FOFS(x) q_offsetof(edict_t, x)
 #define STOFS(x) q_offsetof(spawn_temp_t, x)
 #define LLOFS(x) q_offsetof(level_locals_t, x)
@@ -977,6 +983,12 @@ void    G_SetMovedir(vec3_t angles, vec3_t movedir);
 void    G_InitEdict(edict_t *e);
 edict_t *G_Spawn(void);
 void    G_FreeEdict(edict_t *e);
+void    G_RemoveDeployables(bool (*mine)(edict_t *layer, void *arg), void *arg);
+bool    G_DeployableLaidBy(edict_t *layer, void *arg);   // p_client.c
+void    G_PlayerResetGrapple(edict_t *ent);
+bool    G_LoginThrottled(edict_t *ent);
+void    G_LoginFailed(edict_t *ent);
+void    G_LoginSucceeded(edict_t *ent);
 
 void    G_TouchTriggers(edict_t *ent);
 
@@ -1254,6 +1266,9 @@ extern const game_import_ex_t *gex;
 const char *G_FsBaseDir(void);
 const char *G_FsGameDir(void);
 bool G_FsGamePath(char *out, size_t size, const char *name);
+void G_FsCreatePath(const char *path);
+bool G_FsIsAbsolute(const char *path);
+bool G_FsReadPath(char *out, size_t size, const char *name);
 int         G_FsLoadFile(const char *path, void **buffer);
 void        G_FsFreeFile(void *buffer);
 char      **G_FsListFiles(const char *path, const char *ext, int *count);
@@ -1365,6 +1380,7 @@ bool monster_jump_finished(edict_t *self);
 void Defender_Launch(edict_t *self);
 void Vengeance_Launch(edict_t *self);
 void Hunter_Launch(edict_t *self);
+edict_t *G_OwnedSphere(edict_t *ent);   // `owned_sphere`, validated
 
 //
 // g_newdm.c
@@ -1446,7 +1462,9 @@ extern cvar_t *g_rotatingbutton;    // FUNC_BUTTON_ROTATING
 // a fifth.
 #define LAG_MAX_DELAY   2000
 
-void Lag_StoreClientInput(edict_t *ent, usercmd_t *ucmd, vec3_t origin, vec3_t v_angle);
+// False when the command was NOT queued -- a full pool -- and the caller
+// must run it now, undelayed.
+bool Lag_StoreClientInput(edict_t *ent, usercmd_t *ucmd, vec3_t origin, vec3_t v_angle);
 bool Lag_GetClientInput(edict_t *ent, usercmd_t *laggeducmd, vec3_t origin, vec3_t v_angle);
 void Lag_BeginGame(edict_t *ent);
 void Lag_SetClientLag(edict_t *ent, int delay);
@@ -1495,6 +1513,10 @@ extern const mmove_t flyer_move_attack3;
 extern const mmove_t flyer_move_kamikaze;
 // m_widow.c's shared stalker bounding box, read by m_widow2.c.
 extern vec3_t stalker_mins, stalker_maxs;
+// The precaches of the minions the Carrier and the Widows launch, which their
+// own precaches run too (CarrierPrecache).
+void flyer_precache(void);                      // m_flyer.c
+void stalker_precache(void);                    // rogue/m_stalker.c
 
 // ROGUE PROTOTYPES
 //====================
@@ -1503,6 +1525,7 @@ void G_AddPrecache(void (*func)(void));
 void G_RefreshPrecaches(void);
 void ED_CallSpawn(edict_t *ent);
 void SpawnEntities(const char *mapname, const char *entities, const char *spawnpoint);
+int G_TeamTrainCount(const char *team);
 
 //
 // g_save.c
@@ -1600,6 +1623,18 @@ typedef struct {
     // `SpawnEntities`: `game.clients` is allocated once and survives a level
     // on its own.
     char        address[MAX_CLIENT_ADDRESS];
+
+    // The backoff every password check in the library shares
+    // (G_LoginThrottled, R-SEC-12): wrong answers so far on this connection,
+    // and the wall-clock second before which the next one is refused.  A
+    // property of the CONNECTION like `address`, so InitClientPersistant
+    // keeps it across the wipe every deathmatch spawn makes and ClientConnect
+    // starts it at zero; and on the wall clock rather than `level.framenum`,
+    // which restarts at a map change and stands still through a tourney
+    // pause.  Not saved -- a login's history is the connection's, which a
+    // load is not.
+    int         login_fails;
+    int64_t     login_retry;
 
 //=========
 //ROGUE
@@ -1849,6 +1884,9 @@ struct gclient_s {
     // the donor's.  RA_ZBOT_PORT is what the cheat client of the day used.
     int         zbotscore;
     short       oldangles[2][2];
+    // RA2's session-long chat counter's state.  The counter is gone --
+    // FloodProtect alone limits chat, as rocketarena2@fa01a64 decided -- and
+    // the two fields stay only because the savegame layout names them.
     int         spamcount;
     float       spamtime;
 
@@ -2130,6 +2168,7 @@ struct edict_s {
     int         max_health;
     int         gib_health;
     int         deadflag;
+    // A FRAME number, as baseq2's int is; the type is Ground Zero's.
     float       show_hostile;
 
     int       powerarmor_framenum;
@@ -2249,9 +2288,10 @@ struct edict_s {
     visiblebbox_t   box;
 
     // RA2: which arena this entity belongs to.  Zero on every map that is not
-    // an arena map, which is what makes the handful of `if (ent->arena)` tests
-    // in the spine files self-gating.  A spawn key and a savegame descriptor,
-    // both below.
+    // an arena map -- and NOT zero on an arena map booted under another
+    // ruleset, so a spine test that means "the arena ruleset is running" has to
+    // ask G_Ruleset() as well: `ent->arena` alone says only what the map is.
+    // A spawn key and a savegame descriptor, both below.
     int         arena;
 };
 
@@ -2298,6 +2338,7 @@ void Tag_PlayerEffects(edict_t *ent);
 void Tag_DogTag(edict_t *ent, edict_t *killer, char **pic);
 void Tag_PlayerDisconnect(edict_t *ent);
 int  Tag_ChangeDamage(edict_t *targ, edict_t *attacker, int damage, int mod);
+void Tag_ReturnToken(edict_t *ent);     // a crushed token (BecomeExplosion1)
 
 void DBall_GameInit(void);
 void DBall_ClientBegin(edict_t *ent);

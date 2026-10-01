@@ -90,7 +90,7 @@ func run(q2, ref, lib, glad, pak7, botcfg, aas, dir, mapname string,
 		if err != nil {
 			return 0, err
 		}
-		if err := os.WriteFile(filepath.Join(g, "maps", mapname+".aas"), b, 0o644); err != nil {
+		if err := playtest.WriteFixture(filepath.Join(g, "maps", mapname+".aas"), b, 0o644); err != nil {
 			return 0, err
 		}
 	}

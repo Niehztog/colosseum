@@ -693,7 +693,8 @@ void OSP_runeSpawnThink(edict_t *self)
 // The carrier's shell, drawn from p_view.c's G_SetClientEffects.
 //
 // It lives here rather than in the spine because every field it reads is
-// tourney's: `osp_r23c` is the just-picked-up flash that OSP_Pickup_Rune sets,
+// tourney's: `osp_r23c` is `client_protect`'s spawn-protection deadline, which
+// OSP_seedPlayer sets and a pickup -- this file's runes included -- clears,
 // and `osp_t074..osp_t084` are the five per-rune flash timers the apply
 // functions above stamp.  Putting the branch in p_view.c would have put five
 // offset-named members of `client_respawn_t` into a shared file for no gain --
@@ -710,7 +711,8 @@ void OSP_runesShell(edict_t *ent)
     if (!cl)
         return;
 
-    // Just picked one up: two frames of yellow, whichever rune it was.
+    // Spawn-protected (g_combat.c makes them untouchable for the same span):
+    // yellow until the deadline passes or a pickup, the hook or `kill` ends it.
     if (cl->resp.osp_r23c > level.framenum) {
         ent->s.effects |= EF_COLOR_SHELL;
         ent->s.renderfx |= (RF_SHELL_RED | RF_SHELL_GREEN);
@@ -741,18 +743,41 @@ void OSP_runesShell(edict_t *ent)
 // asks it once instead of testing two runes and two ceilings itself: the
 // regeneration rune holds up to `runes_regen_hmax`, the vampire rune up to
 // `runes_vampire_max`, and both are cvars a referee sets.
+//
+// Each rune's arm is gated on that rune being enabled.  The donor gated both
+// on RUNE_REGEN (g_items.c MegaHealth_think and Pickup_Health), so with the
+// vampire rune on and regeneration off the vampire's ceiling was ignored.
 bool OSP_runesHoldHealth(edict_t *ent)
 {
-    if (!(rune_stat & RUNE_REGEN) || !ent->client)
+    if (!ent->client)
         return false;
 
-    if (OSP_runesHasRegeneration(ent) &&
+    if ((rune_stat & RUNE_REGEN) && OSP_runesHasRegeneration(ent) &&
         ent->health <= (int)runes_regen_hmax->value)
         return true;
 
-    if (OSP_runesHasVampire(ent) &&
+    if ((rune_stat & RUNE_VAMPIRE) && OSP_runesHasVampire(ent) &&
         ent->health <= (int)runes_vampire_max->value)
         return true;
 
     return false;
+}
+
+// "Above what health is this player's overhealth a mega's to time?"
+// Pickup_Health asks it for the share of the overhealth a mega health is
+// responsible for: the rune's ceiling where a rune holds health above
+// `max_health`, and `max_health` otherwise (port_osp:g_items.c Pickup_Health).
+// Gated per rune, as OSP_runesHoldHealth is.
+int OSP_runesHealthCeiling(edict_t *ent)
+{
+    if (!ent->client)
+        return ent->max_health;
+
+    if ((rune_stat & RUNE_REGEN) && OSP_runesHasRegeneration(ent) &&
+        (int)runes_regen_hmax->value > ent->max_health)
+        return (int)runes_regen_hmax->value;
+    if ((rune_stat & RUNE_VAMPIRE) && OSP_runesHasVampire(ent) &&
+        (int)runes_vampire_max->value > ent->max_health)
+        return (int)runes_vampire_max->value;
+    return ent->max_health;
 }

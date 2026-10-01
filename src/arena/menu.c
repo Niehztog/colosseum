@@ -200,6 +200,15 @@ DisplayMenu(edict_t *ent)
             Q_snprintf(entry + strlen(entry), sizeof(entry) - strlen(entry),
                        "%d", ((menuitem_t *)node->it)->num);
 
+        // A quote ends the row's `string2 "..."` and the rest is read as
+        // layout commands.  An unselected row is HiPrint's, where a quote is
+        // 0xA2 and harmless; the selected one is LoPrint's, which leaves it a
+        // quote -- and motd.txt's lines are rows the cursor visits.  Drawn as
+        // an apostrophe, OSP's answer (p_menu.c).
+        for (char *q = entry; *q; q++)
+            if (*q == '"')
+                *q = '\'';
+
         if (strlen(string) + strlen(entry) + 50 >= MAXSTATUSBAR)
             break;
 
@@ -366,12 +375,34 @@ static void free_menu(qmenu_t *menu)
     gi.TagFree(menu);
 }
 
+// How many times close_menus() has torn down each client's queue.  A select
+// callback can reach that teardown -- anything that respawns the clicker runs
+// PutClientInServer, and an admin's map change runs MoveClientToIntermission --
+// and it frees the menu UseMenu captured before calling the callback, along
+// with the rest of the queue.  UseMenu then must not touch that menu again:
+// freeing it is a double free, and even comparing its address against the
+// queue the callback rebuilt proves nothing, because the allocator may hand
+// the new menu the freed block.  A count survives what a pointer does not.
+// It is file-local and indexed by slot rather than kept in gclient_t, because
+// PutClientInServer clears gclient_t between the teardown and the return.
+static unsigned menu_teardowns[MAX_CLIENTS];
+
+static unsigned *teardowns_of(edict_t *ent)
+{
+    int slot = ent - g_edicts - 1;
+
+    if (slot < 0 || slot >= MAX_CLIENTS)
+        return NULL;
+    return &menu_teardowns[slot];
+}
+
 void
 UseMenu(edict_t *ent, int arg)
 {
     qmenu_t     *menu, *item, *qnode;
     bool        orphan;
     int         result;
+    unsigned    *count, before;
 
     if (ent->client->menuusetime + 5 > level.framenum)
         return;
@@ -383,7 +414,15 @@ UseMenu(edict_t *ent, int arg)
     if (!((menuitem_t *)item->it)->select)
         return;
 
+    count = teardowns_of(ent);
+    before = count ? *count : 0;
+
     result = ((menuitem_t *)item->it)->select(ent, menu, item, arg);
+
+    // The callback tore the queue down, `menu` with it.  Whatever is in the
+    // queue now is the callback's own, already displayed by whoever built it.
+    if (count && *count != before)
+        return;
 
     if (result) {
         if (result == 1)
@@ -524,6 +563,11 @@ close_menus(edict_t *ent)
 
     if (ent->client->menu_owner == MENU_ARENA)
         G_MenuClose(ent);
+
+    // Counted before anything is freed, and counted whether or not the queue
+    // holds anything: UseMenu asks "did this run", not "did it free".
+    if (teardowns_of(ent))
+        (*teardowns_of(ent))++;
 
     while ((menu = remove_from_queue(NULL, &ent->client->menuqueue)) != NULL)
         free_menu(menu);

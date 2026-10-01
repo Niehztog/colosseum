@@ -413,6 +413,19 @@ BOTLIB_LOCK = .botlib-lock
 # handed straight back, because choosing it is the whole point of the step.
 BOTLIB_MAKE = env -u CFLAGS -u CC -u MAKEFLAGS $(MAKE)
 
+# ...and handed back the flags that ARE this tree's to choose: the submodule's
+# own release defaults plus a stack protector.  Not an optimisation level --
+# the brain is a reconstruction built at -O0 on purpose (its own BOTCFLAGS),
+# and that is its decision.  The protector was the toolchain's until this said
+# so: Ubuntu's gcc enables it by default and mingw's does not, so the shipped
+# Linux brains had one and the Windows brains did not.  On PE it pulls in
+# libssp, which is linked in rather than imported -- the game library's
+# PE_LDFLAGS below explain why -- and pedeps.sh checks the result.
+# .github/workflows/release.yml builds the shipped brains with these same two
+# lines, and checks the protector is in each.
+BOTLIB_CFLAGS     = -Wall -pipe -fomit-frame-pointer -fstack-protector-strong
+BOTLIB_PE_LDFLAGS = -Wl,-Bstatic -lssp -Wl,-Bdynamic
+
 # The submodule reads the target architecture off `uname -m` unless the compiler
 # names one.  A mingw triple decides it there -- its own Makefile keys on
 # `x86_64-w64-mingw32` and `i686-w64-mingw32` -- so the two PE rows need nothing
@@ -518,12 +531,13 @@ _build: check
 			sleep 1; \
 		done; \
 		trap 'rmdir $$lock 2>/dev/null || true' EXIT INT TERM; \
-		want="$(CC) GLAD_SERVERFIX=$(GLAD_SERVERFIX) $(BOTLIB_ARCH)"; \
+		want="$(CC) GLAD_SERVERFIX=$(GLAD_SERVERFIX) $(BOTLIB_ARCH) $(BOTLIB_CFLAGS)"; \
 		stamp=$(GLADDIR)/release/.built-for; \
 		[ -f $$stamp ] && [ "$$(cat $$stamp)" = "$$want" ] \
 			|| $(BOTLIB_MAKE) -C $(GLADDIR) clean; \
 		$(BOTLIB_MAKE) -C $(GLADDIR) botlib GLAD_SERVERFIX=$(GLAD_SERVERFIX) \
-			CC=$(CC) $(BOTLIB_ARCH); \
+			CC=$(CC) $(BOTLIB_ARCH) CFLAGS="$(BOTLIB_CFLAGS)" \
+			$(if $(filter PE,$(KIND)),LDFLAGS="$(BOTLIB_PE_LDFLAGS)"); \
 		printf '%s\n' "$$want" > $$stamp; \
 		cp $(GLADDIR)/release/$$built $(BUILDDIR)/$$name; \
 		[ $(KIND) != PE ] || $(SHELL) tools/pedeps.sh $(BUILDDIR)/$$name; \
@@ -561,9 +575,19 @@ check: check-ptrs check-audits
 # this recipe at once, into one file, and read back whatever the last writer
 # left.  It reported g_ptrs.c stale against a diff that showed no differences,
 # which is the signature of the race rather than of a finding.
+#
+# Fresh is not complete, so the scanner's own controls run first -- each hole it
+# had, as a source it must read right -- and a value it cannot register (a
+# ternary, a copy, a call: R-SAVE-2) makes it exit non-zero with the site named,
+# which fails this recipe before the comparison.
 check-ptrs:
-	@cd src && $(PYTHON) genptr.py $(PTR_SRC) > .g_ptrs.gen.$$$$ \
-		&& if cmp -s g_ptrs.c .g_ptrs.gen.$$$$; then \
+	@cd src && $(PYTHON) genptr.py --selftest > /dev/null \
+		|| { $(PYTHON) genptr.py --selftest; exit 1; }
+	@cd src && if ! $(PYTHON) genptr.py $(PTR_SRC) > .g_ptrs.gen.$$$$; then \
+			rm -f .g_ptrs.gen.$$$$; \
+			exit 1; \
+		fi; \
+		if cmp -s g_ptrs.c .g_ptrs.gen.$$$$; then \
 			rm -f .g_ptrs.gen.$$$$; \
 		else \
 			echo "*** g_ptrs.c is stale.  Regenerate it:"; \

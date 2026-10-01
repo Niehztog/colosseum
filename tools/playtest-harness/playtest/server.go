@@ -43,6 +43,13 @@ type Server struct {
 	mu   sync.Mutex
 	log  []string
 	subs []chan string
+
+	// done closes when the process has exited and its output is drained, and
+	// exitErr is what Wait said.  A crash is otherwise invisible: q2proded
+	// prints nothing on SIGSEGV or SIGFPE, so a dead server and a quiet one
+	// read the same from its log.
+	done    chan struct{}
+	exitErr error
 }
 
 // Start launches the server and waits until it reports a spawned map.
@@ -72,7 +79,16 @@ func (s *Server) Start() error {
 	}
 	args = append(args, "+map", s.Map)
 
+	// A port something else holds is a boot that can only fail, and it fails
+	// as a 30-second "did not spawn" under a ruleset's name.  Said now, by
+	// port.  (PortFree binds what q2proded binds; see port.go.)
+	if !PortFree(s.Port) {
+		return fmt.Errorf("UDP port %d is in use by another process -- a server "+
+			"left over from an earlier run, or another game; pass a free -port", s.Port)
+	}
+
 	s.cmd = exec.Command(s.Binary, args...)
+	OwnChild(s.cmd)
 	s.cmd.Dir = s.Dir
 	stdout, err := s.cmd.StdoutPipe()
 	if err != nil {
@@ -91,7 +107,15 @@ func (s *Server) Start() error {
 		return err
 	}
 
-	go s.drain(stdout)
+	// Wait only after the pipe is drained: exec's contract is that Wait closes
+	// the pipe, so calling it first loses the last lines -- which on a crash
+	// are the only ones that say anything.
+	s.done = make(chan struct{})
+	go func() {
+		s.drain(stdout)
+		s.exitErr = s.cmd.Wait()
+		close(s.done)
+	}()
 
 	// "SpawnServer: <map>" is printed once the map is up and the game
 	// library's InitGame/SpawnEntities have run.
@@ -205,15 +229,45 @@ func (s *Server) GrepFrom(n int, re string) []string {
 	return out
 }
 
+// Exited reports whether the server process has ended, and how.  A row that
+// ends with "the server is still answering" asks this as well as the console,
+// because the console of a crashed server is not an answer.
+func (s *Server) Exited() (bool, error) {
+	if s.done == nil {
+		return false, nil
+	}
+	select {
+	case <-s.done:
+		return true, s.exitErr
+	default:
+		return false, nil
+	}
+}
+
 // WaitLog blocks until a console line matches re, and returns it.  Lines
-// already logged count, so a race against a fast server cannot lose the match.
+// already logged count, so a race against a fast server cannot lose the match
+// -- and so does every line from before the event being waited for, which is
+// the wrong answer to "did it happen AFTER this?".  That question is
+// WaitLogFrom's, with a mark from Len().
 func (s *Server) WaitLog(re string, timeout time.Duration) (string, error) {
+	return s.WaitLogFrom(0, re, timeout)
+}
+
+// WaitLogFrom is WaitLog counting only the lines from index mark onwards.  It
+// returns at once, with an error, if the server exits first: a dead server
+// never prints the line, and waiting out the timeout only to report "timed
+// out" names the wrong cause.
+func (s *Server) WaitLogFrom(mark int, re string, timeout time.Duration) (string, error) {
 	rx := regexp.MustCompile(re)
 	ch := make(chan string, 256)
 
 	s.mu.Lock()
-	for _, l := range s.log {
-		if rx.MatchString(l) {
+	if mark < 0 {
+		mark = 0
+	}
+	for i := mark; i < len(s.log); i++ {
+		if rx.MatchString(s.log[i]) {
+			l := s.log[i]
 			s.mu.Unlock()
 			return l, nil
 		}
@@ -232,6 +286,10 @@ func (s *Server) WaitLog(re string, timeout time.Duration) (string, error) {
 		s.mu.Unlock()
 	}()
 
+	var exited <-chan struct{}
+	if s.done != nil {
+		exited = s.done
+	}
 	deadline := time.After(timeout)
 	for {
 		select {
@@ -239,10 +297,58 @@ func (s *Server) WaitLog(re string, timeout time.Duration) (string, error) {
 			if rx.MatchString(l) {
 				return l, nil
 			}
+		case <-exited:
+			// Drained before done closed, so a matching last line is in the
+			// log even if it never reached the channel.
+			for _, l := range s.LogFrom(mark) {
+				if rx.MatchString(l) {
+					return l, nil
+				}
+			}
+			return "", fmt.Errorf("the server exited (%v) before printing %q",
+				s.exitErr, re)
 		case <-deadline:
 			return "", fmt.Errorf("timed out waiting for console line %q", re)
 		}
 	}
+}
+
+// Alive asks whether the server is running and answering NOW: the process has
+// not exited, and `status` gets a fresh reply.  It is the check a "the server
+// survived" row means, and grepping the console for "Segmentation" is not --
+// q2proded prints nothing when it dies.
+func (s *Server) Alive(timeout time.Duration) error {
+	_, err := s.Ask("status", `^Current map: `, timeout)
+	return err
+}
+
+// LogFrom returns the console lines from index mark onwards.
+func (s *Server) LogFrom(mark int) []string {
+	log := s.Log()
+	if mark < 0 {
+		mark = 0
+	}
+	if mark > len(log) {
+		mark = len(log)
+	}
+	return log[mark:]
+}
+
+// Ask sends a console command and waits for a reply line matching re that
+// arrived AFTER it was sent.  It returns the index the reply starts from, so
+// the caller parses the answer to THIS question with LogFrom and not the
+// first answer the log happens to hold.  The server having exited is an
+// error, never an answer.
+func (s *Server) Ask(cmd, re string, timeout time.Duration) (int, error) {
+	if dead, err := s.Exited(); dead {
+		return 0, fmt.Errorf("the server has exited (%v)", err)
+	}
+	mark := s.Len()
+	if err := s.Console("%s", cmd); err != nil {
+		return mark, err
+	}
+	_, err := s.WaitLogFrom(mark, re, timeout)
+	return mark, err
 }
 
 // Stop shuts the server down.
@@ -251,13 +357,11 @@ func (s *Server) Stop() {
 		return
 	}
 	s.Console("quit")
-	done := make(chan struct{})
-	go func() { s.cmd.Wait(); close(done) }()
 	select {
-	case <-done:
+	case <-s.done:
 	case <-time.After(3 * time.Second):
 		s.cmd.Process.Kill()
-		<-done
+		<-s.done
 	}
 	if s.logf != nil {
 		s.logf.Close()

@@ -64,8 +64,19 @@ die() { echo "botmatrix.sh: $*" >&2; exit 2; }
 [ -x "$Q2PRO_BUILD/q2proded" ] || die "no q2proded in $Q2PRO_BUILD"
 [ -f "$LIB" ] || die "no game library at $LIB -- make native first"
 [ -d "$Q2DATA" ] || die "no baseq2 paks at $Q2DATA"
-[ -f "$GLADDIR/release/gladiator.so" ] || \
-  die "no brain at $GLADDIR/release/gladiator.so -- build gladiator-bot-restored"
+# The brain that matches $LIB.  The Makefile copies it beside the library it
+# builds, and rebuilds $GLADDIR/release for whichever target it built LAST --
+# so the one there can be another target's, or wiped mid-switch.  An explicit
+# BRAIN wins, beside $LIB comes next, the checkout's release/ is the fallback.
+if [ -z "${BRAIN:-}" ]; then
+  if [ -f "$(dirname "$LIB")/gladiator.so" ]; then
+    BRAIN=$(cd "$(dirname "$LIB")" && pwd)/gladiator.so
+  else
+    BRAIN=$GLADDIR/release/gladiator.so
+  fi
+fi
+export COLOSSEUM_BRAIN=$BRAIN
+[ -f "$BRAIN" ] || die "no brain at $BRAIN -- build gladiator-bot-restored"
 
 # Both of these are read AFTER the chdir below, so they have to survive it, and
 # a caller is as entitled to pass them relative to where it stood as $ROOT was
@@ -83,13 +94,15 @@ for p in "$CTFDATA"/pak*.pak; do ln -s "$p" "$DIR/colosseum/pak$i.pak"; i=$((i+1
 ln -s "$LIB" "$DIR/colosseum/game$CPU.so"
 # The brain, its roster and its character files.  pak7.pak is the Gladiator
 # assets' own and holds the bots/*.c the roster names.
-ln -s "$GLADDIR/release/gladiator.so" "$DIR/colosseum/gladiator.so"
+ln -s "$BRAIN" "$DIR/colosseum/gladiator.so"
 ln -s "$GLADDIR/assets/pak7.pak" "$DIR/colosseum/pak7.pak"
 mkdir -p "$DIR/colosseum/botcfg"
 cp "$GLADDIR/assets/bots.cfg" "$DIR/colosseum/botcfg/bots.cfg"
+# COPIED, not linked: the brain writes a mesh back once it has computed its
+# reachability, and through a link that rewrote the checkout's own.
 for a in "$GLADDIR"/assets/maps/*.aas; do
   case $a in *.original_baseline) continue ;; esac
-  ln -s "$a" "$DIR/colosseum/maps/$(basename "$a")"
+  cp "$a" "$DIR/colosseum/maps/$(basename "$a")"
 done
 
 # EVERY SERVER BELOW IS STARTED FROM THE FIXTURE, and that is the second
@@ -149,7 +162,9 @@ run_row() {
   rc=$?
   before=$(sed -n '/^  *[0-9]*: /p' "$log" | grep -c 'gladiator' || true)
   loaded=$(grep -c '^loaded .*gladiator\.so' "$log" || true)
-  errs=$(grep -cE '^ERROR|assert' "$log" || true)
+  # FATAL too: it is how q2proded words the errors that end it -- a bind
+  # failure, a map that will not load -- and it never starts with ERROR.
+  errs=$(grep -cE '^ERROR|FATAL|assert' "$log" || true)
 
   botplace=$(sed -n 's/^botplace  *//p' "$log" | head -1)
 
@@ -187,6 +202,15 @@ run_row() {
     else
       verdict="crashed (signal $((rc - 128)))"
     fi
+  # ...and ANY other non-zero exit is a failed row too.  Only the two crash
+  # signals were read, so a server killed by the timeout (137) or dying on
+  # SIGFPE (136) -- which prints nothing -- passed on whatever it had logged.
+  elif [ "$rc" = 137 ] || [ "$rc" = 124 ]; then
+    verdict="killed by the timeout after $((FRAMES / 5 + 240))s"
+  elif [ "$rc" -gt 128 ] 2>/dev/null; then
+    verdict="crashed (signal $((rc - 128)))"
+  elif [ "$rc" != 0 ]; then
+    verdict="server exited $rc"
   fi
 
   printf '%-9s %-5s %-9s %-8s %-9s %s\n' "$rs" "$n" "$map" "$before" "$loaded" "$verdict"
@@ -205,7 +229,7 @@ if [ "$CONTROL" = 1 ]; then
   # ...and the second control puts it back but takes the AAS away, which is the
   # BLERR path: the brain loads, refuses the map, and every bot using it is
   # destroyed.  The leak check must still pass, and `spawned` must be 0.
-  ln -s "$GLADDIR/release/gladiator.so" "$DIR/colosseum/gladiator.so"
+  ln -s "$BRAIN" "$DIR/colosseum/gladiator.so"
   rm -f "$DIR/colosseum/maps"/*.aas
   run_row dm 1 q2dm1 spawn && fail=$((fail+1)) || pass=$((pass+1))
   # ...and the third is the PLACEMENT comparison, a later addition
@@ -214,7 +238,7 @@ if [ "$CONTROL" = 1 ]; then
   # that is the opposite of what `botctfteam 1` produces.
   for a in "$GLADDIR"/assets/maps/*.aas; do
     case $a in *.original_baseline) continue ;; esac
-    ln -s "$a" "$DIR/colosseum/maps/$(basename "$a")" 2>/dev/null
+    cp "$a" "$DIR/colosseum/maps/$(basename "$a")" 2>/dev/null
   done
   EXTRA="+set botctfteam 1"
   run_row ctf 2 q2ctf1 spawn "red=0 blue=2" ctl && fail=$((fail+1)) || pass=$((pass+1))
@@ -272,7 +296,7 @@ for rs in dm dmpro tdm duel ctf arena; do
       #
       # `tdm` and `duel` CANNOT seat sixteen, and that is the check rather than
       # a problem with it: they declare a capacity -- `team_maxplayers`, 4 by
-      # default and forced to 1 under `duel` -- and OSP_addTeamMember refuses
+      # default, and one player a team under `duel` -- and OSP_addTeamMember refuses
       # past it, so the roster stops at twice that.  `dm` and `dmpro` have no
       # teams and take everybody.  Asserting `entered=16` here would be
       # asserting that the capacity is NOT enforced.
@@ -315,6 +339,39 @@ else
   fail=$((fail+1))
   cp "$DIR/tdm-4-ready.log" "/tmp/botmatrix-tdm-ready.log" 2>/dev/null
 fi
+
+# An exhausted roster: two configured bots and three `sv addrandom`s.  Outside
+# the OSP four the third is REFUSED, as Gladiator's is, and the refusal has to
+# say so, because it is what the bot fill's roster-exhausted clamp waits for --
+# a pick that returned "added" for a name BotUniqueName then refused left the
+# fill asking again at every check.  Under the four the third is a suffixed
+# copy, tourney's own answer.  `$before`, `$verdict` and `$log` are run_row's.
+printf '"sv" "addbot" "Trash" "cyborg/ps9000" "bots/trash_c.c" "trash"\n' \
+  >"$DIR/colosseum/botcfg/two.cfg"
+printf '"sv" "addbot" "Zero" "cyborg/tyr574" "bots/zero_c.c" "zero"\n' \
+  >>"$DIR/colosseum/botcfg/two.cfg"
+for rs in ctf dm; do
+  if [ "$rs" = ctf ]; then
+    map=q2ctf1 seats=2 refusals=1 EXTRA="+set botfile botcfg/two.cfg"
+  else
+    map=q2dm1 seats=3 refusals=0 EXTRA="+set bots_botfile botcfg/two.cfg"
+  fi
+  run_row "$rs" 3 "$map" spawn "" roster >/dev/null
+  said=$(grep -c 'Every configured bot is already in the game\.' "$log" || true)
+  [ "$verdict" = ok ] && [ "$before" != "$seats" ] && \
+    verdict="seated $before of a two-bot roster, expected $seats"
+  [ "$verdict" = ok ] && [ "$said" != "$refusals" ] && \
+    verdict="refused $said time(s), expected $refusals"
+  printf '%-9s %-5s %-9s %-8s %-9s %s\n' "$rs" "3/2" "$map" "$before" "$loaded" \
+         "roster exhausted: $verdict"
+  if [ "$verdict" = ok ]; then
+    pass=$((pass+1))
+  else
+    fail=$((fail+1))
+    cp "$log" "/tmp/botmatrix-$rs-roster.log" 2>/dev/null
+  fi
+  EXTRA=""
+done
 
 # --------------------------------------------------------------
 #
@@ -405,8 +462,9 @@ botperf_row() {
     log=$DIR/botperf-$n.log
     ( ulimit -c 0
       { printf 'wait 40\n'
-        # `sv addrandom` will not seat a character already in the game, so the
-        # shipped eighteen-name roster is its ceiling.  The budget is about
+        # `sv addrandom` picks at random and, outside the OSP four, will not
+        # seat a character already in the game, so the shipped eighteen-name
+        # roster is its ceiling there.  The budget is about
         # THIRTY-TWO, so these are added by name -- the roster's own character
         # under distinct netnames, which is what addrandom calls underneath.
         i=0

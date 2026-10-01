@@ -18,6 +18,8 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+
+	"q2playtest/playtest"
 )
 
 // The seven rulesets, and a map each one can actually hold a match on.
@@ -531,7 +533,7 @@ func InstallBrain(dir, gladdir string) error {
 		os.Remove(dst)
 		return os.Symlink(abs, dst)
 	}
-	so := filepath.Join(gladdir, "release", "gladiator.so")
+	so := playtest.Brain(gladdir)
 	if _, err := os.Stat(so); err != nil {
 		return fmt.Errorf("no brain at %s: %w", so, err)
 	}
@@ -550,19 +552,23 @@ func InstallBrain(dir, gladdir string) error {
 	if err != nil {
 		return err
 	}
-	if err := os.WriteFile(filepath.Join(cfgdir, "bots.cfg"), src, 0o644); err != nil {
+	if err := playtest.WriteFixture(filepath.Join(cfgdir, "bots.cfg"), src, 0o644); err != nil {
 		return err
 	}
 	maps := filepath.Join(game, "maps")
 	if err := os.MkdirAll(maps, 0o755); err != nil {
 		return err
 	}
+	// COPIED, not linked: the brain writes a mesh back once it has computed
+	// its reachability, and through a link that rewrote the shipped one --
+	// the checkout's q2dm1, q2dm7, q2ctf1 and q2ctf4 meshes were found
+	// modified that way.
 	aas, _ := filepath.Glob(filepath.Join(gladdir, "assets", "maps", "*.aas"))
 	for _, a := range aas {
 		if strings.HasSuffix(a, ".original_baseline") {
 			continue
 		}
-		if err := link(a, filepath.Join(maps, filepath.Base(a))); err != nil {
+		if err := playtest.CopyFixture(a, filepath.Join(maps, filepath.Base(a))); err != nil {
 			return err
 		}
 	}

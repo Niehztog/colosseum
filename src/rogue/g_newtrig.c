@@ -114,6 +114,16 @@ void trigger_teleport_use(edict_t *self, edict_t *other, edict_t *activator)
 
 void rogue_SP_trigger_teleport(edict_t *self)
 {
+    // Ground Zero never checked, because none of its maps has a teleport
+    // trigger without a destination.  RA2's do -- ra2map5 carries one that
+    // names an arena instead -- and outside ctf and arena this is the spawn
+    // function they reach, so it refuses one exactly as CTF's does.
+    if (!self->target) {
+        gi.dprintf("teleporter without a target.\n");
+        G_FreeEdict(self);
+        return;
+    }
+
     if (!self->wait)
         self->wait = 0.2f;
 

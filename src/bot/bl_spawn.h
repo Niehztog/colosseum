@@ -47,14 +47,25 @@ void BotAddDeathmatch(edict_t *ent);
 void BotRemoveDeathmatch(edict_t *ent);
 // moves a bot to a free client edict
 bool BotMoveToFreeClientEdict(edict_t *bot);
+bool BotConnecting(const edict_t *ent);
+// Is client slot `i` free -- nothing in it and nobody holding it?  The
+// allocator's own predicate, exported so that arena.c's seat count asks the
+// same question rather than a second opinion about it.
+bool G_ClientSlotFree(int i);
 // lets a human client become a bot
 void BotBecomeDeathmatch(edict_t *ent);
 // destroys a bot
 void BotDestroy(edict_t *bot);
 // destroys every bot; ShutdownGame, and the `sv removebot all` path
 void BotDestroyAll(void);
+// the bot state of a client ClientDisconnect is dropping while a brain drives it
+void BotClientLeaving(edict_t *ent);
 // adds a bot to the spawn queue
 void AddBotToQueue(edict_t *ent, const char *library, const char *userinfo);
+// seats a bot could still be given, the queued ones already counted out
+int  BotSeatsFree(void);
+// true when a bot of that name is in the queue, not yet in the game
+bool BotNameQueued(const char *name);
 // spawn waiting bots
 void AddQueuedBots(void);
 //

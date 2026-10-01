@@ -207,6 +207,26 @@ void Tag_MakeTouchable(edict_t *ent)
 }
 
 //=================
+// Tag_ReturnToken - a token a mover crushed goes where Tag sends one that has
+//      lain too long, instead of out of the game
+//
+// BecomeExplosion1 sends CTF's flags and techs home and frees anything else,
+// and the game's one token was anything else: a token on a closing door or a
+// crushing plat left Tag with none for the rest of the level.  Tag_Respawn
+// retries every second while no spawn point is open, so it is made the think
+// as well; and the token lets go of the mover it rode, which would otherwise
+// go on carrying it from wherever it was sent.
+//=================
+void Tag_ReturnToken(edict_t *ent)
+{
+    ent->groundentity = NULL;
+    VectorClear(ent->velocity);
+    ent->touch = Touch_Item;
+    ent->think = Tag_Respawn;
+    Tag_Respawn(ent);
+}
+
+//=================
 //=================
 void Tag_DropToken(edict_t *ent, const gitem_t *item)
 {
@@ -231,7 +251,13 @@ void Tag_DropToken(edict_t *ent, const gitem_t *item)
 
     tag_token = G_Spawn();
 
-    tag_token->classname = item->classname;
+    // By name, not `item->classname`: the Tag Token's itemlist row carries no
+    // classname -- the map entity names itself in SP_dm_tag_token -- so the
+    // copy set NULL, and a dropped token was an in-use edict with no
+    // classname.  Ground Zero never looked; CTF does, in every
+    // `loc_findradius` walk behind `say_team %l` and in BecomeExplosion1, and
+    // `ctf` runs Ground Zero's game rules.
+    tag_token->classname = "dm_tag_token";
     tag_token->item = item;
     tag_token->spawnflags = DROPPED_ITEM;
     tag_token->s.effects = EF_ROTATE | EF_TAGTRAIL;
@@ -260,7 +286,10 @@ void Tag_DropToken(edict_t *ent, const gitem_t *item)
     gi.linkentity(tag_token);
 
 //  tag_token = Drop_Item (ent, item);
-    ent->client->pers.inventory[ITEM_INDEX(item)]--;
+    // A holder who went observer may hold nothing by now: CTFObserver wipes
+    // the inventory before Tag_PlayerEffects takes the token back.
+    if (ent->client->pers.inventory[ITEM_INDEX(item)] > 0)
+        ent->client->pers.inventory[ITEM_INDEX(item)]--;
     ValidateSelectedItem(ent);
 }
 
@@ -268,6 +297,16 @@ void Tag_DropToken(edict_t *ent, const gitem_t *item)
 //=================
 void Tag_PlayerEffects(edict_t *ent)
 {
+    // A holder who has left play gives the token back, as a disconnect does.
+    // Ground Zero takes it off a death and a disconnect only, so a holder who
+    // went observer -- CTFObserver, or the Gladiator observer's toggle -- stayed
+    // `tag_owner` as an invisible spectator, and the game had no token until
+    // they rejoined or left.  Asked here because this runs every frame for
+    // every live client (G_SetClientEffects), the new observer included.
+    if (tag_owner && (!tag_owner->inuse || !tag_owner->client->pers.connected ||
+                      G_IsObserver(tag_owner)))
+        Tag_PlayerDisconnect(tag_owner);
+
     if (ent == tag_owner)
         ent->s.effects |= EF_TAGTRAIL;
 }
@@ -308,8 +347,18 @@ void Tag_PostInitSetup(void)
     edict_t     *e;
     vec3_t      origin, angles;
 
+    // Every level starts with nobody holding the token.  Tag_GameInit runs
+    // once per game-library load and a `gamemap` rotation does not reload it,
+    // so the last map's holder kept EF_TAGTRAIL, the dogtag, the 3-point
+    // frags and the damage rule beside this map's own token, and their next
+    // death dropped a second one.  SpawnEntities has just spawned the map's
+    // token if it places one, so `tag_token` is that or the one made below.
+    tag_owner = NULL;
+    tag_count = 0;
+
     // automatic spawning of tag token if one is not present on map.
     e = G_Find(NULL, FOFS(classname), "dm_tag_token");
+    tag_token = e;
     if (e == NULL) {
         e = G_Spawn();
         e->classname = "dm_tag_token";

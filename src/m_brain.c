@@ -706,8 +706,13 @@ void brain_pain(edict_t *self, edict_t *other, float kick, int damage)
 
     self->pain_debounce_framenum = level.framenum + 3 * BASE_FRAMERATE;
 
+    // id's brain and Ground Zero's play no pain animation on nightmare; The
+    // Reckoning's dropped that return.  With both layers on, Ground Zero's
+    // line runs -- the precedence chick_pain and infantry_attack give it
+    // (R-CORE-11c).
     if (skill->value == 3 &&
-        !(self->content_flavour & CONTENT_XATRIX))
+        (!(self->content_flavour & CONTENT_XATRIX) ||
+         (self->content_flavour & CONTENT_ROGUE)))
         return;     // no pain anims in nightmare
 
     r = random();
@@ -721,8 +726,8 @@ void brain_pain(edict_t *self, edict_t *other, float kick, int damage)
         gi.sound(self, CHAN_VOICE, sound_pain1, 1, ATTN_NORM, 0);
         self->monsterinfo.currentmove = &brain_move_pain3;
     }
-    // Ground Zero clears its dodge state before selecting a pain move; Xatrix
-    // completes its base-style duck animation normally.
+    // Ground Zero clears its duck state after selecting a pain move; id's line,
+    // which Xatrix keeps, leaves the duck flag to bq2_brain_duck_up.
     if ((self->content_flavour & CONTENT_ROGUE) &&
         (self->monsterinfo.aiflags & AI_DUCKED))
         monster_duck_up(self);
@@ -811,8 +816,8 @@ static void brain_precache(void)
 //
 // Ground Zero does not add to this monster, it replaces its evasion: baseq2's
 // per-monster brain_dodge and brain_duck_* become the shared M_MonsterDodge with
-// generic monster_duck_* plus a sidestep.  Without this block, `rogue 0` still
-// got Ground Zero's AI.
+// generic monster_duck_* -- a duck only, the brain has no sidestep.  Without this
+// block, `rogue 0` still got Ground Zero's AI.
 //
 // Reintroduced under a bq2_ prefix rather than by un-commenting the donor's dead
 // copy, so the two sets are distinct symbols and both are visible to genptr.py

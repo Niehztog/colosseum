@@ -23,6 +23,8 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 #include "g_local.h"
 #include "m_player.h"
+// OSP_disableItems, for SubstituteItemAllowed (the surface a shared file may see).
+#include "tourney/osp_hooks.h"
 
 dm_game_rt  DMGame;
 
@@ -37,6 +39,8 @@ void InitGameRules(void)
     // clear out the game rule structure before we start
     memset(&DMGame, 0, sizeof(dm_game_rt));
 
+    // The backstop to InitGame's own gate, which is also where a `gamerules`
+    // set under the wrong ruleset is reported.
     if (!G_UsesRogueGameRules())
         return;
 
@@ -81,6 +85,23 @@ void InitGameRules(void)
 #define IT_TYPE_MASK    (IT_WEAPON|IT_AMMO|IT_POWERUP|IT_ARMOR|IT_KEY)
 
 
+// The half of SubstituteItemAllowed that cannot change during a level, which is
+// also what PrecacheForRandomRespawn may leave out: a row that can never be
+// picked is configstrings spent on every randomrespawn server for nothing.
+static bool SubstituteItemCandidate(const gitem_t *it)
+{
+    // Only an item a map could place.  The merged itemlist holds rows Ground
+    // Zero's never did: CTF's grapple and id's blaster have no pickup and no
+    // world model, so a weapon spot that became one held an invisible item
+    // nobody could take for the rest of the level; and the four CTF techs and
+    // five OSP runes are pools their rulesets count and scatter, so a pack or
+    // bandolier that became one put a tech in a deathmatch game -- whose tech
+    // code runs ungated -- or a rune SpawnItem freed on the spot.
+    if (!it->pickup || !it->world_model)
+        return false;
+    return !(it->flags & (IT_TECH | IT_RUNE));
+}
+
 /*
 =================
 SubstituteItemAllowed
@@ -115,15 +136,32 @@ function pointer cannot be misspelled at all).
 */
 static bool SubstituteItemAllowed(const gitem_t *it)
 {
+    if (!SubstituteItemCandidate(it))
+        return false;
+
     if (((int)dmflags->value & DF_NO_SPHERES) && it->pickup == Pickup_Sphere)
         return false;
 
-    if (((int)dmflags->value & DF_NO_NUKES) && !strcmp(it->classname, "ammo_nuke"))
+    // G_RogueDMFlag for the two that share Threewave's bits (see g_ruleset.h).
+    if (G_RogueDMFlag(DF_NO_NUKES) && !strcmp(it->classname, "ammo_nuke"))
         return false;
 
-    if (((int)dmflags->value & DF_NO_MINES) &&
+    if (G_RogueDMFlag(DF_NO_MINES) &&
         (!strcmp(it->classname, "ammo_prox") || !strcmp(it->classname, "ammo_tesla")))
         return false;
+
+    // Nor a class a tourney referee has switched off.  The substitute's
+    // droptofloor would park it at SetRespawn(65000), and the enabled original
+    // has been freed by then, so the spot stayed empty for the match.
+    // OSP_disableItems judges an edict by its classname and reads nothing
+    // else, so the probe carries that alone.
+    if (G_IsOspRuleset()) {
+        static edict_t probe;
+
+        probe.classname = it->classname;
+        if (OSP_disableItems(&probe))
+            return false;
+    }
 
     return true;
 }
@@ -280,6 +318,13 @@ void PrecacheForRandomRespawn(void)
         itflags = it->flags;
 
         if (!itflags || (itflags & IT_NOT_GIVEABLE))
+            continue;
+
+        // Only what FindSubstituteItem could pick -- not the techs, runes,
+        // grapple and blaster, which it never can.  The level's dmflags and a
+        // referee's switches are not asked: either may change mid-level, and
+        // a precache cannot follow them.
+        if (!SubstituteItemCandidate(it))
             continue;
 
         PrecacheItem(it);

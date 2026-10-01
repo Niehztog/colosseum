@@ -123,6 +123,15 @@
 #                  because the brain does its own file I/O and cannot see
 #                  inside one.  Needs $GLADDIR.
 #
+#     hardening    the crash and injection fixes, from a client: RA2 pads
+#                  freed under dm, a teamskin injection refused and never
+#                  stuffed, the referee paths with no password and with a
+#                  backoff, a bot on a password server, accuracy across a
+#                  death, a skin cycle that allocates no image.  Every row
+#                  fails on the library without its fix.  -ra2ref and
+#                  $GLADDIR are optional; each row that needs one skips
+#                  without it and says so.
+#
 #     samelevel    does `dmflags` "same map" outrank the ruleset's own map
 #                  rotation (R-RA-12)?  Four arms on empty servers, 65 seconds
 #                  each: `arena` reading a `maploop:` out of arena.cfg and
@@ -415,9 +424,9 @@
 #                  Each system counts a DIFFERENT set, which is what the ladder
 #                  makes visible.  Tourney divides by everybody CONNECTED under
 #                  `dm`/`dmpro` and by the people who ENTERED under `tdm`/`duel`
-#                  (`vote_countspectators` is registered with a different
-#                  default for a teams ruleset) -- so under `duel`, where
-#                  `team_maxplayers` is 1 and the third client cannot enter at
+#                  (`vote_countspectators` unset answers differently for a
+#                  teams ruleset, OSP_CountSpectators) -- so under `duel`, where
+#                  a team is one player and the third client cannot enter at
 #                  all, three players vote as two and the third is refused.
 #                  Threewave counts every client including the proposer, who may
 #                  not vote, and truncates: two players and three players both
@@ -522,7 +531,11 @@ ROGUEDATA=${ROGUEDATA:-/usr/share/games/quake2/rogue}
 # Rocket Arena's own gamedir, on the same terms: its paks carry `ra2map1`..
 # `ra2map28` and the arena keys `mapinfo` reads, and no retail pak has either.
 ARENADATA=${ARENADATA:-/usr/share/games/quake2/arena}
-LIB=release/game$(uname -m | sed -e 's/^x86_64$/x86_64/' -e 's/^aarch64$/arm64/').so
+# The environment's LIB wins, as in smoke.sh and the matrix scripts; the
+# default is the repository's own release build, found from this script
+# rather than from wherever it was run, with the Makefile's CPU names.
+ROOT=$(cd "$(dirname "$0")/.." && pwd)
+LIB=${LIB:-$ROOT/release/game$(uname -m | sed -e 's/^aarch64$/arm64/' -e 's/^i.86$/i386/').so}
 RULESETS=dm,dmpro,tdm,duel,ctf,arena,sp
 SCENARIO=colosseum
 PLAYTEST_DIR=${PLAYTEST_DIR:-${TMPDIR:-/tmp}/q2playtest}
@@ -586,12 +599,24 @@ if supports_flag ref && ! has_option ref "$@"; then
   [ -d "$REFDATA" ] || die "no reference install at $REFDATA (set Q2DATA, or ARENADATA for ra2nullattacker)"
 fi
 
+# The brain that matches $LIB.  The Makefile copies it beside the library it
+# builds, and rebuilds $GLADDIR/release for whichever target it built LAST --
+# so the one there can be another target's, or wiped mid-switch.  An explicit
+# BRAIN wins, beside $LIB comes next, the checkout's release/ is the fallback.
+if [ -z "${BRAIN:-}" ]; then
+  if [ -f "$(dirname "$LIB")/gladiator.so" ]; then
+    BRAIN=$(cd "$(dirname "$LIB")" && pwd)/gladiator.so
+  else
+    BRAIN=$GLADDIR/release/gladiator.so
+  fi
+fi
+export COLOSSEUM_BRAIN=$BRAIN
 GLAD=""
-if [ -f "$GLADDIR/release/gladiator.so" ]; then
+if [ -f "$BRAIN" ]; then
   GLAD=$(cd "$GLADDIR" && pwd)
 fi
 GLADSO=
-[ -n "$GLAD" ] && GLADSO=$GLAD/release/gladiator.so
+[ -n "$GLAD" ] && GLADSO=$BRAIN
 GLADPAK=
 GLADBOTCFG=
 if [ -f "$GLAD/assets/pak7.pak" ]; then
@@ -711,6 +736,11 @@ if [ "$SCENARIO" = ospbotvote ] && ! has_option aas "$@"; then
   aas_for ospbotvote q2dm1
   set -- "$@" -aas "$AAS"
 fi
+# `hardening` takes the arena gamedir for its RA2-map row, and skips that row
+# (saying so) without one.
+if [ "$SCENARIO" = hardening ] && ! has_option ra2ref "$@" && [ -d "$ARENADATA" ]; then
+  set -- "$@" -ra2ref "$ARENADATA"
+fi
 # `ra2reachscore` also wants the arena gamedir, and its mesh must be COMPLETE:
 # it empties the second map's reachability lump itself to open the window it
 # measures, so one that arrives empty measures nothing.
@@ -725,4 +755,11 @@ if [ "$SCENARIO" = ra2reachscore ]; then
 fi
 
 cd "$HARNESS"
-exec go run "./scenarios/$SCENARIO" "$@"
+# Built, then exec'd, rather than `go run`: `go run` reports any non-zero exit
+# as 1, and the scenarios mean two different things by 1 and 2 -- a check
+# failed, against the scenario could not run at all.
+# One path per scenario, overwritten each run, so exec leaves nothing behind.
+BIN=$PLAYTEST_DIR/.bin/$SCENARIO
+mkdir -p "$PLAYTEST_DIR/.bin" || die "cannot create $PLAYTEST_DIR/.bin"
+go build -o "$BIN" "./scenarios/$SCENARIO" || die "could not build scenario $SCENARIO"
+exec "$BIN" "$@"

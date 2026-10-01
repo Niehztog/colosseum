@@ -707,7 +707,7 @@ def selftest(tree):
 
 if __name__ == '__main__':
     # Was a hardcoded list of six /mnt/c donor trees.  Now takes
-    # label=path pairs, the same CLI shape keycontract.py already had, and
+    # label=path pairs, the imported harness's own CLI shape, and
     # defaults to this repo's own tree.
     args = sys.argv[1:]
     repo = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))

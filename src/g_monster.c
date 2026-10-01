@@ -79,6 +79,13 @@ void monster_fire_blueblaster(edict_t *self, vec3_t start, vec3_t dir, int damag
 {
     fire_blueblaster(self, start, dir, damage, speed, effect);
 
+    // Xatrix's line, kept, and wrong: MZ_BLUEHYPERBLASTER is a PLAYER flash,
+    // and in svc_muzzleflash2's monster space 17 is MZ2_TANK_MACHINEGUN_14,
+    // so a hypergun soldier has flashed and sounded like a tank's machinegun
+    // since 1998 -- every Xatrix donor and Gladiator write it.  Its caller
+    // passes the same constant, so there is no MZ2 number it meant; the right
+    // one, MZ2_SOLDIER_HYPERGUN_*, is the rerelease's, past the end of the
+    // table a 3.20 client knows.
     gi.WriteByte(svc_muzzleflash2);
     gi.WriteShort(self - g_edicts);
     gi.WriteByte(MZ_BLUEHYPERBLASTER);
@@ -256,8 +263,12 @@ void monster_fire_rocket(edict_t *self, vec3_t start, vec3_t dir, int damage, in
 
 void monster_fire_railgun(edict_t *self, vec3_t start, vec3_t aimdir, int damage, int kick, int flashtype)
 {
-    // PMM
-    if (!(gi.pointcontents(start) & MASK_SOLID))
+    // PMM.  The muzzle-in-solid test is Ground Zero's addition -- inside ROGUE
+    // in Gladiator's g_monster.c -- so it is the pack arm: id's gladiator and
+    // Makron fire wherever the muzzle is, as they always did, and Widow and
+    // the Carrier, whose own feature it is, keep it at rogue 0 through the
+    // predicate's classnames.
+    if (!M_UsesRogueBehavior(self) || !(gi.pointcontents(start) & MASK_SOLID))
         fire_rail(self, start, aimdir, damage, kick);
 
     gi.WriteByte(svc_muzzleflash2);
@@ -657,6 +668,13 @@ static void M_MoveFrame(edict_t *self)
             move->frame[index].aifunc(self, 0);
     }
 
+    // The ai function moves, the move touches triggers, and a trigger_hurt
+    // frees a flyer, a floater or the fixbot on the spot; the frame's think
+    // would then fire on the zeroed edict -- flyer_fireleft, after the
+    // `ai_charge, -10` it rides on, reads self->enemy.  The guard ai_run has.
+    if (!self->inuse)
+        return;
+
     if (move->frame[index].thinkfunc)
         move->frame[index].thinkfunc(self);
 }
@@ -664,6 +682,8 @@ static void M_MoveFrame(edict_t *self)
 void monster_think(edict_t *self)
 {
     M_MoveFrame(self);
+    if (!self->inuse)
+        return;         // freed during its frame -- see M_MoveFrame
     if (self->linkcount != self->monsterinfo.linkcount) {
         self->monsterinfo.linkcount = self->linkcount;
         M_CheckGround(self);
@@ -790,17 +810,19 @@ void monster_death_use(edict_t *self)
 
 static bool monster_start(edict_t *self)
 {
-    // This is the gate that actually decides: every SP_monster_* funnels
-    // through monster_start(), so converting only the per-monster checks would
-    // have left monsters freed under ctf regardless.
+    // Not the gate that decides: every SP_monster_* asks G_MonstersAllowed()
+    // first, before it assigns anything.  This stands where id's own
+    // `deathmatch` test stood and asks the ruleset too, because id's test
+    // here would free under ctf every monster its spawn function had just
+    // admitted.
     if (!G_MonstersAllowed()) {
         G_FreeEdict(self);
         return false;
     }
 
-    // The content flavour is latched in ED_CallSpawn, before this runs and
-    // before the SP_monster_* assignments -- see the comment there for why
-    // This is too late a point to gate anything on the content flavour.
+    // The content flavour is latched in ED_CallSpawn, before the SP_monster_*
+    // assignments and so before this runs; this is too late a point to gate
+    // anything on it -- see the comment there for why.
 
     if ((self->spawnflags & 4) && !(self->monsterinfo.aiflags & AI_GOOD_GUY)) {
         self->spawnflags &= ~4;
@@ -893,12 +915,15 @@ void monster_start_go(edict_t *self)
         }
     }
 
+    // "Never" is the spine's INT_MAX here, as in bq2_ai_checkattack.  Ground
+    // Zero writes 100000000, a different spelling of the same answer -- no
+    // level runs 115 days -- so there is nothing for an arm to select.
     if (self->target) {
         self->goalentity = self->movetarget = G_PickTarget(self->target);
         if (!self->movetarget) {
             gi.dprintf("%s can't find target %s at %s\n", self->classname, self->target, vtos(self->s.origin));
             self->target = NULL;
-            self->monsterinfo.pause_framenum = 100000000;
+            self->monsterinfo.pause_framenum = INT_MAX;
             self->monsterinfo.stand(self);
         } else if (strcmp(self->movetarget->classname, "path_corner") == 0) {
             VectorSubtract(self->goalentity->s.origin, self->s.origin, v);
@@ -907,11 +932,11 @@ void monster_start_go(edict_t *self)
             self->target = NULL;
         } else {
             self->goalentity = self->movetarget = NULL;
-            self->monsterinfo.pause_framenum = 100000000;
+            self->monsterinfo.pause_framenum = INT_MAX;
             self->monsterinfo.stand(self);
         }
     } else {
-        self->monsterinfo.pause_framenum = 100000000;
+        self->monsterinfo.pause_framenum = INT_MAX;
         self->monsterinfo.stand(self);
     }
 

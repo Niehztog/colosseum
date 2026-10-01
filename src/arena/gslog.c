@@ -62,6 +62,7 @@ void GSOpenLog(void)
         return;
     }
 
+    G_FsCreatePath(path);
     StdLogFile = fopen(path, "a+t");
 }
 
@@ -249,6 +250,12 @@ void GSLogEnter(edict_t *ent)
 void GSLogExit(edict_t *ent)
 {
     if (logfile->value != 2)
+        return;
+
+    // Not for a bot ShutdownGame tears down: the server going away is
+    // GSLogShutdown's GameEnd, and no person the engine drops then gets a
+    // PlayerLeft either.
+    if (g_shutting_down)
         return;
 
     GSOpenLog();

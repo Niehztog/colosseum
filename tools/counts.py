@@ -314,6 +314,37 @@ typedef struct {
 }
 
 
+# The two inventories publish the finished tree's totals in one sentence each,
+# and this is what holds them to it: a figure the tree has moved away from is a
+# finding, not a stale line.  docs/cvars.md said so of itself before anything
+# checked it -- `--duplicates` checks duplicates, not the document.
+PUBLISHED = re.compile(r'what it prints today is the last of them: \*\*(\d+)\*\*')
+DOCS = (('docs/cvars.md', 'cvars'), ('docs/commands.md', 'client commands'))
+
+
+def doc_mismatches(text, doc, what, measured):
+    m = PUBLISHED.search(text)
+    if not m:
+        return ['%s publishes no total ("what it prints today is the last of '
+                'them: **N**") for its %s' % (doc, what)]
+    if int(m.group(1)) != measured:
+        return ['%s publishes %s %s; the tree has %d'
+                % (doc, m.group(1), what, measured)]
+    return []
+
+
+def docs_check(tree):
+    files = sources(tree)
+    measured = {'cvars': len(cvars(files, [], sources(tree, ('.h',)))),
+                'client commands': len(commands(files))}
+    out = []
+    for doc, what in DOCS:
+        path = os.path.join(REPO, doc)
+        with open(path, encoding='utf-8') as f:
+            out += doc_mismatches(f.read(), doc, what, measured[what])
+    return out
+
+
 def selftest():
     """Controls for each extraction shape, because the count is an assertion.
 
@@ -358,6 +389,15 @@ def selftest():
                  if len({d for _, d in v}) > 1 and len({f for f, _ in v}) > 1}
         want(list(dupes) == ['collides'],
              'two files, two defaults, one name -> reported as a duplicate')
+        # ...and the published totals: a sentence that matches is quiet, one
+        # the tree has moved away from is reported, and so is one gone missing.
+        line = 'what it prints today is the last of them: **%d**.'
+        want(not doc_mismatches(line % 7, 'doc', 'cvars', 7),
+             'a published total the tree has is quiet')
+        want(bool(doc_mismatches(line % 6, 'doc', 'cvars', 7)),
+             'a published total the tree has moved away from is reported')
+        want(bool(doc_mismatches('no such sentence', 'doc', 'cvars', 7)),
+             'a document with no published total is reported')
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
     return ok
@@ -373,6 +413,9 @@ def main():
                     help='exit 1 if any cvar is registered twice')
     ap.add_argument('--selftest', action='store_true',
                     help='controls for each extraction shape')
+    ap.add_argument('--docs', action='store_true',
+                    help='exit 1 if docs/cvars.md or docs/commands.md '
+                         'publishes a total the tree does not have')
     a = ap.parse_args()
 
     if a.selftest:
@@ -380,6 +423,10 @@ def main():
 
     trees = a.tree or [os.path.join(REPO, 'src')]
     bad = 0
+    if a.docs:
+        for line in docs_check(os.path.abspath(trees[0])):
+            print('  !! ' + line)
+            bad += 1
     for t in trees:
         label = os.path.basename(os.path.normpath(t)) or t
         report(label, os.path.abspath(t), a)
@@ -388,7 +435,7 @@ def main():
             bad += sum(1 for v in cv.values()
                        if len({d for _, d in v}) > 1
                        and len({f for f, _ in v}) > 1)
-    return 1 if (a.duplicates and bad) else 0
+    return 1 if ((a.duplicates or a.docs) and bad) else 0
 
 
 if __name__ == '__main__':

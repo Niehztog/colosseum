@@ -324,7 +324,14 @@ void SP_func_force_wall(edict_t *ent)
     ent->movetype = MOVETYPE_NONE;
     ent->wait = 1;
 
+    // `wait` is the wall's "off" flag: force_wall_think draws it only while
+    // `wait` is 0, and force_wall_use turns it off from 0 and on from anything
+    // else.  Ground Zero set it for start_on too, so that wall was solid but
+    // drawn by nothing, and its first trigger turned it on rather than off.
+    // On means on, and one trigger turns it off, as the QUAKED note says.  No
+    // retail map places one.
     if (ent->spawnflags & FWALL_START_ON) {
+        ent->wait = 0;
         ent->solid = SOLID_BSP;
         ent->think = force_wall_think;
         ent->nextthink = level.framenum + 0.1f * BASE_FRAMERATE;

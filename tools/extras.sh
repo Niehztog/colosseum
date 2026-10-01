@@ -75,19 +75,32 @@ ROSTER=""
 # The brain, if this machine has one.  The temporal row needs a bot to
 # pick something up; without it the row is SKIPPED and says so rather than
 # being silently subtracted from the total.
+# The brain that matches $LIB.  The Makefile copies it beside the library it
+# builds, and rebuilds $GLADDIR/release for whichever target it built LAST --
+# so the one there can be another target's, or wiped mid-switch.  An explicit
+# BRAIN wins, beside $LIB comes next, the checkout's release/ is the fallback.
+if [ -z "${BRAIN:-}" ]; then
+  if [ -f "$(dirname "$LIB")/gladiator.so" ]; then
+    BRAIN=$(cd "$(dirname "$LIB")" && pwd)/gladiator.so
+  else
+    BRAIN=$GLADDIR/release/gladiator.so
+  fi
+fi
+export COLOSSEUM_BRAIN=$BRAIN
 GLAD=""
-[ -f "$GLADDIR/release/gladiator.so" ] && {
+[ -f "$BRAIN" ] && {
   # The brain AND its assets: pak7.pak holds the weapon and sound configs and
   # the bots/*.c characters, and the .aas files are the navigation meshes.
   # Without them the brain loads, reports "couldn't load the weapon config"
   # and unloads itself -- and a row that needs a bot then measures nothing
   # while looking like it ran.
-  ln -s "$GLADDIR/release/gladiator.so" "$DIR/colosseum/gladiator.so"
+  ln -s "$BRAIN" "$DIR/colosseum/gladiator.so"
   [ -f "$GLADDIR/assets/pak7.pak" ] && ln -s "$GLADDIR/assets/pak7.pak" "$DIR/colosseum/pak7.pak"
   mkdir -p "$DIR/colosseum/maps"
+  # Copied, not linked: the brain writes a mesh back (botmatrix.sh says why).
   for a in "$GLADDIR"/assets/maps/*.aas; do
     case $a in *.original_baseline) continue ;; esac
-    [ -f "$a" ] && ln -s "$a" "$DIR/colosseum/maps/$(basename "$a")"
+    [ -f "$a" ] && cp "$a" "$DIR/colosseum/maps/$(basename "$a")"
   done
   GLAD=1
 }
@@ -112,6 +125,10 @@ cd "$DIR" || die "cannot enter $DIR"
 pass=0; fail=0
 ok()  { pass=$((pass+1)); printf '  [ ok ] %-42s %s\n' "$1" "$2"; }
 bad() { fail=$((fail+1)); printf '  [FAIL] %-42s %s\n' "$1" "$2"; }
+# A row that could not run is neither: it was counted as a pass, printed
+# "[ ok ]", and the total read "0 failed" as it would for a run that tested it.
+skip() { skipped=$((skipped+1)); printf '  [skip] %-42s %s\n' "$1" "$2"; }
+skipped=0
 have() { case "$2" in *"$1"*) return 0 ;; *) return 1 ;; esac; }
 
 # serve <log> <ruleset> <map> <console lines...>
@@ -255,7 +272,7 @@ if [ "$CONTROL" = 1 ]; then
       bad "control/shadowed default.cfg" "$n bindings -- the shadowing did not bite"
     fi
   else
-    ok "control/shadowed default.cfg" "SKIPPED: no q2pro client or no xvfb-run"
+    skip "control/shadowed default.cfg" "no q2pro client or no xvfb-run"
   fi
 
   # 5. A boot killed after the census must still be a failure.
@@ -297,8 +314,29 @@ if [ "$CONTROL" = 1 ]; then
         "a copy with no blocks still passed ($blocks, $picks)"
   fi
 
+  # 7. The launch-line row must see a config that re-sets a layer.  The
+  # positive control is a config shaped like the shipped ones -- exec
+  # server.cfg, then its own lines -- with `set rogue 0` among them, launched
+  # with `+set rogue 1`: Q2PRO runs the +set first, the exec second, and the
+  # probe has to read the config's 0.
+  printf 'exec server.cfg\nset g_ruleset tdm\nset rogue 0\n' \
+    > "$DIR/colosseum/configs/c7.cfg"
+  ( ulimit -c 0
+    printf 'sv ruleset\nquit\n' | \
+    timeout -s KILL 90 "$Q2PRO_BUILD/q2proded" \
+      +set basedir "$DIR" +set homedir "$DIR" +set game colosseum \
+      +set dedicated 1 +set net_port 0 +set rogue 1 \
+      +exec configs/c7.cfg +map q2dm1 >"$DIR/c7.log" 2>&1 )
+  layers=$(grep '^layers ' "$DIR/c7.log" | tail -1)
+  if have 'rogue=0' "$layers"; then
+    ok "control/+set undone by a config" "$layers"
+  else
+    bad "control/+set undone by a config" "${layers:-no layers line} -- a re-set layer went unseen"
+  fi
+  rm -f "$DIR/colosseum/configs/c7.cfg"
+
   echo
-  echo "6 control(s), $pass fired, $fail did not"
+  echo "7 control(s), $pass fired, $fail did not"
   [ "$fail" -eq 0 ] && echo "controls ok: every assertion below can fail"
   exit $([ "$fail" -eq 0 ] && echo 0 || echo 1)
 fi
@@ -410,8 +448,9 @@ done
 
 # ---------------------------------------------- the shipped gamedir set, the shipped config set
 #
-# Every file in colosseum/ is a default the code already carries, so the check
-# is not "does it change anything" -- it is that an operator who execs one gets
+# The files in colosseum/ are mostly the code's own defaults written down, and
+# a few choices per ruleset besides, so the check is not "does it change
+# anything" -- it is that an operator who execs one gets
 # the ruleset it names, that nothing in it is a command this library does not
 # have, and that RA2's arena.cfg PARSES rather than being reported unreadable.
 for rs in dm dmpro tdm duel ctf arena sp; do
@@ -477,6 +516,65 @@ for rs in dm dmpro tdm duel ctf arena sp; do
   fi
 done
 
+# ---- the launch line against the config it execs.
+#
+# Q2PRO applies every `+set` on the command line before any `+exec`, whatever
+# the order, so a value a shipped config sets undoes the same `+set` on the
+# launch line.  The per-launch choices -- the content layers and `bots` among
+# them -- are therefore left unset by server.cfg and every file in configs/,
+# and this is the row that holds them to it: a layer switched on at launch has
+# to still be on after the config ran, and `bots 0` has to still be off.
+for pair in tdm:q2dm1 sp:base1; do
+  rs=${pair%%:*} map=${pair#*:}
+  log=$DIR/launch-$rs.log
+  ( ulimit -c 0
+    printf 'sv ruleset\nquit\n' | \
+    timeout -s KILL 90 "$Q2PRO_BUILD/q2proded" \
+      +set basedir "$DIR" +set homedir "$DIR" +set game colosseum \
+      +set dedicated 1 +set net_port 0 \
+      +set xatrix 1 +set rogue 1 +set bots 0 \
+      +exec "configs/$rs.cfg" +map "$map" >"$log" 2>&1 )
+  rc=$?
+  layers=$(grep '^layers ' "$log" | tail -1)
+  mods=$(grep '^modifiers ' "$log" | tail -1)
+  if [ "$rc" != 0 ]; then
+    bad "gamedir/+set survives configs/$rs.cfg" "server exited $rc"
+  elif ! have 'xatrix=1 rogue=1' "$layers"; then
+    bad "gamedir/+set survives configs/$rs.cfg" "${layers:-no layers line}"
+  elif ! have 'bots=0' "$mods"; then
+    bad "gamedir/+set survives configs/$rs.cfg" "${mods:-no modifiers line}"
+  else
+    ok "gamedir/+set survives configs/$rs.cfg" "$layers, bots=0"
+  fi
+done
+
+# ---- `sp` on a dedicated server is co-op.
+#
+# The engine forces `deathmatch 1` on a dedicated server unless `coop` is set,
+# and `sp` forces it back to 0 -- which with `coop` unset left single player's
+# semantics on a server with a slot per player: every dead player was sent
+# `menu_loadgame` and every arrival the one info_player_start.  configs/sp.cfg
+# sets `coop 1`, so only a launch line naming the ruleset alone reaches this,
+# and that is the line this row uses.
+log=$DIR/sp-dedicated.log
+( ulimit -c 0
+  printf 'sv ruleset\nquit\n' | \
+  timeout -s KILL 90 "$Q2PRO_BUILD/q2proded" \
+    +set basedir "$DIR" +set homedir "$DIR" +set game colosseum \
+    +set dedicated 1 +set net_port 0 +set g_ruleset sp \
+    +map base1 >"$log" 2>&1 )
+rc=$?
+legacy=$(grep '^legacy ' "$log" | tail -1)
+if [ "$rc" != 0 ]; then
+  bad "ruleset/sp on a dedicated server is co-op" "server exited $rc"
+elif ! have 'deathmatch=0 coop=1' "$legacy"; then
+  bad "ruleset/sp on a dedicated server is co-op" "${legacy:-no legacy line}"
+elif ! grep -q "forcing coop 1" "$log"; then
+  bad "ruleset/sp on a dedicated server is co-op" "coop 1 without the forcing line"
+else
+  ok "ruleset/sp on a dedicated server is co-op" "$legacy"
+fi
+
 # ---- the name that is not ours to use.
 #
 # `default.cfg` is ID'S file: it ships inside pak0.pak and holds all 68 key
@@ -496,7 +594,7 @@ fi
 # breaking it.  Needs the client binary and a display; skipped, and said, when
 # either is missing.
 if [ ! -x "$Q2PRO_BUILD/q2pro" ] || ! command -v xvfb-run >/dev/null; then
-  ok "gamedir/a client has bindings" "SKIPPED: no q2pro client or no xvfb-run"
+  skip "gamedir/a client has bindings" "no q2pro client or no xvfb-run"
 else
   n=$(bindings_retry)
   if [ "$n" = none ]; then
@@ -518,7 +616,7 @@ EXTRA_SETS='+set bots 1'
 # runs on demand, not at InitGame -- and the bot then needs a brain to spawn,
 # which this script does not install.
 if [ -z "$ROSTER" ]; then
-  ok "gamedir/botcfg/bots.cfg" "SKIPPED: no roster at $GLADDIR/assets/bots.cfg"
+  skip "gamedir/botcfg/bots.cfg" "no roster at $GLADDIR/assets/bots.cfg"
 elif serve "$DIR/roster.log" dm q2dm1 'sv addrandom' 'wait 20'; then
   line=$(grep -E 'loaded [0-9]+ bots from' "$DIR/roster.log" | tail -1)
   n=$(printf '%s' "$line" | sed -n 's/^loaded \([0-9]*\) bots.*/\1/p')
@@ -543,7 +641,7 @@ fi
 # own think -- and the row takes it three times: at the start, after the bots
 # have been loose in the map, and again past the deadline.
 if [ -z "$GLAD" ]; then
-  ok "respawn/back in world" "SKIPPED: no brain at $GLADDIR/release/gladiator.so"
+  skip "respawn/back in world" "no brain at $BRAIN"
 else
   log=$DIR/respawn.log
   ( ulimit -c 0
@@ -591,5 +689,5 @@ else
 fi
 
 echo
-echo "$((pass + fail)) check(s), $fail failed"
+echo "$((pass + fail)) check(s), $fail failed, $skipped skipped"
 exit $([ "$fail" -eq 0 ] && echo 0 || echo 1)

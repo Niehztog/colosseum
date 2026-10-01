@@ -347,6 +347,17 @@ RUN printf '%s\n' '#!/bin/sh' 'exec gcc -m32 "$@"' > /usr/local/bin/i686-linux-g
 # exactly what it did the first time these two Dockerfiles were merged.
 COPY --from=colosseum-src . /src-colosseum
 
+# ...and none of the HOST's build output with it.  A context is the working
+# tree as it stands, and a checkout that has been built carries release*/,
+# debug*/ and the submodule's release/ and build/: `make` would take those
+# objects as up to date and link a host-compiled library into the image.
+# Removed here rather than trusted to a .dockerignore, because whether one
+# applies to a NAMED context depends on the builder; the repository's own
+# .dockerignore says the same for the builders that honour it.
+RUN cd /src-colosseum && \
+    rm -rf release* debug* build \
+           vendor/gladiator-bot-restored/release vendor/gladiator-bot-restored/build
+
 # `make linux32` builds debug AND release into separate directories; release is
 # the one installed.  The contract audits and the g_ptrs.c freshness check run
 # as part of the build (not on request), so a finding fails this layer the way
@@ -518,14 +529,21 @@ FROM debian:trixie-slim AS colosseum
 # self-contained tree with its own baseq2 here -- scripts/setup-colosseum-serverdata.sh
 # builds one -- rather than the live game data.
 ENV Q2_GAMEDIR="arena"
+# Q2_IP is the address to BIND.  Empty or "localhost" -- id's own meaning for
+# its `ip` cvar -- is every interface; anything else is passed on as Q2PRO's
+# `net_ip`.  It used to be passed as `+set ip`, which Q2PRO does not read: the
+# socket bound every interface whatever this said.
 ENV Q2_IP="localhost"
 ENV Q2_PORT="27920"
 ENV Q2_SERVER_CFG="test-server.cfg"
 ENV Q2_MAP="ra2map1"
 
-# Same as the live images: the host runs Europe/Berlin and a container left on
-# UTC shows the wrong time in-game (xatrix's func_clock is how that was found).
-ENV TZ=Europe/Berlin
+# The container's zone, as a build argument: a container left on UTC shows
+# the wrong time in-game wherever the host is not on UTC (xatrix's func_clock,
+# in its time-of-day mode, reads localtime() directly).  Pass the host's, e.g.
+# --build-arg TZ=$(cat /etc/timezone).
+ARG TZ=Etc/UTC
+ENV TZ=$TZ
 
 RUN echo 'debconf debconf/frontend select Noninteractive' | debconf-set-selections && \
     dpkg --add-architecture i386 && \
@@ -539,9 +557,11 @@ RUN echo 'debconf debconf/frontend select Noninteractive' | debconf-set-selectio
     rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/* /usr/share/locale/* \
            /var/cache/debconf/*-old /usr/share/doc/*
 
-# UID 1000 matches the host's real `nils` login, so the process can write to its
-# bind-mounted gamedir (the console log, and the library install below).
-RUN useradd -r -u 1000 -U -s /sbin/nologin -M quake2
+# The uid the process runs as has to be one that can write the bind-mounted
+# gamedir (the console log, and the library install below), so it is the
+# host's to choose: --build-arg QUAKE2_UID=$(id -u).  1000 is only a default.
+ARG QUAKE2_UID=1000
+RUN useradd -r -u "$QUAKE2_UID" -U -s /sbin/nologin -M quake2
 RUN mkdir -p /opt/quake2 && chown quake2:quake2 /opt/quake2
 
 COPY --from=build /out/q2proded       /opt/q2pro/q2proded
@@ -593,7 +613,8 @@ WORKDIR /opt/quake2
 # pak7.pak keeps THAT NUMBER whatever else is installed -- it is the one pak in
 # colosseum's numbering that is never renumbered, and neither of these gamedirs
 # reaches 7 on its own (arena stops at 2, xatrix at 0), so there is no clash.
-CMD install -m 755 /opt/colosseum/gamei386.so /opt/quake2/$Q2_GAMEDIR/gamei386.so && \
+CMD bind=; case "$Q2_IP" in ""|localhost) ;; *) bind="+set net_ip $Q2_IP" ;; esac; \
+    install -m 755 /opt/colosseum/gamei386.so /opt/quake2/$Q2_GAMEDIR/gamei386.so && \
     install -m 755 /opt/colosseum/gladiator.so /opt/quake2/$Q2_GAMEDIR/gladiator.so && \
     install -m 644 /opt/colosseum/pak7.pak /opt/quake2/$Q2_GAMEDIR/pak7.pak && \
     install -m 644 -D /opt/colosseum/bots.cfg /opt/quake2/$Q2_GAMEDIR/botcfg/bots.cfg && \
@@ -603,7 +624,7 @@ CMD install -m 755 /opt/colosseum/gamei386.so /opt/quake2/$Q2_GAMEDIR/gamei386.s
         +set basedir /opt/quake2 +set libdir /opt/quake2 +set homedir /opt/quake2 \
         +set dedicated 1 +set public 0 \
         +set game $Q2_GAMEDIR \
-        +set ip $Q2_IP +set port $Q2_PORT +set net_port $Q2_PORT \
+        $bind +set port $Q2_PORT +set net_port $Q2_PORT \
         +set map_override_path maps \
         +exec $Q2_SERVER_CFG +map $Q2_MAP" /dev/null 2>&1 \
     | tee -a /opt/quake2/$Q2_GAMEDIR/logs/console.log
@@ -616,19 +637,27 @@ CMD install -m 755 /opt/colosseum/gamei386.so /opt/quake2/$Q2_GAMEDIR/gamei386.s
 FROM debian:trixie-slim AS server
 
 ENV Q2_GAMEDIR="arena"
+# Q2_IP is the address to BIND.  Empty or "localhost" -- id's own meaning for
+# its `ip` cvar -- is every interface; anything else is passed on as Q2PRO's
+# `net_ip`.  It used to be passed as `+set ip`, which Q2PRO does not read: the
+# socket bound every interface whatever this said.
 ENV Q2_IP="localhost"
 ENV Q2_PORT="27910"
-ENV Q2_OVERRIDE_CFG="q2pro-override-arena.cfg"
+# The server's own cfg and one exec'd AFTER it so it wins -- a command-line
+# `+set` cannot do that, because Q2PRO applies every `+set` before any
+# `+exec`.  Both names are the deployment's; these are only defaults.
+ENV Q2_SERVER_CFG="server.cfg"
+ENV Q2_OVERRIDE_CFG="q2pro-override.cfg"
 
-# Host is Europe/Berlin; without this the container defaults to UTC. Real
-# symptom found 2026-08-06: xatrix/openffa's func_clock entity, in its
-# default "time of day" mode, calls time(NULL)/localtime() directly and
-# displayed exactly 2 hours behind host time (CEST is UTC+2) - the game
-# process has no other source of wall-clock time than the container's own.
+# The container's zone, as a build argument (see the colosseum stage): the
+# game process has no wall clock but the container's, and xatrix's func_clock
+# in its default "time of day" mode calls time(NULL)/localtime() directly, so a
+# container left on UTC shows the time the host's offset away from the host's.
 # tzdata provides the zoneinfo database; the explicit symlink + timezone
 # file + dpkg-reconfigure make it authoritative rather than relying on
 # tzdata's postinst alone to notice the TZ env var.
-ENV TZ=Europe/Berlin
+ARG TZ=Etc/UTC
+ENV TZ=$TZ
 
 # 32-bit runtime libs for the engine and the game DLLs. libssl3t64 is for
 # q2admin's dynamically-linked openssl (see the build stage - avoids a
@@ -651,9 +680,9 @@ RUN echo 'debconf debconf/frontend select Noninteractive' | debconf-set-selectio
         /var/cache/debconf/*-old \
         /usr/share/doc/*
 
-# UID 1000 matches the host's real "nils" login so the server can write to
-# its bind-mounted game data.
-RUN useradd -r -u 1000 -U -s /sbin/nologin -M quake2
+# The host's to choose, as in the colosseum stage: --build-arg QUAKE2_UID=$(id -u).
+ARG QUAKE2_UID=1000
+RUN useradd -r -u "$QUAKE2_UID" -U -s /sbin/nologin -M quake2
 
 RUN mkdir -p /opt/quake2 && chown quake2:quake2 /opt/quake2
 
@@ -725,7 +754,7 @@ WORKDIR /opt/quake2
 # container - `tee` has no size cap of its own and this CMD's shell has no
 # cheap way to enforce one mid-stream. logrotate with `copytruncate` is the
 # working answer, because tee holds the file open for the container's life.
-CMD mkdir -p /opt/quake2/$Q2_GAMEDIR/logs && script -qefc "stty -onlcr; /opt/q2pro/q2proded +set basedir /opt/quake2 +set libdir /opt/quake2 +set homedir /opt/quake2 +set dedicated 1 +set game $Q2_GAMEDIR +set ip $Q2_IP +set port $Q2_PORT +set net_port $Q2_PORT +set map_override_path maps +exec server1.cfg +exec $Q2_OVERRIDE_CFG" /dev/null 2>&1 | /bin/sh /opt/filter-rcon-status.sh | tee -a /opt/quake2/$Q2_GAMEDIR/logs/console.log
+CMD bind=; case "$Q2_IP" in ""|localhost) ;; *) bind="+set net_ip $Q2_IP" ;; esac; mkdir -p /opt/quake2/$Q2_GAMEDIR/logs && script -qefc "stty -onlcr; /opt/q2pro/q2proded +set basedir /opt/quake2 +set libdir /opt/quake2 +set homedir /opt/quake2 +set dedicated 1 +set game $Q2_GAMEDIR $bind +set port $Q2_PORT +set net_port $Q2_PORT +set map_override_path maps +exec $Q2_SERVER_CFG +exec $Q2_OVERRIDE_CFG" /dev/null 2>&1 | /bin/sh /opt/filter-rcon-status.sh | tee -a /opt/quake2/$Q2_GAMEDIR/logs/console.log
 
 # ...and "the process is alive" is not "the server is serving".
 #

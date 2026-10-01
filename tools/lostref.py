@@ -148,7 +148,9 @@ def main():
     ref, tree = os.path.abspath(a.ref), os.path.abspath(a.tree)
 
     if not os.path.isdir(ref):
-        print('lostref.py: no reference tree at %s -- skipped' % ref)
+        # The SKIP form is the one tools/audit.py lists as "not applicable";
+        # a prose "skipped" was counted as a clean run.
+        print('lostref.py: SKIP -- no reference tree at %s' % ref)
         return 0
     if a.selftest:
         return 1 if selftest(ref, tree) else 0

@@ -313,7 +313,11 @@ void ThrowHeadACID(edict_t *self, char *gibname, int damage, int type)
 
     self->s.effects |= EF_GREENGIB;
     self->s.effects &= ~EF_FLIES;
-    self->s.effects |= RF_FULLBRIGHT;
+    // The Reckoning wrote RF_FULLBRIGHT into `effects`, where its bit is
+    // EF_BLASTER, and the client draws a blaster's trail and light in place of
+    // the green gib trail; every copy of the pack carries the slip, q2pro's
+    // too.  The flag is a render flag, as ThrowGibACID above already has it.
+    self->s.renderfx |= RF_FULLBRIGHT;
     self->s.sound = 0;
     self->flags |= FL_NO_KNOCKBACK;
     self->svflags &= ~SVF_MONSTER;
@@ -458,6 +462,15 @@ void BecomeExplosion1(edict_t *self)
         (self->item->flags & IT_RUNE)) {
         r_count[self->item->quantity - SID_OSP_RUNE_RESIST]--;
         OSP_respawnRune(self);
+        return;
+    }
+
+    // And Ground Zero's Tag token, the game's only one: crushed, it is sent
+    // to a spawn point by Tag's own relocation rather than freed.  Asked by
+    // its pickup function, which only Tag's itemlist row carries -- and only
+    // a live Tag game can put that item in the world (Tag_Active).
+    if (self->item && self->item->pickup == Tag_PickupToken) {
+        Tag_ReturnToken(self);
         return;
     }
 
@@ -685,7 +698,11 @@ void light_use(edict_t *self, edict_t *other, edict_t *activator)
 void SP_light(edict_t *self)
 {
     // no targeted lights in deathmatch, because they cause global messages
-    if (!self->targetname || deathmatch->value) {
+    //
+    // Asked as G_IsCampaign(), which is that rule in ruleset terms -- every
+    // ruleset but sp is a deathmatch one -- and is what SP_target_lightramp
+    // asks too, so a ramp never outlives the lights it drives (R-SP-7).
+    if (!self->targetname || !G_IsCampaign()) {
         G_FreeEdict(self);
         return;
     }
@@ -880,7 +897,6 @@ void func_explosive_explode(edict_t *self, edict_t *inflictor, edict_t *attacker
     int     count;
     int     mass;
     edict_t *master;
-    bool    done = false;
 
     // bmodel origins are (0 0 0), we need to adjust that here
     VectorScale(self->size, 0.5f, size);
@@ -924,28 +940,19 @@ void func_explosive_explode(edict_t *self, edict_t *inflictor, edict_t *attacker
     }
 
     // PMM - if we're part of a train, clean ourselves out of it
+    //
+    // Ground Zero's walk, bounded the way G_UseTargets' killtarget walk is:
+    // it went on until it met this explosive, so an explosive no longer on its
+    // live master's chain -- a member ahead of it freed by a path that does not
+    // unlink -- walked off the chain's end into NULL.  The walk stops at the
+    // end of the chain and at a freed member, whose cleared link ends it
+    // (R-MP-11).
     if (self->flags & FL_TEAMSLAVE) {
-//      if ((g_showlogic) && (g_showlogic->value))
-//          gi.dprintf ("Removing func_explosive from train!\n");
-
-        if (self->teammaster) {
-            master = self->teammaster;
-            if (master && master->inuse) {  // because mappers (other than jim (usually)) are stupid....
-                while (!done) {
-                    if (master->teamchain == self) {
-                        master->teamchain = self->teamchain;
-                        done = true;
-                    }
-                    master = master->teamchain;
-                    if (!master) {
-//                      if ((g_showlogic) && (g_showlogic->value))
-//                          gi.dprintf ("Couldn't find myself in master's chain, ignoring!\n");
-                    }
-                }
+        for (master = self->teammaster; master && master->inuse; master = master->teamchain) {
+            if (master->teamchain == self) {
+                master->teamchain = self->teamchain;
+                break;
             }
-        } else {
-//          if ((g_showlogic) && (g_showlogic->value))
-//              gi.dprintf ("No master to free myself from, ignoring!\n");
         }
     }
 
@@ -1617,6 +1624,17 @@ void misc_viper_missile_use(edict_t *self, edict_t *other, edict_t *activator)
 
     self->enemy = G_Find(NULL, FOFS(targetname), self->target);
 
+    // The Reckoning aims at the target with no test that there is one, so a
+    // missile whose `target` names nothing ended the server when it was used.
+    // It says so and is removed, as a fired one is; refinery's sixteen all aim
+    // at something.
+    if (!self->enemy) {
+        gi.dprintf("%s at %s: target %s not found\n", self->classname,
+                   vtos(self->s.origin), self->target ? self->target : "(none)");
+        G_FreeEdict(self);
+        return;
+    }
+
     VectorCopy(self->enemy->s.origin, vec);
     vec[2] += 16;
 
@@ -1942,6 +1960,10 @@ void func_clock_think(edict_t *self)
         self->enemy = G_Find(NULL, FOFS(targetname), self->target);
         if (!self->enemy)
             return;
+        if (!self->enemy->use)
+            gi.dprintf("%s at %s: target %s (%s) cannot show the time\n",
+                       self->classname, vtos(self->s.origin), self->target,
+                       self->enemy->classname);
     }
 
     if (self->spawnflags & 1) {
@@ -1962,8 +1984,14 @@ void func_clock_think(edict_t *self)
             Q_strlcpy(self->message, "00:00:00", CLOCK_MESSAGE_SIZE);
     }
 
-    self->enemy->message = self->message;
-    self->enemy->use(self->enemy, self, self);
+    // id calls the display's `use` with no test for one, so a clock aimed at
+    // something with none -- an info_notnull, a path_corner -- ended the
+    // server on its first tick.  The clock keeps counting and firing its
+    // `pathtarget` without a display.
+    if (self->enemy->use) {
+        self->enemy->message = self->message;
+        self->enemy->use(self->enemy, self, self);
+    }
 
     if (((self->spawnflags & 1) && (self->health > self->wait)) ||
         ((self->spawnflags & 2) && (self->health < self->wait))) {
@@ -2056,15 +2084,24 @@ void teleporter_touch(edict_t *self, edict_t *other, cplane_t *plane, csurface_t
         return;
     }
 
+    // ra_SP_trigger_teleport installs this touch with no test on the
+    // target, so an arena trigger with neither a target nor an arena key
+    // arrives here with nothing to look up.
+    if (!self->target)
+        return;
+
     dest = G_Find(NULL, FOFS(targetname), self->target);
     if (!dest) {
         gi.dprintf("Couldn't find destination\n");
         return;
     }
 
-    // CTF: a teleport releases the grapple.  A no-op when there is none, so it
-    // needs no gate.
-    CTFPlayerResetGrapple(other);
+    // CTF: a teleport releases the grapple -- whichever hook the ruleset hands
+    // out.  Under the four OSP rulesets that is tourney's, which tourney lets
+    // go of quietly a frame later on the EV_PLAYER_TELEPORT below; releasing
+    // it through Threewave's reset played the CTF pak's grreset.wav.  Nothing
+    // happens when no hook is out.
+    G_PlayerResetGrapple(other);
 
     // unlink to make sure it can't possibly interfere with KillBox
     gi.unlinkentity(other);
@@ -2079,9 +2116,15 @@ void teleporter_touch(edict_t *self, edict_t *other, cplane_t *plane, csurface_t
     other->client->ps.pmove.pm_flags |= PMF_TIME_TELEPORT;
 
     // draw the teleport splash at source and on the player
+    //
+    // The source is a pad's disc, and only a pad's trigger has one:
+    // ra_SP_trigger_teleport hands this touch to a bare trigger_teleport brush
+    // with no owner -- ra2map5 has two in arena 1 -- and the first fighter
+    // through one ended the server here.
     if (G_Ruleset() != RULESET_ARENA ||
         other->client->resp.fightstate == FIGHT_ALIVE) {
-        self->owner->s.event = EV_PLAYER_TELEPORT;
+        if (self->owner)
+            self->owner->s.event = EV_PLAYER_TELEPORT;
         other->s.event = EV_PLAYER_TELEPORT;
     }
 
@@ -2106,7 +2149,12 @@ void SP_misc_teleporter(edict_t *ent)
 {
     edict_t     *trig;
 
-    if (!ent->target && ent->arena < 1) {
+    // An RA2 pad names an ARENA instead of a target, and only the arena
+    // ruleset knows what to do with one: teleporter_touch's arena arm is
+    // RULESET_ARENA's.  The shipped RA2 maps carry 34 of them, so the same map
+    // booted under any other ruleset must drop them here as id drops any pad
+    // with no target, or the first player to step on one ends the server.
+    if (!ent->target && !(G_Ruleset() == RULESET_ARENA && ent->arena >= 1)) {
         gi.dprintf("teleporter without a target.\n");
         G_FreeEdict(ent);
         return;
@@ -2192,6 +2240,11 @@ void use_nuke(edict_t *self, edict_t *other, edict_t *activator)
     for (; from < &g_edicts[globals.num_edicts]; from++) {
         if (from == self)
             continue;
+        // Every client slot has a `client`, and ClientDisconnect leaves
+        // `takedamage` set, so a co-op player who had left was killed too:
+        // an obituary, a dropped weapon and player_die on an empty slot.
+        if (!from->inuse)
+            continue;
         if (from->client) {
             T_Damage(from, self, self, vec3_origin, from->s.origin, vec3_origin, 100000, 1, 0, MOD_TRAP);
         } else if (from->svflags & SVF_MONSTER) {
@@ -2234,18 +2287,22 @@ void SP_misc_nuke_core(edict_t *ent)
 
 TELEPORTERS
 
-Three donors, one classname.  baseq2 has `misc_teleporter` and its own
+Four donors, one classname.  baseq2 has `misc_teleporter` and its own
 teleporter_touch above; Ground Zero and Threewave both add `trigger_teleport`
 and `info_teleport_destination` with the same names and different behaviour --
 Ground Zero's is toggleable by `targetname` and uses TE_TELEPORT_EFFECT,
 Threewave's requires a `target`, spawns a humming noise entity and routes the
-touch through its own old_teleporter_touch.
+touch through its own old_teleporter_touch -- and RA2 adds a third
+`trigger_teleport`, a bare brush that hands its touch to baseq2's
+teleporter_touch, arena arm and all.
 
-Two donors changing the same thing get a gate, and the gate is the ruleset.
-Each implementation takes its donor prefix; these two
-functions are what the spawn table points at.  The gate is one-sided and needs
-no key inspection, because `trigger_teleport` is not a baseq2 classname at all:
-outside ctf, Ground Zero's is the only implementation there is.
+Donors changing the same thing get a gate, and the gate is the ruleset.
+Each implementation takes its donor prefix; these two functions are what the
+spawn table points at.  `trigger_teleport` has three arms -- Threewave's under
+ctf, RA2's under arena, Ground Zero's under every other ruleset -- and
+`info_teleport_destination` two, Threewave's under ctf and Ground Zero's
+everywhere else, RA2's own having been an empty stub.  None needs key
+inspection and none falls back to id, because neither classname is baseq2's.
 
 =================================================================
 */
