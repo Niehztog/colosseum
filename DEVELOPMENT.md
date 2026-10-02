@@ -21,7 +21,7 @@ The botlib - `gladiator.so`/`gladiator.dll`, the shared library that holds the b
 git clone --recurse-submodules https://github.com/Niehztog/colosseum.git
 ```
 
-After a plain clone, `git submodule update --init` fetches it. It lands at `vendor/gladiator-bot-restored/` and is the source of the botlib, its assets and the map-prep tool - see [Building the botlib](#building-the-botlib). Nothing in the game library depends on it at compile time: the library builds, and the audits pass, in a tree where the submodule was never checked out.
+After a plain clone, `git submodule update --init` fetches it. It lands at `vendor/gladiator-bot-restored/` and is the source of the botlib, its assets and the map-prep tool - see [Building the botlib](#building-the-botlib). The second botlib, the Quake III bot, is a submodule too, at `vendor/q3a_bot_backport_for_q2/` - see [The Quake III botlib](#the-quake-iii-botlib). Nothing in the game library depends on either at compile time: the library builds, and the audits pass, in a tree where neither was ever checked out.
 
 ## What you need
 
@@ -103,7 +103,22 @@ Independently of the gate, the pin carries the 64-bit port-correctness fixes tha
 
 Three more things come from that submodule, and `README.md` says where each one is installed: `assets/pak7.pak` (the botlib's weapon, item, sound and chat configs), `assets/bots.cfg` (the bot list) and `tools/vendor/bspc/` (the 1999 map-prep tool). **AAS files are per map**, and the release packages carry eight of them: `.github/aas.sh` fetches OSP Tourney DM's precomputed q2dm1..q2dm8 into `colosseum/maps/` before packaging, checksums them against `.github/aas.sha256`, and `package.sh` re-verifies the staged copies. That directory is gitignored - the AAS files are OSP's data and are not carried in the tree. Every other map needs one made; the README's [Bots](README.md#bots) section is the procedure.
 
-The game<->botlib interface is `docs/botlib-contract.md`, at version 3, and `tools/botabi.py` checks it in `make check`: every slot, the preprocessor condition that selects `Trace`, and every struct size - the last by compiling a probe against the botlib's own headers rather than trusting a number in a document. It skips itself with a message when the submodule is not checked out - which the release workflow no longer does, so the contract is compared at release time against the pin the shipped botlib was built from.
+### The Quake III botlib
+
+**The second botlib is built the same way.** Every target also builds `vendor/q3a_bot_backport_for_q2/`'s botlib and its `bspc` and leaves them beside the library as `q3bot.so` (`q3bot.dll` on Windows) and `q3bot/bspc` - its own lock (`.q3bot-lock`), its own stamp, and a line instead of a build when the submodule is absent (R-BUILD-12). `Q3DIR=<path>` builds from another checkout, which is how a change to the backport is tried here before it is pinned.
+
+Its Makefile is fed through the **environment**: it appends `-fPIC` and `-shared` per target without `override`, and a `CFLAGS` on make's command line beats those, so a shared object built that way had no `-fPIC`. By hand, then:
+
+```sh
+cd vendor/q3a_bot_backport_for_q2
+CFLAGS="-Wall -pipe -fomit-frame-pointer" make botlib bspc   # -> release/botlib/botlib.so, release/bspc/bspc
+# Windows from Linux: say the target, which it otherwise reads off MSYS's environment
+CFLAGS=... make botlib bspc CC=x86_64-w64-mingw32-gcc YQ2_OSTYPE=Windows YQ2_ARCH=x86_64
+```
+
+What it needs from the game that the ABI does not say -- where its files are, its bot list, its inventory numbering, the HUD stats it reads -- is one row of `src/bot/bl_botlib.c`, and `docs/botlib-contract.md`'s [Two botlibs](docs/botlib-contract.md#two-botlibs) is the table. Its data is not in this tree or the packages (R-LIC-8): the bot matrix takes it from the submodule's `assets/botfiles/` and MAKES the AAS files it needs with the `bspc` it built, out of the retail paks it already reads.
+
+The game<->botlib interface is `docs/botlib-contract.md`, at version 3, and `tools/botabi.py` checks it in `make check`: every slot, the preprocessor condition that selects `Trace`, and every struct size - the last by compiling a probe against the botlib's own headers rather than trusting a number in a document. It skips itself with a message when the submodule is not checked out - which the release workflow no longer does, so the contract is compared at release time against the pin the shipped botlib was built from. It checks the Quake III botlib's `botlib/be_interface_q2.h` the same way, under its `q2_` names, and checks that its `GetBotAPI` - and this game's pointer to it - is a plain C function, which on 32-bit Windows it was not.
 
 ## Warnings and hardening
 
@@ -122,6 +137,10 @@ tools/bootmatrix.sh   # every ruleset x xatrix x rogue boots and reports back
 tools/smoke.sh        # one map per ruleset, with a savegame round trip
 tools/playtest.sh     # the client-side battery, through headless clients
 tools/botmatrix.sh    # 1, 16 and 32 bots per ruleset: spawned, played, removed, timed
+BOTLIBS=q3 tools/botmatrix.sh    # ...the same on the Quake III botlib
+BOTLIBS=both tools/botmatrix.sh  # both botlibs in one game, and the fallback between them
+tools/playtest.sh -s botlibmenu   # the bot menu with both botlibs offered, driven by a client
+BOTLIBS=q3 tools/playtest.sh -s <scenario>  # a bot scenario's bots on the Quake III botlib
 tools/extras.sh       # the Gladiator extras, the shipped configs, an item respawn
 tools/osprunes.sh     # do the OSP four's five runes actually grant and read?
 ```
@@ -133,6 +152,17 @@ tools/watch.sh                     # four bots on q2dm1, and a person watching
 tools/watch.sh doors -r sp -m base1
 tools/watch.sh ctf-skin -r ctf -m q2ctf1
 ```
+
+And one that measures rather than checks: which botlib's bots play better, per map, ruleset and pack (R-VER-40).
+
+```sh
+tools/botduel.py meshes                   # both botlibs' AAS files for every stock map, made once, cached
+tools/botduel.py run -o /tmp/duel -j 3    # seeded, frame-counted matches; resumable
+tools/botduel.py report -o /tmp/duel      # report.md and matches.csv
+tools/botduel.py control -o /tmp/duelc    # determinism, a side against itself, and skill 1 v 5
+```
+
+Its matches run on `fixedtime`, so they take seconds rather than minutes and a busy host does not change their result. `meshes` needs the sibling `gladiator-bot-restored` checkout for its q2dm/q2ctf meshes and, off x86, `qemu-i386` with an i686 sysroot for Gladiator's bspc; `-a`/`-b` choose the two sides (`gladiator`, `q3:<skill>`).
 
 Every check here is a program looking at a program. `tools/watch.sh` puts q2pro's own client on your display against a server with bots in it and runs one of three drive scripts, each of which opens with what to look for. That is the only thing in this repository that can say whether what a player sees looks like a game.
 
@@ -150,6 +180,8 @@ All of them read the same environment, all defaulted:
 | `GLADDIR` | `vendor/gladiator-bot-restored`, else a sibling checkout | the botlib's assets -- `pak7.pak`, the bot list, the navigation meshes, which fixtures COPY because the botlib writes a mesh back |
 | `LIB` | `release/game<cpu>.so` | the library under test |
 | `BRAIN` | `gladiator.so` beside `LIB`, else `$GLADDIR/release/` | the botlib under test: the Makefile builds one beside every library it builds, while `$GLADDIR/release/` holds whichever target it built last |
+| `Q3DIR` | `vendor/q3a_bot_backport_for_q2`, else a sibling checkout | the Quake III botlib's tree: its `assets/botfiles/` are the bot data `botmatrix.sh` installs, and its build sits beside `LIB` as `q3bot.so` and `q3bot/bspc` |
+| `BOTLIBS` | `gladiator` | `botmatrix.sh`'s botlib: `gladiator`, `q3`, or `both` for the rows that need the two at once |
 | `PLAYTEST_DIR` | `$TMPDIR/q2playtest` | the harness's scratch installs, and the scenario binaries `playtest.sh` builds |
 | `SPMAP` | `base1` | the campaign map `sp` boots on. `base1` is retail `pak0`'s; id's free demo carries the same level as `demo1` |
 

@@ -55,10 +55,17 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #define DF_NUMBERENT(x)         (&g_edicts[x])
 #define DF_CLIENTENT(x)         (&g_edicts[(x) + 1])
 
+// bl_botlib.h; a pointer here, so this header needs nothing from that one
+struct botlib_s;
+
 //bot library
 typedef struct bot_library_s
 {
     char path[BOT_MAX_PATH];                //path to the library
+    // Which botlib it is, by its own BotVersion (R-BOT-31).  At most one
+    // library is loaded per botlib, and every bot points at its botlib's
+    // (R-BOT-33).
+    const struct botlib_s *botlib;
     // The donor writes `HANDLE` on Win32 and `void *` elsewhere, which needs
     // <windows.h> in every translation unit that includes this header -- and
     // <windows.h> redefined the MAX_PATH this header used to define, so under
@@ -88,6 +95,11 @@ typedef struct bot_state_s
     // during a countdown.
     int firecalls;
     int firedrops;
+    // Who last hurt this bot and how: the client number, -1 for nobody, and
+    // the means of death.  T_Damage writes it (BotClientHurt) and the Quake
+    // III botlib reads it in its stats view, for its hit chats (R-BOT-35).
+    int lasthurt_client;
+    int lasthurt_mod;
 } bot_state_t;
 
 //bot globals
@@ -108,10 +120,9 @@ typedef struct bot_globals_s
     int notest;                         //don't call the library test function
     int nobotinput;                 //true if bot input isn't processed
     int nobotai;                        //true if bots don't execute ai
-    // A brain failed to load this level's map: set where BotLoadMap fails,
-    // cleared by BotSpawn at each level, read by the fill, which stops asking,
-    // and by the queue, which says why (CheckMinimumPlayers).
-    bool mapfailed;
+    // Whether a botlib failed to load this level's map is per botlib now, and
+    // kept by bl_botlib.c (BotlibSetMapFailed): one botlib refusing a map is
+    // exactly when the next one `botlibs` names should be asked.
 } bot_globals_t;
 
 //bl_main.c
@@ -124,9 +135,18 @@ void BotSetup(void);
 void BotForgetGameMemory(void);
 void BotShutdown(void);
 void BotExecuteInput(edict_t *bot);
-//bot usage of libraries
-bot_library_t *BotUseLibrary(const char *path);
+//bot usage of libraries.  A bot asks for its BOTLIB, and gets that botlib's
+//library -- loaded the first time, shared after (R-BOT-33).
+bot_library_t *BotUseBotlib(const struct botlib_s *botlib);
 void BotFreeLibrary(bot_library_t *lib);
+// the library loaded for a botlib, or NULL
+bot_library_t *BotlibLoaded(const struct botlib_s *botlib);
+// the OS path a botlib's library is loaded from: `botlib` when that file
+// answers as this botlib, else the botlib's own name, searched for (R-BOT-32)
+void BotlibPath(const struct botlib_s *botlib, char *out, int size);
+bool BotLibraryExists(const char *path);
+// T_Damage's report of a hit on a client, kept for a bot (R-BOT-35)
+void BotClientHurt(edict_t *targ, edict_t *attacker, int mod);
 void BotUnloadAllLibraries(void);
 void BotLibraryDump(void);
 void BotClientDump(void);
@@ -159,6 +179,17 @@ void BotRunFrame(void);
 #define BOTPERF_BUDGET_US   50000
 void BotPerfReset(void);
 void BotPerfReport(void);
+
+// `sv botstats`: what each client did in a measurement window -- kills,
+// deaths, damage and pickups, and a line per death while the window is open
+// -- so that a match between bots can be scored from outside (R-BOT-36).
+// Closed until `sv botstats reset` opens it; the hooks cost a test of one
+// flag until then.
+void BotStatsReset(bool open);
+void BotStatsReport(void);
+void BotStatsHurt(edict_t *targ, edict_t *attacker, int mod, int take);
+void BotStatsDeath(edict_t *self, edict_t *attacker, int mod);
+void BotStatsPickup(edict_t *other, const gitem_t *item, bool health);
 
 // ---- the seventeen TOURNEY blocks, as ruleset-neutral accessors -----------
 //

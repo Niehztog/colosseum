@@ -29,6 +29,12 @@
 # built, and they are copied rather than regenerated because computing them
 # again is hours of work for a byte-identical result.
 #
+# AND THE QUAKE III BOTLIB'S, beside them (colosseum SPECS.md R-BOT-31):
+# `q3bot.so`, and its data directory `q3bot/` -- its botfiles, its bot list and
+# whatever meshes `make-colosseum-aas.sh --q3` made for it.  Installed always,
+# and inert until the server's config offers it with `set botlibs ...`, which
+# is the deployment's choice and goes in CFG_EXTRA.
+#
 # AND THE MESHES NEED THE .bsp BESIDE THEM.  The botlib does its own file I/O
 # and searches ONLY <basedir>/<gamedir>/maps/ -- not baseq2, and not the paks
 # the engine would happily load the map from.  On xatrix almost every rotation
@@ -147,7 +153,7 @@ log "$GD: colosseum -> $DIR (ruleset $RULESET)"
 # ------------------------------------------------- artifacts out of the image
 TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT
 docker run --rm -v "$TMP:/out" --entrypoint sh "$IMAGE" -c \
-    'cp /opt/colosseum/gamei386.so /opt/colosseum/gladiator.so /opt/colosseum/pak7.pak /opt/colosseum/bots.cfg /opt/colosseum/commit /out/' \
+    'cp /opt/colosseum/gamei386.so /opt/colosseum/gladiator.so /opt/colosseum/pak7.pak /opt/colosseum/bots.cfg /opt/colosseum/commit /out/ && cp /opt/colosseum/q3bot.so /out/ && cp -r /opt/colosseum/q3bot /out/q3bot' \
     || die "could not copy the artifacts out of $IMAGE"
 COMMIT="$(cat "$TMP/commit")"
 info "colosseum $COMMIT"
@@ -186,6 +192,15 @@ info "installed gamei386.real.so, gladiator.so, pak7.pak, botcfg/bots.cfg"
 # through its own file I/O rather than the engine's.
 grep -q 'addbot' "$DIR/botcfg/bots.cfg" || die "botcfg/bots.cfg has no addbot lines"
 
+# The Quake III botlib and its data directory.  Its bot list is a loose file in
+# that directory for the same reason, and its botfiles it reads itself.
+ainstall 755 "$TMP/q3bot.so" "$DIR/q3bot.so"
+mkdir -p "$DIR/q3bot/maps"
+cp -r "$TMP/q3bot/botfiles" "$DIR/q3bot/"
+ainstall 644 "$TMP/q3bot/bots.cfg" "$DIR/q3bot/bots.cfg"
+grep -q 'addbot' "$DIR/q3bot/bots.cfg" || die "q3bot/bots.cfg has no addbot lines"
+info "installed q3bot.so and q3bot/ ($(ls "$DIR/q3bot/botfiles/bots" | wc -l) bot files)"
+
 # --------------------------------------------------------- colosseum's configs
 ainstall 644 "$COLOSSEUM_SRC/colosseum/server.cfg" "$DIR/server.cfg"
 mkdir -p "$DIR/configs"
@@ -219,6 +234,38 @@ if bad:
     sys.exit(1)
 PY
 info "every mesh carries a reachability lump"
+
+# ...and the Quake III botlib's, out of the mesh source's q3bot/maps/, if any
+# were made there.  Its own format -- version 5, a 124-byte header with the
+# BSP checksum before the lumps, and everything after the version XORed with
+# `i * 119` (be_aas_file.c AAS_DData), which is undone first -- and its bspc
+# writes the reachability lump itself, so the same test reads it there.
+mkdir -p "$DIR/q3bot/maps"
+n=0
+for m in "$SRC/q3bot/maps"/*.aas; do
+    [ -e "$m" ] || continue
+    ainstall 644 "$m" "$DIR/q3bot/maps/$(basename "$m")"; n=$((n+1))
+done
+info "installed $n Quake III navigation mesh(es)"
+python3 - "$DIR/q3bot/maps" <<'PY'
+import struct, sys, os, glob
+bad = []
+for f in sorted(glob.glob(os.path.join(sys.argv[1], '*.aas'))):
+    d = bytearray(open(f, 'rb').read(124))
+    if len(d) < 124 or struct.unpack_from('<i', d, 0)[0] != 0x53414145:
+        bad.append(os.path.basename(f) + ':not-an-aas'); continue
+    version = struct.unpack_from('<i', d, 4)[0]
+    if version not in (4, 5):
+        bad.append(os.path.basename(f) + ':not-quake-iii-format'); continue
+    if version == 5:
+        for i in range(8, 124):
+            d[i] ^= ((i - 8) * 119) & 0xff
+    if struct.unpack_from('<ii', d, 12 + 9 * 8)[1] == 0:
+        bad.append(os.path.basename(f) + ':no-reachability')
+if bad:
+    print('error: unusable Quake III mesh(es): ' + ', '.join(bad), file=sys.stderr)
+    sys.exit(1)
+PY
 
 # --------------------------------------------------- the rotation's own maps
 # THE BOTLIB SEARCHES ONLY <basedir>/<gamedir>/maps/, through its own file I/O,

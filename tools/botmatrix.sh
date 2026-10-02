@@ -28,11 +28,29 @@
 # leaked.  A row that cannot spawn a bot at all under a later
 # ruleset is reported, not failed -- see WANT below.
 #
+# THE SECOND BOTLIB (R-BOT-31..34).  `BOTLIBS` says which botlib the matrix
+# runs on:
+#
+#   gladiator   the default, and every row below exactly as it was
+#   q3          the same rows on the Quake III botlib, `botlibs q3` -- its
+#               library, its data and its own AAS files, which the fixture
+#               MAKES with that tree's bspc from the retail BSPs, because no
+#               such file ships with anything (R-LIC-8)
+#   both        the rows that need the two at once: both botlibs in one game,
+#               and the fallback to Gladiator's on a map that has no Quake III
+#               AAS file
+#
+# With `--control`, `q3` adds the botlib's two controls: no library, and --
+# the one the data directory exists for -- Gladiator's AAS files in place and
+# none of its own, which it must refuse rather than read.
+#
 # ENV, all defaulted:
 #   Q2PRO_BUILD   ../q2pro/builddir-native
 #   Q2DATA        /usr/share/games/quake2/baseq2
 #   CTFDATA       /usr/share/games/quake2/ctf
 #   GLADDIR       ../gladiator-bot-restored
+#   Q3DIR         vendor/q3a_bot_backport_for_q2, else ../q3a_bot_backport_for_q2
+#   BOTLIBS       gladiator (see above)
 #   LIB           release/game<cpu>.so
 #   FRAMES        600 (one minute).  Five minutes is FRAMES=3000.
 set -u
@@ -78,12 +96,37 @@ fi
 export COLOSSEUM_BRAIN=$BRAIN
 [ -f "$BRAIN" ] || die "no brain at $BRAIN -- build gladiator-bot-restored"
 
+# The Quake III botlib, the same way: beside $LIB, where the Makefile puts it,
+# else its checkout's release/; its bspc likewise.
+BOTLIBS=${BOTLIBS:-gladiator}
+case $BOTLIBS in gladiator|q3|both) ;; *) die "BOTLIBS is gladiator, q3 or both" ;; esac
+if [ -z "${Q3DIR:-}" ]; then
+  for _q in "$ROOT/vendor/q3a_bot_backport_for_q2" "$ROOT/../q3a_bot_backport_for_q2"; do
+    [ -f "$_q/botlib/be_interface_q2.h" ] && Q3DIR=$_q && break
+  done
+fi
+Q3DIR=${Q3DIR:-$ROOT/vendor/q3a_bot_backport_for_q2}
+if [ -f "$(dirname "$LIB")/q3bot.so" ]; then
+  Q3LIB=$(cd "$(dirname "$LIB")" && pwd)/q3bot.so
+  Q3BSPC=$(cd "$(dirname "$LIB")" && pwd)/q3bot/bspc
+else
+  Q3LIB=$Q3DIR/release/botlib/botlib.so
+  Q3BSPC=$Q3DIR/release/bspc/bspc
+fi
+if [ "$BOTLIBS" != gladiator ]; then
+  [ -f "$Q3LIB" ] || die "no Quake III botlib at $Q3LIB -- make native"
+  [ -x "$Q3BSPC" ] || die "no bspc at $Q3BSPC -- make native"
+  [ -d "$Q3DIR/assets/botfiles" ] || die "no botfiles in $Q3DIR/assets -- check out q3a_bot_backport_for_q2"
+fi
+
 # Both of these are read AFTER the chdir below, so they have to survive it, and
 # a caller is as entitled to pass them relative to where it stood as $ROOT was
 # to be derived that way.  Absolutised here rather than at the point of use so
 # that the two `die`s above still quote what the caller actually wrote.
 Q2PRO_BUILD=$(cd "$Q2PRO_BUILD" && pwd) || die "cannot enter $Q2PRO_BUILD"
 GLADDIR=$(cd "$GLADDIR" && pwd)         || die "cannot enter $GLADDIR"
+Q2DATA=$(cd "$Q2DATA" && pwd)           || die "cannot enter $Q2DATA"
+CTFDATA=$(cd "$CTFDATA" && pwd)         || die "cannot enter $CTFDATA"
 
 DIR=$(mktemp -d) || die "mktemp failed"
 trap 'rm -rf "$DIR"' EXIT
@@ -104,6 +147,37 @@ for a in "$GLADDIR"/assets/maps/*.aas; do
   case $a in *.original_baseline) continue ;; esac
   cp "$a" "$DIR/colosseum/maps/$(basename "$a")"
 done
+
+# The Quake III botlib, its data and its AAS files, all in its data directory
+# (R-BOT-31) -- and the meshes MADE here, from the retail BSPs this script
+# already needs, with the bspc built beside it: seconds a map, and the only
+# way to have one, because none ships (R-LIC-8).  The map is read out of the
+# pak that holds it, the way an operator is told to (colosseum/q3bot/README.md).
+q3mesh() {
+  map=$1; shift
+  for pak in "$@"; do
+    "$Q3BSPC" -bsp2aas "$pak/maps/$map.bsp" -output "$DIR/colosseum/q3bot/maps/" \
+      >"$DIR/bspc-$map.log" 2>&1
+    [ -f "$DIR/colosseum/q3bot/maps/$map.aas" ] && return 0
+  done
+  return 1
+}
+if [ "$BOTLIBS" != gladiator ]; then
+  mkdir -p "$DIR/colosseum/q3bot/maps"
+  cp "$Q3LIB" "$DIR/colosseum/q3bot.so"
+  cp -r "$Q3DIR/assets/botfiles" "$DIR/colosseum/q3bot/botfiles"
+  cp "$Q3DIR/assets/botfiles/bots.cfg" "$DIR/colosseum/q3bot/bots.cfg"
+  q3mesh q2dm1 "$Q2DATA"/pak*.pak || die "bspc made no q2dm1.aas -- see $DIR/bspc-q2dm1.log"
+  q3mesh q2ctf1 "$CTFDATA"/pak*.pak || die "bspc made no q2ctf1.aas -- see $DIR/bspc-q2ctf1.log"
+  # bspc writes its log beside the cwd; not ours to keep
+  rm -f bspc.log
+fi
+# Every row runs with the botlibs the mode names.
+case $BOTLIBS in
+  gladiator) LIBSET="+set botlibs gladiator" ;;
+  q3)        LIBSET="+set botlibs q3" ;;
+  both)      LIBSET="+set botlibs q3,gladiator" ;;
+esac
 
 # EVERY SERVER BELOW IS STARTED FROM THE FIXTURE, and that is the second
 # control's business rather than tidiness.  The botlib does its own file I/O
@@ -142,26 +216,32 @@ cd "$DIR" || die "cannot enter $DIR"
 # sat in the audience doing nothing.
 #
 # EXTRA is appended to the server's command line, so a row can set a cvar.
+# ADD, when set, replaces the row's `sv addrandom`s with its own lines -- a bot
+# asked for by name goes past the fill's test of whether a botlib can play the
+# map, straight to the library, which is what a control of its refusal needs.
 run_row() {
   rs=$1 n=$2 map=$3 want=$4 place=${5:-}
   log=$DIR/$rs-$n${6:+-$6}.log
   ( ulimit -c 0
     { printf 'wait 20\n'
-      j=0; while [ $j -lt "$n" ]; do printf 'sv addrandom\nwait 5\n'; j=$((j+1)); done
+      if [ -n "${ADD:-}" ]; then printf '%s\nwait 5\n' "$ADD"
+      else j=0; while [ $j -lt "$n" ]; do printf 'sv addrandom\nwait 5\n'; j=$((j+1)); done
+      fi
       printf 'wait %d\nsv ruleset\nsv clientdump\nsv botlibdump\n' "$FRAMES"
       printf 'sv removebot all\nwait 20\nsv clientdump\nsv botlibdump\nquit\n'
     } | timeout -s KILL $((FRAMES / 5 + 240)) "$Q2PRO_BUILD/q2proded" \
       +set basedir "$DIR" +set homedir "$DIR" +set game colosseum \
       +set dedicated 1 +set net_port 0 +set g_ruleset "$rs" \
       +set deathmatch 1 +set maxclients 20 \
-      +set minimumplayers 0 +set bots_minplayers 0 +set skill 1 ${EXTRA:-} \
+      +set minimumplayers 0 +set bots_minplayers 0 +set skill 1 $LIBSET ${EXTRA:-} \
       +map "$map" >"$log" 2>&1 ) 2>>"$log"
 
   # `%3d: name  <library path>` for a bot, `%3d: name  human` for a person,
   # `%3d: -` for a free slot.  The counts come from the two dumps in order.
+  # A bot's library is either botlib's: gladiator.so or q3bot.so.
   rc=$?
-  before=$(sed -n '/^  *[0-9]*: /p' "$log" | grep -c 'gladiator' || true)
-  loaded=$(grep -c '^loaded .*gladiator\.so' "$log" || true)
+  before=$(sed -n '/^  *[0-9]*: /p' "$log" | grep -cE 'gladiator|q3bot' || true)
+  loaded=$(grep -cE '^loaded .*(gladiator|q3bot)\.so' "$log" || true)
   # FATAL too: it is how q2proded words the errors that end it -- a bind
   # failure, a map that will not load -- and it never starts with ERROR.
   errs=$(grep -cE '^ERROR|FATAL|assert' "$log" || true)
@@ -220,6 +300,72 @@ run_row() {
 pass=0; fail=0
 printf '%-9s %-5s %-9s %-8s %-9s %s\n' ruleset bots map spawned libloads verdict
 
+if [ "$CONTROL" = 1 ] && [ "$BOTLIBS" = q3 ]; then
+  # The Quake III botlib's two.  The first takes its library away: with only
+  # it offered, no row may spawn a bot.
+  rm -f "$DIR/colosseum/q3bot.so"
+  run_row dm 1 q2dm1 spawn && fail=$((fail+1)) || pass=$((pass+1))
+  # ...and the second is the one its data directory exists for.  The library
+  # is back, Gladiator's AAS files are where they always are -- including
+  # q2dm1's, in colosseum/maps/ -- and its own are gone.  A bot asked for by
+  # name goes straight to the library, past the fill's test, and the library
+  # must REFUSE the map rather than read Gladiator's file of the same name:
+  # no bot, and the refusal said.
+  cp "$Q3LIB" "$DIR/colosseum/q3bot.so"
+  mv "$DIR/colosseum/q3bot/maps" "$DIR/colosseum/q3bot/maps.away"
+  # Set and cleared rather than written in front of the call: an assignment
+  # before a FUNCTION call may outlive it in sh.
+  ADD="sv addbot Sarge"
+  run_row dm 1 q2dm1 spawn && fail=$((fail+1)) || {
+    if grep -q 'q3bot.so could not load map q2dm1' "$log"; then
+      pass=$((pass+1))
+    else
+      printf '%-9s %s\n' control "no bot, but no refusal either -- see $log"
+      cp "$log" /tmp/botmatrix-q3-control.log 2>/dev/null
+      fail=$((fail+1))
+    fi
+  }
+  ADD=
+  mv "$DIR/colosseum/q3bot/maps.away" "$DIR/colosseum/q3bot/maps"
+  echo
+  echo "2 control(s), $pass fired, $fail did not"
+  [ "$fail" -eq 0 ] && echo "controls ok: no library is no bot, and the Quake III botlib refuses a map it has only Gladiator's AAS file for"
+  exit $([ "$fail" -eq 0 ] && echo 0 || echo 1)
+fi
+
+if [ "$BOTLIBS" = both ]; then
+  # Both botlibs in one game (R-BOT-33): two bots asked for by name, one of
+  # each, and two at random, which `botlibs q3,gladiator` makes Quake III's.
+  # Both libraries load, each bot runs on its own, and `removebot all` lets
+  # both go.
+  ADD=$(printf 'sv addbot Sarge\nwait 5\nsv addbot "Adrenaline Hunk"\nwait 5\nsv addrandom\nwait 5\nsv addrandom')
+  run_row dm 4 q2dm1 spawn "entered=4" mixed >/dev/null
+  ADD=
+  q3=$(sed -n '/^  *[0-9]*: /p' "$log" | sed -n '1,/client slots/p' | grep -c 'q3bot' || true)
+  gl=$(sed -n '/^  *[0-9]*: /p' "$log" | sed -n '1,/client slots/p' | grep -c 'gladiator' || true)
+  [ "$verdict" = ok ] && [ "$loaded" != 2 ] && verdict="$loaded libraries loaded, wanted both"
+  [ "$verdict" = ok ] && [ "$q3" != 3 ] && verdict="$q3 Quake III bot(s), wanted 3"
+  [ "$verdict" = ok ] && [ "$gl" != 1 ] && verdict="$gl Gladiator bot(s), wanted 1"
+  printf '%-9s %-5s %-9s %-8s %-9s %s\n' dm 4 q2dm1 "$before" "$loaded" "both botlibs: $verdict"
+  if [ "$verdict" = ok ]; then pass=$((pass+1)); else fail=$((fail+1)); cp "$log" /tmp/botmatrix-both.log 2>/dev/null; fi
+  # ...and the fallback (R-BOT-32): the Quake III botlib has no AAS file for
+  # this map, so the fill's botlib is the next one offered, Gladiator's, and
+  # the Quake III library is not even loaded.
+  mv "$DIR/colosseum/q3bot/maps/q2dm1.aas" "$DIR/q2dm1.q3.aas"
+  run_row dm 2 q2dm1 spawn "entered=2" fallback >/dev/null
+  q3=$(grep -c '^loaded .*q3bot\.so' "$log" || true)
+  gl=$(sed -n '/^  *[0-9]*: /p' "$log" | grep -c 'gladiator' || true)
+  [ "$verdict" = ok ] && [ "$q3" != 0 ] && verdict="the Quake III library was loaded"
+  [ "$verdict" = ok ] && [ "$gl" -lt 2 ] && verdict="$gl Gladiator bot(s), wanted 2"
+  printf '%-9s %-5s %-9s %-8s %-9s %s\n' dm 2 q2dm1 "$before" "$loaded" "no Quake III AAS file, Gladiator's bots: $verdict"
+  if [ "$verdict" = ok ]; then pass=$((pass+1)); else fail=$((fail+1)); cp "$log" /tmp/botmatrix-fallback.log 2>/dev/null; fi
+  mv "$DIR/q2dm1.q3.aas" "$DIR/colosseum/q3bot/maps/q2dm1.aas"
+  echo
+  echo "$((pass+fail)) row(s), $pass passed, $fail failed"
+  [ "$fail" -eq 0 ]
+  exit $?
+fi
+
 if [ "$CONTROL" = 1 ]; then
   # The control removes the brain from the gamedir.  Every row must then FAIL to
   # spawn a bot -- if one still appears, `spawned` is counting something that is
@@ -231,7 +377,12 @@ if [ "$CONTROL" = 1 ]; then
   # destroyed.  The leak check must still pass, and `spawned` must be 0.
   ln -s "$BRAIN" "$DIR/colosseum/gladiator.so"
   rm -f "$DIR/colosseum/maps"/*.aas
+  # By name, because `sv addrandom` would now stop at the fill's own test of
+  # whether a botlib can play the map (R-BOT-32) and never reach the library
+  # -- and the library's refusal is the path this control is for.
+  ADD='sv addbot "Adrenaline Hunk"'
   run_row dm 1 q2dm1 spawn && fail=$((fail+1)) || pass=$((pass+1))
+  ADD=
   # ...and the third is the PLACEMENT comparison, a later addition
   # and is the one that would otherwise be green because it never ran.  The
   # aas files are back, the bots spawn, and the row asserts a team assignment
@@ -350,6 +501,15 @@ printf '"sv" "addbot" "Trash" "cyborg/ps9000" "bots/trash_c.c" "trash"\n' \
   >"$DIR/colosseum/botcfg/two.cfg"
 printf '"sv" "addbot" "Zero" "cyborg/tyr574" "bots/zero_c.c" "zero"\n' \
   >>"$DIR/colosseum/botcfg/two.cfg"
+# The Quake III botlib's bot list is a file in its data directory rather than a
+# cvar, so its two-bot list stands in for the real one for these rows.
+if [ "$BOTLIBS" = q3 ]; then
+  cp "$DIR/colosseum/q3bot/bots.cfg" "$DIR/q3bots.cfg"
+  printf '"sv" "addbot" "Sarge" "sarge/default" "bots/sarge_c.c" "sarge"\n' \
+    >"$DIR/colosseum/q3bot/bots.cfg"
+  printf '"sv" "addbot" "Grunt" "grunt/default" "bots/grunt_c.c" "grunt"\n' \
+    >>"$DIR/colosseum/q3bot/bots.cfg"
+fi
 for rs in ctf dm; do
   if [ "$rs" = ctf ]; then
     map=q2ctf1 seats=2 refusals=1 EXTRA="+set botfile botcfg/two.cfg"
@@ -372,6 +532,7 @@ for rs in ctf dm; do
   fi
   EXTRA=""
 done
+[ "$BOTLIBS" = q3 ] && cp "$DIR/q3bots.cfg" "$DIR/colosseum/q3bot/bots.cfg"
 
 # --------------------------------------------------------------
 #
@@ -467,9 +628,13 @@ botperf_row() {
         # roster is its ceiling there.  The budget is about
         # THIRTY-TWO, so these are added by name -- the roster's own character
         # under distinct netnames, which is what addrandom calls underneath.
+        # Under the Quake III botlib its own character, which its bot list
+        # holds and so is what decides the botlib (BotAddDeathmatch).
+        if [ "$BOTLIBS" = q3 ]; then char='"bots/sarge_c.c" "sarge"'
+        else char='"bots/trash_c.c" "trash"'; fi
         i=0
         while [ $i -lt "$n" ]; do
-          printf 'sv addbot "perf%d" "male/grunt" "bots/trash_c.c" "trash"\nwait 5\n' "$i"
+          printf 'sv addbot "perf%d" "male/grunt" %s\nwait 5\n' "$i" "$char"
           i=$((i+1))
         done
         printf 'wait 100\nsv botperf reset\nwait 300\nsv botperf\nwait 10\nquit\n'
@@ -477,7 +642,7 @@ botperf_row() {
         +set basedir "$DIR" +set homedir "$DIR" +set game colosseum \
         +set dedicated 1 +set net_port 0 +set g_ruleset dm \
         +set deathmatch 1 +set coop 0 +set maxclients 40 +set minimumplayers 0 +set bots_minplayers 0 \
-        +set bots 1 +map q2dm1 >"$log" 2>&1 ) 2>>"$log"
+        +set bots 1 $LIBSET +map q2dm1 >"$log" 2>&1 ) 2>>"$log"
     rc=$?
 
     line=$(grep '^botperf frames' "$log" | tail -1)
@@ -515,12 +680,16 @@ echo "the bot section of G_RunFrame, measured"
 printf '%-9s %-5s %-13s %-13s %-13s %s\n' row bots frames mean worst verdict
 if botperf_row 32; then pass=$((pass+1)); else fail=$((fail+1)); fi
 
-echo
-echo "the bot index tables, used and sized"
-printf '%-9s %-5s %-13s %-13s %-13s %s\n' map ext models sounds images verdict
-for ext in 1 0; do
-  if index_row "$ext"; then pass=$((pass+1)); else fail=$((fail+1)); fi
-done
+# The index tables are the game's and no botlib loads for them, so they are
+# measured once, on the default run.
+if [ "$BOTLIBS" = gladiator ]; then
+  echo
+  echo "the bot index tables, used and sized"
+  printf '%-9s %-5s %-13s %-13s %-13s %s\n' map ext models sounds images verdict
+  for ext in 1 0; do
+    if index_row "$ext"; then pass=$((pass+1)); else fail=$((fail+1)); fi
+  done
+fi
 
 echo
 echo "$((pass+fail)) row(s), $pass passed, $fail failed"

@@ -20,7 +20,9 @@ The authoritative copy of the ABI and the libvar contract; SPECS.md Appendix A i
 bot_export_t *GetBotAPI(bot_import_t *import);
 ```
 
-Loaded dynamically from the file the `botlib` cvar names -- `bots.cfg` has no library field -- with `BotUseLibrary`'s search order: a value containing a path separator as given; a bare name under `homedir` + `gamedir`, then `libdir` + `gamedir`, the first that holds the file, else `basedir` + `gamedir`. One library per server, reference counted, and `BotUnloadAllLibraries` on `ShutdownGame`.
+Loaded dynamically -- `bots.cfg` has no library field -- from the file of the botlib a bot needs (see [Two botlibs](#two-botlibs)): `gladiator.so`/`.dll` or `q3bot.so`/`.dll`, unless the `botlib` cvar names a file that answers as that botlib. The search order is `BotLibrarySearch`'s: a value containing a path separator as given; a bare name under `homedir` + `gamedir`, then `libdir` + `gamedir`, the first that holds the file, else `basedir` + `gamedir`. One library **per botlib**, reference counted, and `BotUnloadAllLibraries` on `ShutdownGame`.
+
+`GetBotAPI` is a plain C function on every target, 32-bit Windows included. The 1999 game source declares its pointer `WINAPI` (`__stdcall`), and the real `gladiator.dll` never answered to that -- its `GetBotAPI` ends in a plain `ret` -- so this game's pointer is plain C, and so is the Quake III botlib's export: a `__stdcall` one, called the way Gladiator's is, would leave the stack four bytes off on every return. `tools/botabi.py` checks both sides' spelling.
 
 ## `bot_export_t` -- game -> botlib, 20 slots, in order
 
@@ -92,13 +94,42 @@ Two of the seven were wrong before that existed, and both were a type NAME rathe
 
 Action flags: `ATTACK` 1, `USE` 2, `RESPAWN` 4, `JUMP`/`MOVEUP` 8, `CROUCH`/`MOVEDOWN` 16, `MOVEFORWARD` 32, `MOVEBACK` 64, `MOVELEFT` 128, `MOVERIGHT` 256, `DELAYEDJUMP` 512.
 
+## Two botlibs
+
+The game runs two botlibs through the one ABI above: Gladiator's (`gladiator-bot-restored`) and the Quake III bot (`q3a_bot_backport_for_q2`, the Quake III Arena bot adapted to Quake II, `vendor/q3a_bot_backport_for_q2`). Its interface header is `botlib/be_interface_q2.h`, the same two tables under `q2_` names -- its own Quake III headers define the plain names with other layouts -- and its export table goes on after `Test` with slots of its own, which a game copying twenty never reads. `tools/botabi.py` compares that header with `src/bot/botlib.h` as it compares Gladiator's: both tables in order, the struct sizes measured by a probe compiled against its headers (which assert the same seven sizes themselves), and the calling convention.
+
+What differs between the two is data, and it is one row per botlib in `src/bot/bl_botlib.c` (SPECS.md R-BOT-31):
+
+| | Gladiator | Quake III |
+|---|---|---|
+| library | `gladiator.so` / `.dll` | `q3bot.so` / `.dll` |
+| `BotVersion` -- the handshake | `"BotLib v0.96"` | `"Q3Backport-<n>"` |
+| its files | the gamedir: `pak7.pak`, `maps/<map>.aas` | `colosseum/q3bot/` and nothing else -- the `datadir` libvar |
+| bot list | `botfile` / `bots_botfile`, and `bots/*.cfg` | `q3bot/bots.cfg` |
+| AAS versions it reads | 2..3 | 4..5 |
+| inventory slots 51 / 52 | Magslugs / Trap | Trap / Magslugs |
+| inventory slots it writes itself | 41 (health) | 28 and 29 (health, armour) |
+| HUD stats it is shown | `ps.stats` as it stands | 0..15; 22/23 under `ctf` only; 28/29 the hit record |
+| means of death, in 29 | -- | the 1999 game's numbering |
+| per-bot skill | no -- the character's | 1..5, the `bot_skill` libvar |
+
+**The handshake** is `BotVersion`'s prefix. A library is accepted for a botlib only when it says it is that botlib, and one that answers as neither is refused, because every row of the table is per botlib. It is the handshake this document says `BotVersion` cannot be -- for the *convention* -- and it can be, and is, for the *botlib*.
+
+**`datadir`** is the libvar the Quake III botlib reads its data root from, relative to the gamedir: with it set, every file it opens -- botfiles, AAS files, routing caches, read and written -- comes from there and from nowhere else. Both botlibs look for `maps/<map>.aas`, in formats the other cannot read, and without it the Quake III botlib also fell back to Gladiator's `pak7.pak` layout for any botfile of its own it could not find. Gladiator's files stay where 1999 put them.
+
+**The HUD view** exists because the Quake III botlib reads stats 22/23 as its CTF team and 28/29 as its last attacker on every ruleset, and this tree's per-ruleset stat map (`src/g_stats.h`) puts the OSP runes and the second powerup timer there. So it is shown 0..15 as they are, Threewave's joined-team pictures under `ctf` alone, and in 28/29 the record `T_Damage` keeps for every bot (`BotClientHurt`): the attacker's client number, 0 for nobody, and the means of death in the 1999 game's numbering -- equal to this tree's through `MOD_TARGET_BLASTER`, then Threewave's grapple at 34 and the mission packs' one further on, mapped by name.
+
+**Both at once.** One library is loaded per botlib, and a server whose `botlibs` offers both runs both: every bot on its own, every per-frame call -- `BotStartFrame`, the entity updates, the sounds, the client settings -- to both. Two botlibs are two images with an AAS world each, and both are opened without `RTLD_GLOBAL`; what is refused is a second copy of ONE botlib's library under another name, which the loader answers with the image it already has, told apart by its handle (SPECS.md R-BOT-33).
+
 ## Libvars
 
-`BotInitLibrary` pushes these through `BotLibVarSet` **before** `BotSetupLibrary`, and the set is fixed -- no new libvar may be invented, because the botlib would ignore it:
+`BotInitLibrary` pushes these through `BotLibVarSet` **before** `BotSetupLibrary`, and the set is fixed **per botlib** -- no new libvar may be invented, because the botlib would ignore it. Both are pushed these 32:
 
 `maxclients`, `maxentities`, `max_aaslinks`, `max_bsplinks`, `max_levelitems`, `autolaunchbspc`, `dmflags`, `ctf`, `ch`, `ra`, `xatrix`, `rogue`, `log`, `nochat`, `fastchat`, `altnames`, `rocketjump`, `forceclustering`, `forcereachability`, `forcewrite`, `nooptimize`, `framereachability`, `basedir`, `gamedir`, `cddir`, `usehook`, `laserhook`, `runes`, `techs`, `teamplay`, `teamplay_shell`, `assimilation`.
 
 `ch` is pushed as a constant `"0"`: Colored Hitman is out of scope (N7), but the botlib reads the libvar and sending zero costs nothing.
+
+The Quake III botlib is pushed two more, which only it reads: `datadir` (`q3bot`), with the other paths before `BotSetupLibrary`, and `bot_skill` (1..5) immediately before each `BotSetupClient` -- it reads the skill inside that call, so the value pushed there is that bot's. Neither botlib reads `ra`. Gladiator's registers it in `BotSetupDeathmatchAI` and never reads the value; the Quake III one's gametype follows `ctf`, `teamplay` and the team `dmflags` alone. So `arena` is a team game to both for one reason: this game pushes `teamplay 1` there, with the synthetic team skin `BotLib_BotClientSettings` sends, and both botlibs then compare skins whole (`BotSameTeam`, `Q2_ClientsOnSameTeam`). To the Quake III botlib that makes it a `GT_TEAM` game, with that AI's team chat and team-leader talk.
 
 ### Ruleset -> libvar mapping
 

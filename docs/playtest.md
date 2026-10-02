@@ -6,7 +6,7 @@ The harness itself is `tools/playtest-harness`, with its dependencies vendored; 
 
 ## The scenarios this tree ships
 
-Fifty-three, each one a `main` package under `tools/playtest-harness/scenarios/`. Four are generic diagnostics rather than checks: `mapinfo` lists a map's spawn points grouped by the arena key they carry, read straight out of a pak; `csdump` connects once and prints every configstring the server sent, so the numbering itself can be read; and `netlag` points at a server that is ALREADY RUNNING -- `-host`/`-port`, starting nothing -- and reports what a client there experiences. It is how "it felt laggy on that one" becomes a number: the pm_type and pm_flags the server holds the client on, the distribution of snapshot arrivals against the 100 ms server frame, and the delay from an input to its effect.  `liveprobe` points at a running server the same way and takes ONE reading -- `pm_type`, the configstrings, the playerstate stats and the layout -- which is how "the server is up but nothing is happening" becomes `pm_type = 4 (FREEZE)`, the intermission, with the map name it has been stuck on.  It sends no button, deliberately: under every ruleset but tourney and `arena` a press is what ENDS an intermission, so a probe that pressed one would destroy the state it was sent to look at.
+Fifty-four, each one a `main` package under `tools/playtest-harness/scenarios/`. Four are generic diagnostics rather than checks: `mapinfo` lists a map's spawn points grouped by the arena key they carry, read straight out of a pak; `csdump` connects once and prints every configstring the server sent, so the numbering itself can be read; and `netlag` points at a server that is ALREADY RUNNING -- `-host`/`-port`, starting nothing -- and reports what a client there experiences. It is how "it felt laggy on that one" becomes a number: the pm_type and pm_flags the server holds the client on, the distribution of snapshot arrivals against the 100 ms server frame, and the delay from an input to its effect.  `liveprobe` points at a running server the same way and takes ONE reading -- `pm_type`, the configstrings, the playerstate stats and the layout -- which is how "the server is up but nothing is happening" becomes `pm_type = 4 (FREEZE)`, the intermission, with the map name it has been stuck on.  It sends no button, deliberately: under every ruleset but tourney and `arena` a press is what ENDS an intermission, so a probe that pressed one would destroy the state it was sent to look at.
 
 **The battery, and the two content layers:**
 
@@ -17,6 +17,7 @@ Fifty-three, each one a `main` package under `tools/playtest-harness/scenarios/`
 | `scenarios/layeracc` | Do the loadout cvars reach tourney's accuracy report, and does a content layer's OWN map spawn its own content? Two phases, because the two halves of the layers need different evidence |
 | `scenarios/botfill` | Does the bot count follow the GAME rather than the server, does an EMPTY server get filled the way the flat count fills one, and does the switch being off still mean the flat count? |
 | `scenarios/botmenugate` | Who may open the bot menu, and who may not? The menu gates `menu` on the rcon password rather than on `serveronlybotcmds`, which is the 1999 shape |
+| `scenarios/botlibmenu` | With BOTH botlibs offered, can a player choose between them, and a Quake III bot's skill, from the bot menu (R-BOT-34)? The add list groups each botlib's bots under its name in `botlibs`' order, a Quake III bot is a submenu of the five skills with `botskill`'s marked, a Gladiator bot is added at once, and the `bot skill` row cycles `botskill` and wraps. Read from the layout and from `sv botlibs`/`sv botlibdump`, with the Quake III botlib's own `loaded skill 1` -- printed only when it is asked for less than 4 -- as the receipt that the skill reached the library. A second server under `dm` asks the same of OSP's vote menu: its labels say "Bots", its picker shows `Q3|` and `GB|`, and a vote for a picked bot proposes `Add Q3|<name>.` and adds it on its own botlib |
 | `scenarios/votematrix` | THREE vote systems, seven rulesets, and the head count every one of them divides by. Each ruleset is driven up a ladder -- one connected player, then two, then three -- putting the same proposal at each rung. 117 checks |
 
 **Threewave CTF:**
@@ -98,6 +99,10 @@ go run ./scenarios/colosseum -q2proded $Q2 \
     -lib <colosseum>/release/game<cpu>.so                 # every ruleset
 go run ./scenarios/colosseum -q2proded $Q2 -lib ... -rulesets arena -keep
 ```
+
+### On the other botlib
+
+`BOTLIBS=q3 tools/playtest.sh -s <scenario>` runs a scenario's bots on the Quake III botlib with the scenario unchanged. The wrapper sets `botlibs` on every server the scenario starts, through `PLAYTEST_CVARS` (`name=value ...`, applied after the scenario's own cvars). `colosseum.InstallBrain` then installs that botlib beside Gladiator's in every fixture, and it needs a mesh for every map Gladiator's has one for. The wrapper makes those once with that botlib's `bspc` out of the retail paks and keeps them in `$Q3MESHES`; the RA2 maps take about fifteen seconds each. The switch reaches every scenario that installs bots through `InstallBrain` and adds them by `addrandom` or the fill. A scenario that adds a Gladiator character by name finds no Quake III bot of that name, and one that lays out its own install -- `ra2botchat`, `ra2waitroom` -- is not reached at all.
 
 ### A crash says nothing
 

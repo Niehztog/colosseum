@@ -1,3 +1,6 @@
 [submodule "vendor/gladiator-bot-restored"]
 	path = vendor/gladiator-bot-restored
 	url = https://github.com/Niehztog/gladiator-bot-restored.git
+[submodule "vendor/q3a_bot_backport_for_q2"]
+	path = vendor/q3a_bot_backport_for_q2
+	url = https://github.com/Niehztog/q3a_bot_backport_for_q2.git

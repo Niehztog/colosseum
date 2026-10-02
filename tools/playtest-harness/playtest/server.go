@@ -77,6 +77,15 @@ func (s *Server) Start() error {
 	for k, v := range s.Cvars {
 		args = append(args, "+set", k, v)
 	}
+	// PLAYTEST_CVARS is "name=value ..." from the environment, set after the
+	// scenario's own, so a wrapper can run any scenario under a setting the
+	// scenario never declared -- Colosseum's tools/playtest.sh runs a bot
+	// scenario on another botlib that way.
+	for _, kv := range strings.Fields(os.Getenv("PLAYTEST_CVARS")) {
+		if k, v, ok := strings.Cut(kv, "="); ok && k != "" {
+			args = append(args, "+set", k, v)
+		}
+	}
 	args = append(args, "+map", s.Map)
 
 	// A port something else holds is a boot that can only fail, and it fails

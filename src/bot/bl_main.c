@@ -31,6 +31,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include <time.h>
 #include "g_local.h"
 #include "bot/bl_main.h"
+#include "bot/bl_botlib.h"
 #include "bot/bl_spawn.h"
 #include "bot/bl_redirgi.h"
 #include "bot/bl_botcfg.h"
@@ -472,9 +473,11 @@ void BotLib_BotLoadMap(char *mapname)
             int i;
             edict_t *cl_ent;
 
-            //a map that would not load stops the fill for the level; a NULL
-            //name is the index refresh and is not a map
-            if (mapname) botglobals.mapfailed = true;
+            //a map that would not load stops the fill asking THIS botlib for the
+            //level -- the next one `botlibs` names is asked instead
+            //(BotlibPreferred); a NULL name is the index refresh and is not
+            //a map
+            if (mapname) BotlibSetMapFailed(lib->botlib);
             //remove all bots using this library
             for (i = 0; i < game.maxclients; i++)
             {
@@ -511,6 +514,14 @@ int BotLib_BotSetupClient(edict_t *ent, char *userinfo)
     s = Info_ValueForKey(userinfo, "charname");
     Q_strlcpy(settings.charactername, s, sizeof(settings.charactername));
     //
+    // A botlib whose bots have a skill of their own reads it as the `bot_skill`
+    // libvar INSIDE BotSetupClient (the Quake III botlib: be_interface_q2.c
+    // Q2BuildBotSettings), so pushed here, immediately before, it is this
+    // bot's and nobody else's -- per-bot skill with the ABI unchanged
+    // (R-BOT-34).  The value is the bot's `skill` userinfo key, which `addbot`
+    // and the menus set, else `botskill`.
+    if (lib->botlib && lib->botlib->skills)
+        lib->funcs.BotLibVarSet("bot_skill", va("%d", BotSkillOf(userinfo)));
     return lib->funcs.BotSetupClient(DF_ENTCLIENT(ent), &settings);
 } //end of the function BotLib_BotSetupClient
 //==========================================================================
@@ -719,87 +730,98 @@ void BotLib_BotSettings(edict_t *bot, bot_settings_t *settings)
 // item in either, and the zero-fill below is what guarantees it.
 //===========================================================================
 static const struct {
-    int         slot;           // botfiles/inv.h
+    // The botlib's slot, per botlib: Gladiator's is inv.h out of pak7.pak, the
+    // Quake III botlib's is its own assets/botfiles/inv.h.  The two agree on
+    // every slot but two -- the Q3 botlib's inv.h was derived from the 1999
+    // GAME's itemlist, where the Trap precedes the Magslugs, and Gladiator's
+    // inv.h names them the other way round -- so those two rows differ and
+    // the rest repeat themselves, which is the point of writing both: a data
+    // contract is checked by reading it, and a second numbering kept as a
+    // list of exceptions is one nobody reads (R-BOT-31).
+    int         slot[BOTLIB_COUNT];
     const char *classname;      // ...and what Colosseum calls the same item
 } botinventory[] = {
-    {  1, "item_armor_body" },
-    {  2, "item_armor_combat" },
-    {  3, "item_armor_jacket" },
-    {  4, "item_armor_shard" },
-    {  5, "item_power_screen" },
-    {  6, "item_power_shield" },
-    {  7, "weapon_blaster" },
-    {  8, "weapon_shotgun" },
-    {  9, "weapon_supershotgun" },
-    { 10, "weapon_machinegun" },
-    { 11, "weapon_chaingun" },
-    { 12, "ammo_grenades" },
-    { 13, "weapon_grenadelauncher" },
-    { 14, "weapon_rocketlauncher" },
-    { 15, "weapon_hyperblaster" },
-    { 16, "weapon_railgun" },
-    { 17, "weapon_bfg" },
-    { 18, "ammo_shells" },
-    { 19, "ammo_bullets" },
-    { 20, "ammo_cells" },
-    { 21, "ammo_rockets" },
-    { 22, "ammo_slugs" },
-    { 23, "item_quad" },
-    { 24, "item_invulnerability" },
-    { 25, "item_silencer" },
-    { 26, "item_breather" },
-    { 27, "item_enviro" },
-    { 28, "item_ancient_head" },
-    { 29, "item_adrenaline" },
-    { 30, "item_bandolier" },
-    { 31, "item_pack" },
-    { 32, "key_data_cd" },
-    { 33, "key_power_cube" },
-    { 34, "key_pyramid" },
-    { 35, "key_data_spinner" },
-    { 36, "key_pass" },
-    { 37, "key_blue_key" },
-    { 38, "key_red_key" },
-    { 39, "key_commander_head" },
-    { 40, "key_airstrike_target" },
-    // 41 is INVENTORY_HEALTH and is the brain's own.
-    { 42, "weapon_grapple" },
-    { 43, "item_flag_team1" },
-    { 44, "item_flag_team2" },
-    { 45, "item_tech1" },
-    { 46, "item_tech2" },
-    { 47, "item_tech3" },
-    { 48, "item_tech4" },
-    { 49, "weapon_boomer" },
-    { 50, "weapon_phalanx" },
-    { 51, "ammo_magslug" },
-    { 52, "ammo_trap" },
-    { 53, "item_quadfire" },
-    { 54, "key_green_key" },
-    { 55, "weapon_etf_rifle" },
-    { 56, "weapon_proxlauncher" },
-    { 57, "weapon_plasmabeam" },
-    { 58, "weapon_chainfist" },
-    { 59, "weapon_disintegrator" },
-    { 60, "ammo_flechettes" },
-    { 61, "ammo_prox" },
-    { 62, "ammo_tesla" },
-    { 63, "ammo_nuke" },
-    { 64, "ammo_disruptor" },
-    { 65, "item_ir_goggles" },
-    { 66, "item_double" },
-    { 67, "item_compass" },
-    { 68, "item_sphere_vengeance" },
-    { 69, "item_sphere_hunter" },
-    { 70, "item_sphere_defender" },
-    { 71, "item_doppleganger" },
+    { {  1,  1 }, "item_armor_body" },
+    { {  2,  2 }, "item_armor_combat" },
+    { {  3,  3 }, "item_armor_jacket" },
+    { {  4,  4 }, "item_armor_shard" },
+    { {  5,  5 }, "item_power_screen" },
+    { {  6,  6 }, "item_power_shield" },
+    { {  7,  7 }, "weapon_blaster" },
+    { {  8,  8 }, "weapon_shotgun" },
+    { {  9,  9 }, "weapon_supershotgun" },
+    { { 10, 10 }, "weapon_machinegun" },
+    { { 11, 11 }, "weapon_chaingun" },
+    { { 12, 12 }, "ammo_grenades" },
+    { { 13, 13 }, "weapon_grenadelauncher" },
+    { { 14, 14 }, "weapon_rocketlauncher" },
+    { { 15, 15 }, "weapon_hyperblaster" },
+    { { 16, 16 }, "weapon_railgun" },
+    { { 17, 17 }, "weapon_bfg" },
+    { { 18, 18 }, "ammo_shells" },
+    { { 19, 19 }, "ammo_bullets" },
+    { { 20, 20 }, "ammo_cells" },
+    { { 21, 21 }, "ammo_rockets" },
+    { { 22, 22 }, "ammo_slugs" },
+    { { 23, 23 }, "item_quad" },
+    { { 24, 24 }, "item_invulnerability" },
+    { { 25, 25 }, "item_silencer" },
+    { { 26, 26 }, "item_breather" },
+    { { 27, 27 }, "item_enviro" },
+    { { 28, 28 }, "item_ancient_head" },
+    { { 29, 29 }, "item_adrenaline" },
+    { { 30, 30 }, "item_bandolier" },
+    { { 31, 31 }, "item_pack" },
+    { { 32, 32 }, "key_data_cd" },
+    { { 33, 33 }, "key_power_cube" },
+    { { 34, 34 }, "key_pyramid" },
+    { { 35, 35 }, "key_data_spinner" },
+    { { 36, 36 }, "key_pass" },
+    { { 37, 37 }, "key_blue_key" },
+    { { 38, 38 }, "key_red_key" },
+    { { 39, 39 }, "key_commander_head" },
+    { { 40, 40 }, "key_airstrike_target" },
+    // 41 is Gladiator's INVENTORY_HEALTH and that botlib's own.  The Quake III
+    // botlib keeps its health and armour in 28 and 29 instead, and writes them
+    // itself after this copy lands -- the rows there are the Ancient Head and
+    // the Adrenaline, which no inventory ever holds, so they reach it as 0.
+    { { 42, 42 }, "weapon_grapple" },
+    { { 43, 43 }, "item_flag_team1" },
+    { { 44, 44 }, "item_flag_team2" },
+    { { 45, 45 }, "item_tech1" },
+    { { 46, 46 }, "item_tech2" },
+    { { 47, 47 }, "item_tech3" },
+    { { 48, 48 }, "item_tech4" },
+    { { 49, 49 }, "weapon_boomer" },
+    { { 50, 50 }, "weapon_phalanx" },
+    { { 51, 52 }, "ammo_magslug" },
+    { { 52, 51 }, "ammo_trap" },
+    { { 53, 53 }, "item_quadfire" },
+    { { 54, 54 }, "key_green_key" },
+    { { 55, 55 }, "weapon_etf_rifle" },
+    { { 56, 56 }, "weapon_proxlauncher" },
+    { { 57, 57 }, "weapon_plasmabeam" },
+    { { 58, 58 }, "weapon_chainfist" },
+    { { 59, 59 }, "weapon_disintegrator" },
+    { { 60, 60 }, "ammo_flechettes" },
+    { { 61, 61 }, "ammo_prox" },
+    { { 62, 62 }, "ammo_tesla" },
+    { { 63, 63 }, "ammo_nuke" },
+    { { 64, 64 }, "ammo_disruptor" },
+    { { 65, 65 }, "item_ir_goggles" },
+    { { 66, 66 }, "item_double" },
+    { { 67, 67 }, "item_compass" },
+    { { 68, 68 }, "item_sphere_vengeance" },
+    { { 69, 69 }, "item_sphere_hunter" },
+    { { 70, 70 }, "item_sphere_defender" },
+    { { 71, 71 }, "item_doppleganger" },
     // 72 is INVENTORY_TAGTOKEN.  The itemlist row has no classname -- the Tag
     // token is never placed by a map -- so it is the one row that has to be
     // found by pickup_name, which BotResolveInventoryMap() falls back to where
     // the classname lookup comes back empty.
-    { 72, "Tag Token" },
-    { 73, "key_nuke_container" },
-    { 74, "key_nuke" },
+    { { 72, 72 }, "Tag Token" },
+    { { 73, 73 }, "key_nuke_container" },
+    { { 74, 74 }, "key_nuke" },
 };
 
 // ENEMY_HORIZONTAL_DIST, the lowest slot the brain derives for itself.
@@ -808,36 +830,23 @@ static const struct {
 // put an item there.
 #define BOTLIB_FIRST_DERIVED_SLOT   200
 
-// The resolved table: the game's ITEM_INDEX for each of the brain's slots, or 0
-// where this build has no such item.  itemlist is compile-time constant, so one
-// resolution serves every map -- but not one at load time, because
-// FindItemByClassname() walks `game.num_items` and InitItems() is what sets it.
-static int botinvindex[BOTLIB_MAX_ITEMS];
+// The resolved tables, one per botlib: the game's ITEM_INDEX for each of that
+// botlib's slots, or 0 where this build has no such item.  itemlist is
+// compile-time constant, so one resolution serves every map -- but not one at
+// load time, because FindItemByClassname() walks `game.num_items` and
+// InitItems() is what sets it.
+static int botinvindex[BOTLIB_COUNT][BOTLIB_MAX_ITEMS];
 static bool botinvresolved;
 
 static void BotResolveInventoryMap(void)
 {
     const gitem_t *it;
-    int i, missing = 0;
+    int i, b, missing = 0;
 
     memset(botinvindex, 0, sizeof(botinvindex));
 
     for (i = 0; i < q_countof(botinventory); i++)
     {
-        int slot = botinventory[i].slot;
-
-        // The derived range is the brain's to write and nobody else's, so a
-        // row that reached into it would be a silent corruption of
-        // ENEMY_HORIZONTAL_DIST or a powerup timer rather than a wrong
-        // inventory.  Refused loudly instead.
-        if (slot < 1 || slot >= BOTLIB_FIRST_DERIVED_SLOT)
-        {
-            gi.dprintf("botlib inventory map: slot %d for %s is out of range, "
-                       "dropped\n", slot, botinventory[i].classname);
-            missing++;
-            continue;
-        } //end if
-
         it = FindItemByClassname(botinventory[i].classname);
         if (!it) it = FindItem(botinventory[i].classname);
         if (!it)
@@ -845,7 +854,23 @@ static void BotResolveInventoryMap(void)
             missing++;
             continue;
         } //end if
-        botinvindex[slot] = ITEM_INDEX(it);
+        for (b = 0; b < BOTLIB_COUNT; b++)
+        {
+            int slot = botinventory[i].slot[b];
+
+            // The derived range is the botlib's to write and nobody else's, so
+            // a row that reached into it would be a silent corruption of
+            // ENEMY_HORIZONTAL_DIST or a powerup timer rather than a wrong
+            // inventory.  Refused loudly instead.
+            if (slot < 1 || slot >= BOTLIB_FIRST_DERIVED_SLOT)
+            {
+                gi.dprintf("botlib inventory map: %s slot %d for %s is out of "
+                           "range, dropped\n", botlibs[b].id, slot,
+                           botinventory[i].classname);
+                continue;
+            } //end if
+            botinvindex[b][slot] = ITEM_INDEX(it);
+        } //end for
     } //end for
 
     // Said once, because a row this build genuinely does not have is legal and
@@ -868,17 +893,20 @@ static void BotResolveInventoryMap(void)
 // Returns:                 -
 // Changes Globals:     -
 //===========================================================================
-static void BotFillInventory(int *out, const int *inventory)
+static void BotFillInventory(int *out, const int *inventory,
+                             const botlib_t *botlib)
 {
+    const int *index;
     int i;
 
     if (!botinvresolved) BotResolveInventoryMap();
+    index = botinvindex[botlib ? botlib->num : BOTLIB_GLADIATOR];
 
     memset(out, 0, BOTLIB_MAX_ITEMS * sizeof(int));
 
     for (i = 0; i < BOTLIB_MAX_ITEMS; i++)
     {
-        if (botinvindex[i]) out[i] = inventory[botinvindex[i]];
+        if (index[i]) out[i] = inventory[index[i]];
     } //end for
 } //end of the function BotFillInventory
 
@@ -942,7 +970,10 @@ void BotInventoryDump(void)
         if (!(ent->flags & FL_BOT)) continue;
         if (!ent->client) continue;
 
-        BotFillInventory(inventory, ent->client->pers.inventory);
+        //in the numbering of the botlib THIS bot runs on
+        BotFillInventory(inventory, ent->client->pers.inventory,
+                         botglobals.botstates[i].library ?
+                         botglobals.botstates[i].library->botlib : NULL);
 
         gi.dprintf("%3d: %-16s ", i, ent->client->pers.netname);
         if (G_Ruleset() == RULESET_ARENA)
@@ -979,6 +1010,107 @@ void BotInventoryDump(void)
     gi.dprintf("%d bot%s\n", botglobals.numbots,
                botglobals.numbots == 1 ? "" : "s");
 } //end of the function BotInventoryDump
+//===========================================================================
+// What the Quake III botlib reads off the HUD, and the half of it that is not
+// on the HUD at all.
+//
+// Gladiator's botlib is handed `ps.stats` as it stands, which is what the 1999
+// game handed it under each ruleset.  The Quake III botlib reads nine slots
+// (be_interface_q2.c Q2BotUpdateClient): 1 health, 4 the armour icon, 9 and 10
+// the powerup timer, 14 frags -- all of them in the 0..15 every ruleset leaves
+// alone (g_stats.h, clause 1) -- and four more on every ruleset alike:
+//
+//   * 22 and 23, Threewave's STAT_CTF_JOINED_TEAM1_PIC and _TEAM2_PIC, as the
+//     bot's CTF team.  Only `ctf` puts them there; under the OSP four 22 is
+//     the resist rune and 23 the strength rune (g_stats.h), so a bot holding
+//     either was on a CTF team in a game that has none.  So they are copied
+//     under `ctf` only, out of the stat map rather than by number.
+//   * 28 and 29, which the backport's own game fills with who last hurt the
+//     bot and how (its game_q2/bl_main.c), for the hit chats -- in slots no
+//     1999 HUD used, and that this tree's do: `ctf`'s match and id-view
+//     colour, the OSP four's second powerup timer.  So they are written here,
+//     from the record T_Damage keeps (BotClientHurt), in the botlib's own
+//     convention -- 0 is "nobody", which client 0 shares, as it does in Quake
+//     III -- and the means of death in its numbering (BotQ3MeansOfDeath).
+//
+// Everything else is zero, which is what the botlib reads as "not there".
+//===========================================================================
+static int BotQ3MeansOfDeath(int mod)
+{
+    // The Q3 botlib's numbering is the 1999 Gladiator game's (its
+    // botlib/ai_q2_compat.h, from gladq2_src g_local.h), which agrees with
+    // this tree's up to MOD_TARGET_BLASTER and then does not: Threewave's
+    // grapple is 34 there and Ground Zero's and the Reckoning's follow it, one
+    // further on.  By name, as the inventory is (BotResolveInventoryMap), so a
+    // renumbering here cannot shift it silently.
+    static const struct { int game, botlib; } mods[] = {
+        { MOD_GRAPPLE,          34 },
+        { MOD_RIPPER,           35 },
+        { MOD_PHALANX,          36 },
+        { MOD_BRAINTENTACLE,    37 },
+        { MOD_BLASTOFF,         38 },
+        { MOD_GEKK,             39 },
+        { MOD_TRAP,             40 },
+        { MOD_CHAINFIST,        41 },
+        { MOD_DISINTEGRATOR,    42 },
+        { MOD_ETF_RIFLE,        43 },
+        { MOD_BLASTER2,         44 },
+        { MOD_HEATBEAM,         45 },
+        { MOD_TESLA,            46 },
+        { MOD_PROX,             47 },
+        { MOD_NUKE,             48 },
+        { MOD_VENGEANCE_SPHERE, 49 },
+        { MOD_HUNTER_SPHERE,    50 },
+        { MOD_DEFENDER_SPHERE,  51 },
+        { MOD_TRACKER,          52 },
+        { MOD_DBALL_CRUSH,      53 },
+        { MOD_DOPPLE_EXPLODE,   54 },
+        { MOD_DOPPLE_VENGEANCE, 55 },
+        { MOD_DOPPLE_HUNTER,    56 },
+    };
+    int i;
+
+    mod &= ~MOD_FRIENDLY_FIRE;
+    if (mod >= MOD_UNKNOWN && mod <= MOD_TARGET_BLASTER)
+        return mod;
+    for (i = 0; i < q_countof(mods); i++)
+    {
+        if (mods[i].game == mod) return mods[i].botlib;
+    } //end for
+    return MOD_UNKNOWN;
+} //end of the function BotQ3MeansOfDeath
+
+static void BotQ3Stats(edict_t *bot, short *out)
+{
+    bot_state_t *bs = &botglobals.botstates[DF_ENTCLIENT(bot)];
+
+    memset(out, 0, BOTLIB_MAX_STATS * sizeof(short));
+    memcpy(out, bot->client->ps.stats, 16 * sizeof(short));
+    if (G_Ruleset() == RULESET_CTF)
+    {
+        out[22] = G_GetStat(bot, SID_CTF_JOINED_TEAM1_PIC);
+        out[23] = G_GetStat(bot, SID_CTF_JOINED_TEAM2_PIC);
+    } //end if
+    out[28] = bs->lasthurt_client < 0 ? 0 : bs->lasthurt_client;
+    out[29] = BotQ3MeansOfDeath(bs->lasthurt_mod);
+} //end of the function BotQ3Stats
+//===========================================================================
+// T_Damage reports a hit on a client here, at the point its damage is about to
+// land -- past godmode, the protections and the team rules, which is where
+// Quake III's own G_Damage records `lasthurt_client`.  Kept for bots only: the
+// record is read by a botlib, and a person has none.  `attacker` is the world,
+// a monster or a client; only a client is somebody to talk back to.
+//===========================================================================
+void BotClientHurt(edict_t *targ, edict_t *attacker, int mod)
+{
+    bot_state_t *bs;
+
+    if (!targ->client || !(targ->flags & FL_BOT) || !botglobals.botstates)
+        return;
+    bs = &botglobals.botstates[DF_ENTCLIENT(targ)];
+    bs->lasthurt_client = (attacker && attacker->client) ? DF_ENTCLIENT(attacker) : -1;
+    bs->lasthurt_mod = mod;
+} //end of the function BotClientHurt
 //==========================================================================
 // sends a client (state) update to the bot library
 //
@@ -1054,14 +1186,21 @@ void BotLib_BotUpdateClient(edict_t *bot)
     // still carries the 1999 array, so the copy is bounded by the SMALLER of
     // the two.  A memcpy of MAX_STATS shorts into a 32-entry member is how a
     // struct that "obviously matches" overruns.
-    memcpy(buc.stats, bot->client->ps.stats,
-           min(q_countof(buc.stats), q_countof(bot->client->ps.stats)) * sizeof(short));
+    //
+    // ...and that is Gladiator's view.  The Quake III botlib reads five slots
+    // above 15 that Gladiator's does not, and reads them on every ruleset, so
+    // it is shown a view of its own (BotQ3Stats, R-BOT-31).
+    if (lib->botlib && lib->botlib->num == BOTLIB_Q3)
+        BotQ3Stats(bot, buc.stats);
+    else
+        memcpy(buc.stats, bot->client->ps.stats,
+               min(q_countof(buc.stats), q_countof(bot->client->ps.stats)) * sizeof(short));
     //====================================
     //inventory, translated into the brain's index space.  The
     //bounded memcpy that was here answered a different question -- two arrays of different
     //LENGTHS -- and could not answer this one, which is two arrays of the same
     //length whose slots mean different things.
-    BotFillInventory(buc.inventory, bot->client->pers.inventory);
+    BotFillInventory(buc.inventory, bot->client->pers.inventory, lib->botlib);
     //update the client
     lib->funcs.BotUpdateClient(DF_ENTCLIENT(bot), &buc);
     //====================================
@@ -1723,6 +1862,13 @@ static int BotInitLibrary(bot_library_t *lib)
     lib->funcs.BotLibVarSet("framereachability", cvar->string);
     //base, game and cd directory
     BotSetPathVars(lib);
+    //...and the botlib's own data directory under the gamedir, where it has one
+    //(R-BOT-31).  Only the Quake III botlib reads `datadir`: with it set, every
+    //file it opens -- its botfiles, its AAS files -- comes from there and from
+    //nowhere else, so it can never be handed Gladiator's, which have the same
+    //names in another format.  Gladiator's files are where 1999 put them.
+    if (lib->botlib && lib->botlib->datadir[0])
+        lib->funcs.BotLibVarSet("datadir", (char *)lib->botlib->datadir);
 
     BotRulesetLibVars(lib);
 
@@ -1736,8 +1882,8 @@ static int BotInitLibrary(bot_library_t *lib)
                                 bot_max_imageindexes, imageindexes);
     if (err != BLERR_NOERROR)
     {
-        //remembered for the level: see CheckMinimumPlayers
-        botglobals.mapfailed = true;
+        //remembered for the level, per botlib: see CheckMinimumPlayers
+        BotlibSetMapFailed(lib->botlib);
         return false;
     } //end if
     return true;
@@ -1748,6 +1894,15 @@ static int BotInitLibrary(bot_library_t *lib)
 // Returns:                 -
 // Changes Globals:     -
 //===========================================================================
+static void BotCloseLibrary(void *handle)
+{
+#if defined(_WIN32)
+    FreeLibrary(handle);
+#else
+    dlclose(handle);
+#endif
+} //end of the function BotCloseLibrary
+
 static void BotUnloadLibrary(bot_library_t *lib)
 {
     //unlink library from list
@@ -1756,13 +1911,8 @@ static void BotUnloadLibrary(bot_library_t *lib)
     if (lib->next) lib->next->prev = lib->prev;
     //shut down the library
     lib->funcs.BotShutdownLibrary();
-#if defined(_WIN32)
-    //Win32 free the bot library
-    FreeLibrary(lib->handle);
-#else
-    //free the shared object
-    dlclose(lib->handle);
-#endif
+    //free the bot library
+    BotCloseLibrary(lib->handle);
     //free the memory of the library structure
     gi.TagFree(lib);
 } //end of the function BotUnloadLibrary
@@ -1791,19 +1941,13 @@ const char *BotDefaultLibrary(void)
 // bot library loading
 //
 // NOTE: this is platform dependent code
-//
-// Parameter:               -
-// Returns:                 -
-// Changes Globals:     -
 //===========================================================================
 typedef bot_export_t *(*PFNGetBotAPI)(bot_import_t *import);
 
-static bot_library_t *BotLoadLibrary(const char *botlibdir)
+// Opens a library file, and says why when it will not open.
+static void *BotOpenLibrary(const char *botlibdir)
 {
-    bot_library_t *lib;
-    PFNGetBotAPI GetBotAPI;
     void *botlibhandle;
-    bot_export_t *exports;
 
 #if defined(_WIN32)
     botlibhandle = LoadLibraryA(botlibdir);
@@ -1827,13 +1971,6 @@ static bot_library_t *BotLoadLibrary(const char *botlibdir)
                        botlibdir, (unsigned long)err, (int)(sizeof(void *) * 8));
         return NULL;
     } //end if
-    GetBotAPI = (PFNGetBotAPI)(void *)GetProcAddress(botlibhandle, "GetBotAPI");
-    if (!GetBotAPI)
-    {
-        FreeLibrary(botlibhandle);
-        gi.dprintf("couldn't find GetBotAPI in %s\n", botlibdir);
-        return NULL;
-    } //end if
 #else
     botlibhandle = dlopen(botlibdir, RTLD_NOW);
     if (!botlibhandle)
@@ -1843,32 +1980,133 @@ static bot_library_t *BotLoadLibrary(const char *botlibdir)
                    botlibdir, dlerror(), (int)(sizeof(void *) * 8));
         return NULL;
     } //end if
+#endif
+    return botlibhandle;
+} //end of the function BotOpenLibrary
+
+static PFNGetBotAPI BotLibraryEntry(void *botlibhandle, const char *botlibdir)
+{
+    PFNGetBotAPI GetBotAPI;
+
+#if defined(_WIN32)
+    GetBotAPI = (PFNGetBotAPI)(void *)GetProcAddress(botlibhandle, "GetBotAPI");
+    if (!GetBotAPI)
+        gi.dprintf("couldn't find GetBotAPI in %s\n", botlibdir);
+#else
     dlerror();
     GetBotAPI = (PFNGetBotAPI)dlsym(botlibhandle, "GetBotAPI");
     if (!GetBotAPI)
-    {
         gi.dprintf("couldn't find GetBotAPI in %s: %s\n", botlibdir, dlerror());
-        dlclose(botlibhandle);
+#endif
+    return GetBotAPI;
+} //end of the function BotLibraryEntry
+
+//===========================================================================
+// The library already loaded from the same FILE, whatever name reached it.
+//
+// The loader hands back the object it already has when the same file is opened
+// a second time -- under another path, through a link, by a relative name --
+// so two entries here could be one image with one set of globals: one AAS
+// world, one botlib setup, and a second BotSetupLibrary on top of the first.
+// That is the case the 1999 refusal of a second library actually protected
+// (R-BOT-33), and the handle is what says it, where the path cannot.
+//===========================================================================
+static bot_library_t *BotLibraryWithHandle(void *handle)
+{
+    bot_library_t *lib;
+
+    for (lib = botglobals.firstbotlib; lib; lib = lib->next)
+    {
+        if (lib->handle == handle) return lib;
+    } //end for
+    return NULL;
+} //end of the function BotLibraryWithHandle
+
+bot_library_t *BotlibLoaded(const botlib_t *botlib)
+{
+    bot_library_t *lib;
+
+    for (lib = botglobals.firstbotlib; lib; lib = lib->next)
+    {
+        if (lib->botlib == botlib) return lib;
+    } //end for
+    return NULL;
+} //end of the function BotlibLoaded
+
+//===========================================================================
+// The handshake (R-BOT-31).  `BotVersion` is slot 0 of the export table and it
+// is how a library says which botlib it is: "BotLib v0.96" for Gladiator's --
+// the reconstruction and the 1999 binary alike -- and "Q3Backport-<n>" for the
+// Quake III botlib.  A library that answers neither is refused: the data half
+// of the contract -- its inventory numbering, its HUD stats, where its files
+// are -- is per botlib, and a botlib this game does not know has none it could
+// be given.
+//===========================================================================
+static const botlib_t *BotHandshake(bot_export_t *exports, const char *botlibdir)
+{
+    const char *version = exports->BotVersion ? exports->BotVersion() : NULL;
+    const botlib_t *botlib = BotlibForVersion(version);
+
+    if (!botlib)
+        gi.dprintf("%s reports BotVersion \"%s\", which is no botlib this game "
+                   "knows (gladiator answers \"%s...\", q3 \"%s...\")\n",
+                   botlibdir, version ? version : "",
+                   botlibs[BOTLIB_GLADIATOR].version, botlibs[BOTLIB_Q3].version);
+    return botlib;
+} //end of the function BotHandshake
+
+static bot_library_t *BotLoadLibrary(const char *botlibdir, const botlib_t *want)
+{
+    bot_library_t *lib;
+    PFNGetBotAPI GetBotAPI;
+    void *botlibhandle;
+    bot_export_t *exports;
+    const botlib_t *botlib;
+
+    botlibhandle = BotOpenLibrary(botlibdir);
+    if (!botlibhandle) return NULL;
+    lib = BotLibraryWithHandle(botlibhandle);
+    if (lib)
+    {
+        //the loader counted a second reference to the image; give it back
+        BotCloseLibrary(botlibhandle);
+        if (lib->botlib == want) return lib;
+        gi.dprintf("%s is already loaded as %s, which is the %s botlib and not "
+                   "the %s botlib\n", botlibdir, lib->path, lib->botlib->id,
+                   want->id);
         return NULL;
     } //end if
-#endif
+    GetBotAPI = BotLibraryEntry(botlibhandle, botlibdir);
+    if (!GetBotAPI)
+    {
+        BotCloseLibrary(botlibhandle);
+        return NULL;
+    } //end if
+    exports = GetBotAPI(&botglobals.gamebotimport);
+    if (!exports)
+    {
+        gi.dprintf("GetBotAPI in %s returned nothing\n", botlibdir);
+        BotCloseLibrary(botlibhandle);
+        return NULL;
+    } //end if
+    botlib = BotHandshake(exports, botlibdir);
+    if (botlib != want)
+    {
+        if (botlib)
+            gi.dprintf("%s is the %s botlib (\"%s\"), not the %s "
+                       "botlib\n", botlibdir, botlib->id, exports->BotVersion(),
+                       want->id);
+        BotCloseLibrary(botlibhandle);
+        return NULL;
+    } //end if
 
     lib = gi.TagMalloc(sizeof(bot_library_t), TAG_GAME);
     memset(lib, 0, sizeof(bot_library_t));
     Q_strlcpy(lib->path, botlibdir, sizeof(lib->path));
     lib->handle = botlibhandle;
-    exports = GetBotAPI(&botglobals.gamebotimport);
-    if (!exports)
-    {
-        gi.dprintf("GetBotAPI in %s returned nothing\n", botlibdir);
-        gi.TagFree(lib);
-#if defined(_WIN32)
-        FreeLibrary(botlibhandle);
-#else
-        dlclose(botlibhandle);
-#endif
-        return NULL;
-    } //end if
+    lib->botlib = botlib;
+    //Gladiator's twenty slots.  A botlib's table may be longer -- the Quake III
+    //botlib appends its own after Test -- and the rest is not this game's to read.
     lib->funcs = *exports;
     //what the brain has to find in the index tables when BotInitLibrary hands
     //it the map, and the game does not register for it (BotPrecache).  Before
@@ -1888,8 +2126,9 @@ static bot_library_t *BotLoadLibrary(const char *botlibdir)
         return NULL;
     } //end if
     //
-    gi.dprintf("loaded %s (%s)\n", botlibdir,
-               lib->funcs.BotVersion ? lib->funcs.BotVersion() : "no version");
+    gi.dprintf("loaded %s (%s), the %s botlib\n", botlibdir,
+               lib->funcs.BotVersion ? lib->funcs.BotVersion() : "no version",
+               botlib->id);
     // A Test() round trip at load, which is the only check either side has
     // that the by-value bsp_trace_t and the pointer-bearing tables agree.
     // botglobals.notest turns it off for a brain that has none.
@@ -1900,6 +2139,39 @@ static bot_library_t *BotLoadLibrary(const char *botlibdir)
     } //end if
     return lib;
 } //end of the function BotLoadLibrary
+//===========================================================================
+// Which botlib a library file is, without setting it up: `botlib`'s question
+// (BotLibraryOverride).  Opened, asked its BotVersion and closed again, so
+// the image -- and whatever its GetBotAPI wrote into its own globals -- goes
+// with it.  What does not go is what it allocated through this game's
+// GetMemory: the Quake III botlib's GetBotAPI seeds eighteen libvars there,
+// about two kilobytes of TAG_GAME that stay until the game ends, and it cannot
+// be shut down to free them because it was never set up.  Asked once per value
+// of `botlib`, so that is bounded.  A file that is already loaded is asked
+// nothing: its GetBotAPI would reset a botlib that is running.
+//===========================================================================
+static const botlib_t *BotLibraryIdentify(const char *botlibdir)
+{
+    PFNGetBotAPI GetBotAPI;
+    bot_export_t *exports;
+    const botlib_t *botlib;
+    bot_library_t *lib;
+    void *handle;
+
+    handle = BotOpenLibrary(botlibdir);
+    if (!handle) return NULL;
+    lib = BotLibraryWithHandle(handle);
+    if (lib)
+    {
+        BotCloseLibrary(handle);
+        return lib->botlib;
+    } //end if
+    GetBotAPI = BotLibraryEntry(handle, botlibdir);
+    exports = GetBotAPI ? GetBotAPI(&botglobals.gamebotimport) : NULL;
+    botlib = exports ? BotHandshake(exports, botlibdir) : NULL;
+    BotCloseLibrary(handle);
+    return botlib;
+} //end of the function BotLibraryIdentify
 //===========================================================================
 //
 // Parameter:               -
@@ -1953,60 +2225,111 @@ static void BotLibrarySearch(char *out, int size, const char *name)
     } //end for
 } //end of the function BotLibrarySearch
 //===========================================================================
+// A library name, as an OS path.
 //
-// Parameter:               -
-// Returns:                 -
-// Changes Globals:     -
+// A path is used as given, and a bare name is searched for (BotLibrarySearch:
+// homedir, libdir, then basedir, each with the gamedir under it).  The donor
+// decides between them with `access(path, 4)`, and the obvious modernisation
+// -- ask the engine's filesystem whether it can read the file -- is wrong and
+// was wrong in the first run of tools/botmatrix.sh: the engine finds
+// `gladiator.so` in the gamedir and answers yes, so the bare name went to
+// dlopen, which searches the LINKER's paths and not the gamedir, and every bot
+// failed to load with "cannot open shared object file".  dlopen needs an OS
+// path, so the question is not "can this be read" but "is this already a
+// path" -- which is what a separator says.
 //===========================================================================
-bot_library_t *BotUseLibrary(const char *path)
+static void BotLibraryResolve(const char *name, char *out, int size)
+{
+    if (!strchr(name, '/') && !strchr(name, '\\'))
+        BotLibrarySearch(out, size, name);
+    else
+        Q_strlcpy(out, name, size);
+} //end of the function BotLibraryResolve
+
+bool BotLibraryExists(const char *path)
+{
+    FILE *f = fopen(path, "rb");
+
+    if (!f) return false;
+    fclose(f);
+    return true;
+} //end of the function BotLibraryExists
+//===========================================================================
+// `botlib`, with two botlibs (R-BOT-32).
+//
+// It names the file a bot library is loaded from, as it always has -- and a
+// file is one botlib's or the other's, which its own BotVersion says.  So it is
+// asked once, per value: a `botlib` that answers as the Quake III botlib is that
+// botlib's library, one that answers as Gladiator's is Gladiator's, and the
+// other botlib loads its own name.  It does not choose which botlib bots are
+// driven by -- `botlibs` does that -- and at its default, BotDefaultLibrary(),
+// it overrides nothing.
+//===========================================================================
+static const botlib_t *BotLibraryOverride(void)
+{
+    static char asked[BOT_MAX_PATH];
+    static const botlib_t *answer;
+    cvar_t *botlib = gi.cvar("botlib", BotDefaultLibrary(), 0);
+    char path[BOT_MAX_PATH];
+
+    if (!botlib->string[0] || !Q_stricmp(botlib->string, BotDefaultLibrary()))
+        return NULL;
+    if (strcmp(asked, botlib->string))
+    {
+        Q_strlcpy(asked, botlib->string, sizeof(asked));
+        BotLibraryResolve(botlib->string, path, sizeof(path));
+        answer = BotLibraryIdentify(path);
+        if (answer)
+            gi.dprintf("botlib \"%s\" is the %s botlib\n",
+                       botlib->string, answer->id);
+        else
+            gi.dprintf("botlib \"%s\" is no bot library this game knows; each "
+                       "botlib loads its own file\n", botlib->string);
+    } //end if
+    return answer;
+} //end of the function BotLibraryOverride
+
+void BotlibPath(const botlib_t *botlib, char *out, int size)
+{
+    if (BotLibraryOverride() == botlib)
+        BotLibraryResolve(gi.cvar("botlib", BotDefaultLibrary(), 0)->string,
+                          out, size);
+    else
+        BotLibraryResolve(BotlibFile(botlib), out, size);
+} //end of the function BotlibPath
+//===========================================================================
+// The library a bot of `botlib` runs on: the one already loaded for that botlib,
+// else its file, loaded now.
+//
+// The donor refuses a second library outright -- `if (firstbotlib) return
+// NULL` -- and this tree kept that, on the reasoning that one process cannot
+// hold two AAS worlds.  That is true of ONE botlib loaded twice, which is the
+// same image and the same globals (BotLibraryWithHandle), and false of two
+// botlibs: each library is its own image with its own AAS world, and both are
+// opened without RTLD_GLOBAL -- as q2pro opens this library -- so the names
+// they share bind each to its own.  So the rule is one library PER BOTLIB, and
+// a server whose `botlibs` offers both runs both at once, each bot on its own
+// botlib (R-BOT-33).  The 1999 game's data structures were already built for
+// it: a library per bot, and every call that is not one bot's going to every
+// library on the list.
+//===========================================================================
+bot_library_t *BotUseBotlib(const botlib_t *botlib)
 {
     char botlibdir[BOT_MAX_PATH] = "";
     bot_library_t *lib;
 
-    // A path is used as given, and a bare name is searched for
-    // (BotLibrarySearch: homedir, libdir, then basedir, each with the gamedir
-    // under it).  The donor decides between them with `access(path, 4)`, and
-    // the obvious
-    // modernisation -- ask the engine's filesystem whether it can read the
-    // file -- is wrong and was wrong in the first run of tools/botmatrix.sh:
-    // the engine finds `gladiator.so` in the gamedir and answers yes, so the
-    // bare name went to dlopen, which searches the LINKER's paths and not the
-    // gamedir, and every bot failed to load with "cannot open shared object
-    // file".  dlopen needs an OS path, so the question is not "can this be
-    // read" but "is this already a path" -- which is what a separator says.
-    // A bare name is then searched for as an OS path (BotLibrarySearch).
-    if (!strchr(path, '/') && !strchr(path, '\\'))
+    if (!botlib) return NULL;
+    lib = BotlibLoaded(botlib);
+    if (lib)
     {
-        BotLibrarySearch(botlibdir, sizeof(botlibdir), path);
+        lib->users++;
+        return lib;
     } //end if
-    else
-    {
-        //the dll name, as given
-        Q_strlcpy(botlibdir, path, sizeof(botlibdir));
-    } //end else
-    //check if the library is loaded already
-    for (lib = botglobals.firstbotlib; lib; lib = lib->next)
-    {
-        if (!Q_stricmp(lib->path, botlibdir))
-        {
-            lib->users++;
-            return lib;
-        } //end if
-    } //end for
-    // The donor refuses a second library outright -- `if (firstbotlib) return
-    // NULL` -- which the per-bot naming makes look like a bug and is not:
-    // one process cannot hold two AAS worlds, and the second brain would
-    // silently share the first one's. Kept, with the refusal now reported.
-    if (botglobals.firstbotlib)
-    {
-        gi.dprintf("a bot library is already loaded (%s); one per server\n",
-                   botglobals.firstbotlib->path);
-        return NULL;
-    } //end if
-    lib = BotLoadLibrary(botlibdir);
+    BotlibPath(botlib, botlibdir, sizeof(botlibdir));
+    lib = BotLoadLibrary(botlibdir, botlib);
     if (lib) lib->users++;
     return lib;
-} //end of the function BotUseLibrary
+} //end of the function BotUseBotlib
 //===========================================================================
 //
 // Parameter:               -
@@ -2047,16 +2370,25 @@ void BotLibraryDump(void)
     for (lib = botglobals.firstbotlib; lib; lib = lib->next)
     {
         gi.dprintf("-------------------------------------\n");
-        gi.dprintf("%s (%d user%s)\n", lib->path, lib->users,
-                   lib->users == 1 ? "" : "s");
+        gi.dprintf("%s (%d user%s), the %s botlib (%s)\n", lib->path, lib->users,
+                   lib->users == 1 ? "" : "s", lib->botlib->id,
+                   lib->funcs.BotVersion ? lib->funcs.BotVersion() : "no version");
         for (i = 0; i < game.maxclients; i++)
         {
             bs = &botglobals.botstates[i];
             if (!bs->active) continue;
             if (bs->library != lib) continue;
             ent = DF_CLIENTENT(i);
-            gi.dprintf("    client %3d: %s\n", i,
-                       ent->client ? ent->client->pers.netname : "?");
+            //...and a bot's own skill, where its botlib has them -- the one
+            //place outside the botlib that says what a bot was set up at
+            //(R-BOT-34)
+            if (lib->botlib->skills && ent->client)
+                gi.dprintf("    client %3d: %s, skill %d\n", i,
+                           ent->client->pers.netname,
+                           BotSkillOf(ent->client->pers.userinfo));
+            else
+                gi.dprintf("    client %3d: %s\n", i,
+                           ent->client ? ent->client->pers.netname : "?");
         } //end for
     } //end for
 } //end of the function BotLibraryDump
@@ -2367,3 +2699,216 @@ void BotRunFrame(void)
         } //end if
     } //end if
 } //end of the function BotRunFrame
+//===========================================================================
+// `sv botstats` (R-BOT-36): a per-client record of one measurement window, so
+// that a match between two botlibs' bots can be scored from outside the
+// library.  `sv botperf` measures what the bots cost; this measures what they
+// did.
+//
+// Counted at the three points the game already funnels every event through,
+// and nowhere else: T_Damage past the protections and the team rules (the
+// same point BotClientHurt and tourney's accuracy table read, so `take` is
+// what the hit actually cost after armour), player_die once per death, and
+// Touch_Item once per pickup that was taken.  A slot's counters are the
+// slot's, not the person's: a window is meant to be taken with the same
+// clients from reset to report, and a reader that cannot promise that should
+// compare `sv clientdump` at both ends.
+//
+// Each death also prints one `botstats kill` line while the window is open,
+// because a kill matrix -- who killed whom, and with what -- is the measure a
+// comparison actually needs, and a per-slot total cannot be taken apart into
+// one afterwards.  The lines are console-only and appear only after an
+// explicit `sv botstats reset`, so a server that never asks prints nothing.
+//===========================================================================
+enum {
+    BOTSTATS_WEAPON,
+    BOTSTATS_AMMO,
+    BOTSTATS_ARMOR,
+    BOTSTATS_HEALTH,
+    BOTSTATS_POWERUP,
+    BOTSTATS_OTHER,
+    BOTSTATS_PICKUPS
+};
+
+static struct {
+    bool open;
+    int  since;                 // level.framenum of the reset
+    struct {
+        int kills;              // other clients killed, team-mates excluded
+        int deaths;             // every death, however caused
+        int suicides;           // killed by themselves or by the world
+        int teamkills;          // team-mates killed
+        int dmg_given;          // to other clients, team-mates excluded
+        int dmg_taken;          // from other clients, team-mates excluded
+        int dmg_self;           // to themselves
+        int dmg_team;           // to team-mates
+        int hits;               // hits that cost another client something
+        int pickups[BOTSTATS_PICKUPS];
+    } cl[MAX_CLIENTS];
+} botstats;
+
+//
+// The team a client is on in the running ruleset's own terms, or -1.  Not
+// OnSameTeam(), which answers only for arena and dmflags teams: ctf keeps its
+// teams in `ctf_team` and the OSP pair in `team`, where 2 is "no team".
+//
+static int BotStatsTeam(edict_t *ent)
+{
+    switch (G_Ruleset())
+    {
+        case RULESET_CTF:
+            return ent->client->resp.ctf_team == CTF_NOTEAM ? -1 : ent->client->resp.ctf_team;
+        case RULESET_ARENA:
+            return ent->client->resp.teamnum;
+        case RULESET_TDM:
+        case RULESET_DUEL:
+            return ent->client->resp.team == 0 || ent->client->resp.team == 1 ?
+                   ent->client->resp.team : -1;
+        default:
+            return -1;
+    } //end switch
+} //end of the function BotStatsTeam
+
+static bool BotStatsTeamMates(edict_t *a, edict_t *b)
+{
+    int team = BotStatsTeam(a);
+
+    return a != b && team >= 0 && team == BotStatsTeam(b);
+} //end of the function BotStatsTeamMates
+
+void BotStatsReset(bool open)
+{
+    memset(&botstats, 0, sizeof(botstats));
+    botstats.open = open;
+    botstats.since = level.framenum;
+} //end of the function BotStatsReset
+
+void BotStatsHurt(edict_t *targ, edict_t *attacker, int mod, int take)
+{
+    int t, a;
+
+    if (!botstats.open || take <= 0 || !targ->client || !attacker || !attacker->client)
+        return;
+    t = DF_ENTCLIENT(targ);
+    a = DF_ENTCLIENT(attacker);
+    if (targ == attacker)
+    {
+        botstats.cl[a].dmg_self += take;
+    } //end if
+    else if (BotStatsTeamMates(targ, attacker))
+    {
+        botstats.cl[a].dmg_team += take;
+    } //end else if
+    else
+    {
+        botstats.cl[a].dmg_given += take;
+        botstats.cl[a].hits++;
+        botstats.cl[t].dmg_taken += take;
+    } //end else
+} //end of the function BotStatsHurt
+
+void BotStatsDeath(edict_t *self, edict_t *attacker, int mod)
+{
+    int v, a = -1;
+    const char *kind;
+
+    if (!botstats.open || !self->client)
+        return;
+    v = DF_ENTCLIENT(self);
+    botstats.cl[v].deaths++;
+    if (attacker && attacker->client)
+        a = DF_ENTCLIENT(attacker);
+    if (a < 0 || attacker == self)
+    {
+        botstats.cl[v].suicides++;
+        kind = a < 0 ? "world" : "self";
+    } //end if
+    else if (BotStatsTeamMates(self, attacker))
+    {
+        botstats.cl[a].teamkills++;
+        kind = "team";
+    } //end else if
+    else
+    {
+        botstats.cl[a].kills++;
+        kind = "frag";
+    } //end else
+    newgameimport.dprintf("botstats kill %d %d %d %d %s\n", level.framenum, a, v,
+                          mod & ~MOD_FRIENDLY_FIRE, kind);
+} //end of the function BotStatsDeath
+
+//
+// `health` is the caller's, because only g_items.c can see Pickup_Health and
+// a health item's itemlist row has no classname to recognise it by.
+//
+void BotStatsPickup(edict_t *other, const gitem_t *item, bool health)
+{
+    int kind;
+
+    if (!botstats.open || !other->client || !item)
+        return;
+    if (item->flags & IT_WEAPON)
+        kind = BOTSTATS_WEAPON;
+    else if (item->flags & IT_AMMO)
+        kind = BOTSTATS_AMMO;
+    else if (item->flags & IT_ARMOR)
+        kind = BOTSTATS_ARMOR;
+    else if (item->flags & IT_POWERUP)
+        kind = BOTSTATS_POWERUP;
+    else if (health)
+        kind = BOTSTATS_HEALTH;
+    else
+        kind = BOTSTATS_OTHER;
+    botstats.cl[DF_ENTCLIENT(other)].pickups[kind]++;
+} //end of the function BotStatsPickup
+
+//
+// One header line, then one line per client in use: its botlib -- `human`
+// for a person -- its skill where its botlib has one, its team, the
+// ruleset's own score, and the window's counters.  The name comes last
+// because it is the only field that can contain a space.
+//
+void BotStatsReport(void)
+{
+    edict_t *ent;
+    const char *lib, *skill;
+    int i, *p;
+
+    newgameimport.dprintf("botstats frame %d since %d frames %d ruleset %s %s\n",
+                          level.framenum, botstats.since,
+                          level.framenum - botstats.since,
+                          G_RulesetName(G_Ruleset()),
+                          botstats.open ? "open" : "closed");
+    for (i = 0; i < game.maxclients; i++)
+    {
+        ent = DF_CLIENTENT(i);
+        if (!ent->inuse || !ent->client)
+            continue;
+        lib = "human";
+        skill = "-";
+        if (ent->flags & FL_BOT)
+        {
+            bot_library_t *library = botglobals.botstates ? botglobals.botstates[i].library : NULL;
+
+            lib = library && library->botlib ? library->botlib->id : "none";
+            skill = Info_ValueForKey(ent->client->pers.userinfo, "skill");
+            if (!*skill)
+                skill = "-";
+        } //end if
+        p = botstats.cl[i].pickups;
+        newgameimport.dprintf("botstats client %d lib %s skill %s team %d score %d "
+                              "kills %d deaths %d suicides %d teamkills %d "
+                              "dmggiven %d dmgtaken %d dmgself %d dmgteam %d hits %d "
+                              "weapons %d ammo %d armor %d health %d powerups %d other %d "
+                              "name %s\n",
+                              i, lib, skill, BotStatsTeam(ent), ent->client->resp.score,
+                              botstats.cl[i].kills, botstats.cl[i].deaths,
+                              botstats.cl[i].suicides, botstats.cl[i].teamkills,
+                              botstats.cl[i].dmg_given, botstats.cl[i].dmg_taken,
+                              botstats.cl[i].dmg_self, botstats.cl[i].dmg_team,
+                              botstats.cl[i].hits,
+                              p[BOTSTATS_WEAPON], p[BOTSTATS_AMMO], p[BOTSTATS_ARMOR],
+                              p[BOTSTATS_HEALTH], p[BOTSTATS_POWERUP], p[BOTSTATS_OTHER],
+                              ent->client->pers.netname);
+    } //end for
+} //end of the function BotStatsReport

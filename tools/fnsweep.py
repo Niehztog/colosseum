@@ -407,6 +407,11 @@ CLUSTERS = [
     # five spawn rows and the function could never be reached (g_spawn.c).
     ("Ground Zero's Reckoning stand-ins, unreachable behind the itemlist",
      r'^SP_xatrix_item$'),
+    # The donor's library-by-path load (`BotUseLibrary(path)`) is a load by
+    # BOTLIB now: a bot is one botlib's because its character is, and the
+    # botlib is asked for by what it is rather than by file name (R-BOT-33).
+    ('one library per botlib, asked for by botlib (R-BOT-33)',
+     r'^BotUseLibrary$'),
 ]
 CLUSTERS = [(n, re.compile(p)) for n, p in CLUSTERS]
 FINDINGS_CLUSTER = CLUSTERS[0][0]

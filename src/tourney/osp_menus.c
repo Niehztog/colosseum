@@ -37,6 +37,7 @@ void OSP_menuVotePercent(char *pct, size_t pctsize, char *out, size_t outsize);
 
 #include "tourney/osp_stats.h"
 #include "bot/bl_main.h"
+#include "bot/bl_botlib.h"
 #include "bot/bl_botcfg.h"
 // The two bot entry points.
 void BotServerCommand(char *str, ...);
@@ -369,6 +370,14 @@ static char v2_line5[32];
 static char v2_line6[32];
 static char v2_line7[32];
 static char bot_name_line[32];
+static char bot_menu_title[32];
+
+// The bot labels (R-BOT-34).  With one botlib offered they name it -- with
+// Gladiator's, every label is 1999's, "Gladiator Bots" and all; with more
+// (BotlibsMany) they say "Bots", and the picker prefixes a name with its
+// botlib's two letters -- the "GB|" this menu's own placeholder row has
+// always carried.  BotlibsQualifier() is the word; osp_cmds.c's proposal text
+// follows the same rule.
 static char bot_add_line[32];
 static char bot_rem_line[32];
 static char bot_total_line[32];
@@ -1142,10 +1151,12 @@ void OSP_updateVoteMenu(edict_t *ent)
     }
 
     if (!(int)vote_enable_bots->value) {
-        Q_snprintf(vm_bots, sizeof(vm_bots), "Gladiator Bots [LOCKED]");
+        Q_snprintf(vm_bots, sizeof(vm_bots), "%sBots [LOCKED]",
+                   BotlibsQualifier());
         Vote_Menu[6].SelectFunc = NULL;
     } else {
-        Q_snprintf(vm_bots, sizeof(vm_bots), "Gladiator Bots...");
+        Q_snprintf(vm_bots, sizeof(vm_bots), "%sBots...",
+                   BotlibsQualifier());
         Vote_Menu[6].SelectFunc = OSP_botMenu;
     }
 
@@ -1339,7 +1350,10 @@ void OSP_updateBotMenu(edict_t *ent)
         else {
             for (t = 0, b = botlist; b && t < ent->client->resp.osp_r29c; b = b->next, t++)
                 ;
-            if (b)
+            if (b && BotlibsMany())
+                Q_snprintf(bot_name_line, sizeof(bot_name_line), "%s|%s",
+                           b->botlib->tag, b->name);
+            else if (b)
                 Q_strlcpy(bot_name_line, b->name, sizeof(bot_name_line));
         }
     }
@@ -1354,6 +1368,9 @@ void OSP_updateBotMenu(edict_t *ent)
     Bot_Menu[6].arg = &bot_add_arg;
     Bot_Menu[7].arg = &bot_rem_arg;
     Bot_Menu[4].text = bot_name_line;
+    Q_snprintf(bot_menu_title, sizeof(bot_menu_title), "[ %sBots Menu ]",
+               BotlibsQualifier());
+    Bot_Menu[1].text = bot_menu_title;
     Bot_Menu[6].text = bot_add_line;
     Bot_Menu[7].text = bot_rem_line;
     Bot_Menu[9].text = bot_total_line;
@@ -1462,13 +1479,29 @@ void OSP_updateProposalMenu(edict_t *ent)
         }
         break;
     case 0x100:
-        Q_snprintf(pm_line1, sizeof(pm_line1), "Add 1 Gladiator bot");
+        if (BotlibsMany())
+        {
+            // which bot, and whose: the vote carries an index into the list
+            bot_t       *b;
+            int         t;
+
+            for (t = 0, b = botlist; b && t < Q_atoi(vote_value); b = b->next, t++)
+                ;
+            if (b)
+                Q_snprintf(pm_line1, sizeof(pm_line1), "Add %s|%s", b->botlib->tag, b->name);
+            else
+                Q_snprintf(pm_line1, sizeof(pm_line1), "Add 1 bot");
+        }
+        else
+            Q_snprintf(pm_line1, sizeof(pm_line1), "Add 1 %sbot", BotlibsQualifier());
         break;
     case 0x200:
-        Q_snprintf(pm_line1, sizeof(pm_line1), "Add %s Gladiator bots", vote_value);
+        Q_snprintf(pm_line1, sizeof(pm_line1), "Add %s %sbots", vote_value,
+                   BotlibsQualifier());
         break;
     case 0x400:
-        Q_snprintf(pm_line1, sizeof(pm_line1), "Remove %s Gladiator bots", vote_value);
+        Q_snprintf(pm_line1, sizeof(pm_line1), "Remove %s %sbots", vote_value,
+                   BotlibsQualifier());
         break;
     default:
         Q_snprintf(pm_line1, sizeof(pm_line1), "Umm, what were we voting for?");

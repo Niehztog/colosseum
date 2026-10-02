@@ -37,6 +37,14 @@
 #                             The bot rows need a brain as well as a
 #                             server: without it they are skipped, and the skip
 #                             is reported rather than silently subtracted.
+#   $Q3DIR                    q3a_bot_backport_for_q2, for `-s botlibmenu`:
+#                             the Quake III botlib's bot files.  Default the
+#                             submodule, then ../q3a_bot_backport_for_q2; its
+#                             library and bspc come from beside $LIB.
+#   $BOTLIBS                  run a scenario's bots on another botlib,
+#                             unchanged: BOTLIBS=q3 is every server's
+#                             `botlibs`, with the Quake III botlib and its
+#                             meshes ($Q3MESHES, made once) in every fixture.
 #
 # USAGE
 #   tools/playtest.sh [-s <scenario>] [-r dm,dmpro,tdm,duel,ctf,arena,sp] \
@@ -354,6 +362,23 @@
 #                  which is one q2pro process hosting its own map, and takes a
 #                  screenshot of the menu that opens.
 #
+#     botlibmenu   the bot menu with BOTH botlibs offered (R-BOT-34): the add
+#                  list puts each botlib's bots under its name in `botlibs`'
+#                  order, a Quake III bot is a submenu of the five skills with
+#                  `botskill`'s marked, picking one adds him at it, a Gladiator
+#                  bot is added at once, and the bots page's `bot skill` row
+#                  cycles `botskill` and wraps.  Read from both sides: the
+#                  layout the client was sent, and `sv botlibs`/`sv botlibdump`
+#                  -- with the Quake III botlib's own "loaded skill 1 from
+#                  bots/sarge_c.c", which it prints only when asked for less
+#                  than 4, as the receipt that the skill reached it.  A second
+#                  server, under `dm` on the next port, asks the same of OSP's
+#                  vote menu: "Bots" for "Gladiator Bots", `Q3|`/`GB|` in the
+#                  picker, and a vote for a picked bot that proposes
+#                  "Add Q3|<name>." and adds it on its own botlib.  Exits 2
+#                  without either botlib; it makes its Quake III meshes with
+#                  that botlib's bspc (seconds), or takes `-map`'s as `-q3aas`.
+#
 #     ra2packweap  the pack weapons' menu half: does the arena settings menu offer the
 #                  mission packs' six weapons exactly when their content layer
 #                  is on?  Five whole servers, each asserting a difference --
@@ -626,6 +651,71 @@ if [ -f "$GLAD/assets/bots.cfg" ]; then
   GLADBOTCFG=$GLAD/assets
 fi
 
+# BOTLIBS runs a scenario's bots on another botlib, unchanged (R-BOT-31).
+# `BOTLIBS=q3` -- or `q3,gladiator` -- becomes the `botlibs` of every server the
+# scenario starts (PLAYTEST_CVARS), and puts the Quake III botlib into every
+# fixture InstallBrain lays out, with a mesh for every map Gladiator's has one
+# for.  Those meshes are made with that botlib's bspc out of the retail paks
+# the first time they are wanted, and kept in $Q3MESHES: seconds a map, a few
+# minutes for the set.  It reaches the scenarios that install bots through
+# InstallBrain and add them by `addrandom` or the fill; a scenario that names
+# a Gladiator character finds no Quake III bot by that name.
+if [ -n "${BOTLIBS:-}" ]; then
+  export PLAYTEST_CVARS="${PLAYTEST_CVARS:+$PLAYTEST_CVARS }botlibs=$BOTLIBS"
+  case ",$BOTLIBS," in
+  *,q3,*)
+    LIBDIR=$(cd "$(dirname "$LIB")" && pwd)
+    COLOSSEUM_Q3BOT=$LIBDIR/q3bot.so
+    Q3BSPC=$LIBDIR/q3bot/bspc
+    { [ -f "$COLOSSEUM_Q3BOT" ] && [ -x "$Q3BSPC" ]; } ||
+      die "no q3bot.so and q3bot/bspc beside $LIB -- make native"
+    if [ -z "${Q3DIR:-}" ]; then
+      for _q in "$ROOT/vendor/q3a_bot_backport_for_q2" "$ROOT/../q3a_bot_backport_for_q2"; do
+        [ -d "$_q/assets/botfiles/bots" ] && Q3DIR=$_q && break
+      done
+    fi
+    { [ -n "${Q3DIR:-}" ] && [ -d "$Q3DIR/assets/botfiles/bots" ]; } ||
+      die "no Quake III bot files -- set Q3DIR to a q3a_bot_backport_for_q2 checkout"
+    [ -n "$GLAD" ] || die "BOTLIBS=$BOTLIBS reads the maps off Gladiator's meshes -- set GLADDIR"
+    COLOSSEUM_Q3DIR=$(cd "$Q3DIR" && pwd)
+    COLOSSEUM_Q3MESHES=${Q3MESHES:-$PLAYTEST_DIR/q3meshes}
+    mkdir -p "$COLOSSEUM_Q3MESHES"
+    COLOSSEUM_Q3MESHES=$(cd "$COLOSSEUM_Q3MESHES" && pwd)
+    made=0
+    for g in "$GLAD"/assets/maps/*.aas; do
+      m=$(basename "$g" .aas)
+      [ -f "$COLOSSEUM_Q3MESHES/$m.aas" ] && continue
+      # A leak is remembered by its .lin; delete that to try the map again.
+      if [ -f "$COLOSSEUM_Q3MESHES/$m.lin" ]; then
+        echo "playtest.sh: $m leaks for the Quake III bspc ($m.lin); that map has no Quake III bots" >&2
+        continue
+      fi
+      for src in "$Q2DATA" "$CTFDATA" "$ARENADATA" "$XATRIXDATA" "$ROGUEDATA"; do
+        for bsp in "$src/maps/$m.bsp" "$src"/pak*.pak; do
+          case $bsp in *.pak) bsp=$bsp/maps/$m.bsp ;; *) [ -f "$bsp" ] || continue ;; esac
+          # `|| true`: this script runs under `set -e`, and bspc exits
+          # non-zero for a pak that lacks the map as well as for a map it
+          # cannot convert -- the file below is the answer either way.
+          ( cd "$COLOSSEUM_Q3MESHES" &&
+            "$Q3BSPC" -bsp2aas "$bsp" -output "$COLOSSEUM_Q3MESHES" >/dev/null 2>&1 ) || true
+          [ -f "$COLOSSEUM_Q3MESHES/$m.aas" ] && break 2
+        done
+      done
+      if [ -f "$COLOSSEUM_Q3MESHES/$m.aas" ]; then
+        made=$((made + 1))
+      elif [ -f "$COLOSSEUM_Q3MESHES/$m.lin" ]; then
+        echo "playtest.sh: $m leaks for the Quake III bspc ($m.lin); that map has no Quake III bots" >&2
+      else
+        echo "playtest.sh: no $m.bsp in the retail paks; that map has no Quake III bots" >&2
+      fi
+    done
+    rm -f "$COLOSSEUM_Q3MESHES/bspc.log"
+    echo "playtest.sh: BOTLIBS=$BOTLIBS, $(ls "$COLOSSEUM_Q3MESHES"/*.aas 2>/dev/null | wc -l) Quake III mesh(es) in $COLOSSEUM_Q3MESHES, $made made now"
+    export COLOSSEUM_Q3BOT COLOSSEUM_Q3DIR COLOSSEUM_Q3MESHES
+    ;;
+  esac
+fi
+
 if supports_flag q2proded && ! has_option q2proded "$@"; then
   set -- "$@" -q2proded "$Q2PRODED"
 fi
@@ -646,6 +736,20 @@ if supports_flag gladdir && ! has_option gladdir "$@"; then
 fi
 if supports_flag glad && ! has_option glad "$@"; then
   set -- "$@" -glad "$GLADSO"
+fi
+# The Quake III botlib's data, for the scenario that offers both botlibs: its
+# character, chat and weight files are the q3a_bot_backport_for_q2
+# distribution's assets/botfiles.  Its library and bspc are not looked for here
+# -- the Makefile builds both beside $LIB, which is where the scenario looks.
+if supports_flag q3dir && ! has_option q3dir "$@"; then
+  if [ -z "${Q3DIR:-}" ]; then
+    for _q in "$ROOT/vendor/q3a_bot_backport_for_q2" "$ROOT/../q3a_bot_backport_for_q2"; do
+      [ -d "$_q/assets/botfiles/bots" ] && Q3DIR=$_q && break
+    done
+  fi
+  [ -n "${Q3DIR:-}" ] && [ -d "$Q3DIR/assets/botfiles/bots" ] ||
+    die "no Quake III bot files -- set Q3DIR to a q3a_bot_backport_for_q2 checkout"
+  set -- "$@" -q3dir "$(cd "$Q3DIR" && pwd)"
 fi
 if supports_flag pak7 && ! has_option pak7 "$@"; then
   [ -n "$GLADPAK" ] || die "no Gladiator pak7.pak under $GLADDIR/assets"

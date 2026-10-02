@@ -18,6 +18,7 @@ with this program; if not, write to the Free Software Foundation, Inc.,
 #include "g_local.h"
 #include "tourney/osp_hooks.h"
 #include "arena/arena.h"
+#include "bot/bl_main.h"
 
 bool        Pickup_Weapon(edict_t *ent, edict_t *other);
 void        Use_Weapon(edict_t *ent, const gitem_t *inv);
@@ -1296,6 +1297,8 @@ void Touch_Item(edict_t *ent, edict_t *other, cplane_t *plane, csurface_t *surf)
     taken = ent->item->pickup(ent, other);
 
     if (taken) {
+        BotStatsPickup(other, ent->item, ent->item->pickup == Pickup_Health);   // R-BOT-36
+
         // flash the screen
         other->client->bonus_alpha = 0.25f;
 

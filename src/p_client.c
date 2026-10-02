@@ -788,6 +788,8 @@ void player_die(edict_t *self, edict_t *inflictor, edict_t *attacker, int damage
         LookAtKiller(self, inflictor, attacker);
         self->client->ps.pmove.pm_type = PM_DEAD;
         ClientObituary(self, inflictor, attacker);
+        // Once per death, under `!deadflag` as the obituary is (R-BOT-36).
+        BotStatsDeath(self, attacker, meansOfDeath);
 
         // CTF: telefragging your own teammate on his spawn costs the attacker
         // the frag it just earned, rather than rewarding a bad spawn point.

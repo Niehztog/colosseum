@@ -40,6 +40,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 #include "g_local.h"
 #include "bot/bl_main.h"
+#include "bot/bl_botlib.h"
 #include "bot/bl_spawn.h"
 #include "bot/bl_redirgi.h"
 #include "bot/bl_botcfg.h"
@@ -52,6 +53,10 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 bot_t *botlist;
 static char botfilename[BOT_MAX_PATH];
+// ...and the `botlibs` value the list was loaded for: the list holds the bot
+// lists of the botlibs offered, in that order (R-BOT-32), so a change to
+// either is a change to it.
+static char botlibsvalue[MAX_INFO_STRING];
 
 // The parser reads one character at a time out of a loaded file rather than a
 // FILE *, so that a bots.cfg inside a pak parses exactly like one on disk.
@@ -87,7 +92,11 @@ static void AddBotToList(bot_t *bot)
     lastbot = NULL;
     for (b = botlist; b; b = b->next)
     {
-        if (Q_stricmp(bot->name, b->name) < 0)
+        //by the botlib's place in `botlibs` first, so each botlib's bots stay
+        //together -- the menus head each group with its botlib's name, and
+        //OSP's `vote specbot <n>` counts through the list in this order
+        if (bot->rank < b->rank ||
+            (bot->rank == b->rank && Q_stricmp(bot->name, b->name) < 0))
         {
             //add the new bot before the current bot
             bot->next = b;
@@ -193,7 +202,7 @@ static int ReadSpace(botcfg_t *f)
 // Returns:                 -
 // Changes Globals:     -
 //========================================================================
-static int LoadBotsFromFile(const char *filename)
+static int LoadBotsFromFile(const char *filename, const botlib_t *botlib, int rank)
 {
     int lastline, c, numbots;
     botcfg_t f;
@@ -262,6 +271,8 @@ static int LoadBotsFromFile(const char *filename)
         //
         bot = gi.TagMalloc(sizeof(bot_t), TAG_GAME);
         *bot = tmpbot;
+        bot->botlib = botlib;
+        bot->rank = rank;
         AddBotToList(bot);
         //
         numbots++;
@@ -269,7 +280,8 @@ static int LoadBotsFromFile(const char *filename)
     G_FsFreeFile(buffer);
     //if not at the end of the file something was wrong
     if (c != EOF && f.pos < f.len) return false;
-    gi.dprintf("loaded %d bot%s from %s\n", numbots, numbots == 1 ? "" : "s", filename);
+    gi.dprintf("loaded %d bot%s from %s for the %s botlib\n", numbots,
+               numbots == 1 ? "" : "s", filename, botlib->id);
     return true;
 } //end of the function LoadBotsFromFile
 //========================================================================
@@ -289,10 +301,11 @@ void BotListForget(void)
 
 void LoadBots(void)
 {
+    const botlib_t *offered[BOTLIB_COUNT];
     bot_t *bot;
     char botfile[BOT_MAX_PATH];
     char **list;
-    int i, count;
+    int i, count, b, n;
 
     //free the current botlist
     while(botlist)
@@ -302,19 +315,34 @@ void LoadBots(void)
         gi.TagFree(bot);
     } //end for
     //
-    // The donor builds "./<gamedir>/<botfile>" by hand.  The filesystem is
-    // already rooted at the gamedir, so the path IS the cvar's value -- and
-    // that is what makes a bots.cfg inside a pak findable at all.
-    Q_strlcpy(botfile, BotFile()->string, sizeof(botfile));
-    //load bots from the main bot cfg file
-    LoadBotsFromFile(botfile);
-    //load the bots from all *.cfg files in the "bots" sub-folder
-    list = G_FsListFiles("bots", ".cfg", &count);
-    for (i = 0; i < count; i++)
+    // One bot list per botlib offered, and the bots of a botlib that is not
+    // offered are not loaded at all: nothing can add one (R-BOT-32).  A row is
+    // a character, and a character file is one botlib's, so the list a row
+    // came from is what says which botlib drives that bot.
+    n = BotlibsOffered(offered);
+    for (b = 0; b < n; b++)
     {
-        LoadBotsFromFile(list[i]);
+        if (offered[b]->roster)
+        {
+            //its own file in its own data directory, which installs with it
+            LoadBotsFromFile(offered[b]->roster, offered[b], b);
+            continue;
+        } //end if
+        //
+        // The donor builds "./<gamedir>/<botfile>" by hand.  The filesystem is
+        // already rooted at the gamedir, so the path IS the cvar's value --
+        // and that is what makes a bots.cfg inside a pak findable at all.
+        Q_strlcpy(botfile, BotFile()->string, sizeof(botfile));
+        //load bots from the main bot cfg file
+        LoadBotsFromFile(botfile, offered[b], b);
+        //load the bots from all *.cfg files in the "bots" sub-folder
+        list = G_FsListFiles("bots", ".cfg", &count);
+        for (i = 0; i < count; i++)
+        {
+            LoadBotsFromFile(list[i], offered[b], b);
+        } //end for
+        G_FsFreeFileList(list);
     } //end for
-    G_FsFreeFileList(list);
 } //end of the function LoadBots
 //========================================================================
 //
@@ -322,16 +350,45 @@ void LoadBots(void)
 // Returns:                 -
 // Changes Globals:     -
 //========================================================================
-bot_t *FindBotWithName(const char *name)
+bot_t *FindBotWithName(const char *name, const botlib_t *botlib)
+{
+    bot_t *bot;
+
+    //without regard to case: `addbot sarge` is a person typing a name the
+    //list spells "Sarge", and two rows that differ only in case would be two
+    //clients nobody can tell apart
+    for (bot = botlist; bot; bot = bot->next)
+    {
+        if (botlib && bot->botlib != botlib) continue;
+        if (!Q_stricmp(bot->name, name)) return bot;
+    } //end for
+    return NULL;
+} //end of the function FindBotWithName
+
+bot_t *FindBotWithCharacter(const char *charfile, const char *charname)
 {
     bot_t *bot;
 
     for (bot = botlist; bot; bot = bot->next)
     {
-        if (!strcmp(bot->name, name)) return bot;
+        if (!Q_stricmp(bot->charfile, charfile) &&
+            !Q_stricmp(bot->charname, charname)) return bot;
     } //end for
     return NULL;
-} //end of the function FindBotWithName
+} //end of the function FindBotWithCharacter
+
+int BotRosterCount(const botlib_t *botlib)
+{
+    bot_t *bot;
+    int n = 0;
+
+    CheckForNewBotFile();
+    for (bot = botlist; bot; bot = bot->next)
+    {
+        if (bot->botlib == botlib) n++;
+    } //end for
+    return n;
+} //end of the function BotRosterCount
 //========================================================================
 // Picks up an edit to the `botfile`/`bots_botfile` cvar without a
 // restart.  Blocks 1 and 2 of seventeen are the cvar name, which
@@ -343,15 +400,37 @@ bot_t *FindBotWithName(const char *name)
 //========================================================================
 void CheckForNewBotFile(void)
 {
-    cvar_t *botfile;
+    cvar_t *botfile, *offered;
 
     botfile = BotFile();
-    if (Q_stricmp(botfilename, botfile->string))
+    offered = BotlibsCvar();
+    if (Q_stricmp(botfilename, botfile->string) ||
+        strcmp(botlibsvalue, offered->string))
     {
         LoadBots();
         Q_strlcpy(botfilename, botfile->string, sizeof(botfilename));
+        Q_strlcpy(botlibsvalue, offered->string, sizeof(botlibsvalue));
     } //end if
 } //end of the function CheckForNewBotFile
+//========================================================================
+// The next row of one botlib's bots after `bot`, wrapping round to its first
+// -- the donor walk's `bot->next` with the list's other botlibs stepped over.
+// NULL starts at the first.
+//========================================================================
+static bot_t *NextOfBotlib(bot_t *bot, const botlib_t *botlib)
+{
+    bot_t *b;
+
+    for (b = bot ? bot->next : botlist; b; b = b->next)
+    {
+        if (b->botlib == botlib) return b;
+    } //end for
+    for (b = botlist; b && b != bot; b = b->next)
+    {
+        if (b->botlib == botlib) return b;
+    } //end for
+    return bot;
+} //end of the function NextOfBotlib
 //========================================================================
 // Returns success.
 //
@@ -376,6 +455,10 @@ int AddRandomBot(edict_t *ent)
     int nbots;
     bot_t *bot;
     edict_t *cl_ent;
+    // The botlib whose bots this adds: the first `botlibs` offers that can
+    // play this map (R-BOT-32).  The donor's walk below is unchanged, and
+    // walks that botlib's rows only -- NextOfBotlib() is its `bot->next`.
+    const botlib_t *botlib;
 
     if (!G_BotsAllowed())
     {
@@ -391,8 +474,22 @@ int AddRandomBot(edict_t *ent)
         return false;
     } //end if
     CheckForNewBotFile();
+    botlib = BotlibPreferred();
+    if (!botlib)
+    {
+        // Not one of the botlibs offered can play this map: no library, a
+        // map its library refused, or no AAS file for it.  `sv botlibs` says
+        // which, per botlib.
+        if (ent) gi.cprintf(ent, PRINT_HIGH, "No bot can play %s (see sv botlibs)\n",
+                            level.mapname);
+        else gi.dprintf("No bot can play %s (see sv botlibs)\n", level.mapname);
+        return false;
+    } //end if
     //
-    for (numbots = 0, bot = botlist; bot; bot = bot->next) numbots++;
+    for (numbots = 0, bot = botlist; bot; bot = bot->next)
+    {
+        if (bot->botlib == botlib) numbots++;
+    } //end for
     if (!numbots)
     {
         if (ent) gi.cprintf(ent, PRINT_HIGH, "No configured bots to add!\n");
@@ -404,7 +501,7 @@ int AddRandomBot(edict_t *ent)
     nbots = numbots;
     // The doubling reads `numbots` again, not the copy just made.
     numbots = numbots * 2;
-    for (bot = botlist; bot && numbots > 0; numbots--, choice--)
+    for (bot = NextOfBotlib(NULL, botlib); bot && numbots > 0; numbots--, choice--)
     {
         for (i = 0; i < game.maxclients; i++)
         {
@@ -420,8 +517,7 @@ int AddRandomBot(edict_t *ent)
             if (choice <= 0) break;
         } //end if
         //
-        bot = bot->next;
-        if (!bot) bot = botlist;
+        bot = NextOfBotlib(bot, botlib);
     } //end for
     // Two laps from a start inside the list visit every bot, so a walk that
     // ran out without settling means every configured bot is already in the
@@ -441,8 +537,7 @@ int AddRandomBot(edict_t *ent)
             choice = frand() * nbots;
             for (i = 0; i < choice; i++)
             {
-                bot = bot->next;
-                if (!bot) bot = botlist;
+                bot = NextOfBotlib(bot, botlib);
             } //end for
         } //end if
         BotServerCommand("sv", "addbot", bot->name, bot->skin, bot->charfile,

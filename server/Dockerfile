@@ -356,7 +356,8 @@ COPY --from=colosseum-src . /src-colosseum
 # .dockerignore says the same for the builders that honour it.
 RUN cd /src-colosseum && \
     rm -rf release* debug* build \
-           vendor/gladiator-bot-restored/release vendor/gladiator-bot-restored/build
+           vendor/gladiator-bot-restored/release vendor/gladiator-bot-restored/build \
+           vendor/q3a_bot_backport_for_q2/release vendor/q3a_bot_backport_for_q2/build
 
 # `make linux32` builds debug AND release into separate directories; release is
 # the one installed.  The contract audits and the g_ptrs.c freshness check run
@@ -503,6 +504,53 @@ RUN set -eu; \
     echo "botlib OK (ELF32, exports GetBotAPI, GLAD_SERVERFIX in); pak7.pak $(stat -c%s /out-colosseum/pak7.pak) bytes, bots.cfg $(grep -c . /out-colosseum/bots.cfg) lines, bspc 1.4 staged"
 
 # ---------------------------------------------------------------------------
+# The Quake III botlib, its data, and its map-prep tool
+# ---------------------------------------------------------------------------
+# The second botlib (colosseum's SPECS.md R-BOT-31): the Quake III Arena bot,
+# adapted to Quake II, from colosseum's `vendor/q3a_bot_backport_for_q2`
+# submodule -- pinned by the colosseum checkout, built for the same i386 target
+# as everything above.  It reads everything it reads from one directory under
+# the gamedir, `q3bot/`: its botfiles, its bot list, and its own AAS files,
+# which are another format from Gladiator's.  Its `bspc` makes one per map
+# natively in seconds and needs no reachability pass in the game, so
+# scripts/make-colosseum-aas.sh --q3 is a loop over bspc and nothing more.
+#
+# CFLAGS go through the ENVIRONMENT, not the command line: its Makefile appends
+# -fPIC and -shared per target without `override`, and a command-line CFLAGS
+# beats a target-specific append -- the shared object would be built without
+# -fPIC.  CC and YQ2_ARCH are the command line's, as for Gladiator's.
+#
+# Its bot data is Quake III Arena's own -- not distributable, and not in
+# colosseum's release packages -- but this image is the deployment's own build
+# out of the submodule, exactly as pak7.pak is above.
+RUN set -eu; \
+    cd /src-colosseum/vendor/q3a_bot_backport_for_q2; \
+    [ -f Makefile ] || { echo 'the q3a_bot_backport_for_q2 submodule is not checked out in the build context - run: git -C <clone> submodule update --init'; exit 1; }; \
+    CFLAGS="-Wall -pipe -fomit-frame-pointer -fstack-protector-strong" \
+        make botlib bspc CC=i686-linux-gnu-gcc YQ2_ARCH=i386; \
+    install -Dm755 release/botlib/botlib.so /out-colosseum/q3bot.so; \
+    install -Dm755 release/bspc/bspc        /out-colosseum/q3bspc; \
+    mkdir -p /out-colosseum/q3bot; \
+    cp -r assets/botfiles /out-colosseum/q3bot/botfiles; \
+    install -Dm644 assets/botfiles/bots.cfg /out-colosseum/q3bot/bots.cfg
+
+# Its checks are the Gladiator botlib's in its own terms: the target, GetBotAPI
+# as its only export, and the two strings that say it is the botlib the game
+# expects -- the handshake prefix the game identifies it by, and the `datadir`
+# support that keeps its files out of Gladiator's.
+RUN set -eu; \
+    readelf -h /out-colosseum/q3bot.so | grep -q 'ELF32' \
+        || { echo 'q3bot.so is not ELF32 - YQ2_ARCH did not take'; exit 1; }; \
+    [ "$(readelf --dyn-syms -W /out-colosseum/q3bot.so | awk '$7 != "UND" && $5 == "GLOBAL" {print $8}')" = GetBotAPI ] \
+        || { echo 'q3bot.so exports something other than GetBotAPI alone'; exit 1; }; \
+    strings -a /out-colosseum/q3bot.so | grep -q 'Q3Backport-' \
+        || { echo 'q3bot.so carries no Q3Backport version - not the Quake III botlib'; exit 1; }; \
+    strings -a /out-colosseum/q3bot.so | grep -qx 'datadir' \
+        || { echo 'q3bot.so reads no datadir - a backport too old to run beside Gladiator'; exit 1; }; \
+    readelf -h /out-colosseum/q3bspc | grep -q 'ELF32' || { echo 'q3bspc is not ELF32'; exit 1; }; \
+    echo "Quake III botlib OK (ELF32, GetBotAPI alone, datadir); $(ls /out-colosseum/q3bot/botfiles/bots | wc -l) bot files, q3bspc staged"
+
+# ---------------------------------------------------------------------------
 # The colosseum runtime                                      (--target colosseum)
 # ---------------------------------------------------------------------------
 # NOT a production server: nothing runs from this image on the live host. It is
@@ -575,6 +623,11 @@ COPY --from=colosseum-build /out-colosseum/gladiator.so   /opt/colosseum/gladiat
 COPY --from=colosseum-build /out-colosseum/pak7.pak       /opt/colosseum/pak7.pak
 COPY --from=colosseum-build /out-colosseum/bots.cfg       /opt/colosseum/bots.cfg
 COPY --from=colosseum-build /out-colosseum/bspc           /opt/colosseum/bspc
+# ...and the Quake III botlib's: the library, its data directory's contents
+# and its bspc, installed into <gamedir>/q3bot/ on start the same way.
+COPY --from=colosseum-build /out-colosseum/q3bot.so       /opt/colosseum/q3bot.so
+COPY --from=colosseum-build /out-colosseum/q3bot          /opt/colosseum/q3bot
+COPY --from=colosseum-build /out-colosseum/q3bspc         /opt/colosseum/q3bspc
 
 USER quake2
 WORKDIR /opt/quake2
@@ -618,6 +671,9 @@ CMD bind=; case "$Q2_IP" in ""|localhost) ;; *) bind="+set net_ip $Q2_IP" ;; esa
     install -m 755 /opt/colosseum/gladiator.so /opt/quake2/$Q2_GAMEDIR/gladiator.so && \
     install -m 644 /opt/colosseum/pak7.pak /opt/quake2/$Q2_GAMEDIR/pak7.pak && \
     install -m 644 -D /opt/colosseum/bots.cfg /opt/quake2/$Q2_GAMEDIR/botcfg/bots.cfg && \
+    install -m 755 /opt/colosseum/q3bot.so /opt/quake2/$Q2_GAMEDIR/q3bot.so && \
+    mkdir -p /opt/quake2/$Q2_GAMEDIR/q3bot/maps && \
+    cp -r /opt/colosseum/q3bot/. /opt/quake2/$Q2_GAMEDIR/q3bot/ && \
     mkdir -p /opt/quake2/$Q2_GAMEDIR/logs /opt/quake2/$Q2_GAMEDIR/maps && \
     echo "colosseum $(cat /opt/colosseum/commit) -> $Q2_GAMEDIR" && \
     script -qefc "stty -onlcr; /opt/q2pro/q2proded \

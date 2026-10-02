@@ -29,6 +29,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 #include "g_local.h"
 #include "bot/bl_main.h"
+#include "bot/bl_botlib.h"
 #include "bot/bl_spawn.h"
 #include "bot/bl_redirgi.h"
 #include "bot/bl_botcfg.h"
@@ -464,9 +465,36 @@ bool BotCmd(const char *cmd, edict_t *ent, int server)
             BotPerfReport();
         } //end else
     } //end else if
+    else if (server && Q_stricmp(cmd, "botstats") == 0)
+    {
+        //What each client did in a window (R-BOT-36).  "reset" opens a fresh
+        //one -- which also starts the per-death lines -- "off" closes it, and
+        //no argument reports it.
+        if (gi.argc() > 2 && !Q_stricmp(gi.argv(2), "reset"))
+        {
+            BotStatsReset(true);
+            gi.dprintf("botstats reset %d\n", level.framenum);
+        } //end if
+        else if (gi.argc() > 2 && !Q_stricmp(gi.argv(2), "off"))
+        {
+            BotStatsReset(false);
+            gi.dprintf("botstats off\n");
+        } //end else if
+        else
+        {
+            BotStatsReport();
+        } //end else
+    } //end else if
     else if (server && Q_stricmp(cmd, "botlibdump") == 0)
     {
         BotLibraryDump();
+    } //end else if
+    else if (server && Q_stricmp(cmd, "botlibs") == 0)
+    {
+        //Per botlib: offered or not, its library, its bot list and the AAS
+        //file it would find for this map -- the operator's one view of why a
+        //botlib's bots do or do not appear (R-BOT-32).
+        BotlibDump();
     } //end else if
     else if (server && Q_stricmp(cmd, "clientdump") == 0)
     {

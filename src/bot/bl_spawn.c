@@ -29,6 +29,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 #include "g_local.h"
 #include "bot/bl_main.h"
+#include "bot/bl_botlib.h"
 #include "bot/bl_spawn.h"
 #include "bot/bl_redirgi.h"
 #include "bot/bl_botcfg.h"
@@ -58,7 +59,10 @@ static int botfill_ceiling;
 typedef struct queuedbot_s
 {
     int count;
-    char library[BOT_MAX_PATH];
+    // The botlib the bot is for: a bot is one botlib's because its character
+    // is (R-BOT-31).  The 1999 game queued a library per bot instead -- the
+    // `botlib` cvar's value as it stood when the bot was queued.
+    const botlib_t *botlib;
     char userinfo[MAX_INFO_STRING];
     edict_t *ent;
     struct queuedbot_s *next;
@@ -597,9 +601,10 @@ void BotSpawn(void)
     //because a server with no bot states yet still changes map.  This is
     //arena's clear too now -- arena_init() used to zero a second copy.
     botfill_ceiling = 0;
-    //...and so is whether a brain could load the map, which the next line of
-    //SpawnEntities asks again (CheckMinimumPlayers)
-    botglobals.mapfailed = false;
+    //...and so is whether each botlib could load the map, which the next line
+    //of SpawnEntities asks again, and whether its AAS file is there
+    //(CheckMinimumPlayers, BotlibPlayable)
+    BotlibNewLevel();
     if (!botglobals.botstates) return;
     for (i = 0; i < game.maxclients; i++)
     {
@@ -674,7 +679,7 @@ void RemoveLoadImage(edict_t *ent)
 // Returns:                 -
 // Changes Globals:     -
 //===========================================================================
-void AddBotToQueue(edict_t *ent, const char *library, const char *userinfo)
+void AddBotToQueue(edict_t *ent, const botlib_t *botlib, const char *userinfo)
 {
     queuedbot_t *bot;
 
@@ -684,7 +689,7 @@ void AddBotToQueue(edict_t *ent, const char *library, const char *userinfo)
     memset(bot, 0, sizeof(*bot));
     bot->ent = ent;
     bot->count = 2;
-    Q_strlcpy(bot->library, library, sizeof(bot->library));
+    bot->botlib = botlib;
     // MAX_INFO_STRING-1 on the userinfo copy, and Q_strlcpy rather
     // than a memcpy of a fixed length out of a buffer that may be shorter.
     Q_strlcpy(bot->userinfo, userinfo, sizeof(bot->userinfo));
@@ -748,17 +753,19 @@ void AddQueuedBots(void)
 
     bot = queuedbots;
     queuedbots = queuedbots->next;
-    //load the default library
-    lib = BotUseLibrary(bot->library);
+    //the library of the bot's botlib, loaded the first time
+    lib = BotUseBotlib(bot->botlib);
     if (!lib)
     {
         //a brain that loaded and could not take this map is a different
         //failure from one that is not there, and the one an operator can act on
-        if (botglobals.mapfailed)
+        if (BotlibMapFailed(bot->botlib))
             gi.cprintf(bot->ent, PRINT_HIGH, "%s could not load map %s -- no "
-                       "bots on this map\n", bot->library, level.mapname);
+                       "%s bots on this map\n", BotlibFile(bot->botlib),
+                       level.mapname, bot->botlib->id);
         else
-            gi.cprintf(bot->ent, PRINT_HIGH, "%s not available\n", bot->library);
+            gi.cprintf(bot->ent, PRINT_HIGH, "%s not available\n",
+                       BotlibFile(bot->botlib));
     } //end if
     else
     {
@@ -866,44 +873,104 @@ void BotAddDeathmatch(edict_t *ent)
 {
     char uinfo[MAX_INFO_STRING];
     char bname[MAX_NETNAME];
-    int max, i;
+    char name[BOT_MAX_PATH], skin[BOT_MAX_PATH];
+    char charfile[BOT_MAX_PATH], charname[BOT_MAX_PATH];
+    const botlib_t *botlib;
+    const char *skillarg = NULL;
+    bot_t *bot;
+    int base, args, skill;
 
-    if (!Q_stricmp(gi.argv(0), "sv"))
+    //the console's form is `sv addbot ...`, so its arguments start one later
+    base = !Q_stricmp(gi.argv(0), "sv") ? 2 : 1;
+    args = gi.argc() - base;
+    CheckForNewBotFile();
+    if (args == 1 || args == 2)
     {
-        max = 6;
-        i = 1;
+        // The short form, Quake III's: a bot out of the bot lists by its name,
+        // and a skill (R-BOT-34).  The lists are searched in `botlibs`'s
+        // order, so a name two of them share is the preferred botlib's.
+        bot = FindBotWithName(gi.argv(base), NULL);
+        if (!bot)
+        {
+            gi.cprintf(ent, PRINT_HIGH, "no bot called \"%s\" in the bot lists "
+                       "(`sv botlibs` says which are loaded)\n", gi.argv(base));
+            return;
+        } //end if
+        Q_strlcpy(name, bot->name, sizeof(name));
+        Q_strlcpy(skin, bot->skin, sizeof(skin));
+        Q_strlcpy(charfile, bot->charfile, sizeof(charfile));
+        Q_strlcpy(charname, bot->charname, sizeof(charname));
+        botlib = bot->botlib;
+        if (args == 2) skillarg = gi.argv(base + 1);
     } //end if
-    else
+    else if (args >= 4)
     {
-        max = 5;
-        i = 0;
-    } //end else
-    //need at least 6 parmeters (command name included)
-    if (gi.argc() < max)
+        // The classic form names a character, not a botlib -- and a character
+        // file is one botlib's: the bot list that holds it says whose
+        // (R-BOT-31).  So a bots.cfg row exec'd as a script, a `bot` entity in
+        // a map, a vote and the menus all reach the right botlib through the
+        // one command.  A character no offered list holds goes to the botlib
+        // offered first (BotlibDefault), which under the default `botlibs` is
+        // Gladiator's.
+        Q_strlcpy(name, gi.argv(base), sizeof(name));
+        Q_strlcpy(skin, gi.argv(base + 1), sizeof(skin));
+        Q_strlcpy(charfile, gi.argv(base + 2), sizeof(charfile));
+        Q_strlcpy(charname, gi.argv(base + 3), sizeof(charname));
+        bot = FindBotWithCharacter(charfile, charname);
+        botlib = bot ? bot->botlib : BotlibDefault();
+        if (args >= 5) skillarg = gi.argv(base + 4);
+    } //end else if
+    else
     {
         gi.cprintf(ent, PRINT_HIGH, "too few parameters\n");
         gi.cprintf(ent, PRINT_HIGH,
-                        "Usage:   addbot <name> <skin> <charfile> <charname>\n"
-                        "Example: addbot brianna female/brianna char.c Brianna\n"
+                        "Usage:   addbot <name> [skill]\n"
+                        "         addbot <name> <skin> <charfile> <charname> [skill]\n"
+                        "Example: addbot Sarge 3\n"
+                        "         addbot brianna female/brianna char.c Brianna\n"
                         "\n"
-                        "<name>     = name of the bot\n"
+                        "<name>     = a bot out of the bot lists, or the name of a new one\n"
                         "<skin>     = skin of the bot\n"
                         "<charfile> = character file\n"
-                        "<charname> = character name\n");
+                        "<charname> = character name\n"
+                        "[skill]    = 1..5, for a bot whose botlib has skills;\n"
+                        "             botskill when left out\n");
         return;
+    } //end else
+
+    // A skill is the bot's, 1..5, and only a botlib with skills reads it.
+    // Gladiator's characters carry theirs in the character file, so one given
+    // for a Gladiator bot is said to be ignored rather than silently dropped.
+    if (skillarg)
+    {
+        skill = Q_atoi(skillarg);
+        if (skill < 1 || skill > 5)
+        {
+            gi.cprintf(ent, PRINT_HIGH, "skill %s is not 1..5\n", skillarg);
+            return;
+        } //end if
+        if (!botlib->skills)
+            gi.cprintf(ent, PRINT_HIGH, "%s's skill is its character's; %d "
+                       "ignored\n", name, skill);
     } //end if
+    else
+    {
+        skill = Q_clip((int)BotSkill()->value, 1, 5);
+    } //end else
 
     memset(uinfo, 0, sizeof(uinfo));
-    if (!BotUniqueName(gi.argv(i + 1), bname, sizeof(bname)))
+    if (!BotUniqueName(name, bname, sizeof(bname)))
     {
-        gi.cprintf(ent, PRINT_HIGH, "client name %s is already used\n", gi.argv(i + 1));
+        gi.cprintf(ent, PRINT_HIGH, "client name %s is already used\n", name);
         return;
     } //end if
     if (!BotSetUserinfo(ent, uinfo, "name", bname) ||
-        !BotSetUserinfo(ent, uinfo, "skin", gi.argv(i + 2)) ||
-        !BotSetUserinfo(ent, uinfo, "charfile", gi.argv(i + 3)) ||
-        !BotSetUserinfo(ent, uinfo, "charname", gi.argv(i + 4)))
+        !BotSetUserinfo(ent, uinfo, "skin", skin) ||
+        !BotSetUserinfo(ent, uinfo, "charfile", charfile) ||
+        !BotSetUserinfo(ent, uinfo, "charname", charname))
         return;
+    if (botlib->skills)
+        Info_SetValueForKey(uinfo, "skill", va("%d", skill));
     //
     // The donor's two #ifdef fences, as the resolution's answer.  `arena` and
     // `botctfteam` are cvars a server operator sets; the userinfo key is how
@@ -948,8 +1015,7 @@ void BotAddDeathmatch(edict_t *ent)
     {
         Info_SetValueForKey(uinfo, "ctfteam", gi.cvar("botctfteam", "0", 0)->string);
     } //end if
-    //load the default library
-    AddBotToQueue(ent, gi.cvar("botlib", BotDefaultLibrary(), 0)->string, uinfo);
+    AddBotToQueue(ent, botlib, uinfo);
 } //end of the function BotAddDeathmatch
 //===========================================================================
 // become a bot
@@ -960,6 +1026,7 @@ void BotAddDeathmatch(edict_t *ent)
 //===========================================================================
 void BotBecomeDeathmatch(edict_t *ent)
 {
+    const botlib_t *botlib;
     bot_library_t *lib;
 
     if (!ent)
@@ -975,12 +1042,15 @@ void BotBecomeDeathmatch(edict_t *ent)
         gi.cprintf(ent, PRINT_HIGH, "you are a bot already\n");
         return;
     } //end if
-    //load the default library
-    lib = BotUseLibrary(gi.cvar("botlib", BotDefaultLibrary(), 0)->string);
+    //the botlib the fill would use, which is the first one `botlibs` offers
+    //that can play this map (R-BOT-32), and else the first one offered, whose
+    //refusal then says why
+    botlib = BotlibPreferred();
+    if (!botlib) botlib = BotlibDefault();
+    lib = BotUseBotlib(botlib);
     if (!lib)
     {
-        gi.cprintf(ent, PRINT_HIGH, "%s not available\n",
-                   gi.cvar("botlib", BotDefaultLibrary(), 0)->string);
+        gi.cprintf(ent, PRINT_HIGH, "%s not available\n", BotlibFile(botlib));
         return;
     } //end if
     BotBecome(ent, lib);
@@ -1279,15 +1349,6 @@ void CheckMinimumPlayers(void)
     bool fillon;
     char buf[32];
 
-    // A map no brain could load takes no bots, and every one the fill asked
-    // for there was a whole library load: dlopen, BotSetupLibrary, a failed
-    // BotLoadMap and, with `freebotlib` 1, the unload -- every 32 frames for
-    // the rest of the level, because a queued bot is a request that succeeds
-    // and the fill never hears that its bot did not.  So the fill stops for
-    // the level; BotSpawn clears the latch at the next one, and `addbot` still
-    // tries and says why it cannot.
-    if (botglobals.mapfailed) return;
-
     minplayers = BotMinPlayers();
 
     // Only the switches are read here.  Everything above the frame gate below
@@ -1319,6 +1380,18 @@ void CheckMinimumPlayers(void)
     if (G_IsOspRuleset() && !OSP_BotFillReady(!fillon)) return;
     //
     if (level.framenum & 31) return;
+    // A map no offered botlib can play takes no bots, and every one the fill
+    // asked for there was a whole library load: dlopen, BotSetupLibrary, a
+    // failed BotLoadMap and, with `freebotlib` 1, the unload -- every 32
+    // frames for the rest of the level, because a queued bot is a request
+    // that succeeds and the fill never hears that its bot did not.  "Can
+    // play" is per botlib (BotlibPlayable): its library has not refused the
+    // map, and the AAS file it would look for is there.  So the fill asks the
+    // first botlib `botlibs` offers that can, which is what AddRandomBot adds,
+    // and stops for the level when none can; BotSpawn clears both answers at
+    // the next one, and `addbot` still tries and says why it cannot.  Below
+    // the gate, so a server that wants no bots never searches for a file.
+    if (!BotlibPreferred()) return;
     // Which arena the fill is feeding, and it is asked for first on a fill tick
     // because under `arena` it is also the CENSUS that changes: a target
     // belonging to one of up to 32 games on the map has to be compared against

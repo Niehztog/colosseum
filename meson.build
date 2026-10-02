@@ -121,6 +121,7 @@ colosseum_src = files(
 
   # BOT -- the Gladiator Bot SDK glue
   'src/bot/bl_botcfg.c',
+  'src/bot/bl_botlib.c',
   'src/bot/bl_cmd.c',
   'src/bot/bl_debug.c',
   'src/bot/bl_main.c',

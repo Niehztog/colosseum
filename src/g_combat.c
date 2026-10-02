@@ -18,6 +18,7 @@ with this program; if not, write to the Free Software Foundation, Inc.,
 // g_combat.c
 
 #include "g_local.h"
+#include "bot/bl_main.h"
 #include "tourney/osp_hooks.h"
 #include "arena/arena.h"
 #include "arena/ra2stats.h"
@@ -926,6 +927,18 @@ void T_Damage(edict_t *targ, edict_t *inflictor, edict_t *attacker, const vec3_t
     // team rules, which is what the report means by damage given and taken.
     if (G_IsOspRuleset())
         OSP_accDamage(targ, inflictor, attacker, mod, take);
+
+    // Who hurt a bot, and how, for the Quake III botlib's hit chats (R-BOT-35):
+    // here, past godmode, the protections and the team rules, which is where
+    // Quake III's own G_Damage records `lasthurt_client` -- a hit the armour
+    // took whole still counts, one the rules refused does not.  A record and
+    // nothing else: no ruleset's damage reads it, and a target that is not a
+    // bot returns at once.
+    BotClientHurt(targ, attacker, mod);
+
+    // ...and the same point for `sv botstats` (R-BOT-36), which counts `take`
+    // as tourney's accuracy table does: what reached the health.
+    BotStatsHurt(targ, attacker, mod, take);
 
 // do the damage
     if (take) {

@@ -37,6 +37,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 #include "g_local.h"
 #include "bot/bl_main.h"
+#include "bot/bl_botlib.h"
 #include "bot/bl_spawn.h"
 #include "bot/bl_redirgi.h"
 #include "bot/bl_botcfg.h"
@@ -99,12 +100,26 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 // The donor gave the credits submenu MID_HELP as its item id, so
 // bot_MenuItemWithId(MID_HELP) found the help menu and "Credits" could never be
 // entered -- a duplicate id in a tree that is searched by id.
+// `botskill`, on the bots page under the fill switch -- the skill of a bot
+// nobody chose one for (R-BOT-34).  Shown only while a botlib with skills is
+// offered, because Gladiator's characters carry their own.
+#define MID_BOT_SKILL               45
 #define MID_BOT_ADD_FIRST           256
 #define MID_BOT_ADD_LAST            511
 #define MID_BOT_REMOVE_FIRST        512
 #define MID_BOT_REMOVE_LAST         1024
+// The add list's skill rows: a bot of a botlib with skills is a SUBMENU of the
+// add list, holding Quake III's five, and picking one adds the bot at it.
+// Five ids per add-list entry, so the entry and the skill are both in the id.
+#define MID_BOT_ADDSKILL_FIRST      1100
+#define MID_BOT_ADDSKILL_LAST       (MID_BOT_ADDSKILL_FIRST + \
+                                     (MID_BOT_ADD_LAST - MID_BOT_ADD_FIRST + 1) * 5 - 1)
 
 static bot_menu_t *mainmenu;
+// The botlib of each add-list entry, by its place in the list: the entry's
+// text is the bot's name, and two botlibs' lists may share a name.  Rebuilt
+// with the list, which is the shared tree's, like this.
+static const botlib_t *addmenubotlib[MID_BOT_ADD_LAST - MID_BOT_ADD_FIRST + 1];
 
 //========================================================================
 //
@@ -154,10 +169,12 @@ static void SetupRemoveBotMenu(void)
 //========================================================================
 static void SetupAddBotMenu(void)
 {
-    int i, n;
+    int i, n, s;
     edict_t *cl_ent;
     bot_menuitem_t *menuitem;
-    bot_menu_t *addmenu, *parent = NULL;
+    bot_menu_t *addmenu, *skillmenu, *parent = NULL;
+    const botlib_t *heading = NULL;
+    bool many;
     bot_t *bot;
 
     CheckForNewBotFile();
@@ -172,9 +189,27 @@ static void SetupAddBotMenu(void)
     } //end if
     //
     addmenu = bot_MenuTreeCreate(MID_BOT_ADD, "", "m_add");
+    // With more than one botlib offered, each one's bots come under its name,
+    // in `botlibs`' order (the bot list is kept that way), and a botlib that
+    // cannot play this map says so under its name instead of listing bots that
+    // would only be refused (R-BOT-32, R-BOT-34).  With one, the list is the
+    // 1999 list.
+    many = BotlibsMany();
     n = 0;
     for (bot = botlist; bot; bot = bot->next)
     {
+        if (n > MID_BOT_ADD_LAST - MID_BOT_ADD_FIRST) break;
+        if (bot->botlib != heading)
+        {
+            heading = bot->botlib;
+            if (many)
+                bot_MenuAppend(addmenu, MI_SEPERATOR, -1, NULL,
+                               va("- %s -", heading->title), NULL);
+            if (!BotlibPlayable(heading))
+                bot_MenuAppend(addmenu, MI_SEPERATOR, -1, NULL,
+                               "  cannot play this map", NULL);
+        } //end if
+        if (!BotlibPlayable(bot->botlib)) continue;
         for (i = 0; i < game.maxclients; i++)
         {
             cl_ent = DF_CLIENTENT(i);
@@ -183,8 +218,28 @@ static void SetupAddBotMenu(void)
             if (!strcmp(bot->name, cl_ent->client->pers.netname)) break;
         } //end for
         if (i < game.maxclients) continue;
-        if (n > MID_BOT_ADD_LAST - MID_BOT_ADD_FIRST) break;
-        bot_MenuAppend(addmenu, MI_ITEM, MID_BOT_ADD_FIRST + n, NULL, bot->name, NULL);
+        addmenubotlib[n] = bot->botlib;
+        if (bot->botlib->skills)
+        {
+            // Its five skills, with the bot's name over them -- as a row, not
+            // as the menu's title, which the 32-pixel `m_add` picture would
+            // cover -- and the one it would get unasked marked.
+            skillmenu = bot_MenuTreeCreate(MID_BOT_ADD_FIRST + n, "", "m_add");
+            bot_MenuAppend(skillmenu, MI_SEPERATOR, -1, NULL, bot->name, NULL);
+            for (s = 1; s <= 5; s++)
+                bot_MenuAppend(skillmenu, MI_ITEM, MID_BOT_ADDSKILL_FIRST + n * 5 + s - 1,
+                               NULL, va("%d %s%s", s, BotSkillName(s),
+                                        s == Q_clip((int)BotSkill()->value, 1, 5) ?
+                                        " *" : ""), NULL);
+            bot_MenuAppend(skillmenu, MI_SEPERATOR, -1, NULL, "-----------", NULL);
+            bot_MenuAppend(skillmenu, MI_ITEM, MID_BACK, NULL, "back", NULL);
+            bot_MenuAppend(addmenu, MI_SUBMENU, MID_BOT_ADD_FIRST + n, skillmenu,
+                           bot->name, NULL);
+        } //end if
+        else
+        {
+            bot_MenuAppend(addmenu, MI_ITEM, MID_BOT_ADD_FIRST + n, NULL, bot->name, NULL);
+        } //end else
         n++;
     } //end for
     if (n == 0) bot_MenuAppend(addmenu, MI_SEPERATOR, -1, NULL, "- no bots.cfg -", NULL);
@@ -313,6 +368,19 @@ static const char *MinPlayersString(void)
     return buf;
 }
 //========================================================================
+// The `botskill` row.  Its own cycle, 1..5, with Quake III's name for the
+// value, because "4" beside "bot skill" says nothing a player can weigh.
+//========================================================================
+static const char *BotSkillString(void)
+{
+    static char buf[128];
+    int skill = Q_clip((int)BotSkill()->value, 1, 5);
+
+    Q_snprintf(buf, sizeof(buf), "%-18s%d %s", "bot skill", skill,
+               BotSkillName(skill));
+    return buf;
+}
+//========================================================================
 //
 // Parameter:               -
 // Returns:                 -
@@ -328,13 +396,37 @@ static void MenuProc(edict_t *ent, int id)
 
     if (id >= MID_BOT_ADD_FIRST && id <= MID_BOT_ADD_LAST)
     {
-        str = bot_MenuItemName(mainmenu, id);
-        if (!str) return;
-        bot = FindBotWithName(str);
+        bot_menuitem_t *mi = bot_MenuItemWithId(mainmenu, id);
+
+        //a bot with skills is its skill submenu, and this is the menu being
+        //entered rather than a bot being chosen
+        if (!mi || mi->type == MI_SUBMENU) return;
+        bot = FindBotWithName(mi->name, addmenubotlib[id - MID_BOT_ADD_FIRST]);
         if (!bot) return;
         BotServerCommand("sv", "addbot", bot->name, bot->skin, bot->charfile,
                          bot->charname, NULL);
         bot_MenuRemoveItem(mainmenu, id);
+        return;
+    } //end if
+    if (id >= MID_BOT_ADDSKILL_FIRST && id <= MID_BOT_ADDSKILL_LAST)
+    {
+        int entry = (id - MID_BOT_ADDSKILL_FIRST) / 5;
+        int skill = (id - MID_BOT_ADDSKILL_FIRST) % 5 + 1;
+        bot_menuitem_t *mi = bot_MenuItemWithId(mainmenu, MID_BOT_ADD_FIRST + entry);
+
+        if (!mi) return;
+        bot = FindBotWithName(mi->name, addmenubotlib[entry]);
+        if (!bot) return;
+        //the classic form, whose character says the botlib, with the skill on
+        //the end (BotAddDeathmatch)
+        Q_snprintf(buf, sizeof(buf), "%d", skill);
+        BotServerCommand("sv", "addbot", bot->name, bot->skin, bot->charfile,
+                         bot->charname, buf, NULL);
+        //...and back to the list, which no longer offers that bot
+        bot_MenuBack(ent);
+        bot_MenuTreeDelete(mi->submenu);
+        mi->submenu = NULL;
+        bot_MenuRemoveItem(mainmenu, MID_BOT_ADD_FIRST + entry);
         return;
     } //end if
     if (id >= MID_BOT_REMOVE_FIRST && id <= MID_BOT_REMOVE_LAST)
@@ -463,6 +555,15 @@ static void MenuProc(edict_t *ent, int id)
         case MID_BOT_BOTFILL:
             ToggleMenuCVarBoolean("botfill", "0", id);
             break;
+        case MID_BOT_SKILL:
+        {
+            int skill = Q_clip((int)BotSkill()->value, 1, 5) % 5 + 1;
+
+            Q_snprintf(buf, sizeof(buf), "%d", skill);
+            gi.cvar_set("botskill", buf);
+            bot_MenuItemRename(mainmenu, id, BotSkillString());
+            break;
+        } //end case
         case MID_BACK: //back to the parent menu
         {
             bot_MenuBack(ent);
@@ -527,6 +628,7 @@ static void bot_MenuRelabel(void)
     bot_MenuItemRename(mainmenu, MID_BOT_MINPLAYERS, MinPlayersString());
     bot_MenuItemRename(mainmenu, MID_BOT_BOTFILL, OnOffString("botfill",
                        (int)gi.cvar("botfill", "0", 0)->value));
+    bot_MenuItemRename(mainmenu, MID_BOT_SKILL, BotSkillString());
     bot_MenuItemRename(mainmenu, MID_CTF_BOTTEAM, BotCTFTeamString());
     bot_MenuItemRename(mainmenu, MID_RA2_BOTARENA, BotArenaString());
     bot_MenuItemRename(mainmenu, MID_RA2_PLAYERCYCLE, OnOffString("ra_playercycle",
@@ -736,6 +838,19 @@ void bot_MenuCreate(void)
     bot_MenuAppend(botmenu, MI_ITEM, MID_BOT_BOTFILL, NULL,
                    OnOffString("botfill",
                                (int)gi.cvar("botfill", "0", 0)->value), NULL);
+    // ...and the skill those bots get, when a botlib that has skills is
+    // offered.  The tree is built once per game; `botlibs` read here is the
+    // value at that point, and a botlib offered later gets its row at the
+    // next game.
+    {
+        const botlib_t *offered[BOTLIB_COUNT];
+        int i, n = BotlibsOffered(offered);
+
+        for (i = 0; i < n && !offered[i]->skills; i++)
+            ;
+        if (i < n)
+            bot_MenuAppend(botmenu, MI_ITEM, MID_BOT_SKILL, NULL, BotSkillString(), NULL);
+    }
     bot_MenuAppend(botmenu, MI_SEPERATOR, -1, NULL, "-----------", NULL);
     bot_MenuAppend(botmenu, MI_ITEM, MID_BACK, NULL, "back", NULL);
     //Deathmatch

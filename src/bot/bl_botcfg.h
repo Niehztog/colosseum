@@ -30,19 +30,33 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #ifndef BL_BOTCFG_H
 #define BL_BOTCFG_H
 
+struct botlib_s;
+
 typedef struct bot_s
 {
     char name[BOT_MAX_PATH];
     char skin[BOT_MAX_PATH];
     char charfile[BOT_MAX_PATH];
     char charname[BOT_MAX_PATH];
+    // The botlib whose bot list this row came from, and that botlib's place in
+    // `botlibs`: the list is kept in that order, then by name, so each
+    // botlib's bots are together and the preferred botlib's come first
+    // (R-BOT-32).
+    const struct botlib_s *botlib;
+    int rank;
     struct bot_s *next;
 } bot_t;
 
 extern bot_t *botlist;
 
 void AppendPathSeperator(char *path, int length);
-bot_t *FindBotWithName(const char *name);
+// A bot by its name, in one botlib's list or, for NULL, in the first list
+// that has it.
+bot_t *FindBotWithName(const char *name, const struct botlib_s *botlib);
+// The row naming this character file and character name, if any list has one.
+bot_t *FindBotWithCharacter(const char *charfile, const char *charname);
+// How many bots a botlib's list holds; 0 for a botlib not offered.
+int BotRosterCount(const struct botlib_s *botlib);
 void CheckForNewBotFile(void);
 void LoadBots(void);
 void BotListForget(void);

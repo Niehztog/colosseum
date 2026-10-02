@@ -305,7 +305,7 @@ TOURNEY_SRC = \
 # and bl_botcfg.c define all seven for real.  The early-out is what kept the
 # swap honest.
 BOT_SRC = \
-	bot/bl_botcfg.c bot/bl_cmd.c bot/bl_debug.c bot/bl_main.c \
+	bot/bl_botcfg.c bot/bl_botlib.c bot/bl_cmd.c bot/bl_debug.c bot/bl_main.c \
 	bot/bl_redirgi.c bot/bl_spawn.c \
 	bot/p_botmenu.c bot/p_menulib.c bot/p_observer.c
 
@@ -435,6 +435,31 @@ BOTLIB_PE_LDFLAGS = -Wl,-Bstatic -lssp -Wl,-Bdynamic
 BOTLIB_ARCH = $(if $(findstring i686-linux-gnu,$(CC)),YQ2_ARCH=i386)\
 $(if $(findstring x86_64-linux-gnu,$(CC)),YQ2_ARCH=x86_64)
 
+# ------------------------------------------------- the Quake III botlib
+#
+# THE SECOND BOTLIB, q3a_bot_backport_for_q2, built the same way and for the
+# same reason: every target builds it beside the library, under the name the
+# game dlopens -- `q3bot.dll` on Windows, `q3bot.so` everywhere else, macOS
+# included -- with that tree's `bspc` beside it in `q3bot/`, because a botlib
+# whose AAS files nobody can make is a feature nobody sees (R-BUILD-12).  An
+# absent submodule is a skip here too, and it has its own lock and its own
+# stamp, because it is its own tree with its own `build/` and `release/`.
+#
+# ITS MAKEFILE IS FED THROUGH THE ENVIRONMENT, not its command line, and that
+# is correctness.  It appends `-fPIC` and `-shared` to CFLAGS and LDFLAGS per
+# target without `override`, and a variable on make's command line beats a
+# target-specific one -- so CFLAGS on the command line built a shared object
+# with no -fPIC and a DLL with no -shared.  Its own defaults are `?=`, which the
+# environment fills; MAKEFLAGS is cleared for the reason BOTLIB_MAKE gives.
+# Where it would read the host off `uname`, the target is said instead: its
+# OS for the PE rows (it keys Windows on MSYS's environment, which a cross
+# build does not have), its CPU for the cross rows.
+Q3DIR       ?= vendor/q3a_bot_backport_for_q2
+Q3BOT_LOCK   = .q3bot-lock
+Q3BOT_TARGET = $(if $(filter PE,$(KIND)),YQ2_OSTYPE=Windows \
+$(if $(findstring x86_64,$(CC)),YQ2_ARCH=x86_64,YQ2_ARCH=i386))\
+$(if $(filter ELF,$(KIND)),$(BOTLIB_ARCH))
+
 # ---------------------------------------------------------------- goals
 
 .PHONY: all everything native linux64 linux32 win32 win64 windows macos \
@@ -541,6 +566,41 @@ _build: check
 		printf '%s\n' "$$want" > $$stamp; \
 		cp $(GLADDIR)/release/$$built $(BUILDDIR)/$$name; \
 		[ $(KIND) != PE ] || $(SHELL) tools/pedeps.sh $(BUILDDIR)/$$name; \
+	fi
+	@if [ ! -f $(Q3DIR)/Makefile ]; then \
+		echo "q3bot: $(Q3DIR) is not checked out -- no Quake III botlib built (DEVELOPMENT.md)"; \
+	else \
+		set -e; \
+		case $(KIND) in \
+		PE)    built=botlib.dll;   name=q3bot.dll; bspc=bspc.exe ;; \
+		MACHO) built=botlib.dylib; name=q3bot.so;  bspc=bspc ;; \
+		*)     built=botlib.so;    name=q3bot.so;  bspc=bspc ;; \
+		esac; \
+		lock=$(Q3BOT_LOCK); waited=0; \
+		while ! mkdir $$lock 2>/dev/null; do \
+			waited=$$((waited + 1)); \
+			if [ $$waited -gt 600 ]; then \
+				echo "q3bot: $$lock has been held for ten minutes." >&2; \
+				echo "  If no build owns it, remove it and run this again." >&2; \
+				exit 1; \
+			fi; \
+			sleep 1; \
+		done; \
+		trap 'rmdir $$lock 2>/dev/null || true' EXIT INT TERM; \
+		want="$(CC) $(Q3BOT_TARGET) $(BOTLIB_CFLAGS)"; \
+		stamp=$(Q3DIR)/release/.built-for; \
+		[ -f $$stamp ] && [ "$$(cat $$stamp)" = "$$want" ] \
+			|| env -u MAKEFLAGS $(MAKE) -C $(Q3DIR) clean; \
+		env -u MAKEFLAGS CC=$(CC) CFLAGS="$(BOTLIB_CFLAGS)" \
+			LDFLAGS="$(if $(filter PE,$(KIND)),$(BOTLIB_PE_LDFLAGS))" \
+			$(Q3BOT_TARGET) $(MAKE) -C $(Q3DIR) botlib bspc; \
+		mkdir -p $(Q3DIR)/release; \
+		printf '%s\n' "$$want" > $$stamp; \
+		cp $(Q3DIR)/release/botlib/$$built $(BUILDDIR)/$$name; \
+		mkdir -p $(BUILDDIR)/q3bot; \
+		cp $(Q3DIR)/release/bspc/$$bspc $(BUILDDIR)/q3bot/$$bspc; \
+		[ $(KIND) != PE ] || $(SHELL) tools/pedeps.sh $(BUILDDIR)/$$name; \
+		[ $(KIND) != PE ] || $(SHELL) tools/pedeps.sh $(BUILDDIR)/q3bot/$$bspc; \
 	fi
 
 # A PE artifact is checked for what it IMPORTS the moment it is

@@ -22,7 +22,7 @@ in a `q2server-dockerfile` repository, which is where most of this came from.
 | `scripts/setup-colosseum-serverdata.sh` | Builds a self-contained data tree to compute meshes in |
 | `scripts/make-aas-geometry.sh` | Mesh step 1, off-host: bspc v1.4 over a rotation |
 | `scripts/make-aas-reachability.py` | Mesh step 2, on a workstation: ~14–20 s/map |
-| `scripts/make-colosseum-aas.sh` | Mesh step 2, on the game host: ~30–45 s/map, needs no Windows |
+| `scripts/make-colosseum-aas.sh` | Mesh step 2, on the game host: ~30–45 s/map, needs no Windows. With `--q3`, the Quake III botlib's meshes, in one step |
 | `scripts/validate_override.py` | Checks a `.bsp.override` offline instead of on a live map load |
 | `scripts/q2_test_client.py` | A real protocol-34 handshake, for exercising the connect path |
 
@@ -187,6 +187,14 @@ q2admin the bot list additionally has to be a **loose file**
 extension, so colosseum falls back to plain stdio, and that arm cannot see
 inside a pak.
 
+It installs the **Quake III botlib** beside them as well: `q3bot.so`, and its
+data directory `q3bot/` — botfiles, bot list, and the meshes
+`make-colosseum-aas.sh --q3` made for it, which the deploy refuses if they are
+not that botlib's format. It is inert until the server offers it:
+`set botlibs "q3 gladiator"` in `CFG_EXTRA` fills with Quake III bots and falls
+back to Gladiator's on a map that has no Quake III mesh, and `sv botlibs` on the
+console says per botlib what it found.
+
 Everything server-specific is an input rather than something the script knows:
 
 | Variable | What it supplies |
@@ -253,6 +261,14 @@ Four things bite here, all of them learned the hard way:
   So every rotation map's `.bsp` must be in the *gamedir's* `maps/`, and
   `.bsp.override` files play no part: drive maps by their resolved name and
   name the mesh for that.
+
+**The Quake III botlib's meshes are one step**, and none of the above applies to
+them. Its `bspc` — `q3bspc` in the image, built from the same submodule as the
+botlib — computes reachability and clustering itself, natively, in seconds a
+map, so `make-colosseum-aas.sh --q3 <arena|xatrix>` is a loop over that bspc
+and nothing else: no throwaway server, no rcon, no waiting, and a map that
+already has one is skipped. They are its own format, in `<gamedir>/q3bot/maps/`;
+neither botlib reads the other's.
 
 The mesh rig — `setup-colosseum-serverdata.sh` and the two step-2 scripts — is
 built around two gamedirs called `arena` and `xatrix`, which is the shape it

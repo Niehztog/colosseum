@@ -60,8 +60,9 @@ void BotDestroy(edict_t *bot);
 void BotDestroyAll(void);
 // the bot state of a client ClientDisconnect is dropping while a brain drives it
 void BotClientLeaving(edict_t *ent);
-// adds a bot to the spawn queue
-void AddBotToQueue(edict_t *ent, const char *library, const char *userinfo);
+// adds a bot to the spawn queue, to be driven by `botlib` (bl_botlib.h)
+struct botlib_s;
+void AddBotToQueue(edict_t *ent, const struct botlib_s *botlib, const char *userinfo);
 // seats a bot could still be given, the queued ones already counted out
 int  BotSeatsFree(void);
 // true when a bot of that name is in the queue, not yet in the game

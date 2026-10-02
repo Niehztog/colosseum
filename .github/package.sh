@@ -75,10 +75,20 @@
 # packaging job passes the gate (R-BUILD-11) and the same read-back proves it
 # reached the object, because a flag on a command line is not a flag in a binary.
 #
-# WHAT DOES NOT: game assets of any kind, the botlib's own assets (`pak7.pak`
-# and the `bots.cfg` bot list are the Gladiator distribution's, R-LIC-2) and a
-# mesh for any map but those eight -- made per map, and far larger than
-# everything else here put together.
+# AND THE QUAKE III BOTLIB, the second one (R-BUILD-12): `q3bot.so` /
+# `q3bot.dll`, built from the `vendor/q3a_bot_backport_for_q2` submodule the
+# same way and for the same reason, with that tree's `bspc` in `colosseum/q3bot/`
+# -- the directory everything that botlib reads lives in, and where its AAS
+# files go, because no AAS file that botlib reads ships with anything (R-LIC-8).
+# Its checks are the Gladiator botlib's two questions asked of its bytes: built
+# for this package's target, bspc included, and the build that has the
+# `datadir` support the game relies on to keep the two botlibs' files apart.
+#
+# WHAT DOES NOT: game assets of any kind, the botlibs' own assets (`pak7.pak`
+# and the `bots.cfg` bot list are the Gladiator distribution's, R-LIC-2; the
+# Quake III botlib's character, chat and weight files are id's Quake III Arena
+# data, R-LIC-8) and a mesh for any map but those eight -- made per map, and
+# far larger than everything else here put together.
 #
 # WHAT DOES NOT, AND IS WHY THE DOCUMENTATION IS AN ALLOWLIST RATHER THAN
 # `cp -r docs`: the developer documentation.  `SPECS.md`, `DEVELOPMENT.md`,
@@ -191,6 +201,56 @@ esac
 }
 cp "$GLADDIR/release/$BOTLIB_BUILT" "$STAGE/colosseum/$BOTLIB"
 
+# ...and the Quake III botlib, and its bspc, the same way (R-BUILD-12).
+# $Q3DIR moves the submodule as $GLADDIR does.
+Q3DIR=${Q3DIR:-$ROOT/vendor/q3a_bot_backport_for_q2}
+case $OS in
+  windows) Q3_BUILT=botlib.dll   Q3BOT=q3bot.dll Q3_BSPC=bspc.exe ;;
+  macos)   Q3_BUILT=botlib.dylib Q3BOT=q3bot.so  Q3_BSPC=bspc     ;;
+  *)       Q3_BUILT=botlib.so    Q3BOT=q3bot.so  Q3_BSPC=bspc     ;;
+esac
+for f in "botlib/$Q3_BUILT" "bspc/$Q3_BSPC"; do
+  [ -f "$Q3DIR/release/$f" ] || {
+    echo "package.sh: no $f in $Q3DIR/release -- was the Quake III botlib built?" >&2
+    echo "  Every package carries one, with its bspc, for its own platform." >&2
+    echo "  Build both with: make -C vendor/q3a_bot_backport_for_q2 botlib bspc" >&2
+    echo "  -- CFLAGS through the environment, not the command line; see the" >&2
+    echo "  release workflow and the Makefile beside Q3DIR for why." >&2
+    exit 1
+  }
+done
+cp "$Q3DIR/release/botlib/$Q3_BUILT" "$STAGE/colosseum/$Q3BOT"
+mkdir -p "$STAGE/colosseum/q3bot/maps"
+cp "$Q3DIR/release/bspc/$Q3_BSPC" "$STAGE/colosseum/q3bot/$Q3_BSPC"
+cat > "$STAGE/colosseum/q3bot/README.md" <<'EOF'
+# The Quake III botlib's directory
+
+`q3bot.so` (`q3bot.dll` on Windows), one directory up, is the Quake III bot --
+the AI of Quake III Arena, adapted to Quake II -- and this directory is where
+everything it reads lives. It reads nothing anywhere else, so its files can
+never be mixed up with the Gladiator botlib's, which have the same names.
+
+Three things go here, and the first two are not in this package:
+
+* `botfiles/` and `bots.cfg` -- its characters, their chats and weights, and the
+  bot list. They are Quake III Arena data and are installed from the
+  [q3a_bot_backport_for_q2](https://github.com/Niehztog/q3a_bot_backport_for_q2)
+  distribution: its `assets/botfiles/` is this `botfiles/`, and the `bots.cfg`
+  inside it goes here, beside this file.
+* `maps/<map>.aas` -- one navigation mesh per map, in this botlib's own format.
+  Gladiator's meshes in `colosseum/maps/` are a different format and are not
+  read. Make one with the `bspc` beside this file:
+
+      ./bspc -bsp2aas <basedir>/baseq2/pak1.pak/maps/q2dm1.bsp -output maps/
+
+  It reads a map out of a `.pak` as well as a loose `.bsp`, and takes seconds.
+
+Then offer the botlib: `set botlibs "q3 gladiator"` in `server.cfg` fills the
+server with Quake III bots, and with Gladiator's on a map that has no Quake III
+mesh. `sv botlibs` says, per botlib, what it found and whether it can play the
+map. The package's `README.md` has the rest.
+EOF
+
 # Two files of the same name in one package need a note beside them, and it has
 # to be here rather than in `docs/`: the operator reading it is standing in the
 # directory, deciding which file to copy.  It is in the allowlist below like
@@ -287,6 +347,21 @@ if [ "$want" != "$got" ]; then
   echo "  A botlib built for the host loads on nobody's server; see the header." >&2
   exit 1
 fi
+# ...and the Quake III botlib and its bspc, by the same fields.  An executable
+# and a shared object for one target agree in ELF's class and machine and in
+# Mach-O's cputype, which is all these compare.
+for f in "$Q3BOT" "q3bot/$Q3_BSPC"; do
+  case $OS in
+    linux) got="$(hdr "$STAGE/colosseum/$f" 0 5)$(hdr "$STAGE/colosseum/$f" 18 2)" ;;
+    macos) got=$(hdr "$STAGE/colosseum/$f" 0 8) ;;
+    *)     got= ;;
+  esac
+  if [ "$want" != "$got" ]; then
+    echo "package.sh: colosseum/$f is not built for the same target as $LIB." >&2
+    echo "  library header $want, its header $got; see the header." >&2
+    exit 1
+  fi
+done
 
 # The second question, and this one has the same answer on all three platforms.
 # `AAS_LinkEntity: stack overflow` is the PRT_ERROR text of the overflow guard
@@ -304,10 +379,22 @@ if ! strings -a "$STAGE/colosseum/$BOTLIB" | grep -q 'AAS_LinkEntity: stack over
   echo "  Build it with: make -C vendor/gladiator-bot-restored botlib GLAD_SERVERFIX=1" >&2
   exit 1
 fi
+# The Quake III botlib's two strings: the handshake prefix the game identifies
+# it by (R-BOT-31), and the `datadir` libvar it must read, without which it
+# would look for its files where Gladiator's are (R-BOT-31).  A copy built from
+# a backport older than both is a botlib this game cannot run beside the other.
+for s in 'Q3Backport-' 'datadir'; do
+  if ! strings -a "$STAGE/colosseum/$Q3BOT" | grep -q "$s"; then
+    echo "package.sh: colosseum/$Q3BOT has no \"$s\" in it." >&2
+    echo "  It is not a Quake III botlib this game can run; see the header." >&2
+    exit 1
+  fi
+done
 
 # The stage check.  See the header: this is the part that holds when someone
 # adds a file to a directory this script copies whole.
 expected=$({ echo README.md; echo colosseum/README.md; echo colosseum/oldapi/README.md
+             echo colosseum/q3bot/README.md
              for d in $DOCS; do echo "docs/$d"; done; } | sort)
 actual=$(cd "$STAGE" && find . -name '*.md' | sed 's#^\./##' | sort)
 if [ "$expected" != "$actual" ]; then

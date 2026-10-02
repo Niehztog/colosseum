@@ -51,6 +51,8 @@ src/.g_ptrs.gen*
 # It sits in this tree rather than the submodule's for the reason the Makefile
 # gives beside BOTLIB_LOCK.
 /.botlib-lock/
+# ...and the Quake III botlib's, for the same reason.
+/.q3bot-lock/
 
 __pycache__/
 *.pyc

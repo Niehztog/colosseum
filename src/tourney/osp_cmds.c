@@ -34,6 +34,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "tourney/osp_stats.h"
 #include "bot/bl_main.h"
 #include "bot/bl_botcfg.h"
+#include "bot/bl_botlib.h"
 // The two bot entry points, from the headers that own them.  These were once
 // re-declared here, which is the shape to avoid: a donor's name declared
 // outside the header that declares it.  The seam file they resolved to is
@@ -1644,18 +1645,32 @@ void OSP_voteinfo(edict_t *ent, bool broadcast)
             Q_snprintf(scratch, sizeof(scratch), "Kick Player: %s", cp->client->pers.netname);
             break;
         }
-    } else if (vote_item == 0x100)
-        Q_strlcpy(scratch, "Add 1 Gladiator bot.", sizeof(scratch));
-    else if (vote_item == 0x200) {
-        if (Q_atoi(vote_value) == 1)
-            Q_strlcpy(scratch, "Add 1 Gladiator bot.", sizeof(scratch));
+    } else if (vote_item == 0x100) {
+        // With more than one botlib offered the proposal names the bot and
+        // its botlib, as the proposal menu does (R-BOT-34): the vote carries
+        // an index into the bot list.  With one, 1999's words.
+        bot_t   *b = NULL;
+        int     t;
+
+        if (BotlibsMany())
+            for (t = 0, b = botlist; b && t < Q_atoi(vote_value); b = b->next, t++)
+                ;
+        if (b)
+            Q_snprintf(scratch, sizeof(scratch), "Add %s|%s.", b->botlib->tag, b->name);
         else
-            Q_snprintf(scratch, sizeof(scratch), "Add %d Gladiator bots.", Q_atoi(vote_value));
+            Q_snprintf(scratch, sizeof(scratch), "Add 1 %sbot.", BotlibsQualifier());
+    } else if (vote_item == 0x200) {
+        if (Q_atoi(vote_value) == 1)
+            Q_snprintf(scratch, sizeof(scratch), "Add 1 %sbot.", BotlibsQualifier());
+        else
+            Q_snprintf(scratch, sizeof(scratch), "Add %d %sbots.", Q_atoi(vote_value),
+                       BotlibsQualifier());
     } else if (vote_item == 0x400) {
         if (Q_atoi(vote_value) == 1)
-            Q_strlcpy(scratch, "Remove 1 Gladiator bot.", sizeof(scratch));
+            Q_snprintf(scratch, sizeof(scratch), "Remove 1 %sbot.", BotlibsQualifier());
         else
-            Q_snprintf(scratch, sizeof(scratch), "Remove %d Gladiator bots.", Q_atoi(vote_value));
+            Q_snprintf(scratch, sizeof(scratch), "Remove %d %sbots.", Q_atoi(vote_value),
+                       BotlibsQualifier());
     } else
         Q_strlcpy(scratch, "Vote error, invalid vote item active", sizeof(scratch));
 

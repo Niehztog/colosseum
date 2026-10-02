@@ -76,8 +76,9 @@ jobs:
           - {name: win32,        target: win32,   packages: 'gcc-mingw-w64-i686',   make: ''}
           - {name: win64,        target: win64,   packages: 'gcc-mingw-w64-x86-64', make: ''}
     steps:
-      # The submodule, so `tools/botabi.py` compares the game<->botlib ABI for
-      # real instead of skipping itself.
+      # The submodules -- both botlibs -- so `tools/botabi.py` compares the
+      # game<->botlib ABI for real, for each of them, instead of skipping
+      # itself, and every leg builds both libraries beside the game's.
       - uses: actions/checkout@v7
         with:
           submodules: true

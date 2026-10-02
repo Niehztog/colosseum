@@ -1,6 +1,14 @@
 #!/bin/bash
 #
-# make-colosseum-aas.sh <arena|xatrix> [map ...]
+# make-colosseum-aas.sh [--q3] <arena|xatrix> [map ...]
+#
+# --q3 makes the QUAKE III botlib's meshes instead (colosseum SPECS.md R-BOT-31):
+# its own format, in <gamedir>/q3bot/maps/, made by its own bspc out of the
+# image (`q3bspc`).  That bspc computes reachability and clustering itself, so
+# none of step 2 below applies -- no throwaway server, no rcon, no waiting: one
+# bspc run per map, seconds each, and a map that already has one is skipped.
+# Gladiator's meshes in <gamedir>/maps/ are another format, and neither botlib
+# reads the other's.
 #
 # Build the botlib's AAS navigation meshes for a Colosseum test server's map
 # rotation.  `botfill 1` is set permanently in both test-server.cfg files, but
@@ -89,7 +97,9 @@ log()  { printf '==> %s\n' "$*"; }
 info() { printf '    %s\n' "$*"; }
 die()  { printf 'error: %s\n' "$*" >&2; exit 1; }
 
-[ $# -ge 1 ] || die "usage: $(basename "$0") <arena|xatrix> [map ...]"
+Q3=0
+if [ "${1:-}" = --q3 ]; then Q3=1; shift; fi
+[ $# -ge 1 ] || die "usage: $(basename "$0") [--q3] <arena|xatrix> [map ...]"
 WHICH="$1"; shift
 
 case "$WHICH" in
@@ -134,7 +144,8 @@ mkdir -p "$STATE" "$WORK" "$GAMEDIR/maps"
 
 RCON_PW="$(sed -n 's/^[[:space:]]*set[[:space:]]\+rcon_password[[:space:]]\+"\([^"]*\)".*/\1/p' \
     "$GAMEDIR/test-server.cfg" | head -1)"
-[ -n "$RCON_PW" ] || die "no rcon_password in $GAMEDIR/test-server.cfg"
+# (--q3 drives no server, so it needs no password)
+[ "$Q3" = 1 ] || [ -n "$RCON_PW" ] || die "no rcon_password in $GAMEDIR/test-server.cfg"
 
 # ---------------------------------------------------------------- helpers
 
@@ -265,6 +276,53 @@ except Exception:
     print('?')
 PY
 }
+
+# ---------------------------------------------------------------- --q3
+#
+# The Quake III botlib's meshes: the rotation, each map's .bsp out of the paks
+# by the same helper, and the image's q3bspc over it.  Its own state directory,
+# because a map with a Gladiator mesh is not a map with a Quake III one.
+if [ "$Q3" = 1 ]; then
+    Q3MAPS="$GAMEDIR/q3bot/maps"
+    STATE="$GAMEDIR/.aas-state-q3"
+    mkdir -p "$Q3MAPS" "$STATE"
+    MAPS=("$@")
+    if [ ${#MAPS[@]} -eq 0 ]; then
+        mapfile -t MAPS < <(rotation)
+    fi
+    [ ${#MAPS[@]} -gt 0 ] || die "could not work out the map rotation for $WHICH"
+    log "$WHICH: ${#MAPS[@]} map(s) in rotation, Quake III meshes"
+    built=0; skipped=0; failed=()
+    for name in "${MAPS[@]}"; do
+        mesh="$(resolve_bsp "$name")"
+        if [ -f "$Q3MAPS/$mesh.aas" ]; then
+            skipped=$((skipped + 1)); info "$name: already has one, skipping"; continue
+        fi
+        if ! out="$(extract_bsp "$name" 2>&1)"; then
+            info "$name: cannot extract the .bsp: $out"; failed+=("$name(no-bsp)"); continue
+        fi
+        # The .bsp is extracted under the map's own name; the mesh is named for
+        # the map the engine ends up on (resolve_bsp), as Gladiator's are.
+        bout="$(docker run --rm -v "$WORK:/work" -w /work \
+                    --entrypoint /opt/colosseum/q3bspc "$IMAGE" \
+                    -bsp2aas "/work/$name.bsp" -output /work/ 2>&1 || true)"
+        if [ ! -f "$WORK/$name.aas" ]; then
+            info "$name: bspc produced no .aas:"; printf '%s\n' "$bout" | tail -6 | sed 's/^/      /'
+            failed+=("$name(bspc)"); rm -f "$WORK/$name.bsp"; continue
+        fi
+        install -m 644 "$WORK/$name.aas" "$Q3MAPS/$mesh.aas"
+        touch "$STATE/$name.done"
+        built=$((built + 1))
+        info "$name: $(stat -c%s "$Q3MAPS/$mesh.aas") bytes"
+        rm -f "$WORK/$name.bsp" "$WORK/$name.aas" "$WORK/bspc.log"
+    done
+    rmdir "$WORK" 2>/dev/null || true
+    echo
+    log "$WHICH: $built built, $skipped already there, ${#failed[@]} failed"
+    [ ${#failed[@]} -gt 0 ] && printf '    failed: %s\n' "${failed[*]}"
+    log "Quake III meshes now in $Q3MAPS: $(ls "$Q3MAPS"/*.aas 2>/dev/null | wc -l)"
+    exit 0
+fi
 
 # ---------------------------------------------------------------- the run
 

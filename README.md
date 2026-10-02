@@ -115,7 +115,7 @@ The RA2 download is a Windows self-extractor, and also an ordinary zip archive t
 
 Two extra details: some Threewave distributions ship a loose `q2ctf4a.bsp` beside the paks, which goes in `colosseum/maps/`; and **do not** copy any pack's `game.so` or `gamex86.dll` - that is the pack's own game library, and Colosseum is what replaces it. The loose `maps/`, `music/` and `video/` directories beside those paks are not needed by a server either.
 
-Bots need three more things than that one pak - the botlib file (`gladiator.so`/`gladiator.dll`) itself, the bot list, and one AAS file per map. **A release package brings the botlib and eight of the AAS files**, so the bot list is the only one of the three left to install.
+Bots need three more things than that one pak - the botlib file (`gladiator.so`/`gladiator.dll`) itself, the bot list, and one AAS file per map. **A release package brings the botlib and eight of the AAS files**, so the bot list is the only one of the three left to install. The second botlib, the [Quake III bots](#the-quake-iii-bots), keeps its own files in a directory of its own.
 
 ## Bots
 
@@ -145,6 +145,42 @@ Miss `pak7.pak` and the botlib loads, says *"couldn't load the weapon config"* a
 2. one load of that map with the botlib ingame, which computes reachability and clustering itself and writes the finished file (minutes, not seconds).
 
 **Every build in that directory is v1.4**: `bspc.exe` and `winbspc.exe` for Windows, and `bspci386` for Linux, the build the 1999 Linux release shipped. v1.4 reads a map straight out of a `.pak`, which is the worked example it prints when run with no arguments: `bspc -bsp2aas 'pak1.pak/maps/q2dm*.bsp'`.
+
+### The Quake III bots
+
+A second botlib ships beside Gladiator's: **the Quake III Arena bot**, adapted to Quake II by [`q3a_bot_backport_for_q2`](https://github.com/Niehztog/q3a_bot_backport_for_q2) - Sarge, Anarki, Xaero and the rest, with Quake III's AI and its five skill levels. Every release package carries it as `colosseum/q3bot.so` (`q3bot.dll` on Windows), and everything else it reads lives in one directory of its own, `colosseum/q3bot/`, so its files can never be mixed up with Gladiator's, which have the same names in another format:
+
+```
+colosseum/q3bot.so               the botlib, built for this platform -
+                                 in the release package already
+colosseum/q3bot/bspc             its map-prep tool - in the package too
+colosseum/q3bot/botfiles/        its characters, chats and weights
+colosseum/q3bot/bots.cfg         its bot list
+colosseum/q3bot/maps/q2dm1.aas   one AAS file PER MAP, its own format
+```
+
+**Its bot files and bot list are Quake III Arena data and are not in the package**: copy the backport's `assets/botfiles/` to `colosseum/q3bot/botfiles/`, and the `bots.cfg` inside it to `colosseum/q3bot/bots.cfg`. **Its AAS files are made per map with the `bspc` beside it**, in seconds, straight out of the map's pak - Gladiator's AAS files in `colosseum/maps/` are another format and are not read:
+
+```
+cd colosseum/q3bot
+./bspc -bsp2aas /path/to/baseq2/pak1.pak/maps/q2dm1.bsp -output maps/
+```
+
+Rocket Arena's maps convert the same way, out of the arena paks, at ten to sixty seconds each - all but one: that `bspc` finds a leak in `ra2map16`'s arena 5 that Gladiator's does not, and writes no AAS file for it. With `botlibs "q3 gladiator"`, that map gets Gladiator's bots instead.
+
+**Offering it** is one setting. `botlibs` lists the botlibs the server offers, in order of preference - `gladiator`, the default, is the server as it always was:
+
+```
+set botlibs "q3 gladiator"   // Quake III bots, Gladiator's where a map has no Quake III AAS file
+set botlibs q3               // Quake III bots only
+set botskill 3               // the skill of a bot nobody chose one for, 1..5
+```
+
+The first botlib the list names that can play the map is the one the fill, `sv addrandom` and the bot votes add from, so a rotation with Quake III AAS files for some maps and Gladiator's for others keeps its bots on every map. Both can play in one game: `sv addbot Sarge 4` adds a Quake III bot by name at a skill, `sv addbot "Adrenaline Hunk"` a Gladiator one, and each bot runs on its own botlib. **`sv botlibs`** prints, per botlib, whether it is offered, its library, its bot list, the AAS file it found for this map and whether it can play it - the one place to look when a botlib's bots do not appear.
+
+For the players, the bot menu lists each botlib's bots under its name, and a Quake III bot asks for one of Quake III's five skills - *I Can Win* to *Nightmare!* - before it is added; under the four OSP rulesets the vote menu's bot picker marks a Quake III bot `Q3|` and a Gladiator one `GB|`.
+
+The bots wear their Quake III player models (`sarge/default`, ...), which Quake II clients do not have, so they show as `male/grunt` unless the clients install converted models - the backport's README says how - or the skins in `q3bot/bots.cfg` are changed to stock Quake II ones.
 
 ## Playing
 
@@ -211,7 +247,7 @@ botfill 1            // hold the server at the optimal number for the current ma
 minimumplayers 4     // ...or at four, bots making up the difference (ctf, arena)
 ```
 
-`sv addbot` names one instead, and wants all four of `<name> <skin> <charfile> <charname>`; it prints its own usage if you give it fewer. As the host of a listen server you can also just type `menu` with no password and drive the 1999 bot menu instead - under `ctf` and `arena`, because under the four OSP rulesets `menu` is tourney's own menu. With `serveronlybotcmds` at its default of 1, the commands that manage bots (`addbot`, `addrandom`, `removebot`, `becomebot`, `botpause`) stay console-only and the bot menu wants the rcon password from everybody but that host. The few a bot itself types - `name`, `skin`, `gender`, `teamhelp`, `teamaccompany`, `checkpoint`, `gps` - are client commands whatever it says, and `bbox` needs only `cheats`.
+`sv addbot` names one instead: `sv addbot Sarge 3` takes a bot out of the bot lists by its name, with a skill for a [Quake III bot](#the-quake-iii-bots), and the long form wants all four of `<name> <skin> <charfile> <charname>`; it prints its own usage if you give it fewer. As the host of a listen server you can also just type `menu` with no password and drive the 1999 bot menu instead - under `ctf` and `arena`, because under the four OSP rulesets `menu` is tourney's own menu. With `serveronlybotcmds` at its default of 1, the commands that manage bots (`addbot`, `addrandom`, `removebot`, `becomebot`, `botpause`) stay console-only and the bot menu wants the rcon password from everybody but that host. The few a bot itself types - `name`, `skin`, `gender`, `teamhelp`, `teamaccompany`, `checkpoint`, `gps` - are client commands whatever it says, and `bbox` needs only `cheats`.
 
 **The last two are settings rather than one-shot commands**, and they are how the server keeps itself populated instead of you adding bots by hand after every map change. The server re-checks them every few seconds, adding bots up to the target and removing them again as real players arrive; observers and spectators are counted out, so a full crowd of them does not hold bots back.
 

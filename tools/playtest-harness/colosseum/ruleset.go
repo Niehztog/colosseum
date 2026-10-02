@@ -572,5 +572,67 @@ func InstallBrain(dir, gladdir string) error {
 			return err
 		}
 	}
+	// ...and the Quake III botlib beside it, when the wrapper asks for that
+	// (tools/playtest.sh BOTLIBS): its library, its distribution's data and
+	// bot list, and the meshes the wrapper made for it, copied for the reason
+	// above.  Which botlib the bots then run on is the `botlibs` the wrapper
+	// sets through PLAYTEST_CVARS, so a scenario written for Gladiator's bots
+	// runs on these unchanged -- as long as it adds them by `addrandom` or the
+	// fill, because a Gladiator character named in it is not in this list.
+	if q3dir := os.Getenv("COLOSSEUM_Q3DIR"); q3dir != "" {
+		if err := InstallQ3(dir, os.Getenv("COLOSSEUM_Q3BOT"), q3dir, nil); err != nil {
+			return err
+		}
+		meshes, _ := filepath.Glob(filepath.Join(os.Getenv("COLOSSEUM_Q3MESHES"), "*.aas"))
+		for _, m := range meshes {
+			if err := playtest.CopyFixture(m, filepath.Join(game, "q3bot", "maps", filepath.Base(m))); err != nil {
+				return err
+			}
+		}
+	}
 	return nil
+}
+
+// InstallQ3 adds the Quake III botlib on top of Install (R-BOT-31): its
+// library, as q3bot.so in the gamedir, and the directory everything it reads
+// lives in -- `q3bot/`, which the game pushes to it as `datadir`.  Its
+// character, chat and weight files are the backport distribution's
+// assets/botfiles, linked; nothing writes them.  Its bot list is the caller's
+// when roster is not nil, and the distribution's otherwise.  Its meshes are
+// NOT installed here: they are made per map with its own bspc, in a format
+// Gladiator's are not, and q3bot/maps/ is left empty for the caller.
+func InstallQ3(dir, so, q3dir string, roster []byte) error {
+	game := filepath.Join(dir, "colosseum")
+	data := filepath.Join(game, "q3bot")
+	link := func(src, dst string) error {
+		abs, err := filepath.Abs(src)
+		if err != nil {
+			return err
+		}
+		os.Remove(dst)
+		return os.Symlink(abs, dst)
+	}
+	if _, err := os.Stat(so); err != nil {
+		return fmt.Errorf("no Quake III botlib at %s: %w", so, err)
+	}
+	if err := link(so, filepath.Join(game, "q3bot.so")); err != nil {
+		return err
+	}
+	if err := os.MkdirAll(filepath.Join(data, "maps"), 0o755); err != nil {
+		return err
+	}
+	botfiles := filepath.Join(q3dir, "assets", "botfiles")
+	if _, err := os.Stat(filepath.Join(botfiles, "bots")); err != nil {
+		return fmt.Errorf("no Quake III bot files under %s: %w", botfiles, err)
+	}
+	if err := link(botfiles, filepath.Join(data, "botfiles")); err != nil {
+		return err
+	}
+	if roster == nil {
+		var err error
+		if roster, err = os.ReadFile(filepath.Join(botfiles, "bots.cfg")); err != nil {
+			return err
+		}
+	}
+	return playtest.WriteFixture(filepath.Join(data, "bots.cfg"), roster, 0o644)
 }

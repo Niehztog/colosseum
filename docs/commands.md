@@ -2,7 +2,7 @@
 
 Every client and server command Colosseum accepts, what it does, which ruleset it belongs to, and whether it is server-only.
 
-Generated from `tools/counts.py --list commands` and annotated. **The counts accrue by layer**, in the order the donors were merged; `tools/counts.py` measures the finished tree, so what it prints today is the last of them: **104**.
+Generated from `tools/counts.py --list commands` and annotated. **The counts accrue by layer**, in the order the donors were merged; `tools/counts.py` measures the finished tree, so what it prints today is the last of them: **106**.
 
 ## Inherited from baseq2
 
@@ -134,11 +134,11 @@ Two commands Ground Zero added to baseq2's dispatcher, reachable under every rul
 
 ## The bot layer
 
-The bot command set, reachable from the console as `sv <cmd>`. The five marked `both` are reachable from a client where `serveronlybotcmds` allows it -- which by default it does not, reversing the 1999 default, because the 1999 path exposed `bl_spawn.c`'s 32-byte bot-name copies to clients. The `client` rows are a client's whatever it says (R-BOT-24): the bot menu has its own gate, `bbox` asks for `cheats`, and the rest are what a bot types on its own behalf. Nine are console-only regardless, because they report at the server: `modelindex`, `soundindex`, `imageindex`, `indexprobe`, `inventory`, `botperf`, `botlibdump`, `clientdump` and `botinv`.
+The bot command set, reachable from the console as `sv <cmd>`. The five marked `both` are reachable from a client where `serveronlybotcmds` allows it -- which by default it does not, reversing the 1999 default, because the 1999 path exposed `bl_spawn.c`'s 32-byte bot-name copies to clients. The `client` rows are a client's whatever it says (R-BOT-24): the bot menu has its own gate, `bbox` asks for `cheats`, and the rest are what a bot types on its own behalf. Ten are console-only regardless, because they report at the server: `modelindex`, `soundindex`, `imageindex`, `indexprobe`, `inventory`, `botperf`, `botlibdump`, `botlibs`, `clientdump` and `botinv`.
 
 | command | who | notes |
 |---|---|---|
-| `addbot <name> <skin> <charfile> <charname>` | both | queues one bot; never creates one inside `SpawnEntities` or a `ClientConnect`. A duplicate name is refused, except under the four OSP rulesets, which auto-suffix; a bot already queued holds its name as surely as one in the game. A name, skin, character file or character name the userinfo cannot hold -- 64 characters or more, or a `\`, `"` or `;` -- is refused with a message, and a bot that cannot be seated says why: no free slot, the connect's refusal, or the botlib refusing the character |
+| `addbot <name> [skill]`, `addbot <name> <skin> <charfile> <charname> [skill]` | both | queues one bot; never creates one inside `SpawnEntities` or a `ClientConnect`. **The short form is Quake III's**: a bot out of the offered botlibs' bot lists by name, without regard to case, searched in `botlibs`' order, and a skill 1..5 (R-BOT-34). The long form names a character, and the bot list that holds that character file and name says which botlib drives the bot; a character no offered list holds goes to the first botlib offered. A skill is the bot's -- `botskill` when it is left out -- and only a botlib with skills reads it: one given for a Gladiator bot is said to be ignored, because Gladiator's characters carry theirs. A duplicate name is refused, except under the four OSP rulesets, which auto-suffix; a bot already queued holds its name as surely as one in the game. A name, skin, character file or character name the userinfo cannot hold -- 64 characters or more, or a `\`, `"` or `;` -- is refused with a message, and a bot that cannot be seated says why: no free slot, the connect's refusal, or the botlib refusing the character |
 | `addrandom [n]` | both | picks from `bots.cfg`, skipping bots already in the game or queued for it. Once every one is in, the four OSP rulesets pick again at random and seat a suffixed copy; the rest refuse with `Every configured bot is already in the game.`, which is also where the bot fill stops. `n` is held to the seats a bot could still be given -- the free client slots, less the bots already queued -- and the command says so when it cuts |
 | `removebot [name\|all]` | both | `all` is new: `BotDestroyAll()`, which `ShutdownGame` needs too |
 | `becomebot` | both | turns a human client into a bot |
@@ -152,7 +152,8 @@ The bot command set, reachable from the console as `sv <cmd>`. The five marked `
 | `modelindex`, `soundindex`, `imageindex` | console | the three index tables sized from `game.csr`. Empty rows are skipped: the 1999 table had 256 entries and this one has up to 8192 |
 | `indexprobe <model\|sound\|image> <index>` | console | The control. Asks `BotIndexRecord` about one index and **writes nothing**. It exists because the tables are sized from `game.csr`, so the engine cannot issue an index they have no room for and the overflow arm cannot fire on a real server -- which leaves a check that only ever sees silence and cannot tell "it did not overflow" from "the reporting is broken" |
 | `inventory` | console | `itemlist[]` by name and index |
-| `botlibdump` | console | one block per loaded library, its path, its user count and the clients using it. The bot matrix reads this |
+| `botlibdump` | console | one block per loaded library, its path, its user count, which botlib it is with its `BotVersion`, and the clients using it -- with each bot's skill where its botlib has them. The bot matrix reads this |
+| `botlibs` | console | **New here.** Per botlib: whether `botlibs` offers it and where in the order, its library file and whether it is loaded, its data directory and bot list, the AAS file it would find for this map with that file's version, and whether it can play the map -- the one view of why a botlib's bots do or do not appear (R-BOT-32) |
 | `clientdump` | console | every client slot: free, human, or bot with its library. The bot matrix reads this too |
 | `botinv` | console | The instrument: per bot, its arena and round state, the weapon it has chosen, and the inventory **as the botlib reads it** beside the client's own. The botlib's rows are labelled `brain` in that output; a `brain` ammo row that disagrees with the `game` row under it is an index-space defect. `hold`, `asked` and `dropped` are the fire gate's: whether it is closed right now, how many AI frames asked to shoot while the round was not being fought, and how many of those the gate took away -- a gap between the last two is a shot that left during a countdown |
 
@@ -160,7 +161,7 @@ The bot command set, reachable from the console as `sv <cmd>`. The five marked `
 
 ## The Gladiator extras' commands, and three diagnostics
 
-**104 client commands** (`tools/counts.py`).  The figure counts every literal the dispatchers compare against, so the two `sv` diagnostics added since it last read 102 -- `arenadump` and `botinv` -- are in it.
+**106 client commands** (`tools/counts.py`).  The figure counts every literal the dispatchers compare against, so the `sv` diagnostics -- `arenadump`, `botinv` and `botstats` among them -- are in it.
 
 | command | who | what |
 |---|---|---|
@@ -180,3 +181,4 @@ The bot command set, reachable from the console as `sv <cmd>`. The five marked `
 | `sv extras` | console | One line per extra, each a **measurement** rather than a restatement of the cvar: whether the log is open and where, the lag pool's size, whether the three classnames are in the spawn table, how many itemlist rows carry a `weapmodel`, and which observer implementation the running ruleset uses |
 | `sv census <classname-or-prefix>` | console | How many entities of that class are spawned, in the world, and taken-and-waiting on their own think, with the frame the count was taken on. A prefix, so `sv census weapon_` answers about every weapon on the map. `sv ruleset` cannot: an item that has been picked up is still `inuse`, still counted and still at the same origin -- what changed is `solid` |
 | `sv botperf [reset]` | console | Frames measured, mean and worst cost of the bot section of `G_RunFrame` in microseconds, and the budget. `reset` starts a fresh window so a map load and thirty-two connects are not averaged into the steady state |
+| `sv botstats [reset\|off]` | console | What each client did in a measurement window (R-BOT-36): per client its botlib, skill, team, the ruleset's score, kills, deaths, suicides, team kills, damage given, taken, to itself and to team-mates, hits, and pickups by kind. `reset` opens a fresh window and, while it is open, prints a `botstats kill` line per death; `off` closes it. Closed by default, and closed it counts and prints nothing. `tools/botduel.py` reads it |

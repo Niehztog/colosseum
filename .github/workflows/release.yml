@@ -176,6 +176,20 @@ jobs:
           make -C vendor/gladiator-bot-restored botlib GLAD_SERVERFIX=1 CFLAGS="$flags" ${{ matrix.botmake }}
       - name: Check the botlib has a stack protector
         run: nm -D vendor/gladiator-bot-restored/release/gladiator.so | grep -q __stack_chk_fail || { echo 'the botlib was built without a stack protector'; exit 1; }
+      # The Quake III botlib and its bspc (R-BUILD-12), with the same flags.
+      # Its Makefile appends -fPIC and -shared per target without `override`,
+      # and a CFLAGS on make's command line beats a target-specific append, so
+      # the flags go through the environment; CC and YQ2_ARCH are the cross
+      # row's, and on the command line is where they belong.
+      - name: Build the Quake III botlib
+        run: |
+          flags=$(printf 'p:\n\t@echo $(BOTLIB_CFLAGS)\n' | make -s -f Makefile -f - p)
+          CFLAGS="$flags" make -C vendor/q3a_bot_backport_for_q2 botlib bspc ${{ matrix.botmake }}
+      - name: Check the Quake III botlib has a stack protector and exports GetBotAPI alone
+        run: |
+          lib=vendor/q3a_bot_backport_for_q2/release/botlib/botlib.so
+          nm -D $lib | grep -q __stack_chk_fail || { echo 'the Quake III botlib was built without a stack protector'; exit 1; }
+          [ "$(nm -D --defined-only $lib | awk '{print $3}')" = GetBotAPI ] || { echo 'the Quake III botlib exports more than GetBotAPI'; exit 1; }
       - name: Fetch the navigation meshes
         run: .github/aas.sh
       - name: Package
@@ -193,8 +207,8 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - {arch: x86,    target: win32, packages: gcc-mingw-w64-i686,   botmake: 'CC=i686-w64-mingw32-gcc',   objdump: i686-w64-mingw32-objdump}
-          - {arch: x86_64, target: win64, packages: gcc-mingw-w64-x86-64, botmake: 'CC=x86_64-w64-mingw32-gcc', objdump: x86_64-w64-mingw32-objdump}
+          - {arch: x86,    target: win32, packages: gcc-mingw-w64-i686,   botmake: 'CC=i686-w64-mingw32-gcc',   objdump: i686-w64-mingw32-objdump,   q3arch: i386}
+          - {arch: x86_64, target: win64, packages: gcc-mingw-w64-x86-64, botmake: 'CC=x86_64-w64-mingw32-gcc', objdump: x86_64-w64-mingw32-objdump, q3arch: x86_64}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -223,6 +237,22 @@ jobs:
         run: ${{ matrix.objdump }} -t vendor/gladiator-bot-restored/release/gladiator.dll | grep -q __stack_chk_fail || { echo 'the botlib was built without a stack protector'; exit 1; }
       - name: Check what the botlib imports (R-SEC-6a, for the DLL that ships)
         run: sh tools/pedeps.sh vendor/gladiator-bot-restored/release/gladiator.dll
+      # The Quake III botlib and its bspc (R-BUILD-12) -- the flags through the
+      # environment, for the reason the linux job gives.  Its Makefile tells
+      # Windows by MSYS's environment, which a cross build does not have, so the
+      # target is said: YQ2_OSTYPE and the architecture.
+      - name: Build the Quake III botlib
+        run: |
+          flags=$(printf 'p:\n\t@echo $(BOTLIB_CFLAGS)\n' | make -s -f Makefile -f - p)
+          ldflags=$(printf 'p:\n\t@echo $(BOTLIB_PE_LDFLAGS)\n' | make -s -f Makefile -f - p)
+          CFLAGS="$flags" LDFLAGS="$ldflags" make -C vendor/q3a_bot_backport_for_q2 botlib bspc ${{ matrix.botmake }} YQ2_OSTYPE=Windows YQ2_ARCH=${{ matrix.q3arch }}
+      - name: Check the Quake III botlib -- stack protector, GetBotAPI its only export, and what both files import
+        run: |
+          dll=vendor/q3a_bot_backport_for_q2/release/botlib/botlib.dll
+          ${{ matrix.objdump }} -t $dll | grep -q __stack_chk_fail || { echo 'the Quake III botlib was built without a stack protector'; exit 1; }
+          exports=$(${{ matrix.objdump }} -p $dll | sed -n '/\[Ordinal\/Name Pointer\] Table/,/^$/p' | awk '/^[[:space:]]*\[ *[0-9]+\]/ {print $NF}')
+          [ "$exports" = GetBotAPI ] || { echo "the Quake III botlib exports: $exports"; exit 1; }
+          sh tools/pedeps.sh $dll vendor/q3a_bot_backport_for_q2/release/bspc/bspc.exe
       - name: Fetch the navigation meshes
         run: .github/aas.sh
       - name: Package
@@ -281,6 +311,14 @@ jobs:
           make -C vendor/gladiator-bot-restored botlib GLAD_SERVERFIX=1 CFLAGS="$flags"
       - name: Check the botlib has a stack protector
         run: nm -u vendor/gladiator-bot-restored/release/gladiator.dylib | grep -q ___stack_chk_fail || { echo 'the botlib was built without a stack protector'; exit 1; }
+      # The Quake III botlib and its bspc (R-BUILD-12): the flags through the
+      # environment, for the reason the linux job gives.
+      - name: Build the Quake III botlib
+        run: |
+          flags=$(printf 'p:\n\t@echo $(BOTLIB_CFLAGS)\n' | make -s -f Makefile -f - p)
+          CFLAGS="$flags" make -C vendor/q3a_bot_backport_for_q2 botlib bspc
+      - name: Check the Quake III botlib has a stack protector
+        run: nm -u vendor/q3a_bot_backport_for_q2/release/botlib/botlib.dylib | grep -q ___stack_chk_fail || { echo 'the Quake III botlib was built without a stack protector'; exit 1; }
       - name: Fetch the navigation meshes
         run: .github/aas.sh
       - name: Package
@@ -352,13 +390,13 @@ jobs:
 
           ## About this distribution
 
-          One Quake II game library: baseq2, both mission packs, Threewave CTF, Rocket Arena 2 and OSP Tourney DM, with Gladiator bots.
+          One Quake II game library: baseq2, both mission packs, Threewave CTF, Rocket Arena 2 and OSP Tourney DM, with Gladiator bots and Quake III bots.
 
-          **Installing is copying this package's `colosseum/` folder beside the engine** -- on Windows always, and on Linux unless your Q2PRO is a distribution package, which looks in `~/.q2pro/colosseum/` instead. The library is already in it, and so is everything else an engine loads. The bots need the botlib, its pak, a bot list and one navigation mesh per map. **The botlib for this platform is in that folder too**, as `colosseum/gladiator.so` (`.dll` on Windows), and so are the meshes for the eight retail deathmatch maps, under `colosseum/maps/`; what is left to install is `pak7.pak` and `bots.cfg` out of the 1999 Gladiator release, which go in beside them. `README.md` has both halves.
+          **Installing is copying this package's `colosseum/` folder beside the engine** -- on Windows always, and on Linux unless your Q2PRO is a distribution package, which looks in `~/.q2pro/colosseum/` instead. The library is already in it, and so is everything else an engine loads. The bots need the botlib, its pak, a bot list and one navigation mesh per map. **The botlib for this platform is in that folder too**, as `colosseum/gladiator.so` (`.dll` on Windows), and so are the meshes for the eight retail deathmatch maps, under `colosseum/maps/`; what is left to install is `pak7.pak` and `bots.cfg` out of the 1999 Gladiator release, which go in beside them. `README.md` has both halves. **A second botlib, the Quake III bot, is in the folder as well**, as `colosseum/q3bot.so` (`.dll` on Windows), with the `bspc` that makes its navigation meshes in `colosseum/q3bot/`: install its botfiles and bot list from the [q3a_bot_backport_for_q2](https://github.com/Niehztog/q3a_bot_backport_for_q2) distribution into that directory, make a mesh per map with that `bspc`, and offer it with `set botlibs "q3 gladiator"` -- `colosseum/q3bot/README.md` has the steps.
 
           Each package carries **two builds of the library**: the one in `colosseum/` is for Q2PRO built with `USE_NEW_GAME_API`, which is the recommended engine, and `colosseum/oldapi/` holds the same library against the classic game ABI for R1Q2, Yamagi Quake II, id's own 3.20 or a Q2PRO without that switch. Same name, different struct layouts -- if your engine wants the second one, copy it over the first and delete that directory, renaming it to whatever your engine looks for (Yamagi wants a flat `game.so`). `colosseum/oldapi/README.md` says what the choice costs.
 
-          Packages carry the library, the botlib built for the same platform, the default gamedir config set and the operator documentation -- `README.md` and the cvar, command and entity inventories under `docs/`. The first three are inside `colosseum/`, which is the directory to copy; the documentation is beside it, for reading rather than installing. The config set holds one ready-to-exec file per ruleset, so a match is one line: `q2pro +set game colosseum +set maxclients 32 +exec configs/ctf.cfg +map q2ctf1`, and the same for `dm`, `dmpro`, `tdm`, `duel`, `arena` and `sp` -- `README.md` lists all seven. Game assets are not included and never will be: they are id's and the mods'. The one exception is data rather than an asset -- the eight navigation meshes for q2dm1..q2dm8, precomputed by OSP Tourney DM in 1999, which ride along under `colosseum/maps/` so the bots have somewhere to walk on the stock deathmatch maps without a `bspc` run. Any other map still needs one made. The botlib is not an asset either: it is a build of the [`gladiator-bot-restored`](https://github.com/Niehztog/gladiator-bot-restored) submodule, GPL like everything else here, from the commit this tag pins. The specification, the contributor guide and the rest of `docs/` live in the repository, at the tag this release was cut from.
+          Packages carry the library, both botlibs built for the same platform, the default gamedir config set and the operator documentation -- `README.md` and the cvar, command and entity inventories under `docs/`. The first three are inside `colosseum/`, which is the directory to copy; the documentation is beside it, for reading rather than installing. The config set holds one ready-to-exec file per ruleset, so a match is one line: `q2pro +set game colosseum +set maxclients 32 +exec configs/ctf.cfg +map q2ctf1`, and the same for `dm`, `dmpro`, `tdm`, `duel`, `arena` and `sp` -- `README.md` lists all seven. Game assets are not included and never will be: they are id's and the mods'. The one exception is data rather than an asset -- the eight navigation meshes for q2dm1..q2dm8, precomputed by OSP Tourney DM in 1999, which ride along under `colosseum/maps/` so the bots have somewhere to walk on the stock deathmatch maps without a `bspc` run. Any other map still needs one made. The botlibs are not assets either: they are builds of the [`gladiator-bot-restored`](https://github.com/Niehztog/gladiator-bot-restored) and [`q3a_bot_backport_for_q2`](https://github.com/Niehztog/q3a_bot_backport_for_q2) submodules, GPL like everything else here, from the commits this tag pins -- their characters, chats and weights are their distributions' data and are not included. The specification, the contributor guide and the rest of `docs/` live in the repository, at the tag this release was cut from.
           ABOUT
           gh release create "$VERSION" dist/* \
             --title "Colosseum $VERSION" \

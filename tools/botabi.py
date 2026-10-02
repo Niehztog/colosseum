@@ -65,6 +65,21 @@ bots loaded every laser's sparks went out as palette index 0.  This compiles
 the tree's own Bot_WriteByte and Bot_WriteShort against a stub that records
 what they stage and compares it with q2pro's MSG_WriteByte/MSG_WriteShort.
 
+AND FOURTH: THE SECOND BOTLIB (R-BOT-31).  The Quake III botlib,
+q3a_bot_backport_for_q2, implements the same two tables, under q2_ names --
+its own Quake III headers already define a bot_input_t and a bot_settings_t
+with other layouts -- in botlib/be_interface_q2.h.  The same three questions
+are asked of it: both tables, in order, against ours (the prefix dropped
+first; its export table goes on after Test with slots of its own, which a
+game copying twenty never reads); the seven struct sizes, measured by a probe
+compiled against ITS headers, where a wrong one is a compile error because the
+header asserts them itself -- so a probe that will not build is a finding here,
+not a skip; and the calling convention of GetBotAPI, which is a plain C
+function on every target: a __stdcall one on 32-bit Windows, called the way
+this game calls Gladiator's own gladiator.dll, returns with the stack four
+bytes off.  Our side's pointer type is held to the same rule.  An absent
+checkout is a skip and said so, like Gladiator's.
+
 WHAT IT STILL CANNOT SEE.  Member ORDER at equal size -- two structs of 84 bytes
 with two fields transposed pass -- and a slot the brain calls with the wrong
 argument count inside itself.  Neither is a reason to
@@ -72,6 +87,7 @@ skip the two comparisons that do work.
 
 USAGE
     tools/botabi.py [--ours src/bot/botlib.h] [--brain <gladiator-bot-restored>]
+                    [--q3 <q3a_bot_backport_for_q2>]
     tools/botabi.py --selftest
 """
 import argparse
@@ -469,6 +485,161 @@ SELFTEST_BRAIN = SELFTEST_OURS.replace('bot_import_s', 'botimport_block_s') \
                               .replace('bot_import_t;', 'botimport_block_t;')
 
 
+Q3_HEADER = os.path.join('botlib', 'be_interface_q2.h')
+
+# Our name for a contract struct -> the Quake III botlib's.  `bsp_trace_t`,
+# `bsp_surface_t` and `qboolean` are spelled alike on both sides.
+Q3_TYPES = {'bot_settings_t': 'q2_bot_settings_t',
+            'bot_clientsettings_t': 'q2_bot_clientsettings_t',
+            'bot_input_t': 'q2_bot_input_t',
+            'bot_updateclient_t': 'q2_bot_updateclient_t',
+            'bot_updateentity_t': 'q2_bot_updateentity_t'}
+
+Q3_PROBE_HEAD = ('#include "q_shared.h"\n#include "botlib.h"\n'
+                 '#include "be_ai_chat.h"\n#include "be_interface_q2.h"\n'
+                 '#include <stdio.h>\nint main(void) {\n')
+
+
+def find_q3():
+    """Where the Quake III botlib is: $Q3DIR, the submodule, a sibling."""
+    env = os.environ.get('Q3DIR')
+    if env:
+        return env
+    for d in (os.path.join(REPO, 'vendor', 'q3a_bot_backport_for_q2'),
+              os.path.join(REPO, '..', 'q3a_bot_backport_for_q2')):
+        if os.path.exists(os.path.join(d, Q3_HEADER)):
+            return d
+    return os.path.join(REPO, 'vendor', 'q3a_bot_backport_for_q2')
+
+
+def unprefix(text):
+    """The Quake III botlib's contract types without their q2_ prefix."""
+    return re.sub(r'\bq2_(bot_\w+_t)\b', r'\1', text)
+
+
+def q3_tables(hdr):
+    """Its two tables, each cut out whole and unprefixed: (imports, exports).
+    Cut, because slots() reads from a little before the first slot it is
+    asked for, and in this header the import table ends right where the export
+    table starts."""
+    out = []
+    for first, last in (('typedef struct q2_bot_import_s', '} q2_bot_import_t;'),
+                        ('typedef struct q2_bot_export_s', '} q2_bot_export_t;')):
+        i = hdr.find(first)
+        j = hdr.find(last, i) if i >= 0 else -1
+        out.append(unprefix(hdr[i:j + len(last)]) if i >= 0 and j >= 0 else '')
+    return out[0], out[1]
+
+
+def q3_sizes(root, names):
+    """-> ({name: sizeof}, None), or (None, why) when the probe fails.
+
+    Compiled with the host compiler for the reason brain_sizes() gives.  The
+    header asserts the sizes itself, so a probe that does not compile is
+    reported with the compiler's own first error -- usually the assert that
+    failed -- rather than skipped.
+    """
+    import shutil
+    import subprocess
+    import tempfile
+    cc = shutil.which("cc") or shutil.which("gcc")
+    if not cc:
+        return None, "SKIP: no host compiler for the Quake III probe"
+    body = "".join('    printf("%s %%zu\\n", sizeof(%s));\n'
+                   % (n, Q3_TYPES.get(n, n)) for n in names)
+    d = tempfile.mkdtemp()
+    try:
+        src = os.path.join(d, "probe.c")
+        exe = os.path.join(d, "probe")
+        with open(src, "w") as f:
+            f.write(Q3_PROBE_HEAD + body + PROBE_TAIL)
+        # On macOS the header is told it is macOS, as the botlib's own
+        # Makefile tells it (-DMACOS_X on Darwin): its q_shared.h recognises
+        # id's MACOS_X token rather than __APPLE__, and without it defines no
+        # ID_INLINE and the probe does not compile there.
+        plat = ["-DMACOS_X"] if sys.platform == "darwin" else []
+        r = subprocess.run([cc, "-I", os.path.join(root, "game_q3"),
+                            "-I", os.path.join(root, "botlib")] + plat +
+                           ["-std=gnu99", "-w", "-o", exe, src],
+                           capture_output=True, text=True)
+        if r.returncode or not os.path.exists(exe):
+            first = [ln for ln in r.stderr.split('\n') if 'error' in ln]
+            return None, ("the probe against %s does not compile: %s"
+                          % (Q3_HEADER, (first or ['?'])[0].strip()))
+        r = subprocess.run([exe], capture_output=True, text=True)
+        if r.returncode:
+            return None, "the Quake III probe exited %d" % r.returncode
+        out = {}
+        for ln in r.stdout.split("\n"):
+            f2 = ln.split()
+            if len(f2) == 2 and f2[1].isdigit():
+                out[f2[0]] = int(f2[1])
+        return out, None
+    except OSError as e:
+        return None, "SKIP: the Quake III probe could not run (%s)" % e
+    finally:
+        shutil.rmtree(d, ignore_errors=True)
+
+
+def stdcall_findings(header_text, where):
+    """GetBotAPI as a plain C function, and every pointer to it."""
+    bad = []
+    # Preprocessor lines out first, so a finding quotes the declaration and
+    # not the export macro's #if block in front of it.
+    t = '\n'.join(ln for ln in strip(header_text).split('\n')
+                  if not ln.lstrip().startswith('#'))
+    decl = re.findall(r'([^;{}]*\bGetBotAPI\s*\)?\s*\([^;{]*)', t)
+    if not decl:
+        bad.append('%s: no GetBotAPI declaration found' % where)
+    for d in decl:
+        if re.search(r'\b(__stdcall|WINAPI|CALLBACK|APIENTRY)\b', d):
+            bad.append('%s: GetBotAPI is declared %s -- a game calls it as a '
+                       'plain C function, as the real gladiator.dll answers'
+                       % (where, re.sub(r'\s+', ' ', d.strip())))
+    return bad
+
+
+def pointer_findings(text, where):
+    """Our pointer to GetBotAPI, which a cast makes the call: plain C too."""
+    t = strip(text)
+    m = re.search(r'typedef[^;]*\(\s*[A-Za-z_ \t]*\*\s*PFNGetBotAPI\s*\)[^;]*;', t)
+    if not m:
+        return ['%s: no PFNGetBotAPI typedef found' % where]
+    if re.search(r'\b(__stdcall|WINAPI|CALLBACK|APIENTRY)\b', m.group(0)):
+        return ['%s: PFNGetBotAPI is %s -- both botlibs export a plain C '
+                'function' % (where, re.sub(r'\s+', ' ', m.group(0)))]
+    return []
+
+
+def compare_q3(ours_text, q3_root, hdr=None, sizes=True):
+    """The Quake III botlib against our header: tables, sizes, convention.
+
+    `hdr` is its header's text, read from q3_root when not given; the selftest
+    passes a mutated one.  The sizes are a probe compiled against the files in
+    q3_root, so a mutated text is compared with `sizes` off.
+    """
+    if hdr is None:
+        hdr = read(os.path.join(q3_root, Q3_HEADER))
+    imports, exports = q3_tables(hdr)
+    bad = [b.replace('brain', 'Quake III botlib')
+           for b in compare(ours_text, imports) + compare_exports(ours_text, exports)]
+    bad += stdcall_findings(hdr, Q3_HEADER)
+    if not sizes:
+        return bad
+    want = {m.group(1): int(m.group(2), 0) for m in ASSERT.finditer(ours_text)}
+    got, why = q3_sizes(q3_root, sorted(want))
+    if why:
+        bad.append(why)
+        return bad
+    for name in sorted(want):
+        if name not in got:
+            bad.append("%s: the Quake III botlib's headers do not declare it" % name)
+        elif got[name] != want[name]:
+            bad.append("%s: we assert %d, the Quake III botlib's compiler says %d"
+                       % (name, want[name], got[name]))
+    return bad
+
+
 def find_brain():
     """Where the brain is.
 
@@ -603,6 +774,71 @@ def selftest():
         if not ok:
             bad += 1
 
+    # ...and four for the Quake III botlib: the convention, which is the
+    # defect it shipped with, and three against the real checkout -- clean,
+    # an export slot swapped in its header, and a size we assert that its
+    # compiler does not agree with.  Skipped, out loud, without a checkout.
+    for label, text, want in (
+            ('GetBotAPI plain C', 'q2_bot_export_t *GetBotAPI(q2_bot_import_t *import);', 0),
+            ('GetBotAPI __stdcall', '__declspec(dllexport) q2_bot_export_t * __stdcall '
+             'GetBotAPI(q2_bot_import_t *import);', 1)):
+        n += 1
+        got = stdcall_findings(text, 'selftest')
+        fired = 1 if got else 0
+        ok = fired == want
+        print('  %-42s %s' % (label, 'ok' if ok else 'DID NOT FIRE'
+                              if want else 'FIRED ON CLEAN INPUT'))
+        if not ok:
+            bad += 1
+    for label, text, want in (
+            ('PFNGetBotAPI plain C',
+             'typedef bot_export_t *(*PFNGetBotAPI)(bot_import_t *import);', 0),
+            ('PFNGetBotAPI WINAPI',
+             'typedef bot_export_t *(WINAPI *PFNGetBotAPI)(bot_import_t *import);', 1)):
+        n += 1
+        got = pointer_findings(text, 'selftest')
+        fired = 1 if got else 0
+        ok = fired == want
+        print('  %-42s %s' % (label, 'ok' if ok else 'DID NOT FIRE'
+                              if want else 'FIRED ON CLEAN INPUT'))
+        if not ok:
+            bad += 1
+    q3root = find_q3()
+    if os.path.exists(real) and os.path.exists(os.path.join(q3root, Q3_HEADER)):
+        text = read(real)
+        hdr = read(os.path.join(q3root, Q3_HEADER))
+        swapped_hdr = hdr.replace(
+            '    int  (*BotSetupLibrary)(void);\n    int  (*BotShutdownLibrary)(void);\n',
+            '    int  (*BotShutdownLibrary)(void);\n    int  (*BotSetupLibrary)(void);\n')
+        stdcall_hdr = hdr.replace('q2_bot_export_t *GetBotAPI(',
+                                  'q2_bot_export_t * __stdcall GetBotAPI(')
+        cases_q3 = (('Quake III botlib unmutated', text, hdr, 0),
+                    ('Quake III export slots swapped', text, swapped_hdr, 1),
+                    ('Quake III GetBotAPI __stdcall', text, stdcall_hdr, 1),
+                    ('Quake III size disagreement', text.replace(
+                        'sizeof(bot_input_t)          == 36',
+                        'sizeof(bot_input_t)          == 40'), hdr, 1))
+        for label, ours_t, hdr_t, want in cases_q3:
+            n += 1
+            if want and (ours_t == text and hdr_t == hdr):
+                print('  %-42s %s' % (label, 'ROTTED: the mutation no longer applies'))
+                bad += 1
+                continue
+            # The real check, as main() runs it; a SKIP is not a finding.
+            got = [g for g in compare_q3(ours_t, q3root, hdr_t, sizes=hdr_t == hdr)
+                   if not g.startswith('SKIP: ')]
+            fired = 1 if got else 0
+            ok = fired == want
+            print('  %-42s %s' % (label, 'ok' if ok else 'DID NOT FIRE'
+                                  if want else 'FIRED ON CLEAN INPUT'))
+            for g in got[:3]:
+                print('      ' + g.replace('\n', '\n  '))
+            if not ok:
+                bad += 1
+    else:
+        print('  %-42s %s' % ('the Quake III botlib controls',
+                              'SKIPPED: no checkout'))
+
     print('botabi.py --selftest: %d control(s), %d wrong' % (n, bad))
     return 1 if bad else 0
 
@@ -611,6 +847,7 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('--ours', default=os.path.join(REPO, 'src/bot/botlib.h'))
     ap.add_argument('--brain', default=find_brain())
+    ap.add_argument('--q3', default=find_q3())
     ap.add_argument('--selftest', action='store_true')
     a = ap.parse_args()
 
@@ -661,6 +898,26 @@ def main():
         print('  !! ' + b)
     for sk in skips:
         print('  -- ' + sk[6:])
+
+    # The second botlib (R-BOT-31), and our own pointer to GetBotAPI, which
+    # has to be plain C for both.
+    q3bad = pointer_findings(read(os.path.join(REPO, 'src/bot/bl_main.c')),
+                             'src/bot/bl_main.c')
+    q3hdr = os.path.join(a.q3, Q3_HEADER)
+    if os.path.exists(q3hdr):
+        q3bad += compare_q3(ours, a.q3)
+        print('botabi.py: %s vs %s' % (os.path.relpath(a.ours, REPO), q3hdr))
+    else:
+        print('botabi.py: SKIP -- %s is absent, so the Quake III botlib has '
+              'nothing to be compared against (git submodule update --init '
+              'vendor/q3a_bot_backport_for_q2)' % q3hdr)
+    q3skips = [x for x in q3bad if x.startswith('SKIP: ')]
+    q3bad = [x for x in q3bad if not x.startswith('SKIP: ')]
+    for b in q3bad:
+        print('  !! ' + b)
+    for sk in q3skips:
+        print('  -- ' + sk[6:])
+    bad += q3bad
     if bad or staged_bad:
         return 1
     print('  the two sides agree on every slot both tables declare and on their '
