@@ -2128,6 +2128,34 @@ static void osp_selfDeathTeams(edict_t *self)
         frag_offset--;
 }
 
+// The bots' copy of an obituary (R-OSP-41).  Tourney unicasts its
+// obituaries and skips every bot -- osp-tourney's FL_OSP_NOCMD is the bot SDK's
+// FL_BOT bit, so the donor did too -- which left both botlibs, which learn of a
+// death only by reading it off a bot's console, blind to every death under
+// the four rulesets: no death or kill chats, and the Quake III bot's kill
+// bookkeeping (its EV_OBITUARY) never ran.  Each bot gets the line ctf and
+// arena broadcast, `victim message killer message2` with plain names and no
+// teammate tag, because that is the line both botlibs' match templates read.
+// Through gi.cprintf, which the bot layer turns into BotConsoleMessage for a
+// bot and never puts on a wire, so no person sees anything new.
+static void q_printf(1, 2) OSP_obituaryBots(const char *fmt, ...)
+{
+    char     line[MAX_STRING_CHARS];
+    va_list  ap;
+    edict_t *e;
+    int      i;
+
+    va_start(ap, fmt);
+    Q_vsnprintf(line, sizeof(line), fmt, ap);
+    va_end(ap);
+
+    for (i = 1; i <= game.maxclients; i++) {
+        e = g_edicts + i;
+        if (e->inuse && e->client && (e->flags & FL_BOT))
+            gi.cprintf(e, PRINT_MEDIUM, "%s", line);
+    }
+}
+
 void OSP_obituarySelf(edict_t *self, const char *message)
 {
     edict_t *e;
@@ -2146,6 +2174,8 @@ void OSP_obituarySelf(edict_t *self, const char *message)
                 gi.cprintf(e, PRINT_MEDIUM, "%s %s.\n",
                            self->client->pers.netname, message);
         }
+
+        OSP_obituaryBots("%s %s.\n", self->client->pers.netname, message);
     }
 
     if (sync_stat > 2) {
@@ -2183,6 +2213,9 @@ void OSP_obituaryFrag(edict_t *self, edict_t *attacker, const char *message,
                            self->client->pers.netname, message,
                            attacker->client->pers.netname, message2, tag);
         }
+
+        OSP_obituaryBots("%s %s %s%s\n", self->client->pers.netname, message,
+                         attacker->client->pers.netname, message2);
 
         // Nobody unicasts to the console, so a dedicated server logs it here.
         if ((int)dedicated->value)
