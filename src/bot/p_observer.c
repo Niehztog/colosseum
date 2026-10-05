@@ -44,12 +44,9 @@
 #include "g_local.h"
 #include "bot/p_observer.h"
 
-// Mask value at gamex86.dll+0x10092 area, embedded as immediate 0x2010003 in
-// every trace call.  Standard MASK_OPAQUE = SOLID|LAVA|SLIME|WINDOW, encoded
-// as CONTENTS_SOLID(1) | CONTENTS_WINDOW(2) | CONTENTS_LAVA(8) | something.
-#ifndef OBSERVER_TRACE_MASK
-#define OBSERVER_TRACE_MASK 0x2010003
-#endif
+// The 1999 binary's camera traces push the immediate 0x2010003, which is
+// MASK_PLAYERSOLID; upstream spells it so since gladiator-bot-restored 1020fb7.
+_Static_assert(MASK_PLAYERSOLID == 0x2010003, "the camera traces' 1999 mask");
 
 // --- sub_10077d50 -----------------------------------------------------------
 // Step `from` toward `to` by at most `maxstep` degrees, taking the shorter
@@ -168,9 +165,9 @@ void SetClientOrigin(edict_t *ent, vec3_t origin)
 //===========================================================================
 void ClientSetViewAngles(edict_t *ent, vec3_t new_angles, vec3_t cmd_angles)
 {
-    ent->client->ps.pmove.delta_angles[0] = (short)((int)(anglemod(AngleDifference(new_angles[0], cmd_angles[0])) * 65536.0f / 360.0f) & 0xffff);
-    ent->client->ps.pmove.delta_angles[1] = (short)((int)(anglemod(AngleDifference(new_angles[1], cmd_angles[1])) * 65536.0f / 360.0f) & 0xffff);
-    ent->client->ps.pmove.delta_angles[2] = (short)((int)(anglemod(AngleDifference(new_angles[2], cmd_angles[2])) * 65536.0f / 360.0f) & 0xffff);
+    ent->client->ps.pmove.delta_angles[0] = ANGLE2SHORT(anglemod(AngleDifference(new_angles[0], cmd_angles[0])));
+    ent->client->ps.pmove.delta_angles[1] = ANGLE2SHORT(anglemod(AngleDifference(new_angles[1], cmd_angles[1])));
+    ent->client->ps.pmove.delta_angles[2] = ANGLE2SHORT(anglemod(AngleDifference(new_angles[2], cmd_angles[2])));
 }
 
 //===========================================================================
@@ -263,7 +260,7 @@ bool Cam_SpotVisible(edict_t *ent, vec3_t point)
     if (!gi.inPVS(sav_origin, point))
         return false;
 
-    contmask = 1;
+    contmask = CONTENTS_SOLID;
     VectorCopy(sav_origin, start);
     VectorCopy(point,      end);
 
@@ -314,7 +311,7 @@ bool Cam_EntityVisible(edict_t *ent, edict_t *target)
     if (!gi.inPVS(sav_origin, target->s.origin))
         return false;
 
-    contmask = 1;
+    contmask = CONTENTS_SOLID;
     passent = ent;
     targent = target;
     VectorCopy(sav_origin,       start);
@@ -440,7 +437,7 @@ void Cam_UpdateView(edict_t *ent, float speed, usercmd_t *ucmd)
     /* NULL mins/maxs -- ref pushes two immediate zeroes, not the address of
        vec3_origin, and every other trace in this file passes NULL. */
     tr = gi.trace(ent->s.origin, NULL, NULL, cam->dest,
-                  ent, OBSERVER_TRACE_MASK);
+                  ent, MASK_PLAYERSOLID);
     if (tr.fraction < 1.0f) {
         SetClientOrigin(ent, cam->dest);
         goto angles_phase;
@@ -684,7 +681,7 @@ void Cam_GetFollowSpot(edict_t *ent, vec3_t out)
     endpos[1] = viewfrom[1] + ofs[1];
     endpos[2] = viewfrom[2] + ofs[2];
 
-    tr = gi.trace(viewfrom, NULL, NULL, endpos, cam->ent, OBSERVER_TRACE_MASK);
+    tr = gi.trace(viewfrom, NULL, NULL, endpos, cam->ent, MASK_PLAYERSOLID);
 
     if (tr.fraction < 1.0f && tr.ent != g_edicts)
         VectorMA(tr.endpos, 70.0f, tr.plane.normal, out);
@@ -773,7 +770,7 @@ float Cam_TryFlyByVector(edict_t *ent, vec3_t ofs, vec3_t out_endpos)
     out_endpos[1] = tr.endpos[1] - unit5[1];
     out_endpos[2] = tr.endpos[2] - unit5[2];
 
-    if (gi.pointcontents(out_endpos) & 1)
+    if (gi.pointcontents(out_endpos) & CONTENTS_SOLID)
         return 1111.0f;
 
     cv_view = gi.pointcontents(viewfrom) & MASK_WATER;
@@ -1204,8 +1201,8 @@ void Cam_FollowThink(edict_t *ent, usercmd_t *ucmd)
     if (Cam_EntityVisible(ent, cam->ent)) {
         Cam_GetFollowSpot(ent, cam->dest);
         Cam_GetFollowTarget(ent, cam->viewtarget);
-        // gi.pointcontents(&cam->dest) & 1 == 1  OR  pause_time < level.time
-        if ((gi.pointcontents(cam->dest) & 1)
+        // gi.pointcontents(&cam->dest) & CONTENTS_SOLID  OR  pause_time < level.time
+        if ((gi.pointcontents(cam->dest) & CONTENTS_SOLID)
             || cam->pause_time < level.time) {
             Cam_EnterFlyByMode(ent, cam->ent, ucmd);
         }
@@ -1365,7 +1362,7 @@ install_target:
     // becomes the new viewtarget.
     cam->ent = ent;
     tr = gi.trace(cam->dest, NULL, NULL,
-                  cam->viewtarget, ent, OBSERVER_TRACE_MASK);
+                  cam->viewtarget, ent, MASK_PLAYERSOLID);
     cam->viewtarget[0] = tr.endpos[0];
     cam->viewtarget[1] = tr.endpos[1];
     cam->viewtarget[2] = tr.endpos[2];
@@ -1434,7 +1431,7 @@ install_target:
         angles[1] = cam->dest[1] + delta[1];
         angles[2] = cam->dest[2] + delta[2];
         tr = gi.trace(cam->dest, NULL, NULL,
-                      delta, ent, OBSERVER_TRACE_MASK);
+                      delta, ent, MASK_PLAYERSOLID);
         delta[0] = tr.endpos[0];
         delta[1] = tr.endpos[1];
         delta[2] = tr.endpos[2];
@@ -1467,7 +1464,7 @@ install_target:
         delta[1] = cam->dest[1] - angles[1];
         delta[2] = cam->dest[2] - angles[2];
         tr = gi.trace(cam->dest, NULL, NULL,
-                      delta, ent, OBSERVER_TRACE_MASK);
+                      delta, ent, MASK_PLAYERSOLID);
         delta[0] = tr.endpos[0];
         delta[1] = tr.endpos[1];
         delta[2] = tr.endpos[2];
@@ -1506,7 +1503,7 @@ install_target:
         angles[2] += cam->viewtarget[2];
 
         tr = gi.trace(ent->s.origin, NULL, NULL,
-                      angles, ent, OBSERVER_TRACE_MASK);
+                      angles, ent, MASK_PLAYERSOLID);
 
         if (tr.fraction >= 1.0f) {                        // 0x10092178 = 1.0
             // Trace got all the way: commit the backtracked dest.
@@ -1615,8 +1612,8 @@ void ChangeChaseCamOffset(edict_t *ent, usercmd_t *ucmd)
 
     // chaseoffset[ROLL] is the "vertical" component (offset behind the player).
     // Adjust by  +/- 0.5 * diff[PITCH] * inv_m_pitch depending on attack-button
-    // state (ucmd->buttons bit 0 == BUTTON_ATTACK).
-    if (ucmd->buttons & 1) {
+    // state.
+    if (ucmd->buttons & BUTTON_ATTACK) {
         if (diff[PITCH] >  3.0f)
             cam->chaseoffset[ROLL] += inv_m_pitch * diff[PITCH] * 0.5f;
         else if (diff[PITCH] < 3.0f)
