@@ -1,7 +1,12 @@
+// Changed for the Colosseum play-test harness, by its
+// patches/libq2-v1.0.335-entities.patch: spawn baselines kept for the
+// entity parser.
+
 package message
 
 import (
 	"errors"
+	"math"
 	"strconv"
 	"strings"
 
@@ -102,11 +107,15 @@ func (m *Buffer) ParseFrame(oldFrames map[int32]*pb.Frame) *pb.Frame {
 	for _, ab := range areabits {
 		fr.AreaBits = append(fr.AreaBits, uint32(ab))
 	}
+	var baselines map[int32]*pb.PackedEntity
 	if oldFrames != nil {
 		delta, ok := oldFrames[fr.Delta]
 		if ok {
 			fromPS = delta.GetPlayerState()
 			fromEnts = delta.GetEntities()
+		}
+		if bf, ok := oldFrames[BaselineFrame]; ok {
+			baselines = bf.GetEntities()
 		}
 	}
 	var ps *pb.PackedPlayer
@@ -115,7 +124,7 @@ func (m *Buffer) ParseFrame(oldFrames map[int32]*pb.Frame) *pb.Frame {
 	}
 	fr.PlayerState = ps
 	if m.ReadByte() == SVCPacketEntities {
-		fr.Entities = m.ParsePacketEntities(fromEnts)
+		fr.Entities = m.ParsePacketEntitiesFrom(fromEnts, baselines)
 	}
 	return fr
 }
@@ -483,6 +492,10 @@ func (msg *MessageBuffer) WriteDeltaMove(from *client.ClientMove, to *client.Cli
 }
 */
 
+// BaselineFrame is the key the spawn baselines are kept under in a frame
+// history map; no real frame has a negative number.
+const BaselineFrame = math.MinInt32
+
 // ParsePacket will parse all the messages in a particular server packet.
 func (p *Buffer) ParsePacket(oldFrames map[int32]*pb.Frame) (*pb.Packet, error) {
 	if p.Index == p.Length {
@@ -499,7 +512,21 @@ func (p *Buffer) ParsePacket(oldFrames map[int32]*pb.Frame) (*pb.Packet, error) 
 		case SVCSpawnBaseline:
 			bitmask := p.ParseEntityBitmask()
 			number := p.ParseEntityNumber(bitmask)
-			out.Baselines = append(out.Baselines, p.ParseEntity(nil, number, bitmask))
+			base := p.ParseEntity(nil, number, bitmask)
+			out.Baselines = append(out.Baselines, base)
+			// an entity that enters a frame is delta-coded from its
+			// baseline, so the frame parser needs them
+			if oldFrames != nil {
+				bf, ok := oldFrames[BaselineFrame]
+				if !ok {
+					bf = &pb.Frame{Number: BaselineFrame}
+					oldFrames[BaselineFrame] = bf
+				}
+				if bf.Entities == nil {
+					bf.Entities = make(map[int32]*pb.PackedEntity)
+				}
+				bf.Entities[int32(number)] = base
+			}
 		case SVCStuffText:
 			out.Stuffs = append(out.Stuffs, p.ParseStuffText())
 		case SVCFrame: // includes playerstate and packetentities

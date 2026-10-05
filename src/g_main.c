@@ -633,11 +633,22 @@ void ClientEndServerFrames(void)
     // and damage has been added
     for (i = 0; i < game.maxclients; i++) {
         ent = g_edicts + 1 + i;
-        if (!ent->inuse || !ent->client)
+        if (!ent->inuse || !ent->client ||
+            (G_Ruleset() == RULESET_ARENA && eyecam_active(ent)))
             continue;
         ClientEndServerFrame(ent);
     }
 
+    // An arena in-eyes camera copies its subject's finished view, so it is
+    // ended after every client it could be watching (R-RA-25).
+    if (G_Ruleset() == RULESET_ARENA) {
+        for (i = 0; i < game.maxclients; i++) {
+            ent = g_edicts + 1 + i;
+            if (!ent->inuse || !ent->client || !eyecam_active(ent))
+                continue;
+            ClientEndServerFrame(ent);
+        }
+    }
 }
 
 /*

@@ -94,6 +94,11 @@ typedef struct team_s {
 
 #define TEAM(node)  ((team_t *)(node)->it)
 
+// RA2's per-client configstrings live in the item block past the last item:
+// +0 the arena status, +1 the round line, +2/+3 the pickup queue names, and
+// +4 the round clock (R-RA-26).
+#define CS_ROUNDTIME    (game.csr.items + game.num_items + 4)
+
 typedef struct arena_settings_s {
     int         playersperteam;
     int         rounds;
@@ -366,6 +371,14 @@ typedef struct arena_s {
     team_t      *pickupteam[2];
 
     struct ra2_round_s  *stats;     // NULL when statsfile is off
+
+    // R-RA-26's round clock.  Outside the settings run above on purpose:
+    // the limit is arena.cfg's alone, with no menu row and no vote.
+    int         roundtimelimit;         // seconds a round may last, 0 = no limit
+    int         roundstart_framenum;    // the frame the fighting began
+    int         roundtime_sent;         // the whole second last sent
+    bool        timed_out;              // the clock, not a wipe, ended the round
+    int         timeout_winner;         // health_winner's team, or -1 for a tie
 } arena_t;
 
 // The second half of the same contract: `arena_t` repeats those 50 members
@@ -524,6 +537,9 @@ char        *RA_ArenaBotName(int arenanum);
 
 void        track_SetStats(edict_t *ent);
 void        eyecam_think(edict_t *ent, usercmd_t *ucmd);
+bool        eyecam_active(edict_t *ent);
+void        RA_SetRoundTimeStat(edict_t *ent);
+void        eyecam_SetView(edict_t *ent);
 void        track_think(edict_t *ent, usercmd_t *ucmd);
 void        track_change(edict_t *ent, int dir);
 void        track_next(edict_t *ent);

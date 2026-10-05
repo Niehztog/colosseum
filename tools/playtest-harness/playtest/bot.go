@@ -41,6 +41,7 @@ type Bot struct {
 	centers  []string
 	stuffs   []string
 	cs       map[int]string
+	cshist   map[int][]string
 	layout   string
 	origin   [3]float64
 	frame    int
@@ -54,6 +55,9 @@ type Bot struct {
 	kick     [3]float64
 	gunframe int
 	gunhigh  int
+	viewoff  [3]float64
+	gunindex int
+	ents     map[int32]*pb.PackedEntity
 	stats    map[int]int
 	sounds   []Sound
 }
@@ -154,6 +158,10 @@ func NewBot(name, host string, port int) *Bot {
 		}
 		p.mu.Lock()
 		p.cs[int(cs.GetIndex())] = cs.GetData()
+		if p.cshist == nil {
+			p.cshist = map[int][]string{}
+		}
+		p.cshist[int(cs.GetIndex())] = append(p.cshist[int(cs.GetIndex())], cs.GetData())
 		p.mu.Unlock()
 	})
 	// A SOUND IS THE FIFTH CHANNEL, and for some mod behaviour it is the only
@@ -255,6 +263,19 @@ func NewBot(name, host string, port int) *Bot {
 		if p.gunframe > p.gunhigh {
 			p.gunhigh = p.gunframe
 		}
+		// ps.viewoffset is a signed char per axis in quarter units; the
+		// client renders from origin + viewoffset, so the two together are
+		// the eye.  gunindex is the view-weapon model.  The entity map is
+		// the frame's whole delta-merged set, which is what says whether a
+		// given entity is drawn for THIS client -- a server hiding a POV
+		// entity sends it with modelindex 0.
+		p.viewoff = [3]float64{
+			float64(ps.GetViewOffsetX()) * 0.25,
+			float64(ps.GetViewOffsetY()) * 0.25,
+			float64(ps.GetViewOffsetZ()) * 0.25,
+		}
+		p.gunindex = int(ps.GetGunIndex())
+		p.ents = fr.GetEntities()
 		// stats[] is DELTA-COMPRESSED against the last acked frame, so a frame
 		// carries only the slots that changed.  Merging rather than replacing is
 		// what makes Stat(n) mean "the last value the server sent for n" instead
@@ -384,6 +405,41 @@ func (p *Bot) GunFrameHigh() int {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	return p.gunhigh
+}
+
+// ViewOffset is playerstate.viewoffset in units.
+func (p *Bot) ViewOffset() [3]float64 {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.viewoff
+}
+
+// Eye is where the client renders from: the pmove origin plus viewoffset.
+func (p *Bot) Eye() [3]float64 {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return [3]float64{p.origin[0] + p.viewoff[0], p.origin[1] + p.viewoff[1],
+		p.origin[2] + p.viewoff[2]}
+}
+
+// GunIndex is playerstate.gunindex, the view-weapon model this client draws.
+func (p *Bot) GunIndex() int {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.gunindex
+}
+
+// EntityModel is entity n's modelindex in the last frame, and whether the
+// entity was in that frame at all.  Present with modelindex 0 is an entity
+// the server is hiding from this client.
+func (p *Bot) EntityModel(n int) (int, bool) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	e, ok := p.ents[int32(n)]
+	if !ok {
+		return 0, false
+	}
+	return int(e.GetModelIndex()), true
 }
 
 // ViewAngles is playerstate.viewangles in degrees -- PITCH, YAW, ROLL.  For a
@@ -633,6 +689,14 @@ func (p *Bot) ConfigString(n int) string {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	return p.cs[n]
+}
+
+// ConfigStringHistory is every value configstring n has been sent, in order
+// -- the whole sequence, where ConfigString is only the last of it.
+func (p *Bot) ConfigStringHistory(n int) []string {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return append([]string(nil), p.cshist[n]...)
 }
 
 // ConfigStrings returns a copy of every configstring seen so far.

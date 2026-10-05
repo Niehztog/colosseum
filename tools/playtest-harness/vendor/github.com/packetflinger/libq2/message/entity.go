@@ -1,3 +1,7 @@
+// Changed for the Colosseum play-test harness, by its
+// patches/libq2-v1.0.335-entities.patch: removed entities leave the merged
+// set, and an entity entering a frame starts from its baseline.
+
 package message
 
 import (
@@ -207,6 +211,13 @@ func (m *Buffer) ParseEntity(from *pb.PackedEntity, num uint16, bits uint32) *pb
 // tell new values from existing. This makes it impossible to decompress all
 // entities after the fact.
 func (m *Buffer) ParsePacketEntities(from map[int32]*pb.PackedEntity) map[int32]*pb.PackedEntity {
+	return m.ParsePacketEntitiesFrom(from, nil)
+}
+
+// ParsePacketEntitiesFrom is ParsePacketEntities with the spawn baselines: an
+// entity that was not in the delta frame is coded against its baseline, not
+// against nothing, so a field equal to the baseline is never sent for it.
+func (m *Buffer) ParsePacketEntitiesFrom(from, baselines map[int32]*pb.PackedEntity) map[int32]*pb.PackedEntity {
 	if m.Index == m.Length {
 		return nil
 	}
@@ -224,10 +235,18 @@ func (m *Buffer) ParsePacketEntities(from map[int32]*pb.PackedEntity) map[int32]
 		}
 		previous, ok := out[int32(num)]
 		if !ok {
-			previous = &pb.PackedEntity{}
+			if b, isBase := baselines[int32(num)]; isBase {
+				previous = proto.Clone(b).(*pb.PackedEntity)
+			} else {
+				previous = &pb.PackedEntity{}
+			}
 		}
 		e := m.ParseEntity(previous, num, bits)
-		if !e.GetRemove() {
+		if e.GetRemove() {
+			// the entity left this client's frame: it must not linger in
+			// the merged set with whatever state it had when it left
+			delete(out, int32(num))
+		} else {
 			out[int32(num)] = e
 		}
 	}

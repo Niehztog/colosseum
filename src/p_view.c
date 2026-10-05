@@ -1054,6 +1054,10 @@ void ClientEndServerFrame(edict_t *ent)
     current_player = ent;
     current_client = ent->client;
 
+    // the engine reads this (GMF_CLIENTNUM); eyecam_SetView points it at an
+    // in-eyes camera's subject further down
+    current_client->clientNum = ent - g_edicts - 1;
+
     //
     // If the origin or velocity have changed since ClientThink(),
     // update the pmove values.  This will happen when the client
@@ -1161,9 +1165,10 @@ void ClientEndServerFrame(edict_t *ent)
     // FIXME: with client prediction, the contents
     // should be determined by the client
     if (RA_CameraObserver(ent)) {
-        // TRACKCAM and EYECAM see through no blend at all, as RA2 has it: the
-        // contents this client's own camera sits in are not what it is
-        // watching, and nothing hands it the tracked player's blend instead.
+        // TRACKCAM sees through no blend at all, as RA2 has it: the contents
+        // this client's own camera sits in are not what it is watching.  An
+        // EYECAM starts from the same zero and is handed its subject's blend by
+        // eyecam_SetView below (R-RA-25).
         ent->client->ps.blend[0] = ent->client->ps.blend[1] =
             ent->client->ps.blend[2] = ent->client->ps.blend[3] = 0;
     } else {
@@ -1191,6 +1196,11 @@ void ClientEndServerFrame(edict_t *ent)
         else
             G_SetStats(ent);
     }
+
+    // An arena in-eyes camera takes its subject's view, now that its own has
+    // been computed and before anything below reads it (R-RA-25).
+    if (G_Ruleset() == RULESET_ARENA)
+        eyecam_SetView(ent);
 
     // OSP's copy loop below replaces this base spectator mechanism.
     if (!G_IsOspRuleset())

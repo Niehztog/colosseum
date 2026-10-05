@@ -2538,6 +2538,124 @@ void eyecam_think(edict_t *ent, usercmd_t *ucmd)
     track_SetStats(ent);
 }
 
+/*
+=================
+eyecam_active
+
+An arena observer in EYECAM whose subject is fighting, outside an
+intermission: the client whose view eyecam_SetView replaces with its subject's.
+=================
+*/
+bool eyecam_active(edict_t *ent)
+{
+    edict_t *target;
+
+    if (G_Ruleset() != RULESET_ARENA || !ent->client || level.intermission_framenum)
+        return false;
+    if (ent->client->resp.fightstate != FIGHT_SPECTATING ||
+        ent->client->resp.omode != OMODE_EYECAM)
+        return false;
+
+    target = ent->client->resp.track_target;
+    return target && target->inuse && target->client &&
+           target->client->resp.fightstate == FIGHT_ALIVE;
+}
+
+/*
+=================
+eyecam_SetView
+
+R-RA-25, opentdm's in-eyes view as packetflinger's RA2 fork has it
+(packetflinger/rocketarena2@a66e94b).  RA2's EYECAM put the camera twenty units
+ahead of its subject's origin and twenty-two up, with no gun and no blend, so
+the subject's model sat around the camera.  Called at the end of
+ClientEndServerFrame, after the subject's own view is final -- which is why
+ClientEndServerFrames ends these clients last -- it puts the camera in the
+subject's eye and copies the subject's view angles, kick, gun, blend and
+rdflags.  `clientNum` names the subject, so an engine that reads it
+(GMF_CLIENTNUM) leaves the subject's model out of this client's frame.  The
+fork's fallback for an engine that does not -- the camera thirty units in front
+of the face -- is kept, which rocketarena2@f748f34 drops: that tree is built
+for Q2PRO's new game API only, and an `API=old` build of this one can be loaded
+by an engine without the bit.
+=================
+*/
+void eyecam_SetView(edict_t *ent)
+{
+    gclient_t   *client = ent->client;
+    gclient_t   *tclient;
+    edict_t     *target;
+    vec3_t      eye, goal, forward, delta;
+    trace_t     tr;
+    int         i;
+
+    if (!eyecam_active(ent)) {
+        // leaving the subject's eyes: the observer's own gun comes back, and
+        // the next frame's view and gun offsets are its own again
+        if (client->eyecam_view) {
+            client->eyecam_view = false;
+            client->ps.gunindex = client->eyecam_gunindex;
+            client->ps.gunframe = client->eyecam_gunframe;
+            client->ps.rdflags = 0;
+#if USE_NEW_GAME_API
+            Vector4Clear(client->ps.damage_blend);
+#endif
+        }
+        return;
+    }
+
+    target = client->resp.track_target;
+    tclient = target->client;
+    if (!client->eyecam_view) {
+        client->eyecam_view = true;
+        client->eyecam_gunindex = client->ps.gunindex;
+        client->eyecam_gunframe = client->ps.gunframe;
+    }
+
+    VectorAdd(target->s.origin, tclient->ps.viewoffset, eye);
+    VectorCopy(eye, goal);
+
+    if (sv_features && ((int)sv_features->value & GMF_CLIENTNUM)) {
+        client->clientNum = target - g_edicts - 1;
+    } else {
+        AngleVectors(tclient->v_angle, forward, NULL, NULL);
+        VectorMA(eye, 30, forward, goal);
+
+        // not through the wall in front of the face
+        tr = gi.trace(eye, vec3_origin, vec3_origin, goal, target, MASK_SOLID);
+        if (tr.fraction < 1) {
+            VectorSubtract(tr.endpos, eye, delta);
+            VectorMA(eye, 0.9f, delta, goal);
+        }
+    }
+
+    // the client adds viewoffset to the origin, so it is taken back out
+    VectorSubtract(goal, tclient->ps.viewoffset, ent->s.origin);
+    VectorClear(ent->velocity);
+    gi.linkentity(ent);
+
+    for (i = 0; i < 3; i++) {
+        client->ps.pmove.origin[i] = COORD2SHORT(ent->s.origin[i]);
+        client->ps.pmove.velocity[i] = 0;
+    }
+    client->ps.pmove.pm_flags |= PMF_NO_PREDICTION;
+
+    VectorCopy(tclient->ps.viewoffset, client->ps.viewoffset);
+    VectorCopy(tclient->ps.viewangles, client->ps.viewangles);
+    VectorCopy(tclient->ps.kick_angles, client->ps.kick_angles);
+
+    client->ps.gunindex = tclient->ps.gunindex;
+    client->ps.gunframe = tclient->ps.gunframe;
+    VectorCopy(tclient->ps.gunangles, client->ps.gunangles);
+    VectorCopy(tclient->ps.gunoffset, client->ps.gunoffset);
+
+    Vector4Copy(tclient->ps.blend, client->ps.blend);
+#if USE_NEW_GAME_API
+    Vector4Copy(tclient->ps.damage_blend, client->ps.damage_blend);
+#endif
+    client->ps.rdflags = tclient->ps.rdflags;
+}
+
 void track_think(edict_t *ent, usercmd_t *ucmd)
 {
     edict_t     *target;
@@ -3449,6 +3567,163 @@ int fill_arena(int arenanum)
     return 1;
 }
 
+/*
+==================
+The round clock (R-RA-26)
+
+packetflinger's RA2 fork (packetflinger/rocketarena2@1f3069a, 64c6da1) gives an
+arena.cfg `roundtimelimit`, in seconds and 0 by default.  While it runs, the
+fighters and the audience of the arena see the time left, a per-client
+configstring after RA2's four (status, round, the two queue names); when it runs
+out with more than one team standing the round ends there, and the team with the
+most health and armour left among its living fighters wins it.  An even split is
+RA2's own tie, which replays the round.
+==================
+*/
+static int round_time_left(const arena_t *arena)
+{
+    int     frames;
+
+    frames = arena->roundtimelimit * BASE_FRAMERATE -
+             (level.framenum - arena->roundstart_framenum);
+    if (frames <= 0)
+        return 0;
+
+    // rounded up, so the clock reads 0:00 only once the time is gone
+    return (frames + BASE_FRAMERATE - 1) / BASE_FRAMERATE;
+}
+
+static void show_roundtime(int arenanum, bool force)
+{
+    arena_t *arena = &arenas[arenanum];
+    edict_t *e;
+    char    *s;
+    int     i, secs;
+
+    if (!arena->roundtimelimit)
+        return;
+
+    secs = round_time_left(arena);
+    if (!force && secs == arena->roundtime_sent)
+        return;
+    arena->roundtime_sent = secs;
+
+    s = va("%2d:%02d", secs / 60, secs % 60);
+    for (i = 0; i < game.maxclients; i++) {
+        e = &g_edicts[i + 1];
+        if (e->inuse && e->client && e->client->resp.context == arenanum)
+            send_configstring(e, CS_ROUNDTIME, s);
+    }
+}
+
+// The clock is up from the first frame of the fighting until the next round's
+// countdown, frozen at the time it stopped on.
+void RA_SetRoundTimeStat(edict_t *ent)
+{
+    arena_t *arena = &arenas[ent->client->resp.context];
+
+    if (ent->client->resp.context && arena->roundtimelimit &&
+        (arena->state == ASTATE_FIGHTING || arena->state == ASTATE_RESULTS ||
+         arena->state == ASTATE_NEXTROUND))
+        G_SetStat(ent, SID_RA_ROUNDTIME, CS_ROUNDTIME);
+    else
+        G_SetStat(ent, SID_RA_ROUNDTIME, 0);
+}
+
+// The team whose living fighters have the most health and armour between them,
+// read as fight_done reads a fighter; -1 when the best two are level.
+static int health_winner(int arenanum)
+{
+    qmenu_t     *tnode, *mnode;
+    edict_t     *e;
+    int         winner, best, total, armor;
+    bool        tie;
+
+    winner = -1;
+    best = 0;
+    tie = false;
+
+    tnode = &arenas[arenanum].activeteams;
+    while (tnode->next) {
+        tnode = tnode->next;
+
+        mnode = (qmenu_t *)tnode->it;
+        total = 0;
+        while (mnode->next) {
+            mnode = mnode->next;
+            e = (edict_t *)mnode->it;
+
+            if (e->takedamage != DAMAGE_AIM || e->deadflag != DEAD_NO)
+                continue;
+
+            total += e->health;
+            armor = ArmorIndex(e);
+            if (armor)
+                total += e->client->pers.inventory[armor];
+        }
+
+        if (total <= 0)
+            continue;
+        if (total > best) {
+            best = total;
+            winner = TEAM((qmenu_t *)tnode->it)->teamnum;
+            tie = false;
+        } else if (total == best) {
+            tie = true;
+        }
+    }
+
+    return tie ? -1 : winner;
+}
+
+// Is this team still one of the arena's active teams?  health_winner's answer
+// is kept through the results pause, and a team that empties in that pause is
+// freed by check_teams() and its slot handed to the next team made; fight_done,
+// asked at the end of the pause, only ever names a team that is there.
+static bool team_is_active(int arenanum, int teamnum)
+{
+    qmenu_t *tnode;
+
+    tnode = &arenas[arenanum].activeteams;
+    while (tnode->next) {
+        tnode = tnode->next;
+        if (TEAM((qmenu_t *)tnode->it)->teamnum == teamnum)
+            return true;
+    }
+
+    return false;
+}
+
+// The clock runs for every arena on every frame (multi_arena_think), where
+// arena_think reaches any one arena only every num_arenas * 2 frames -- 1.4
+// seconds on a seven-arena map, which a clock counting seconds cannot be
+// quantised to, and neither can the moment it runs out.  When it runs out on
+// a fight still going, the round is decided on health and armour, the fighting
+// stops so the results pause cannot change it, and the arena goes to
+// ASTATE_RESULTS as it does after a wipe.  A fight already decided is left to
+// arena_think.
+static void arena_roundclock(int arenanum)
+{
+    arena_t *arena = &arenas[arenanum];
+
+    if (arena->state != ASTATE_FIGHTING || !arena->roundtimelimit)
+        return;
+
+    show_roundtime(arenanum, false);
+
+    if (round_time_left(arena) > 0 || fight_done(arenanum) > -2)
+        return;
+
+    arena->timeout_winner = health_winner(arenanum);
+    arena->timed_out = true;
+    set_damage(arenanum, DAMAGE_NO);
+    show_stringc("Time's up!", arenanum);
+    RA2_Stats_TimedOut(arena->stats);
+    gi.dprintf("%d: time's up, %d\n", arenanum, arena->timeout_winner);
+
+    arena->state = ASTATE_RESULTS;
+}
+
 int fight_done(int arenanum)
 {
     qmenu_t     *tnode, *mnode;
@@ -3581,7 +3856,7 @@ void UpdateStatusBars(int arenanum)
     int     health[MAX_STATUS_TEAMS][MAX_STATUS_MEMBERS];
     char    *p;
     char    string[1400];
-    int     linepos, idview;
+    int     linepos, idview, roundtime;
 
     tnode = &arenas[arenanum].activeteams;
     numteams = -1;
@@ -3657,9 +3932,17 @@ void UpdateStatusBars(int arenanum)
         }
     }
 
-    if (idview >= 0)
+    if (idview >= 0) {
         Q_snprintf(p, sizeof(string) - (p - string),
                    "if %d xv 0 yb -58 stat_string %d endif ", idview, idview);
+        p = string + strlen(string);
+    }
+
+    // the round clock, where G_Statusbar draws it (R-RA-26)
+    roundtime = G_Stat(SID_RA_ROUNDTIME);
+    if (roundtime >= 0)
+        Q_snprintf(p, sizeof(string) - (p - string),
+                   "if %d xr -42 yt 28 stat_string %d endif ", roundtime, roundtime);
 
     for (n = 0; n < game.maxclients; n++) {
         e = &g_edicts[n + 1];
@@ -3912,6 +4195,9 @@ void arena_think(int arenanum)
 
             arena->state = ASTATE_FIGHTING;
             set_damage(arenanum, DAMAGE_AIM);
+            arena->roundstart_framenum = level.framenum;
+            arena->timed_out = false;
+            show_roundtime(arenanum, true);
             return;
         }
 
@@ -3968,7 +4254,17 @@ void arena_think(int arenanum)
         arena->proposetime = level.time + 30;
         return;
     } else if (arena->state == ASTATE_NEXTROUND) {
-        winner = fight_done(arenanum);
+        // A fight the clock ended was decided when it ended, and fight_done
+        // can no longer tell: set_damage has taken everyone out of its count.
+        // A winner that has left since is a tie, as after a wipe (R-RA-26).
+        if (arena->timed_out) {
+            winner = arena->timeout_winner;
+            arena->timed_out = false;
+            if (winner != -1 && !team_is_active(arenanum, winner))
+                winner = -1;
+        } else {
+            winner = fight_done(arenanum);
+        }
 
         if (winner == -1)
             Q_strlcpy(arena->msg, "It was a tie!", sizeof(arena->msg));
@@ -4050,6 +4346,9 @@ void multi_arena_think(void)
 
     if (level.intermission_framenum)
         return;
+
+    for (i = 1; i <= num_arenas; i++)
+        arena_roundclock(i);
 
     i = level.framenum % (num_arenas * 2);
     if (i % 2)

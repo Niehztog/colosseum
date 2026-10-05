@@ -578,19 +578,27 @@ static void sb_arena_head(statusbar_t *sb)
     sb_stat_string(sb, SID_RA_ROUNDINFO);
     sb_endif(sb);
 
-    // the two pickup-team queues
+    // the round clock, under the frag counter (R-RA-26)
+    sb_if(sb, SID_RA_ROUNDTIME);
+    sb_layout(sb, "xr", -42);
+    sb_layout(sb, "yt", 28);
+    sb_stat_string(sb, SID_RA_ROUNDTIME);
+    sb_endif(sb);
+
+    // the two pickup-team queues, ten lower than RA2's literal to clear the
+    // round clock, as packetflinger/rocketarena2@1f3069a moves them
     sb_if(sb, SID_RA_SHOWQUEUE);
     sb_layout(sb, "xr", -34);
-    sb_layout(sb, "yt", 32);
+    sb_layout(sb, "yt", 42);
     sb_num(sb, 2, SID_RA_QUEUE1);
     sb_layout(sb, "xr", -34);
-    sb_layout(sb, "yt", 62);
+    sb_layout(sb, "yt", 72);
     sb_num(sb, 2, SID_RA_QUEUE2);
     sb_layout(sb, "xr", -64);
-    sb_layout(sb, "yt", 40);
+    sb_layout(sb, "yt", 50);
     sb_stat_string(sb, SID_RA_QUEUE1_ICON);
     sb_layout(sb, "xr", -64);
-    sb_layout(sb, "yt", 70);
+    sb_layout(sb, "yt", 80);
     sb_stat_string(sb, SID_RA_QUEUE2_ICON);
     sb_endif(sb);
 }

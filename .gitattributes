@@ -14,7 +14,7 @@ inc/** -text
 src/** -text
 
 # The shipped gamedir set.  `arena.cfg` is Rocket Arena 2's own
-# arena-definition file -- 1039 lines, CRLF as it shipped.  The parser does not
+# arena-definition file -- 1049 lines, CRLF as it shipped.  The parser does not
 # care, but a donor's file that git rewrites is no longer a copy of it.
 #
 # This rule stops GIT rewriting it; it cannot stop an EDITOR.  A whole-file

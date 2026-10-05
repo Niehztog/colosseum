@@ -2210,6 +2210,8 @@ void PutClientInServer(edict_t *ent)
     saved = client->pers;
     memset(client, 0, sizeof(*client));
     client->pers = saved;
+    // the engine reads clientNum (GMF_CLIENTNUM), and the memset made it 0
+    client->clientNum = ent - g_edicts - 1;
     if (client->pers.health <= 0)
         InitClientPersistant(client, !G_IsOspRuleset());
     client->resp = resp;

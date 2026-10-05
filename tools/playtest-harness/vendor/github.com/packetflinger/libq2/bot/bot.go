@@ -1,5 +1,6 @@
 // Changed for the Colosseum play-test harness, by its
-// patches/libq2-v1.0.335-netchan.patch: NetMu and ReadErr.
+// patches/libq2-v1.0.335-netchan.patch: NetMu and ReadErr; and by its
+// patches/libq2-v1.0.335-entities.patch: the baselines survive frame pruning.
 
 // A very basic library for making a bot capable of connecting to a Quake 2
 // server.
@@ -266,7 +267,7 @@ func (bot *Bot) Run() error {
 			for _, fr := range packet.GetFrames() {
 				bot.oldframes[fr.GetNumber()] = fr
 				for n := range bot.oldframes {
-					if fr.GetNumber()-n > 64 {
+					if n != message.BaselineFrame && fr.GetNumber()-n > 64 {
 						delete(bot.oldframes, n)
 					}
 				}

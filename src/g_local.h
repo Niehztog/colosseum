@@ -49,7 +49,10 @@ with this program; if not, write to the Free Software Foundation, Inc.,
 #include "bot/bl_debug.h"
 
 // features this game supports
-#define G_FEATURES  (GMF_PROPERINUSE|GMF_WANT_ALL_DISCONNECTS|GMF_ENHANCED_SAVEGAMES)
+// GMF_CLIENTNUM: ClientEndServerFrame sets gclient_t.clientNum every frame,
+// to the client's own slot or, for an arena in-eyes camera, to its subject's
+// (R-ENG-2, R-RA-25).
+#define G_FEATURES  (GMF_CLIENTNUM|GMF_PROPERINUSE|GMF_WANT_ALL_DISCONNECTS|GMF_ENHANCED_SAVEGAMES)
 
 // the ruleset dispatch.  Included here rather than per-file so that a gate is
 // always reachable by its name and never by a cvar test that happens to be in
@@ -1858,6 +1861,9 @@ struct gclient_s {
     // known to server
     player_state_t  ps;             // communicated by server to clients
     int             ping;
+    // the entity the client sees from, minus one; read by the engine because
+    // G_FEATURES has GMF_CLIENTNUM, so it sits where gclient_new_t has it
+    int             clientNum;
 
     // private to game
     client_persistant_t pers;
@@ -2071,6 +2077,12 @@ struct gclient_s {
     // library serves all of them, and six sites are what sharing a field
     // between two donors' meanings costs.
     camera_t    camera;
+
+    // An arena EYECAM showing its subject's own view (R-RA-25): set while
+    // eyecam_SetView mirrors it, with the observer's own gun to give back.
+    bool        eyecam_view;
+    int         eyecam_gunindex;
+    int         eyecam_gunframe;
 };
 
 struct edict_s {

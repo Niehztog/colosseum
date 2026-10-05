@@ -86,6 +86,8 @@ typedef enum {
 // observer inside arena.c, so there is no chase-cam name to draw and
 // no spectator flag to test.  Its own block runs 16..25 and the shared second
 // powerup timer therefore goes to 26/27, which is where the table puts it.
+// The round clock (R-RA-26) is not RA2's, and takes 28, the first slot after
+// the timer pair.
 //
 // The kinds below are read off RA2's own statusbar literal rather than off the
 // field names, because two of the names lie: STAT_QUEUE1_ICON and
@@ -140,6 +142,7 @@ typedef enum {
     E(SID_RA_SHOWQUEUE,          SK_NUM,  -1,  -1,  23,  -1) \
     E(SID_RA_QUEUE1_ICON,        SK_CS,  -1,  -1,  24,  -1) \
     E(SID_RA_QUEUE2_ICON,        SK_CS,  -1,  -1,  25,  -1) \
+    E(SID_RA_ROUNDTIME,          SK_CS,  -1,  -1,  28,  -1) \
     E(SID_OSP_RUNE_RESIST,       SK_NUM,  22,  -1,  -1,  -1) \
     E(SID_OSP_RUNE_STRENGTH,     SK_NUM,  23,  -1,  -1,  -1) \
     E(SID_OSP_RUNE_HASTE,        SK_NUM,  24,  -1,  -1,  -1) \

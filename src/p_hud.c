@@ -933,8 +933,10 @@ void G_SetStats(edict_t *ent)
     // unreachable and a free-flying observer never saw a name.  Outside an
     // intermission a camera observer does not get here (ClientEndServerFrame)
     // and has the row from track_SetStats.
-    else if (G_Ruleset() == RULESET_ARENA)
+    else if (G_Ruleset() == RULESET_ARENA) {
         CTFSetIDView(ent);
+        RA_SetRoundTimeStat(ent);
+    }
 }
 
 /*

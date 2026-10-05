@@ -1,0 +1,139 @@
+--- a/bot/bot.go
++++ b/bot/bot.go
+@@ -1,5 +1,6 @@
+ // Changed for the Colosseum play-test harness, by its
+-// patches/libq2-v1.0.335-netchan.patch: NetMu and ReadErr.
++// patches/libq2-v1.0.335-netchan.patch: NetMu and ReadErr; and by its
++// patches/libq2-v1.0.335-entities.patch: the baselines survive frame pruning.
+ 
+ // A very basic library for making a bot capable of connecting to a Quake 2
+ // server.
+@@ -266,7 +267,7 @@
+ 			for _, fr := range packet.GetFrames() {
+ 				bot.oldframes[fr.GetNumber()] = fr
+ 				for n := range bot.oldframes {
+-					if fr.GetNumber()-n > 64 {
++					if n != message.BaselineFrame && fr.GetNumber()-n > 64 {
+ 						delete(bot.oldframes, n)
+ 					}
+ 				}
+--- a/message/entity.go
++++ b/message/entity.go
+@@ -1,3 +1,7 @@
++// Changed for the Colosseum play-test harness, by its
++// patches/libq2-v1.0.335-entities.patch: removed entities leave the merged
++// set, and an entity entering a frame starts from its baseline.
++
+ package message
+ 
+ import (
+@@ -207,6 +211,13 @@
+ // tell new values from existing. This makes it impossible to decompress all
+ // entities after the fact.
+ func (m *Buffer) ParsePacketEntities(from map[int32]*pb.PackedEntity) map[int32]*pb.PackedEntity {
++	return m.ParsePacketEntitiesFrom(from, nil)
++}
++
++// ParsePacketEntitiesFrom is ParsePacketEntities with the spawn baselines: an
++// entity that was not in the delta frame is coded against its baseline, not
++// against nothing, so a field equal to the baseline is never sent for it.
++func (m *Buffer) ParsePacketEntitiesFrom(from, baselines map[int32]*pb.PackedEntity) map[int32]*pb.PackedEntity {
+ 	if m.Index == m.Length {
+ 		return nil
+ 	}
+@@ -224,10 +235,18 @@
+ 		}
+ 		previous, ok := out[int32(num)]
+ 		if !ok {
+-			previous = &pb.PackedEntity{}
++			if b, isBase := baselines[int32(num)]; isBase {
++				previous = proto.Clone(b).(*pb.PackedEntity)
++			} else {
++				previous = &pb.PackedEntity{}
++			}
+ 		}
+ 		e := m.ParseEntity(previous, num, bits)
+-		if !e.GetRemove() {
++		if e.GetRemove() {
++			// the entity left this client's frame: it must not linger in
++			// the merged set with whatever state it had when it left
++			delete(out, int32(num))
++		} else {
+ 			out[int32(num)] = e
+ 		}
+ 	}
+--- a/message/parse.go
++++ b/message/parse.go
+@@ -1,7 +1,12 @@
++// Changed for the Colosseum play-test harness, by its
++// patches/libq2-v1.0.335-entities.patch: spawn baselines kept for the
++// entity parser.
++
+ package message
+ 
+ import (
+ 	"errors"
++	"math"
+ 	"strconv"
+ 	"strings"
+ 
+@@ -102,12 +107,16 @@
+ 	for _, ab := range areabits {
+ 		fr.AreaBits = append(fr.AreaBits, uint32(ab))
+ 	}
++	var baselines map[int32]*pb.PackedEntity
+ 	if oldFrames != nil {
+ 		delta, ok := oldFrames[fr.Delta]
+ 		if ok {
+ 			fromPS = delta.GetPlayerState()
+ 			fromEnts = delta.GetEntities()
+ 		}
++		if bf, ok := oldFrames[BaselineFrame]; ok {
++			baselines = bf.GetEntities()
++		}
+ 	}
+ 	var ps *pb.PackedPlayer
+ 	if m.ReadByte() == SVCPlayerInfo {
+@@ -115,7 +124,7 @@
+ 	}
+ 	fr.PlayerState = ps
+ 	if m.ReadByte() == SVCPacketEntities {
+-		fr.Entities = m.ParsePacketEntities(fromEnts)
++		fr.Entities = m.ParsePacketEntitiesFrom(fromEnts, baselines)
+ 	}
+ 	return fr
+ }
+@@ -483,6 +492,10 @@
+ }
+ */
+ 
++// BaselineFrame is the key the spawn baselines are kept under in a frame
++// history map; no real frame has a negative number.
++const BaselineFrame = math.MinInt32
++
+ // ParsePacket will parse all the messages in a particular server packet.
+ func (p *Buffer) ParsePacket(oldFrames map[int32]*pb.Frame) (*pb.Packet, error) {
+ 	if p.Index == p.Length {
+@@ -499,7 +512,21 @@
+ 		case SVCSpawnBaseline:
+ 			bitmask := p.ParseEntityBitmask()
+ 			number := p.ParseEntityNumber(bitmask)
+-			out.Baselines = append(out.Baselines, p.ParseEntity(nil, number, bitmask))
++			base := p.ParseEntity(nil, number, bitmask)
++			out.Baselines = append(out.Baselines, base)
++			// an entity that enters a frame is delta-coded from its
++			// baseline, so the frame parser needs them
++			if oldFrames != nil {
++				bf, ok := oldFrames[BaselineFrame]
++				if !ok {
++					bf = &pb.Frame{Number: BaselineFrame}
++					oldFrames[BaselineFrame] = bf
++				}
++				if bf.Entities == nil {
++					bf.Entities = make(map[int32]*pb.PackedEntity)
++				}
++				bf.Entities[int32(number)] = base
++			}
+ 		case SVCStuffText:
+ 			out.Stuffs = append(out.Stuffs, p.ParseStuffText())
+ 		case SVCFrame: // includes playerstate and packetentities

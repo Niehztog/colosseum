@@ -28,7 +28,12 @@
 //  1. a client that joins DURING a round waits in the arena as an observer, and
 //     ATTACK reaches the game -- ChangeOMode says so out loud.
 //  2. its ps.gunframe never leaves zero.  Only the weaponthink moves that: to
-//     FRAME_FIRE_FIRST on a shot, round the idle loop otherwise.
+//     FRAME_FIRE_FIRST on a shot, round the idle loop otherwise.  EXCEPT IN
+//     IN EYES, whose in-eyes camera (colosseum's R-RA-25, rocketarena2's
+//     f748f34) mirrors its target's gun into the observer's playerstate,
+//     gunframe and all.  So the presses step through the
+//     observer modes one announced switch at a time, and gunframe is filed
+//     under the mode it was read in; the claim is about every mode but In Eyes.
 //  3. a fighter's DOES move, on the same server in the same round.  Without
 //     this the second check passes just as well on a server that never sends
 //     gunframe to anyone.
@@ -41,6 +46,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
+	"strings"
 	"time"
 
 	"q2playtest/playtest"
@@ -156,15 +163,59 @@ func run(q2, ref, lib, dir, mapname string, arena, port int, label string) error
 	// ChangeOMode is what RA2 spends an observer's ATTACK on, and it announces
 	// itself -- which is how this tells "the weapon did not fire" apart from
 	// "the button never arrived", the two readings a silent result has.
+	// AN IN-EYES OBSERVER SHOWS ITS TARGET'S GUN, so its ps.gunframe is the
+	// target's and moves whether or not its own weapon thinks.  The witness is
+	// therefore taken per observer mode: after each press, once the server has
+	// announced the mode it switched to, gunframe is sampled and filed under
+	// that mode.  The claim is about every mode but In Eyes.
+	modeRe := regexp.MustCompile(`Switched Observer Mode to: (.+)`)
+	modes := func() []string {
+		var out []string
+		for _, l := range queued.Prints() {
+			if m := modeRe.FindStringSubmatch(playtest.Decode(l)); m != nil {
+				out = append(out, strings.TrimSpace(m[1]))
+			}
+		}
+		return out
+	}
+	high := map[string]int{}
+	var order []string
 	for i := 0; i < 4; i++ {
-		queued.Press(playtest.ButtonAttack, 500*time.Millisecond)
+		// a single press is not always seen -- on either build -- so press
+		// until the server announces a switch: retry the transient
+		n := len(modes())
+		for try := 0; try < 5 && len(modes()) <= n; try++ {
+			queued.Press(playtest.ButtonAttack, 250*time.Millisecond)
+			deadline := time.Now().Add(1500 * time.Millisecond)
+			for len(modes()) <= n && time.Now().Before(deadline) {
+				time.Sleep(50 * time.Millisecond)
+			}
+		}
+		ms := modes()
+		if len(ms) <= n {
+			break
+		}
+		mode := ms[len(ms)-1]
+		order = append(order, mode)
+		queued.WaitFrames(2, 2*time.Second)
+		for j := 0; j < 8; j++ {
+			if g := queued.GunFrame(); g > high[mode] {
+				high[mode] = g
+			}
+			time.Sleep(60 * time.Millisecond)
+		}
 	}
 	sw, swErr := queued.WaitPrint(`Switched Observer Mode to`, 5*time.Second)
 	check("ATTACK reaches the game", swErr == nil, sw)
 
-	queued.WaitFrames(20, 10*time.Second)
-	check("queued client's weapon never thinks", queued.GunFrameHigh() == 0,
-		fmt.Sprintf("gunframe high water %d after %d presses", queued.GunFrameHigh(), 4))
+	worst := 0
+	for m, g := range high {
+		if m != "In Eyes" && g > worst {
+			worst = g
+		}
+	}
+	check("queued client's weapon never thinks", len(order) == 4 && worst == 0,
+		fmt.Sprintf("modes %v, gunframe high water per mode %v", order, high))
 
 	// The other sign.  A fighter on the same server, in the same round, pressing
 	// the same button: its weapon has to think, or check 2 is measuring a wire
