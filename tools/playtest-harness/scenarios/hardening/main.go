@@ -30,6 +30,11 @@
 //	H20 arena: a client cycling its skin allocates no image index -- every
 //	    new skin name was one gi.imageindex, and a client could walk the
 //	    server to the table's end (R-SEC-13).
+//	M1  dm on q2dm1 with every brush a shot stops at made lava as well --
+//	    contents 73 on a plain solid brush, a custom map's lava floor: a
+//	    rail fired into the floor is spent and the frame ends.  fire_rail
+//	    took such a brush for a lava surface and retraced from it forever
+//	    (R-BASE-8).
 //
 // C1, C5, H9, H11, H14 and H18 are not rows here, and each for a reason
 // stated where the fix is: they need a map position, a match in progress or a
@@ -37,6 +42,7 @@
 package main
 
 import (
+	"encoding/binary"
 	"flag"
 	"fmt"
 	"os"
@@ -446,6 +452,121 @@ func rowH20() {
 	alive("H20", srv)
 }
 
+// ---------------------------------------------------------------- M1 ------
+
+// lavaMap is the fixture M1 boots, written into the install by writeLavaMap.
+const lavaMap = "q2dm1lava"
+
+const statAmmo = 3 // STAT_AMMO, one of Quake II's own slots
+
+// writeLavaMap copies q2dm1 out of the paks with every brush a shot stops at
+// made lava and mist as well -- a plain solid brush becomes contents 73,
+// SOLID|LAVA|MIST, the contents of a custom map's lava floor -- and writes
+// it into the install's own maps/.  Only the brush lump changes, twelve
+// bytes a brush with the contents last, so the map loads and plays as q2dm1
+// does.
+func writeLavaMap() (int, error) {
+	const (
+		lumpBrushes  = 14
+		solid        = 1
+		window       = 2
+		lava         = 8
+		mist         = 64
+		monster      = 1 << 25
+		deadmonster  = 1 << 26
+		maskShot     = solid | window | monster | deadmonster
+		headerLength = 8 + 19*8
+	)
+	data, err := playtest.MapData(filepath.Join(*ref, "pak*.pak"), "q2dm1")
+	if err != nil {
+		return 0, err
+	}
+	if len(data) < headerLength || string(data[:4]) != "IBSP" {
+		return 0, fmt.Errorf("q2dm1 is not an IBSP file")
+	}
+	ofs := int(binary.LittleEndian.Uint32(data[8+lumpBrushes*8:]))
+	end := ofs + int(binary.LittleEndian.Uint32(data[12+lumpBrushes*8:]))
+	if end > len(data) {
+		return 0, fmt.Errorf("q2dm1's brush lump runs past the file")
+	}
+	n := 0
+	for at := ofs + 8; at+4 <= end; at += 12 {
+		if c := binary.LittleEndian.Uint32(data[at:]); c&maskShot != 0 {
+			binary.LittleEndian.PutUint32(data[at:], c|lava|mist)
+			n++
+		}
+	}
+	maps := filepath.Join(*dir, "colosseum", "maps")
+	if err := os.MkdirAll(maps, 0o755); err != nil {
+		return 0, err
+	}
+	return n, playtest.WriteFixture(filepath.Join(maps, lavaMap+".bsp"), data, 0o644)
+}
+
+func rowM1() {
+	if !want("M1") {
+		return
+	}
+	n, err := writeLavaMap()
+	note := fmt.Sprintf("%d brush(es) patched", n)
+	if err != nil {
+		note = err.Error()
+	}
+	if !check("M1/q2dm1 with lava in every brush a shot stops at", err == nil && n > 0, note) {
+		return
+	}
+	srv := boot("dm", lavaMap, map[string]string{"cheats": "1"})
+	if srv == nil {
+		return
+	}
+	defer srv.Stop()
+	a := connect(srv, "golf")
+	if a == nil {
+		return
+	}
+	defer a.Disconnect()
+	for i := 0; i < 6 && a.Spectating(); i++ {
+		a.Cmd("join")
+		time.Sleep(1500 * time.Millisecond)
+	}
+	if !check("M1/the client is in the game", !a.Spectating(), "") {
+		return
+	}
+	// `dm` starts a client with the blaster alone, so the ammo stat counts
+	// the railgun's slugs and nothing else's.  A command can be lost in the
+	// first frames after a connect, so the grant is asked again until the
+	// stat moves -- which no build can fake.
+	slugs := 0
+	for try := 0; try < 3 && slugs == 0; try++ {
+		a.Cmd("give railgun")
+		a.Cmd("give slugs")
+		a.Cmd("use railgun")
+		for i := 0; i < 25 && slugs == 0; i++ {
+			time.Sleep(100 * time.Millisecond)
+			slugs = a.Stat(statAmmo)
+		}
+	}
+	if !check("M1/a railgun in hand", slugs > 0, "%d slug(s)", slugs) {
+		return
+	}
+	time.Sleep(1500 * time.Millisecond) // raised, so the press finds it ready
+	a.Look(89, 0, 0)                    // the floor, a patched brush
+	time.Sleep(300 * time.Millisecond)
+	// Pressed again only while no slug is spent: on the library without the
+	// guard the first rail that fires is the one that never returns.
+	left := slugs
+	for try := 0; try < 3 && left == slugs; try++ {
+		a.Press(playtest.ButtonAttack, 300*time.Millisecond)
+		for i := 0; i < 50 && left == slugs; i++ {
+			time.Sleep(100 * time.Millisecond)
+			left = a.Stat(statAmmo)
+		}
+	}
+	check("M1/a rail into the floor is spent and returns", left < slugs,
+		"%d of %d slug(s) left", left, slugs)
+	alive("M1", srv)
+}
+
 func main() {
 	flag.Parse()
 	if *q2proded == "" || *lib == "" {
@@ -481,6 +602,7 @@ func main() {
 	rowH12()
 	rowH19()
 	rowH20()
+	rowM1()
 
 	fmt.Printf("\n%d check(s), %d failed, %d skipped\n", total, failed, skipped)
 	if failed > 0 {

@@ -135,7 +135,8 @@
 #                  freed under dm, a teamskin injection refused and never
 #                  stuffed, the referee paths with no password and with a
 #                  backoff, a bot on a password server, accuracy across a
-#                  death, a skin cycle that allocates no image.  Every row
+#                  death, a skin cycle that allocates no image, a rail into
+#                  a floor that is solid and lava at once.  Every row
 #                  fails on the library without its fix.  -ra2ref and
 #                  $GLADDIR are optional; each row that needs one skips
 #                  without it and says so.

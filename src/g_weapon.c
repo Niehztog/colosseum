@@ -781,7 +781,13 @@ void fire_rail(edict_t *self, vec3_t start, vec3_t aimdir, int damage, int kick)
     while (ignore) {
         tr = gi.trace(from, NULL, NULL, end, ignore, mask);
 
-        if (tr.contents & (CONTENTS_SLIME | CONTENTS_LAVA)) {
+        // A liquid is passed by taking its bits out of the mask and tracing
+        // on.  A brush that is a liquid AND solid to the shot -- a SOLID|LAVA
+        // floor, which custom maps carry and no retail map does -- stops that
+        // retrace all the same, at no distance and reporting the same liquid,
+        // so id's test took this branch for it forever and the frame never
+        // ended.  To the shot such a brush is a wall.
+        if ((tr.contents & (CONTENTS_SLIME | CONTENTS_LAVA)) && !(tr.contents & MASK_SHOT)) {
             mask &= ~(CONTENTS_SLIME | CONTENTS_LAVA);
             water = true;
         } else {

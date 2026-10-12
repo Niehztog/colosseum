@@ -31,16 +31,26 @@ type Spawn struct {
 // position into the identity of the spot the game chose, which is a far
 // sharper signal than a distance.
 func MapEntities(pakGlob, mapName string, classes ...string) ([]Spawn, error) {
+	data, err := MapData(pakGlob, mapName)
+	if err != nil {
+		return nil, err
+	}
+	want := map[string]bool{}
+	for _, c := range classes {
+		want[c] = true
+	}
+	return entities(data, want)
+}
+
+// MapData returns a map's BSP file as the first pak matching pakGlob that
+// holds it stores it -- the bytes a scenario patches into a fixture map.
+func MapData(pakGlob, mapName string) ([]byte, error) {
 	paks, err := filepath.Glob(pakGlob)
 	if err != nil {
 		return nil, err
 	}
 	if len(paks) == 0 {
 		return nil, fmt.Errorf("no paks matched %q", pakGlob)
-	}
-	want := map[string]bool{}
-	for _, c := range classes {
-		want[c] = true
 	}
 
 	for _, p := range paks {
@@ -59,7 +69,7 @@ func MapEntities(pakGlob, mapName string, classes ...string) ([]Spawn, error) {
 			if !strings.HasSuffix(f.GetName(), ".bsp") {
 				continue
 			}
-			return entities(f.GetData(), want)
+			return f.GetData(), nil
 		}
 	}
 	return nil, fmt.Errorf("map %q not in %q", mapName, pakGlob)
