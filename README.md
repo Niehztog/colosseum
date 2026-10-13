@@ -180,7 +180,15 @@ The first botlib the list names that can play the map is the one the fill, `sv a
 
 For the players, the bot menu lists each botlib's bots under its name, and a Quake III bot asks for one of Quake III's five skills - *I Can Win* to *Nightmare!* - before it is added; under the four OSP rulesets the vote menu's bot picker marks a Quake III bot `Q3|` and a Gladiator one `GB|`.
 
-The bots wear their Quake III player models (`sarge/default`, ...), which Quake II clients do not have, so they show as `male/grunt` unless the clients install converted models - the backport's README says how - or the skins in `q3bot/bots.cfg` are changed to stock Quake II ones.
+**Their player models.** The bots wear their Quake III player models (`sarge/default`, ...), which Quake II clients do not have, so they show as `male/grunt` until the models are converted. The models are Quake III Arena and Team Arena data, so they are not in the package: convert them from your own copy of the games with [`q3player2md2`](https://github.com/Niehztog/q3player2md2), which needs Python 3 with NumPy and Pillow:
+
+```
+git clone https://github.com/Niehztog/q3player2md2 && cd q3player2md2
+python3 q3player2md2.py --q3 <quake3>/baseq3 --q2 <quake2>/baseq2 --q2 <quake2>/xatrix --q2 <quake2>/rogue --all
+python3 q3player2md2.py --q3 <quake3>/baseq3 --q3 <quake3>/missionpack --q2 <quake2>/baseq2 --q2 <quake2>/xatrix --q2 <quake2>/rogue fritzkrieg pi
+```
+
+The first line converts every Quake III model, and the second converts Team Arena's two bots. Passing the mission packs' data with `--q2` puts their weapons in the bots' hands. Copy everything in `out/players/` into `baseq2/players/` of every Quake II installation that plays with the bots. The other way out is to change the skins in `q3bot/bots.cfg` to stock Quake II ones.
 
 ## Playing
 
