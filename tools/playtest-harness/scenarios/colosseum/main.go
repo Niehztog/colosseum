@@ -1283,7 +1283,10 @@ func slotRows() {
 	port := nextPort()
 	fmt.Printf("\n##### a bot gets out of a human's way (port %d)\n", port)
 
-	srv, err := startBotServer("slots", "dm", "q2dm1", port, max, nil)
+	// sv_novis puts every entity in every frame, so the human sees each bot
+	// wherever it stands: the "drawn as itself" row needs the moved one.
+	srv, err := startBotServer("slots", "dm", "q2dm1", port, max,
+		map[string]string{"sv_novis": "1"})
 	if err != nil {
 		check("slots/boot", false, err.Error())
 		return
@@ -1357,6 +1360,39 @@ func slotRows() {
 	check("slots/both bot bits survived the move",
 		b2.Fields["FL_BOTCLIENT"] == b2.Bots,
 		"FL_BOT=%d FL_BOTCLIENT=%d", b2.Bots, b2.Fields["FL_BOTCLIENT"])
+
+	// ...and it must still LOOK like itself.  A client draws a player model
+	// with clientinfo[skinnum & 0xff], and that byte names the slot, not the
+	// bot: copied with the rest of the edict, it drew the moved bot with the
+	// human's model and skin -- the slot it left is the human's -- until its
+	// next weapon change or respawn rewrote it.  So every frame the human has
+	// had counts, not the last one.
+	before := map[int]bool{}
+	for _, s := range b.Slots {
+		before[s] = true
+	}
+	movedTo := -1
+	for _, s := range b2.Slots {
+		if !before[s] {
+			movedTo = s
+		}
+	}
+	var drawn []string
+	wrong := 0
+	for _, s := range b2.Slots {
+		h := p.PlayerSkinHistory(s + 1)
+		as := []int{}
+		for _, sk := range h {
+			as = append(as, sk&0xff)
+			if sk&0xff != s {
+				wrong++
+			}
+		}
+		drawn = append(drawn, fmt.Sprintf("slot %d as %v", s, as))
+	}
+	check("slots/every bot is drawn as itself",
+		movedTo >= 0 && len(p.PlayerSkinHistory(movedTo+1)) > 0 && wrong == 0,
+		"moved to slot %d; %s", movedTo, strings.Join(drawn, ", "))
 	p.Disconnect()
 
 	// Second half: every slot a bot, and the human is refused BY NAME.

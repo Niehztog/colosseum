@@ -58,6 +58,7 @@ type Bot struct {
 	viewoff  [3]float64
 	gunindex int
 	ents     map[int32]*pb.PackedEntity
+	skinhist map[int][]int
 	stats    map[int]int
 	sounds   []Sound
 }
@@ -133,7 +134,7 @@ func NewBot(name, host string, port int) *Bot {
 	ui["spectator"] = "0"
 
 	p := &Bot{Name: name, spawned: make(chan struct{}), cs: map[int]string{},
-		stats: map[int]int{}}
+		stats: map[int]int{}, skinhist: map[int][]int{}}
 	p.b = &bot.Bot{
 		Net:     bot.Connection{Address: host, Port: port},
 		User:    ui,
@@ -276,6 +277,21 @@ func NewBot(name, host string, port int) *Bot {
 		}
 		p.gunindex = int(ps.GetGunIndex())
 		p.ents = fr.GetEntities()
+		// A player model is drawn with clientinfo[skinnum & 0xff]: the low
+		// byte names the slot whose model and skin it wears, the high byte is
+		// the view weapon.  So the skinnum is the one thing on the wire that
+		// says whose a player entity looks like, and it is kept per frame,
+		// because a wrong one lasts only until the game next rewrites it -- a
+		// weapon change, a respawn -- and the last frame alone would miss it.
+		for n, e := range p.ents {
+			if e.GetModelIndex() != ModelIndexPlayer {
+				continue
+			}
+			sk, h := int(e.GetSkin()), p.skinhist[int(n)]
+			if len(h) == 0 || h[len(h)-1] != sk {
+				p.skinhist[int(n)] = append(h, sk)
+			}
+		}
 		// stats[] is DELTA-COMPRESSED against the last acked frame, so a frame
 		// carries only the slots that changed.  Merging rather than replacing is
 		// what makes Stat(n) mean "the last value the server sent for n" instead
@@ -440,6 +456,19 @@ func (p *Bot) EntityModel(n int) (int, bool) {
 		return 0, false
 	}
 	return int(e.GetModelIndex()), true
+}
+
+// ModelIndexPlayer is the modelindex that means "the player model the skinnum
+// names" rather than a model of its own.
+const ModelIndexPlayer = 255
+
+// PlayerSkinHistory is every skinnum entity n has been sent with while drawn as
+// a player model, in order and with repeats collapsed.  Its low byte is the
+// slot whose clientinfo the client draws the entity with.
+func (p *Bot) PlayerSkinHistory(n int) []int {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return append([]int(nil), p.skinhist[n]...)
 }
 
 // ViewAngles is playerstate.viewangles in degrees -- PITCH, YAW, ROLL.  For a

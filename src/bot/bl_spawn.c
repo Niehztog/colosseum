@@ -530,8 +530,15 @@ bool BotMoveToFreeClientEdict(edict_t *bot)
                                 newcl, newcl->client->resp.teamnum);
         } //end if
     }
-    //the edict's own identity does not travel with it
+    //the edict's own identity does not travel with it, and nor does the slot
+    //in the low byte of a player model's skinnum: every client draws a player
+    //with clientinfo[skinnum & 0xff], and the high byte is the view weapon.
+    //Copied, it drew the moved bot with the arriving person's model and skin
+    //-- the slot it left is theirs -- until the bot's next weapon change or
+    //respawn rewrote it (ShowGun, PutClientInServer).  The test is ShowGun's.
     newcl->s.number = DF_ENTNUMBER(newcl);
+    if (newcl->s.modelindex == MODELINDEX_PLAYER)
+        newcl->s.skinnum = (newcl->s.skinnum & ~0xff) | DF_ENTCLIENT(newcl);
     //copy bot state
     bs = &botglobals.botstates[DF_ENTCLIENT(bot)];
     newbs = &botglobals.botstates[DF_ENTCLIENT(newcl)];
