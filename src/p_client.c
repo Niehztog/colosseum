@@ -2104,18 +2104,13 @@ void PutClientInServer(edict_t *ent)
     // The donor passes false at both of this function's two reset sites, and
     // the merge kept baseq2's true at both, which is rule 2 taking the base
     // where the base is unchanged.  It is not cosmetic: tourney's
-    // ClientUserinfoChanged may REFUSE a rename, and refusing means "put back
-    // what they had" -- `Info_SetValueForKey(userinfo, "name", pers.netname)`.
-    // With the full wipe, `pers.netname` is the empty string by the time the
-    // refusal reads it, so the refusal installs an empty name and the userinfo
-    // carries it from then on.  The refusal always fires here, because
-    // ClientConnect's own userinfo change stamps the `client_infochange`
-    // cooldown four seconds ahead and this runs inside it.
-    //
-    // Measured: every bot under `tourney` announced itself as " entered the
-    // game" and every scoreboard row was blank.  It is not a bot defect -- a
-    // human's first spawn takes the same path -- but a bot is what respawns
-    // often enough to make it obvious.
+    // ClientUserinfoChanged reads the name in force out of `pers.netname`.  That
+    // is how it HOLDS a rename made inside `client_infochange` (R-OSP-30), and
+    // it is what it writes back over a name the player list refuses.  A first
+    // spawn always runs inside that window, because ClientConnect's own userinfo
+    // change stamps the cooldown four seconds ahead -- and with the full wipe
+    // the name in force is the empty string by then: a held rename would be
+    // taken early, and a write-back would install no name at all.
     //
     // Tourney's arm is also the donor's ORDER (osp-tourney@a8d1725,
     // port_osp:p_client.c:1171-1178), and the order is what it is for.  The
@@ -2776,16 +2771,22 @@ void ClientUserinfoChanged(edict_t *ent, char *userinfo)
         Q_strlcpy(userinfo, "\\name\\badinfo\\skin\\male/grunt", MAX_INFO_STRING);
     }
 
-    // Tourney edits the userinfo it was handed -- refusing a forbidden
-    // or too-frequent rename, forcing a qualifier skin -- and everything below
-    // reads the edited copy, which is what makes the edit take effect.  It also
+    // Under the OSP four the name and the skin in force are tourney's, the
+    // donor's shape: OSP_userinfoChanged sets `pers.netname` and
+    // `resp.osp_r0f4`, and a rename or a skin change it holds inside
+    // `client_infochange` stays in the userinfo, asking, so the first update or
+    // spawn after the window takes it (R-OSP-30).  So for them the name is not
+    // copied out of the userinfo here, and the skin published below is the one
+    // in force.  What tourney does edit in place -- the rate cap, a name the
+    // player list forbids, a forced skin -- everything below reads.  It also
     // owns the rename logging and the green-text copy of the name.
-    if (G_IsOspRuleset())
+    if (G_IsOspRuleset()) {
         OSP_userinfoChanged(ent, userinfo);
-
-    // set name
-    s = Info_ValueForKey(userinfo, "name");
-    Q_strlcpy(ent->client->pers.netname, s, sizeof(ent->client->pers.netname));
+    } else {
+        // set name
+        s = Info_ValueForKey(userinfo, "name");
+        Q_strlcpy(ent->client->pers.netname, s, sizeof(ent->client->pers.netname));
+    }
 
     // set spectator
     s = Info_ValueForKey(userinfo, "spectator");
@@ -2814,8 +2815,9 @@ void ClientUserinfoChanged(edict_t *ent, char *userinfo)
     else
         ent->client->pers.spectator = false;
 
-    // set skin
-    s = Info_ValueForKey(userinfo, "skin");
+    // set skin -- under the OSP four, the one in force (see above)
+    s = G_IsOspRuleset() ? ent->client->resp.osp_r0f4 :
+        Info_ValueForKey(userinfo, "skin");
 
     playernum = ent - g_edicts - 1;
 

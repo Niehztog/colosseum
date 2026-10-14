@@ -365,6 +365,9 @@ func run(rs colosseum.Ruleset, port int, base colosseum.State) (colosseum.State,
 		arenaChecks(srv, b, rs.Name)
 	case colosseum.IsOSP(rs.Name):
 		tourneyChecks(srv, b, rs.Name)
+		if rs.Name == "dm" {
+			paceChecks(srv, rs.Name)
+		}
 	}
 
 	// ---- 4b. The Gladiator observer.  Three implementations, one
@@ -1131,6 +1134,92 @@ func tourneyChecks(srv *playtest.Server, b *playtest.Bot, rs string) {
 	}
 	check(rs+"/MOTD window draws OSP's page, not baseq2's board",
 		strings.Contains(lay, "OrangeSmoothie"), "%.70q", lay)
+}
+
+// R-OSP-30 -- A PACED CHANGE WAITS, IT IS NOT LOST.
+//
+// Under `dm` a rename or a skin change inside `client_infochange` seconds of
+// the last accepted one is held, the donor's way: the pair in force is what the
+// server publishes, and the userinfo goes on asking for the new pair, so the
+// first spawn after the window takes it.  A real q2pro client makes exactly
+// such a change on every fresh connect whose baseq2 and game-directory configs
+// disagree -- it connects with the first and runs the second a moment later --
+// and a hold that wrote the old pair back into the userinfo kept that player
+// in the first config's skin for the whole session, while their own client
+// said the second.
+//
+// A FRESH client, because the window is measured from a known moment, and that
+// moment is its spawn rather than its connect: ClientBegin's InitClientResp
+// makes the skin a first one again, and taking it restarts the window.  Start
+// returns once the client is in, so the clock started there runs no earlier
+// than the window.  `client_infochange` is raised for the one client so that a
+// slow frame cannot carry the change past the window's end, and the first row
+// says how far into it the change landed.
+//
+// The trigger after the window is a spawn.  A new arrival under `dm` is an
+// observer with no gun, and `join` only marks it entered: the next think
+// places it, and that is the PutClientInServer which re-reads the game's own
+// copy of the userinfo.  This client sends no userinfo of its own after the
+// change, so the second row asks what the server kept and nothing the client
+// re-sent.  The gun is what says the placement happened.
+func paceChecks(srv *playtest.Server, rs string) {
+	const window = 8
+	held := rs + "/a rename and a skin inside client_infochange wait"
+	taken := rs + "/and are taken at the first spawn after it"
+
+	srv.Console("set client_infochange %d", window)
+	defer srv.Console("set client_infochange 4")
+	settle()
+	c := playtest.NewBot("pacer", "127.0.0.1", srv.Port)
+	if err := c.Start(30 * time.Second); err != nil {
+		check(held, false, "a client connects: %v", err)
+		return
+	}
+	defer c.Disconnect()
+	start := time.Now()
+
+	// The client's own entry in the player configstrings, in whichever of the
+	// two layouts the server negotiated.
+	n := -1
+	for _, ext := range []bool{true, false} {
+		for i := 0; i < 8 && n < 0; i++ {
+			if strings.HasPrefix(c.ConfigString(colosseum.PlayerSkinBase(ext)+i), "pacer\\") {
+				n = colosseum.PlayerSkinBase(ext) + i
+			}
+		}
+	}
+	if n < 0 {
+		check(held, false, "no player configstring names \"pacer\"")
+		return
+	}
+
+	c.SetUserinfo("name", "pacer2")
+	c.SetUserinfo("skin", "male/cipher")
+	time.Sleep(1500 * time.Millisecond)
+	in := time.Since(start)
+	pair := c.ConfigString(n)
+	check(held, pair == `pacer\male/grunt` && in < (window-1)*time.Second,
+		"%q, %.1fs into a %ds window", pair, in.Seconds(), window)
+
+	if d := time.Duration(window+1)*time.Second - time.Since(start); d > 0 {
+		time.Sleep(d)
+	}
+	// A join that does not take is a transient, so it is asked again; the
+	// claim is what the spawn publishes, and a client that never got a body is
+	// reported as that rather than read as either answer.
+	for i := 0; i < 4 && c.GunIndex() == 0; i++ {
+		c.Cmd("join")
+		time.Sleep(1500 * time.Millisecond)
+	}
+	if c.GunIndex() == 0 {
+		check(taken, false, "never placed: no gun after four joins, %q", c.ConfigString(n))
+		return
+	}
+	got, err := c.WaitConfigString(n, `^pacer2\\male/cipher$`, 6*time.Second)
+	if err != nil {
+		got = c.ConfigString(n)
+	}
+	check(taken, err == nil, "%q after a spawn %.1fs in", got, time.Since(start).Seconds())
 }
 
 // ---------------------------------------------------------------- bots

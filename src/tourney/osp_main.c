@@ -5265,18 +5265,21 @@ static int OSP_nameRefused(edict_t *ent, char *name, char *userinfo)
 =================
 OSP_userinfoChanged
 
-Tourney's half of ClientUserinfoChanged, run before the spine
-copies the name and skin out of the userinfo it is handed -- because what this
-does is EDIT that userinfo in place, and the spine reading it afterwards is what
-makes the edit stick.
+Tourney's half of ClientUserinfoChanged, run before the spine publishes the
+name and the skin.  Under the OSP four both are tourney's to say: this sets
+`pers.netname` and `resp.osp_r0f4`, the name and the skin in force, and the
+spine publishes those rather than the userinfo's.  That is the donor's shape,
+and it is what lets a change this holds back stay in the userinfo, asking.  What
+this does edit in place -- the rate cap, a name the player list forbids, a
+forced skin -- is meant to stick, and the spine reads the edited copy.
 
 Four things, and each is a rule about what a player may call themselves:
 
-  * a name the player list forbids, or a name changed again inside
-    `client_infochange` seconds, is refused and the old one put back.  The
-    second is not vanity policing: a player who renames every frame makes the
-    scoreboard unreadable for everyone else, and the userinfo-key-order auto-ban
-    came from the same place.
+  * a name the player list forbids is refused and the old one put back; a name
+    changed again inside `client_infochange` seconds is held until the window
+    has passed (R-OSP-30).  The second is not vanity policing: a player who
+    renames every frame makes the scoreboard unreadable for everyone else, and
+    the userinfo-key-order auto-ban came from the same place.
   * a real rename is written to both logs and to the admin log.
   * `pers.greenname` is the name with the high bit set on every byte, which is
     how the mod draws it in the alternate charset; it is rebuilt here so that
@@ -5294,8 +5297,9 @@ void OSP_userinfoChanged(edict_t *ent, char *userinfo)
     int       tnum;
     bool      renamed = false;
 
-    // The rate cap, edited into the userinfo the caller is about to copy out,
-    // like everything else here.  A bot has no connection to rate-limit;
+    // The rate cap, edited into the userinfo the caller is about to copy out
+    // -- a cap and not a wait, so it is meant to stick.  A bot has no
+    // connection to rate-limit;
     // `pers.connected` false is the first ClientUserinfoChanged of a connect,
     // where there is nobody to tell yet.
     if ((int)client_maxrate->value && !(ent->flags & FL_BOTCLIENT)) {
@@ -5311,18 +5315,28 @@ void OSP_userinfoChanged(edict_t *ent, char *userinfo)
 
     s = Info_ValueForKey(userinfo, "name");
 
-    // Refused: keep what they had.  A first name is not a rename, and the
-    // window is the EDICT's, so it outlives the edict's last occupant: a client
-    // taking a seat somebody had just renamed in was refused its name and
-    // given the empty one it had.
-    if (OSP_nameRefused(ent, s, userinfo) ||
-        (!OSP_IsMatch() && cl->pers.netname[0] &&
-         ent->osp_infochange_framenum > level.framenum))
+    // A name the player list forbids is refused for good, and the name in
+    // force goes back into the userinfo: the engine takes its own copy of the
+    // client's name out of that string when this returns, and a reserved name
+    // must not reach its `status` and the server browsers either.
+    if (OSP_nameRefused(ent, s, userinfo))
         Info_SetValueForKey(userinfo, "name", cl->pers.netname);
     // Read again either way: the player list's own lookups rotate the buffers
     // `s` points into (Info_ValueForKey keeps four), and with four address
     // entries the name read back as an address.
     s = Info_ValueForKey(userinfo, "name");
+
+    // A rename inside the window is HELD, the donor's way: the name in force
+    // stays, and the userinfo -- the engine's copy and `pers.userinfo` -- goes
+    // on asking for the new one, so the first update or spawn after the window
+    // takes it.  Written back, the request would be lost for good, because
+    // nothing tells the client it was held and so nothing makes it ask again
+    // (R-OSP-30).  A first name is not a rename, and the window is the EDICT's,
+    // so it outlives the edict's last occupant: a client taking a seat somebody
+    // had just renamed in was refused its name and given the empty one it had.
+    if (!OSP_IsMatch() && cl->pers.netname[0] &&
+        ent->osp_infochange_framenum > level.framenum)
+        s = cl->pers.netname;
 
     if (cl->pers.netname[0]) {
         Q_strlcpy(newnick, s, sizeof(newnick));
@@ -5395,6 +5409,16 @@ void OSP_userinfoChanged(edict_t *ent, char *userinfo)
                 }
             }
         }
+    } else if (strcmp(cl->pers.netname, s)) {
+        // A change of case alone is no rename -- the test above is the donor's,
+        // and blind to case -- so it opens no window and logs nothing.  It is
+        // still the player's name, though, and with nothing holding it it is
+        // taken, as the spine's copy out of the userinfo takes it under every
+        // other ruleset.  Same length, so the green copy is overwritten in place.
+        Q_strlcpy(cl->pers.netname, s, sizeof(cl->pers.netname));
+        for (i = 0; i < strlen(cl->pers.netname) &&
+             i < sizeof(cl->pers.greenname) - 1; i++)
+            cl->pers.greenname[i] = cl->pers.netname[i] + 128;
     }
 
     // The skin is the server's under three rules, and `resp.osp_r0f4` is the
@@ -5408,13 +5432,25 @@ void OSP_userinfoChanged(edict_t *ent, char *userinfo)
     //     keeps their own.
     //
     // Anything else leaves the player's own choice alone -- at RegularDM's
-    // pace, which is the rename's: a change inside `client_infochange` is
-    // refused unless the name changed in the same update, and one taken
-    // restarts the window (the donor's ClientUserinfoChanged).  Every change is
-    // a configstring to every client, so unlimited it was a flood.  A first
-    // skin is not a change: the copy is empty after every InitClientResp and
-    // after a recovery.  Refused, the userinfo goes back to the skin in force,
-    // which is what the spine publishes.
+    // pace, which is the rename's: a change inside `client_infochange` is held
+    // unless the name changed in the same update, and one taken restarts the
+    // window (the donor's ClientUserinfoChanged).  Every change is a
+    // configstring to every client, so unlimited it was a flood.  A first skin
+    // is not a change: the copy is empty after every InitClientResp and after a
+    // recovery.
+    //
+    // Held as a rename is: `osp_r0f4` stays, and it is what the spine
+    // publishes, while the userinfo keeps the player's choice for the first
+    // update or spawn after the window.  Not a corner case -- q2pro connects
+    // with its baseq2 config and runs the server's game-directory config a
+    // moment later, inside the window the connect opened, so a player whose two
+    // configs disagree has a skin held on every fresh connect.  Kept, it is
+    // taken at the spawn that ends the load, whose InitClientResp makes it a
+    // first skin; written back over the request, the baseq2 config's skin
+    // would be the player's for the whole session.  A forced
+    // skin, by contrast, does go into the userinfo, because the game's own
+    // readers of `pers.userinfo` -- skin teams, the bot brain's team sense
+    // (BotLib_BotClientSettings) -- have to see the skin the player is wearing.
     tnum = cl->resp.team;
     if (sync_stat == 4 && G_Ruleset() == RULESET_DMPRO && (int)qualifier_forceskins->value) {
         Info_SetValueForKey(userinfo, "skin", qualifier_skinname->string);
@@ -5427,19 +5463,17 @@ void OSP_userinfoChanged(edict_t *ent, char *userinfo)
         Q_strlcpy(cl->resp.osp_r0f4, osp_teams[tnum].skin,
                   sizeof(cl->resp.osp_r0f4));
     } else {
+        bool held = cl->resp.osp_r0f4[0] && !renamed && !OSP_IsMatch() &&
+                    ent->osp_infochange_framenum > level.framenum;
+
         s = Info_ValueForKey(userinfo, "skin");
-        if (strcmp(cl->resp.osp_r0f4, s)) {
-            if (cl->resp.osp_r0f4[0] && !renamed && !OSP_IsMatch() &&
-                ent->osp_infochange_framenum > level.framenum) {
-                Info_SetValueForKey(userinfo, "skin", cl->resp.osp_r0f4);
-            } else {
-                Q_strlcpy(cl->resp.osp_r0f4, s, sizeof(cl->resp.osp_r0f4));
-                if ((int)client_infochange->value)
-                    ent->osp_infochange_framenum = level.framenum +
-                                                   (int)client_infochange->value * 10;
-                else
-                    ent->osp_infochange_framenum = 0;
-            }
+        if (strcmp(cl->resp.osp_r0f4, s) && !held) {
+            Q_strlcpy(cl->resp.osp_r0f4, s, sizeof(cl->resp.osp_r0f4));
+            if ((int)client_infochange->value)
+                ent->osp_infochange_framenum = level.framenum +
+                                               (int)client_infochange->value * 10;
+            else
+                ent->osp_infochange_framenum = 0;
         }
     }
 }

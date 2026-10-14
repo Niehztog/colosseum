@@ -270,7 +270,7 @@ What the server requires of, or does for, a connected client.
 |---|---|---|
 | `client_minping`, `client_maxping` | `0`, `0` | ping band; `0` disables the test |
 | `client_maxrate`, `client_maxfps` | `0`, `0` | ditto for rate and fps |
-| `client_infochange` | `4` | userinfo changes allowed per interval |
+| `client_infochange` | `4` | **seconds** after an accepted rename or skin change during which the next one is held, outside a match: the server goes on showing the name and skin in force, and takes the new one at the player's first userinfo update or spawn after the window (R-OSP-30). `0` holds nothing |
 | `client_nomove` | `90` | seconds a client may stand completely still before being moved to observer. Teamplay and 1v1 only |
 | `client_protect` | `0` | **seconds** of impervious shell after respawning, under `dm` only (`OSP_ClientProtect()`), and only for a player who spawns holding the blaster. Lost early on picking up a weapon, a powerup, a MegaHealth, armour, a power screen or shield or a rune, on `hookon`, on `kill`, and on a shot fired after the respawn's first 0.2 s. The match rulesets ignore it rather than writing 0 into it |
 | `client_recover` | `0` | rejoin a match after a sudden disconnect with frags and deaths intact. **Prerequisite for `team_duelrecover`**, which does nothing without it |
