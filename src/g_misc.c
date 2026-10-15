@@ -735,6 +735,8 @@ void func_wall_use(edict_t *self, edict_t *other, edict_t *activator)
     if (self->solid == SOLID_NOT) {
         self->solid = SOLID_BSP;
         self->svflags &= ~SVF_NOCLIENT;
+        // linked before KillBox, as in the 2023 game (R-BASE-11)
+        gi.linkentity(self);
         KillBox(self);
     } else {
         self->solid = SOLID_NOT;
@@ -1010,8 +1012,9 @@ void func_explosive_spawn(edict_t *self, edict_t *other, edict_t *activator)
     self->solid = SOLID_BSP;
     self->svflags &= ~SVF_NOCLIENT;
     self->use = NULL;
-    KillBox(self);
+    // linked before KillBox, as in the 2023 game (R-BASE-11)
     gi.linkentity(self);
+    KillBox(self);
 }
 
 void SP_func_explosive(edict_t *self)
@@ -2136,10 +2139,11 @@ void teleporter_touch(edict_t *self, edict_t *other, cplane_t *plane, csurface_t
     VectorCopy(dest->s.angles, other->client->ps.viewangles);
     VectorCopy(dest->s.angles, other->client->v_angle);
 
+    // linked before KillBox, as in the 2023 game (R-BASE-11)
+    gi.linkentity(other);
+
     // kill anything at the destination
     KillBox(other);
-
-    gi.linkentity(other);
 }
 
 /*QUAKED misc_teleporter (1 0 0) (-32 -32 -24) (32 32 -16)

@@ -2915,7 +2915,7 @@ void move_to_arena(edict_t *ent, int arenanum, int mode)
     // those paths, so the box was empty for the whole of the placement, and
     // that cost two things:
     //
-    //   * KillBox below traces `ent->mins`/`maxs` -- a point at the origin,
+    //   * KillBox below sizes by `ent->mins`/`maxs` -- a point at the origin,
     //     which misses a body the arriving fighter is standing inside, so
     //     neither the push nor the telefrag ever fired and `spawn_recheck` was
     //     left at the zero KillBox clears it to;
@@ -2963,23 +2963,6 @@ void move_to_arena(edict_t *ent, int arenanum, int mode)
     VectorClear(ent->client->ps.viewangles);
     VectorClear(ent->client->v_angle);
 
-    // telefrag avoidance at destination
-    if (!KillBox(ent)) {
-    }
-
-    // Landing on somebody is not an overlap yet, which is why it has to be
-    // watched.  When every point on this side is taken the selector returns one
-    // of them anyway -- RA2's stated fallback, "no choice to turn one into a
-    // telefrag meltdown" -- and the landing trace then stops the arriving body
-    // on the occupant: two boxes that touch, which KillBox reads as clear
-    // because touching is not overlapping, and which one Pmove later can be two
-    // boxes that overlap.  check_telefrag() is the thing that would separate
-    // them and it only examines a client whose `spawn_recheck` is set, so the
-    // pair is handed to it here.  After KillBox, which clears the field on
-    // entry.
-    if (mode == 0 && tr.ent && tr.ent->client)
-        ent->client->resp.spawn_recheck = level.framenum + 0.5f / FRAMETIME;
-
     if (mode) {
         if (arenas[arenanum].active && ent->client->resp.omode == OMODE_NORMAL)
             ent->client->resp.omode = OMODE_FREEFLYING;
@@ -2994,6 +2977,26 @@ void move_to_arena(edict_t *ent, int arenanum, int mode)
     }
 
     gi.linkentity(ent);
+
+    // telefrag avoidance, after SetObserverMode as in the RA2 port (R-BASE-11)
+    if (!KillBox(ent)) {
+    }
+
+    // relinked, since a push leaves both bodies SOLID_NOT for check_telefrag()
+    gi.linkentity(ent);
+
+    // Landing on somebody is not an overlap yet, which is why it has to be
+    // watched.  When every point on this side is taken the selector returns one
+    // of them anyway -- RA2's stated fallback, "no choice to turn one into a
+    // telefrag meltdown" -- and the landing trace then stops the arriving body
+    // on the occupant: two boxes that touch, which KillBox reads as clear
+    // because touching is not overlapping, and which one Pmove later can be two
+    // boxes that overlap.  check_telefrag() is the thing that would separate
+    // them and it only examines a client whose `spawn_recheck` is set, so the
+    // pair is handed to it here.  After KillBox, which clears the field on
+    // entry.
+    if (mode == 0 && tr.ent && tr.ent->client)
+        ent->client->resp.spawn_recheck = level.framenum + 0.5f / FRAMETIME;
 
     if (arenas[arenanum].proposetime > level.time && !ent->client->resp.ra_voted) {
         menu_centerprint(ent, va("Settings changes have been proposed\n by %s!\nGoto the observer menu (TAB) to vote",

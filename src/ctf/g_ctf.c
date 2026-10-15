@@ -4002,11 +4002,12 @@ void old_teleporter_touch(edict_t *self, edict_t *other, cplane_t *plane, csurfa
     AngleVectors(other->client->v_angle, forward, NULL, NULL);
     VectorScale(forward, 200, other->velocity);
 
+    // linked before KillBox, as in the 2023 game (R-BASE-11)
+    gi.linkentity(other);
+
     // kill anything at the destination
     if (!KillBox(other)) {
     }
-
-    gi.linkentity(other);
 }
 
 /*QUAKED trigger_teleport (0.5 0.5 0.5) ?

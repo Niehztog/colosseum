@@ -98,10 +98,11 @@ void trigger_teleport_touch(edict_t *self, edict_t *other, cplane_t *plane, csur
 
     VectorClear(other->s.angles);
 
+    // linked before KillBox, as in the 2023 game (R-BASE-11)
+    gi.linkentity(other);
+
     // kill anything at the destination
     KillBox(other);
-
-    gi.linkentity(other);
 }
 
 void trigger_teleport_use(edict_t *self, edict_t *other, edict_t *activator)

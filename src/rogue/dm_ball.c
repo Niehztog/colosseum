@@ -481,10 +481,11 @@ void DBall_BallRespawn(edict_t *self)
     self->s.event = EV_PLAYER_TELEPORT;
     self->groundentity = NULL;
 
+    // linked before KillBox, as in the 2023 game (R-BASE-11)
+    gi.linkentity(self);
+
     // kill anything at the destination
     KillBox(self);
-
-    gi.linkentity(self);
 }
 
 // ************************

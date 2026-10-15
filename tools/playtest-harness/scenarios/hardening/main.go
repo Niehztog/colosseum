@@ -35,6 +35,7 @@
 //	    rail fired into the floor is spent and the frame ends.  fire_rail
 //	    took such a brush for a lava surface and retraced from it forever
 //	    (R-BASE-8).
+//	M2  a teleport onto a floor-plane destination telefrags whoever stands there (R-BASE-11).
 //
 // C1, C5, H9, H11, H14 and H18 are not rows here, and each for a reason
 // stated where the fix is: they need a map position, a match in progress or a
@@ -45,6 +46,7 @@ import (
 	"encoding/binary"
 	"flag"
 	"fmt"
+	"math"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -567,6 +569,128 @@ func rowM1() {
 	alive("M1", srv)
 }
 
+// ---------------------------------------------------------------- M2 ------
+
+// teleMap is the fixture M2 boots, written into the install by writeTeleMap.
+const teleMap = "q2dm1tele"
+
+// teleDest is a q2dm1 spot where an arrival's box sits exactly on the floor plane.
+var teleDest = [3]float64{1488, -48, 664}
+
+// teleEntities replace q2dm1's: one spot, a teleporter pad on it and its destination.
+const teleEntities = `{
+"classname" "worldspawn"
+"message" "q2dm1, one teleporter -- hardening M2"
+}
+{
+"classname" "info_player_deathmatch"
+"origin" "-80 800 472"
+}
+{
+"classname" "misc_teleporter"
+"origin" "-80 800 472"
+"target" "m2"
+}
+{
+"classname" "misc_teleporter_dest"
+"origin" "1488 -48 654"
+"angle" "135"
+"targetname" "m2"
+}
+`
+
+// writeTeleMap writes q2dm1 with teleEntities over its entity lump into the install.
+func writeTeleMap() error {
+	const (
+		lumpEntities = 0
+		headerLength = 8 + 19*8
+	)
+	data, err := playtest.MapData(filepath.Join(*ref, "pak*.pak"), "q2dm1")
+	if err != nil {
+		return err
+	}
+	if len(data) < headerLength || string(data[:4]) != "IBSP" {
+		return fmt.Errorf("q2dm1 is not an IBSP file")
+	}
+	ofs := int(binary.LittleEndian.Uint32(data[8+lumpEntities*8:]))
+	end := ofs + int(binary.LittleEndian.Uint32(data[12+lumpEntities*8:]))
+	if end > len(data) || end-ofs <= len(teleEntities) {
+		return fmt.Errorf("q2dm1's entity lump cannot hold the fixture's")
+	}
+	copy(data[ofs:], teleEntities)
+	for at := ofs + len(teleEntities); at < end; at++ {
+		data[at] = 0
+	}
+	maps := filepath.Join(*dir, "colosseum", "maps")
+	if err := os.MkdirAll(maps, 0o755); err != nil {
+		return err
+	}
+	return playtest.WriteFixture(filepath.Join(maps, teleMap+".bsp"), data, 0o644)
+}
+
+func rowM2() {
+	if !want("M2") {
+		return
+	}
+	err := writeTeleMap()
+	if !check("M2/q2dm1 with a teleporter onto the floor plane", err == nil, "%v", err) {
+		return
+	}
+	srv := boot("dm", teleMap, nil)
+	if srv == nil {
+		return
+	}
+	defer srv.Stop()
+
+	join := func(b *playtest.Bot) bool {
+		for i := 0; i < 6 && b.Spectating(); i++ {
+			b.Cmd("join")
+			time.Sleep(1500 * time.Millisecond)
+		}
+		return !b.Spectating()
+	}
+
+	// hotel spawns on the pad, is teleported and, alone there, is snapped clear.
+	a := connect(srv, "hotel")
+	if a == nil {
+		return
+	}
+	defer a.Disconnect()
+	if !check("M2/hotel is in the game", join(a), "") {
+		return
+	}
+	there := false
+	for i := 0; i < 50 && !there; i++ {
+		time.Sleep(100 * time.Millisecond)
+		o := a.Origin()
+		there = math.Abs(o[0]-teleDest[0]) < 16 && math.Abs(o[1]-teleDest[1]) < 16 &&
+			math.Abs(o[2]-teleDest[2]) < 2
+	}
+	if !check("M2/hotel stands on the destination", there, "at %v", a.Origin()) {
+		return
+	}
+
+	// india lands on it.
+	b := connect(srv, "india")
+	if b == nil {
+		return
+	}
+	defer b.Disconnect()
+	if !check("M2/india is in the game", join(b), "") {
+		return
+	}
+	line, err := b.WaitPrint(`hotel tried to invade india's personal space`, 10*time.Second)
+	check("M2/india telefrags hotel on the destination", err == nil, "%s", strings.TrimSpace(line))
+
+	// A body wedged in another has an allsolid pmove and never moves (Bot.Walk).
+	from := b.Origin()
+	b.Walk(400, 0, time.Second)
+	to := b.Origin()
+	moved := math.Hypot(to[0]-from[0], to[1]-from[1])
+	check("M2/india walks off the destination", moved > 32, "%.0f unit(s) from %v", moved, from)
+	alive("M2", srv)
+}
+
 func main() {
 	flag.Parse()
 	if *q2proded == "" || *lib == "" {
@@ -603,6 +727,7 @@ func main() {
 	rowH19()
 	rowH20()
 	rowM1()
+	rowM2()
 
 	fmt.Printf("\n%d check(s), %d failed, %d skipped\n", total, failed, skipped)
 	if failed > 0 {

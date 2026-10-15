@@ -2481,13 +2481,14 @@ void PutClientInServer(edict_t *ent)
         return;
     }
 
+    // linked before KillBox, as in the 2023 game (R-BASE-11)
+    gi.linkentity(ent);
+
     // An observer telefrags nobody: the donor's KillBox is behind the same
     // `osp_r240 == 2` that decides whether this client is a body at all.
     if (!(G_IsOspRuleset() && client->resp.osp_r240 != 2) && !KillBox(ent)) {
         // could't spawn in?
     }
-
-    gi.linkentity(ent);
 
     // my tribute to cash's level-specific hacks. I hope I live
     // up to his trailblazing cheese.

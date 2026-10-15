@@ -2689,7 +2689,14 @@ Kills everything inside when fired, irrespective of protection.
 */
 void use_killbox(edict_t *self, edict_t *other, edict_t *activator)
 {
+    // linked as a trigger, killing all in its bounds, as in the 2023 game (R-BASE-11)
+    self->solid = SOLID_TRIGGER;
+    gi.linkentity(self);
+
     KillBox(self);
+
+    self->solid = SOLID_NOT;
+    gi.linkentity(self);
 }
 
 void SP_func_killbox(edict_t *ent)

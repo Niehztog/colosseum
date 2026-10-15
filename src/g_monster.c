@@ -729,13 +729,15 @@ void monster_start_go(edict_t *self);
 void monster_triggered_spawn(edict_t *self)
 {
     self->s.origin[2] += 1;
-    KillBox(self);
 
     self->solid = SOLID_BBOX;
     self->movetype = MOVETYPE_STEP;
     self->svflags &= ~SVF_NOCLIENT;
     self->air_finished_framenum = level.framenum + 12 * BASE_FRAMERATE;
     gi.linkentity(self);
+
+    // after the link, as in the 2023 game (R-BASE-11)
+    KillBox(self);
 
     monster_start_go(self);
 
@@ -1021,13 +1023,14 @@ void stationarymonster_start_go(edict_t *self);
 
 void stationarymonster_triggered_spawn(edict_t *self)
 {
-    KillBox(self);
-
     self->solid = SOLID_BBOX;
     self->movetype = MOVETYPE_NONE;
     self->svflags &= ~SVF_NOCLIENT;
     self->air_finished_framenum = level.framenum + 12 * BASE_FRAMERATE;
     gi.linkentity(self);
+
+    // after the link, as in the 2023 game (R-BASE-11)
+    KillBox(self);
 
     // FIXME - why doesn't this happen with real monsters?
     self->spawnflags &= ~2;

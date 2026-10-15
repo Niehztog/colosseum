@@ -768,12 +768,41 @@ Kill box
 KillBox
 
 Kills all entities that would touch the proposed new positioning
-of ent.  Ent should be unlinked before calling this!
+of ent.  Ent must be linked at that position (R-BASE-11).
 =================
 */
+
+// Whether the boxes share a point, which BoxEdicts' one-unit link margin overstates.
+static bool KillBox_Overlaps(const edict_t *ent, const edict_t *hit)
+{
+    int     i;
+
+    for (i = 0; i < 3; i++) {
+        if (ent->s.origin[i] + ent->mins[i] > hit->s.origin[i] + hit->maxs[i] ||
+            ent->s.origin[i] + ent->maxs[i] < hit->s.origin[i] + hit->mins[i])
+            return false;
+    }
+    return true;
+}
+
+// The mask `hit` collides with, as the 2023 game's G_GetClipMask.
+static int KillBox_ClipMask(const edict_t *hit)
+{
+    if (hit->clipmask)
+        return hit->clipmask;
+    if (hit->client)
+        return MASK_PLAYERSOLID;
+    if (hit->svflags & SVF_MONSTER)
+        return MASK_MONSTERSOLID;
+    return MASK_SHOT & ~CONTENTS_DEADMONSTER;
+}
+
+// Finds bodies in the way by entity list, as the 2023 rerelease does (R-BASE-11).
 bool KillBox(edict_t *ent)
 {
+    edict_t     *touch[MAX_EDICTS_OLD], *hit;
     trace_t     tr;
+    int         i, num;
 
     if (G_Ruleset() == RULESET_ARENA) {
         // RA2 telefrags only between fighting players.  Its first test cannot
@@ -787,16 +816,48 @@ bool KillBox(edict_t *ent)
             return true;
     }
 
-    while (1) {
-        tr = gi.trace(ent->s.origin, ent->mins, ent->maxs, ent->s.origin, NULL, MASK_PLAYERSOLID);
-        if (!tr.ent)
-            break;
+    // don't telefrag as spectator...
+    if (ent->movetype == MOVETYPE_NOCLIP)
+        return true;
 
-        if (G_Ruleset() == RULESET_ARENA &&
-            tr.ent->client && !tr.ent->takedamage && tr.ent->solid) {
+    // without gex->clip (q2admin forwards none) a brush model keeps id's trace
+    if (ent->solid == SOLID_BSP && !(gex && gex->clip)) {
+        while (1) {
+            tr = gi.trace(ent->s.origin, ent->mins, ent->maxs, ent->s.origin, ent, MASK_PLAYERSOLID);
+            if (!tr.ent)
+                break;
+
+            // nail it
+            T_Damage(tr.ent, ent, ent, vec3_origin, ent->s.origin, vec3_origin, 100000, 0, DAMAGE_NO_PROTECTION, MOD_TELEFRAG);
+
+            // if we didn't kill it, fail
+            if (tr.ent->solid)
+                return false;
+        }
+        return true;
+    }
+
+    num = gi.BoxEdicts(ent->absmin, ent->absmax, touch, q_countof(touch), AREA_SOLID);
+
+    // a kill can free a later entity in this list, hence the inuse test
+    for (i = 0; i < num; i++) {
+        hit = touch[i];
+        if (hit == ent || !hit->inuse || !hit->solid ||
+            hit->solid == SOLID_TRIGGER || hit->solid == SOLID_BSP)
+            continue;
+
+        if (ent->solid == SOLID_BSP) {
+            tr = gex->clip(hit->s.origin, hit->mins, hit->maxs, hit->s.origin, ent, KillBox_ClipMask(hit));
+            if (tr.fraction == 1)
+                continue;
+        } else if (!KillBox_Overlaps(ent, hit)) {
+            continue;
+        }
+
+        if (G_Ruleset() == RULESET_ARENA && hit->client && !hit->takedamage) {
             vec3_t  angle, forward;
 
-            tr.ent->solid = SOLID_NOT;
+            hit->solid = SOLID_NOT;
             ent->solid = SOLID_NOT;
 
             angle[YAW] = rand() % 360;
@@ -814,23 +875,22 @@ bool KillBox(edict_t *ent)
             // report -- "they did not telefrag or push away each other, their
             // bodies overlapped like siamese twins".  The telefrag underneath
             // cannot save it either: an arena fighter is `takedamage DAMAGE_NO`
-            // until ASTATE_FIGHTING, and `!tr.ent->takedamage` is the condition
+            // until ASTATE_FIGHTING, and `!hit->takedamage` is the condition
             // for taking this branch instead of that one, so during a countdown
             // this IS the whole mechanism.
-            VectorAdd(tr.ent->velocity, forward, tr.ent->velocity);
+            VectorAdd(hit->velocity, forward, hit->velocity);
             VectorSubtract(ent->velocity, forward, ent->velocity);
 
-            tr.ent->client->resp.spawn_recheck = level.framenum + 0.5f / FRAMETIME;
+            hit->client->resp.spawn_recheck = level.framenum + 0.5f / FRAMETIME;
             ent->client->resp.spawn_recheck = level.framenum + 0.5f / FRAMETIME;
             continue;
         }
 
-        // nail it
-        T_Damage(tr.ent, ent, ent, vec3_origin, ent->s.origin, vec3_origin, 100000, 0, DAMAGE_NO_PROTECTION, MOD_TELEFRAG);
+        if (!hit->takedamage)
+            continue;
 
-        // if we didn't kill it, fail
-        if (tr.ent->solid)
-            return false;
+        // nail it
+        T_Damage(hit, ent, ent, vec3_origin, ent->s.origin, vec3_origin, 100000, 0, DAMAGE_NO_PROTECTION, MOD_TELEFRAG);
     }
 
     return true;        // all clear

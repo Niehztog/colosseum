@@ -369,9 +369,9 @@ void use_target_spawner(edict_t *self, edict_t *other, edict_t *activator)
     VectorCopy(self->s.origin, ent->s.origin);
     VectorCopy(self->s.angles, ent->s.angles);
     ED_CallSpawn(ent);
-    gi.unlinkentity(ent);
-    KillBox(ent);
+    // linked before KillBox, as in the 2023 game (R-BASE-11)
     gi.linkentity(ent);
+    KillBox(ent);
     if (self->speed)
         VectorCopy(self->movedir, ent->velocity);
 

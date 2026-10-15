@@ -283,8 +283,9 @@ void force_wall_use(edict_t *self, edict_t *other, edict_t *activator)
         self->think = force_wall_think;
         self->nextthink = level.framenum + 0.1f * BASE_FRAMERATE;
         self->solid = SOLID_BSP;
-        KillBox(self);      // Is this appropriate?
+        // linked before KillBox, as in the 2023 game (R-BASE-11)
         gi.linkentity(self);
+        KillBox(self);      // Is this appropriate?
     }
 }
 
