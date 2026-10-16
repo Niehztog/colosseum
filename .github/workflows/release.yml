@@ -272,7 +272,7 @@ jobs:
         include:
           # THE MINIMUM macOS IS SET, not inherited.  With no deployment
           # target the library and the brain required whatever the runner's
-          # SDK said -- macOS 15 on Intel and 14 on Apple Silicon with these
+          # SDK said -- macOS 15 on both architectures with these
           # images -- and nothing told an operator.  Apple clang reads
           # MACOSX_DEPLOYMENT_TARGET from the environment, and the botlib's
           # sub-make keeps it, so one variable covers all three builds: 11.0
@@ -284,9 +284,10 @@ jobs:
           # fail -- the job sits unassigned until the run expires, which is
           # what it did (run 35190547919, cancelled after 83 minutes with six
           # siblings already finished).  So a label here is re-checked when a
-          # run queues rather than when it fails.
+          # run queues rather than when it fails, which is why `macos-14`
+          # gave way to `macos-15` ahead of its retirement on 2 November 2026.
           - {runner: macos-15-intel, arch: x86_64, macos: "10.13"}
-          - {runner: macos-14,       arch: arm64,  macos: "11.0"}
+          - {runner: macos-15,       arch: arm64,  macos: "11.0"}
     env:
       MACOSX_DEPLOYMENT_TARGET: ${{ matrix.macos }}
     steps:
