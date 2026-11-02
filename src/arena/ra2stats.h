@@ -99,6 +99,7 @@ typedef struct ra2_round_s {
     int             roundtimelimit;
 
     bool            timedout;           // the round clock decided this round
+    bool            forfeit;            // a side had left, which ended the match
 
     ra2_tstats_t    teams[RA2_STATS_MAX_TEAMS];
     ra2_pstats_t    players[MAX_CLIENTS];
@@ -115,6 +116,7 @@ void    RA2_Stats_Write(ra2_round_t *r);        // append the round record
 void    RA2_Stats_End(ra2_round_t *r);          // write and free
 void    RA2_Stats_NextRound(ra2_round_t *r);
 void    RA2_Stats_TimedOut(ra2_round_t *r);     // the clock, not a wipe, ends it
+void    RA2_Stats_Forfeit(ra2_round_t *r);      // a side left, and the match ends
 
 void    RA2_Stats_AddTeam(ra2_round_t *r, int team, const char *name);
 void    RA2_Stats_TeamScore(ra2_round_t *r, int team, int delta);

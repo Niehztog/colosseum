@@ -3697,6 +3697,31 @@ static bool team_is_active(int arenanum, int teamnum)
     return false;
 }
 
+// How many of the arena's active teams still have anybody on them, and the
+// last of them.  An emptied team is not always gone from the list: a pickup
+// side is locked (arena_init), so check_teams() keeps it there with nobody on
+// it, where any other team that empties is freed and leaves the list.
+static int sides_left(int arenanum, int *standing)
+{
+    qmenu_t *tnode;
+    int     count;
+
+    count = 0;
+    *standing = -1;
+
+    tnode = &arenas[arenanum].activeteams;
+    while (tnode->next) {
+        tnode = tnode->next;
+        if (count_queue((qmenu_t *)tnode->it) == 0)
+            continue;
+
+        *standing = TEAM((qmenu_t *)tnode->it)->teamnum;
+        count++;
+    }
+
+    return count;
+}
+
 // The clock runs for every arena on every frame (multi_arena_think), where
 // arena_think reaches any one arena only every num_arenas * 2 frames -- 1.4
 // seconds on a seven-arena map, which a clock counting seconds cannot be
@@ -4144,8 +4169,9 @@ static void RA_ClearDevices(int arenanum)
 
 void arena_think(int arenanum)
 {
-    int         winner;
+    int         winner, standing;
     int         morewins;
+    bool        matchwon;
     qmenu_t     *tnode, *popped;
     arena_t     *arena;
 
@@ -4269,6 +4295,8 @@ void arena_think(int arenanum)
             winner = fight_done(arenanum);
         }
 
+        matchwon = false;
+
         if (winner == -1)
             Q_strlcpy(arena->msg, "It was a tie!", sizeof(arena->msg));
         else {
@@ -4278,6 +4306,7 @@ void arena_think(int arenanum)
                 Q_snprintf(arena->msg, sizeof(arena->msg), "%s has won the match!!",
                            ((team_t *)teams[winner].it)->name);
                 arena->round = arena->rounds;
+                matchwon = true;
 
                 RA2_Stats_End(arena->stats);
                 arena->stats = NULL;
@@ -4286,14 +4315,41 @@ void arena_think(int arenanum)
                            ((team_t *)teams[winner].it)->name);
         }
 
-        RA2_Stats_Write(arena->stats);
-
         if (winner == -1) {
             if (count_queue(&arenas[arenanum].activeteams) != 0) {
                 if (count_queue((qmenu_t *)arenas[arenanum].activeteams.next->it) != 0)
                     arena->round--;
             }
         }
+
+        // A match with fewer than two sides left in it is over (R-RA-27).
+        // RA2 does not ask once a match is under way -- check_for_teams() is
+        // consulted only before one -- and fight_done() reads a side with
+        // nobody on it as a side wiped out, so the side still standing was
+        // handed every round that followed until it had won the match alone,
+        // and an arena both sides had left ran tie after tie to its last
+        // round.  It ends at the first round boundary instead, as OSP Tourney
+        // ends a match whose team empties (OSP_checkHalt): the side still
+        // standing wins it, and ROUNDEND's check_for_teams() holds the next
+        // match until both sides have somebody.  Asked after the tie's
+        // replay, which would otherwise reopen the match this ends, and not
+        // after a round that has won the match outright, which stands as RA2
+        // announces it.
+        if (!matchwon && sides_left(arenanum, &standing) < 2) {
+            if (standing == -1)
+                Q_strlcpy(arena->msg, "Not enough teams to go on", sizeof(arena->msg));
+            else
+                Q_snprintf(arena->msg, sizeof(arena->msg), "%s has won the match by forfeit!",
+                           ((team_t *)teams[standing].it)->name);
+            winner = standing;
+            arena->round = arena->rounds;
+
+            RA2_Stats_Forfeit(arena->stats);
+            RA2_Stats_End(arena->stats);
+            arena->stats = NULL;
+        }
+
+        RA2_Stats_Write(arena->stats);
 
         gi.dprintf("%d: %d %s\n", arenanum, winner, arena->msg);
         set_damage(arenanum, DAMAGE_NO);

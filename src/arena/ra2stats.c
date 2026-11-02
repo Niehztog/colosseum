@@ -187,6 +187,7 @@ void RA2_Stats_Write(ra2_round_t *r)
     json_string(f, r->mapname);
     fprintf(f, ",\"duration\":%.1f", (level.framenum - r->start_framenum) * FRAMETIME);
     fprintf(f, ",\"timeout\":%s", r->timedout ? "true" : "false");
+    fprintf(f, ",\"forfeit\":%s", r->forfeit ? "true" : "false");
 
     fprintf(f, ",\"settings\":{\"armor\":%d,\"health\":%d,\"armorprotect\":%d"
             ",\"healthprotect\":%d,\"fallingdamage\":%d,\"compmode\":%d"
@@ -267,6 +268,21 @@ void RA2_Stats_TimedOut(ra2_round_t *r)
 {
     if (r)
         r->timedout = true;
+}
+
+/*
+=================
+RA2_Stats_Forfeit
+
+A side had nobody left on it at the end of this round, so the match ends here
+whatever the score (R-RA-27).  Written with the round record, which is the
+match's last, so that a match won short of `rounds / 2 + 1` reads as one.
+=================
+*/
+void RA2_Stats_Forfeit(ra2_round_t *r)
+{
+    if (r)
+        r->forfeit = true;
 }
 
 /*
