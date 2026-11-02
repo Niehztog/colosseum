@@ -508,7 +508,9 @@ int AddRandomBot(edict_t *ent)
             cl_ent = DF_CLIENTENT(i);
             if (!cl_ent->inuse) continue;
             if (!(cl_ent->flags & FL_BOT)) continue;
-            if (!strcmp(bot->name, cl_ent->client->pers.netname)) break;
+            //by its own name, which is the list's: the name it is shown by
+            //has the tag in front (R-BOT-37)
+            if (!strcmp(bot->name, BotOwnName(cl_ent))) break;
         } //end for
         //if the bot is NOT already in the game -- nor queued for it, which is
         //where the ones a counted `addrandom` asked for this frame still are

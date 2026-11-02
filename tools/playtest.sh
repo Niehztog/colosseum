@@ -497,6 +497,24 @@
 #                  `-rulesets` takes any comma-separated subset of the seven
 #                  (`-r` through this wrapper).
 #
+#     bottag       is every bot's name shown behind `botnametag`, and does
+#                  everything that knows a bot by its OWN name still find it
+#                  (R-BOT-37)?  Three servers, one per place a name is composed
+#                  or published: `dm`, where tourney's OSP_userinfoChanged
+#                  composes it; `ctf`, with CTF's two name strings; and `arena`,
+#                  with arena's id view.  Read off the playerskins configstrings
+#                  a person's client receives, which is what every scoreboard
+#                  draws: a person untagged, a bot tagged, a second copy of a
+#                  character suffixed where the suffix can be seen, `removebot`
+#                  by either name, a changed tag reaching a bot already in the
+#                  game, and the bot list still seeing its bots once they are
+#                  shown under another name.  And the people half: a person who
+#                  arrives in the tag, or renames into it, loses it on the wire
+#                  and in the ENGINE's `status`, which is the copy a server
+#                  browser is sent.  Needs $GLADDIR with q2dm1 and
+#                  q2ctf1 meshes, and dies without them rather than skipping,
+#                  because every check here is about a bot.
+#
 #     netlag       what a client EXPERIENCES on a server that is ALREADY
 #                  RUNNING, which is the one question every other scenario here
 #                  cannot ask: they start their own server, and a report of "it

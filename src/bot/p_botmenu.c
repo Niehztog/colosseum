@@ -215,7 +215,8 @@ static void SetupAddBotMenu(void)
             cl_ent = DF_CLIENTENT(i);
             if (!cl_ent->inuse) continue;
             if (!(cl_ent->flags & FL_BOT)) continue;
-            if (!strcmp(bot->name, cl_ent->client->pers.netname)) break;
+            //by its own name, as AddRandomBot asks (R-BOT-37)
+            if (!strcmp(bot->name, BotOwnName(cl_ent))) break;
         } //end for
         if (i < game.maxclients) continue;
         addmenubotlib[n] = bot->botlib;

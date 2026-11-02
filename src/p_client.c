@@ -2772,6 +2772,12 @@ void ClientUserinfoChanged(edict_t *ent, char *userinfo)
         Q_strlcpy(userinfo, "\\name\\badinfo\\skin\\male/grunt", MAX_INFO_STRING);
     }
 
+    // ...nor take it on with a rename (R-BOT-37): the same cut, ahead of
+    // tourney's player list and of the engine's copy of the name, and the
+    // player told.  FL_BOTCLIENT says a bot here, as below.
+    if (!(ent->flags & FL_BOTCLIENT))
+        BotUntagPerson(ent, userinfo);
+
     // Under the OSP four the name and the skin in force are tourney's, the
     // donor's shape: OSP_userinfoChanged sets `pers.netname` and
     // `resp.osp_r0f4`, and a rename or a skin change it holds inside
@@ -2784,9 +2790,10 @@ void ClientUserinfoChanged(edict_t *ent, char *userinfo)
     if (G_IsOspRuleset()) {
         OSP_userinfoChanged(ent, userinfo);
     } else {
-        // set name
+        // set name -- a bot's behind `botnametag`, which the userinfo never
+        // holds (R-BOT-37); tourney composes its own the same way
         s = Info_ValueForKey(userinfo, "name");
-        Q_strlcpy(ent->client->pers.netname, s, sizeof(ent->client->pers.netname));
+        BotShownName(ent, s, ent->client->pers.netname, sizeof(ent->client->pers.netname));
     }
 
     // set spectator
@@ -3003,6 +3010,14 @@ qboolean ClientConnect(edict_t *ent, char *userinfo)
     // Whether this connect is a bot's is BotCreate's to say, not the edict's:
     // see BotConnecting.
     bool    bot = BotConnecting(ent);
+
+    // A person may not arrive wearing the bots' tag (R-BOT-37).  Off the
+    // userinfo before anything below reads the name -- tourney's player list
+    // first, which would otherwise judge `[BOT]Nils` and let it in under a
+    // `Nils` the list reserves for somebody else -- and the engine copies the
+    // name out of this string once the connect is allowed.
+    if (!bot)
+        BotUntagUserinfo(userinfo);
 
     // The refusals first, ahead of the bot move below, because a refused
     // connect must not make that move: it releases the bot's hook, removes

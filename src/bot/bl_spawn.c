@@ -169,6 +169,7 @@ static void BotCountBots(void)
 static void BotBecome(edict_t *ent, bot_library_t *lib)
 {
     bot_state_t *bs;
+    char userinfo[MAX_INFO_STRING];
 
     //remove bot flag before calling ClientBegin to make sure
     //BotMoveToFreeClientEdict won't be called there
@@ -178,6 +179,11 @@ static void BotBecome(edict_t *ent, bot_library_t *lib)
     //set the bot flag
     ent->flags |= FL_BOT | FL_BOTCLIENT;
     BotSetSvFlags(ent);
+    //...and shown as one from here on, which the name it connected with was
+    //not (R-BOT-37).  A copy, because ClientUserinfoChanged saves what it is
+    //given into pers.userinfo.
+    Q_strlcpy(userinfo, ent->client->pers.userinfo, sizeof(userinfo));
+    ClientUserinfoChanged(ent, userinfo);
     //get pointer to the bot state structure
     bs = &botglobals.botstates[DF_ENTCLIENT(ent)];
     //clear the bot state
@@ -788,7 +794,279 @@ void AddQueuedBots(void)
     gi.TagFree(bot);
 } //end of the function AddQueuedBots
 //===========================================================================
-// returns true if there is a client with the given name
+// The tag a bot's name is shown behind (R-BOT-37).
+//
+// People could not tell the bots from the other people: a bot's name is only a
+// name.  So every bot, under every ruleset and of either botlib, is shown as
+// `botnametag` and then its OWN name -- the one bots.cfg or `addbot` gave it,
+// which stays in its userinfo untagged and is still what the bot list and
+// `removebot` know it by.  The tag is the game's alone: no bot list or
+// character file carries it, so one cvar changes it for every bot, and "" is
+// no tag at all.
+//
+// One registration, here, because only one may decide the default.
+//===========================================================================
+cvar_t *BotNameTag(void)
+{
+    return gi.cvar("botnametag", "[BOT]", 0);
+} //end of the function BotNameTag
+//===========================================================================
+// The tag, then `name`, in `out`.
+//
+// Both go into the fifteen characters a name has -- `pers.netname`, which the
+// botlib contract's MAX_NETNAME fixes at 16 with the terminator, because the
+// brain is sent the name a client is shown by -- so a tag of five leaves ten of
+// the bot's own: "Shotgun Messiah" is "[BOT]Shotgun Me".  The tag loses the
+// three characters no name can hold: `\` would end the name inside the
+// playerskins configstring, and `"` and `;` are what the userinfo filter keeps
+// out of every name a person can choose, because a name reaches layouts and,
+// through tourney's team names, other clients' consoles.
+//===========================================================================
+static void BotTaggedName(char *out, size_t size, const char *name)
+{
+    const char *tag = BotNameTag()->string;
+    size_t n = 0;
+
+    if (!size) return;
+    for (; *tag && n + 1 < size; tag++)
+    {
+        if (*tag == '\\' || *tag == '"' || *tag == ';') continue;
+        out[n++] = *tag;
+    } //end for
+    out[n] = '\0';
+    Q_strlcat(out, name, size);
+} //end of the function BotTaggedName
+//===========================================================================
+// The name a client is shown by, out of the one its userinfo asks for: a bot's
+// behind the tag, a person's their own.  The two places a name is composed --
+// ClientUserinfoChanged, and OSP_userinfoChanged under the OSP four -- ask
+// this, so the tag takes the path every name already takes, at the connect
+// and again at every spawn.
+//
+// FL_BOTCLIENT, the flag that says the CLIENT is a bot: ClientConnect has
+// cleared it from a person's slot before it asks, and BotCreate clears FL_BOT
+// across the connect (G_LatchClientAddress says the same).
+//===========================================================================
+void BotShownName(const edict_t *ent, const char *name, char *out, size_t size)
+{
+    if (ent->flags & FL_BOTCLIENT) BotTaggedName(out, size, name);
+    else Q_strlcpy(out, name, size);
+} //end of the function BotShownName
+//===========================================================================
+// A bot's own name, which the tag never enters: its userinfo's.  What the bot
+// list and `removebot` know a bot by.  Info_ValueForKey's rotating buffer, so
+// it is read before the next lookup.
+//===========================================================================
+const char *BotOwnName(const edict_t *ent)
+{
+    return Info_ValueForKey(ent->client->pers.userinfo, "name");
+} //end of the function BotOwnName
+//===========================================================================
+// How much of the front of `name` is the tag, or 0 (R-BOT-37).
+//
+// The tag only means something if nobody else can wear it, so a PERSON's name
+// may not start with it -- and "starts with it" is read the way it is seen,
+// not byte for byte: after any leading spaces, in either case, and in either
+// half of the character set, because a name in the alternate (high-bit)
+// letters still spells the tag out.  What is compared is the tag's printing
+// part: without the characters it loses anyway (BotTaggedName) and without
+// the spaces either side, so a tag of "[BOT] " is still found in "[BOT]Nils".
+// A tag with nothing printing in it is no tag, and finds nothing.
+//===========================================================================
+static bool BotTagDrops(int c)
+{
+    return c == '\\' || c == '"' || c == ';';
+} //end of the function BotTagDrops
+
+static size_t BotTagPrefix(const char *name)
+{
+    const char *tag = BotNameTag()->string;
+    const char *end, *n;
+    int c, t;
+
+    for (;; tag++)
+    {
+        c = (unsigned char)*tag;
+        if (!c || !(Q_isspace(c) || BotTagDrops(c))) break;
+    } //end for
+    end = tag + strlen(tag);
+    for (; end > tag; end--)
+    {
+        c = (unsigned char)end[-1];
+        if (!(Q_isspace(c) || BotTagDrops(c))) break;
+    } //end for
+    if (end == tag) return 0;
+
+    n = name;
+    for (;; n++)
+    {
+        c = *n & 127;
+        if (!Q_isspace(c)) break;
+    } //end for
+    for (; tag < end; tag++)
+    {
+        t = (unsigned char)*tag;
+        if (BotTagDrops(t)) continue;
+        c = *n & 127;
+        if (!c || Q_tolower(c) != Q_tolower(t & 127)) return 0;
+        n++;
+    } //end for
+    return n - name;
+} //end of the function BotTagPrefix
+//===========================================================================
+// A PERSON's name with the tag taken off the front, and the spaces after it,
+// as often as it is there; true when anything was taken.  A name that was
+// nothing but the tag becomes "unnamed", which is what a Quake II client calls
+// a player who has not chosen a name (q2pro: client/main.c).
+//===========================================================================
+static bool BotUntagName(char *name, size_t size)
+{
+    size_t cut;
+    bool changed = false;
+    int c;
+
+    while ((cut = BotTagPrefix(name)) > 0)
+    {
+        for (;; cut++)
+        {
+            c = name[cut] & 127;
+            if (!c || !Q_isspace(c)) break;
+        } //end for
+        memmove(name, name + cut, strlen(name + cut) + 1);
+        changed = true;
+    } //end while
+    if (changed && !*name) Q_strlcpy(name, "unnamed", size);
+    return changed;
+} //end of the function BotUntagName
+//===========================================================================
+// Where `key`'s value starts inside the info string `s`, or NULL: the parse
+// Info_ValueForKey makes, answered with a place rather than a copy.
+//===========================================================================
+static char *InfoValueAt(char *s, const char *key)
+{
+    char *k;
+    size_t kl = strlen(key);
+
+    if (*s == '\\') s++;
+    while (*s)
+    {
+        k = s;
+        while (*s != '\\')
+        {
+            if (!*s) return NULL;
+            s++;
+        } //end while
+        s++;
+        if ((size_t)(s - 1 - k) == kl && !strncmp(k, key, kl)) return s;
+        while (*s && *s != '\\') s++;
+        if (*s) s++;
+    } //end while
+    return NULL;
+} //end of the function InfoValueAt
+//===========================================================================
+// The userinfo of a PERSON, made to name them without the tag (R-BOT-37); true
+// when the name had it.  It is the USERINFO that changes, not just the name
+// the game shows, for two readers that take the name from there: the engine,
+// which copies a client's name out of the very string the game was handed once
+// ClientConnect or ClientUserinfoChanged returns -- and lists it in `status`
+// and in the reply server browsers read -- and tourney's player list, which
+// judges the name before the game composes one.  Taken off at the second
+// alone, `[BOT]Nils` would still be listed under the tag, and would be let in
+// under a name the player list reserves for somebody else.
+//
+// The tag is cut out of the value where it stands, because what is left is the
+// end of the same value.  Info_SetValueForKey would move the key to the end of
+// the string and clear the high bit of every character in the name, turning a
+// player's alternate letters into plain ones; it is used only for "unnamed",
+// which is not part of what the player sent.
+//===========================================================================
+bool BotUntagUserinfo(char *userinfo)
+{
+    char name[MAX_INFO_STRING];
+    char *value;
+    size_t had, keep;
+
+    // Only where there can be a bot to take a person for: not under `sp`, nor
+    // with `bots 0`.  An empty tag finds nothing either (BotTagPrefix).
+    if (!G_BotsAllowed()) return false;
+    value = InfoValueAt(userinfo, "name");
+    if (!value) return false;
+    had = strcspn(value, "\\");
+    if (had >= sizeof(name)) return false;
+    memcpy(name, value, had);
+    name[had] = '\0';
+    if (!BotUntagName(name, sizeof(name))) return false;
+    keep = strlen(name);
+    if (keep <= had && !memcmp(value + had - keep, name, keep))
+        memmove(value, value + had - keep, strlen(value + had - keep) + 1);
+    else
+        Info_SetValueForKey(userinfo, "name", name);
+    return true;
+} //end of the function BotUntagUserinfo
+//===========================================================================
+// ClientUserinfoChanged's half for a person: the tag off the userinfo, and the
+// player told why their name is not the one they typed -- except on a
+// connect's own call, where there is nobody to tell yet (`pers.connected` is
+// set as ClientConnect returns, as tourney's rate cap asks it).
+//===========================================================================
+void BotUntagPerson(edict_t *ent, char *userinfo)
+{
+    char tag[MAX_NETNAME];
+    char *t;
+    size_t n;
+
+    if (!BotUntagUserinfo(userinfo) || !ent->client->pers.connected) return;
+    BotTaggedName(tag, sizeof(tag), "");
+    t = tag;
+    while (*t == ' ') t++;
+    n = strlen(t);
+    while (n > 0 && t[n - 1] == ' ') t[--n] = '\0';
+    gi.cprintf(ent, PRINT_HIGH, "Names starting with \"%s\" are kept for bots; "
+               "yours is \"%s\"\n", t, Info_ValueForKey(userinfo, "name"));
+} //end of the function BotUntagPerson
+//===========================================================================
+// A changed `botnametag` reaches the clients already in the game at once,
+// through ClientUserinfoChanged as their next spawn would: every bot's name is
+// composed again, and a person whose name starts with the NEW tag has it taken
+// off (BotUntagPerson).  Called before the brain is sent the frame's client
+// names (BotLib_BotStartFrame), so it hears the new ones on the same frame.
+//
+// A person's is the game's half only.  What the engine lists them as -- in
+// `status` and to server browsers -- is its own copy of their userinfo, which
+// the game reaches only through the string the engine hands it, so that copy
+// loses the tag at the player's next userinfo change.
+//
+// Under the OSP four it is a rename like any other, and one asked for inside a
+// client's `client_infochange` window -- a bot's first four seconds, by default
+// -- waits for the window's end and is taken at the next spawn (R-OSP-30).
+//===========================================================================
+void BotNameTagFrame(void)
+{
+    cvar_t *tag = BotNameTag();
+    char userinfo[MAX_INFO_STRING];
+    edict_t *ent;
+    int i;
+
+    if (!tag->modified) return;
+    tag->modified = false;
+    for (i = 0; i < game.maxclients; i++)
+    {
+        ent = DF_CLIENTENT(i);
+        if (!ent->inuse || !ent->client) continue;
+        if (!(ent->flags & FL_BOTCLIENT) && !BotTagPrefix(BotOwnName(ent))) continue;
+        //a copy, because ClientUserinfoChanged saves what it is given into
+        //pers.userinfo
+        Q_strlcpy(userinfo, ent->client->pers.userinfo, sizeof(userinfo));
+        ClientUserinfoChanged(ent, userinfo);
+    } //end for
+} //end of the function BotNameTagFrame
+//===========================================================================
+// returns true if a client in the game, or a bot on its way in, is SHOWN by the
+// given name -- the name that has to be unique, because it is the one a player
+// sees.  A bot in the queue will be shown by the tag and its own name, and
+// holds that as surely as a bot in the game holds its name (BotNameQueued).
+// Two bots whose own names differ only past what the tag leaves room for would
+// otherwise both be seated under one name.
 //
 // Parameter:               -
 // Returns:                 -
@@ -798,6 +1076,8 @@ static bool ClientNameExists(const char *name)
 {
     int i;
     edict_t *cl_ent;
+    queuedbot_t *bot;
+    char shown[MAX_NETNAME];
 
     for (i = 0; i < game.maxclients; i++)
     {
@@ -810,8 +1090,12 @@ static bool ClientNameExists(const char *name)
             } //end if
         } //end if
     } //end for
-    //...or one on its way in (BotNameQueued)
-    return BotNameQueued(name);
+    for (bot = queuedbots; bot; bot = bot->next)
+    {
+        BotTaggedName(shown, sizeof(shown), Info_ValueForKey(bot->userinfo, "name"));
+        if (!Q_strcasecmp(shown, name)) return true;
+    } //end for
+    return false;
 } //end of the function ClientNameExists
 //===========================================================================
 // Block 5 of seventeen: a duplicate bot name.  The SDK refuses it; tourney
@@ -820,36 +1104,42 @@ static bool ClientNameExists(const char *name)
 // client sees, so it stays tourney's: a donor's behaviour belongs to the
 // ruleset that shipped it.
 //
+// `out` is the bot's own name and what has to be unique is the name it will be
+// shown by, the tag in front (R-BOT-37) -- so the suffix goes where it is SEEN:
+// inside the part of the own name the tag leaves room for.  The last character
+// that part shows gives way to it when there is no room after, as the
+// fifteenth character always did, and with the tag "" this is exactly that.
+//
 // Returns false when the name cannot be used at all.
 //===========================================================================
 static bool BotUniqueName(const char *want, char *out, size_t outsize)
 {
+    char shown[MAX_NETNAME];
     char suffix;
+    size_t room, keep;
 
     Q_strlcpy(out, want, outsize);
-    if (!ClientNameExists(out)) return true;
+    BotTaggedName(shown, sizeof(shown), out);
+    if (!ClientNameExists(shown)) return true;
 
     if (!G_IsOspRuleset()) return false;
 
-    // MAX_NETNAME is 16 including the terminator, so a name of 15 characters
-    // has nowhere to put a suffix and the last character is overwritten.
-    if (strlen(out) < 15)
+    // MAX_NETNAME is 16 including the terminator.  A tag that fills all
+    // fifteen leaves nowhere for a suffix to be seen.
+    BotTaggedName(shown, sizeof(shown), "");
+    if (strlen(shown) >= MAX_NETNAME - 1 || outsize < 2) return false;
+    room = MAX_NETNAME - 1 - strlen(shown);
+    if (room > outsize - 1) room = outsize - 1;
+    keep = strlen(out);
+    if (keep >= room) keep = room - 1;
+    for (suffix = '0'; suffix <= '9'; suffix++)
     {
-        for (suffix = '0'; suffix <= '9'; suffix++)
-        {
-            Q_snprintf(out, outsize, "%s%c", want, suffix);
-            if (!ClientNameExists(out)) return true;
-        } //end for
-    } //end if
-    else
-    {
-        for (suffix = '0'; suffix <= '9'; suffix++)
-        {
-            out[14] = suffix;
-            out[15] = '\0';
-            if (!ClientNameExists(out)) return true;
-        } //end for
-    } //end else
+        Q_strlcpy(out, want, keep + 1);
+        out[keep] = suffix;
+        out[keep + 1] = '\0';
+        BotTaggedName(shown, sizeof(shown), out);
+        if (!ClientNameExists(shown)) return true;
+    } //end for
     return false;
 }
 //===========================================================================
@@ -968,7 +1258,9 @@ void BotAddDeathmatch(edict_t *ent)
     memset(uinfo, 0, sizeof(uinfo));
     if (!BotUniqueName(name, bname, sizeof(bname)))
     {
-        gi.cprintf(ent, PRINT_HIGH, "client name %s is already used\n", name);
+        //the name that is taken is the one it would be shown by (R-BOT-37)
+        BotTaggedName(bname, sizeof(bname), name);
+        gi.cprintf(ent, PRINT_HIGH, "client name %s is already used\n", bname);
         return;
     } //end if
     if (!BotSetUserinfo(ent, uinfo, "name", bname) ||
@@ -1107,7 +1399,7 @@ void SP_bot(edict_t *self)
 //===========================================================================
 void BotRemoveDeathmatch(edict_t *ent)
 {
-    int i;
+    int i, pass;
     edict_t *cl_ent;
     const char *name;
 
@@ -1123,18 +1415,27 @@ void BotRemoveDeathmatch(edict_t *ent)
         BotDestroyAll();
         return;
     } //end if
-    for (i = 0; i < game.maxclients; i++)
+    //By the name it is shown by, and failing that by its own (R-BOT-37).
+    //Every caller in the game passes the first -- the bot menu, the fill, CTF's
+    //`boot`, tourney's kicks -- and the first is the one that is unique, so
+    //the whole server is asked it before any bot is asked its own name, which
+    //is the one a bot list or an operator knows.
+    for (pass = 0; pass < 2; pass++)
     {
-        cl_ent = DF_CLIENTENT(i);
-        if (!cl_ent->inuse) continue;
-        if (cl_ent->flags & FL_BOT)
+        for (i = 0; i < game.maxclients; i++)
         {
-            if (!name || (Q_strcasecmp(cl_ent->client->pers.netname, name) == 0))
+            cl_ent = DF_CLIENTENT(i);
+            if (!cl_ent->inuse) continue;
+            if (cl_ent->flags & FL_BOT)
             {
-                BotDestroy(cl_ent);
-                return;
+                if (!name || !Q_strcasecmp(pass ? BotOwnName(cl_ent) :
+                                           cl_ent->client->pers.netname, name))
+                {
+                    BotDestroy(cl_ent);
+                    return;
+                } //end if
             } //end if
-        } //end if
+        } //end for
     } //end for
     if (name) gi.cprintf(ent, PRINT_HIGH, "No bot found with name %s\n", name);
     else gi.cprintf(ent, PRINT_HIGH, "No bots found to remove!\n");

@@ -218,14 +218,21 @@ func dump(srv *playtest.Server, cmd, until string) []string {
 }
 
 // clientLine is the library dump's line for a bot, and the library it was
-// listed under.
+// listed under.  The dump prints the name a bot is SHOWN by, which is its own
+// name behind `botnametag` (R-BOT-37), so the line is the one whose name ENDS
+// in the bot's own -- whatever the tag, and with none.
 func clientLine(lines []string, name string) (line, library string) {
 	lib := ""
 	for _, l := range lines {
 		if strings.Contains(l, " botlib (") {
 			lib = l
 		}
-		if strings.Contains(l, "client") && strings.Contains(l, ": "+name) {
+		i := strings.Index(l, ": ")
+		if !strings.Contains(l, "client") || i < 0 {
+			continue
+		}
+		shown, _, _ := strings.Cut(l[i+2:], ", skill")
+		if strings.HasSuffix(strings.TrimSpace(shown), name) {
 			return strings.TrimSpace(l), lib
 		}
 	}

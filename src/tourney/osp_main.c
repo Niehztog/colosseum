@@ -5293,6 +5293,8 @@ void OSP_userinfoChanged(edict_t *ent, char *userinfo)
     gclient_t *cl = ent->client;
     char      *s;
     char      newnick[16];
+    char      own[MAX_INFO_VALUE];
+    char      shown[sizeof(cl->pers.netname)];
     size_t    i;
     int       tnum;
     bool      renamed = false;
@@ -5319,12 +5321,33 @@ void OSP_userinfoChanged(edict_t *ent, char *userinfo)
     // force goes back into the userinfo: the engine takes its own copy of the
     // client's name out of that string when this returns, and a reserved name
     // must not reach its `status` and the server browsers either.
-    if (OSP_nameRefused(ent, s, userinfo))
-        Info_SetValueForKey(userinfo, "name", cl->pers.netname);
+    //
+    // A bot's name in force is its OWN name, which its saved userinfo holds:
+    // its netname is that name behind `botnametag` (R-BOT-37), and written back
+    // here it would be tagged a second time below.  The list judges a bot by
+    // its own name as well, as it did before there was a tag -- the file is
+    // the operator's, written in the names bots.cfg gives the bots.
+    if (OSP_nameRefused(ent, s, userinfo)) {
+        if (ent->flags & FL_BOTCLIENT) {
+            Q_strlcpy(own, Info_ValueForKey(cl->pers.userinfo, "name"), sizeof(own));
+            Info_SetValueForKey(userinfo, "name", own);
+        } else {
+            Info_SetValueForKey(userinfo, "name", cl->pers.netname);
+        }
+    }
     // Read again either way: the player list's own lookups rotate the buffers
     // `s` points into (Info_ValueForKey keeps four), and with four address
     // entries the name read back as an address.
     s = Info_ValueForKey(userinfo, "name");
+
+    // ...and a bot is shown by that name behind the tag, which is the name
+    // everything below holds back, compares, logs and installs.  Composed to
+    // the length of a netname, so a bot whose own name the tag cuts short does
+    // not read as renamed by every spawn.
+    if (ent->flags & FL_BOTCLIENT) {
+        BotShownName(ent, s, shown, sizeof(shown));
+        s = shown;
+    }
 
     // A rename inside the window is HELD, the donor's way: the name in force
     // stays, and the userinfo -- the engine's copy and `pers.userinfo` -- goes

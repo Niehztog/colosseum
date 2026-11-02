@@ -1219,6 +1219,9 @@ void BotLib_BotStartFrame(float time)
 {
     bot_library_t *lib;
 
+    //a changed `botnametag` first, so the names sent below are the new ones
+    //(R-BOT-37)
+    BotNameTagFrame();
     //NOTE: not really nice to put this call here ... but it's functional
     BotLib_UpdateAllClientSettings();
     //

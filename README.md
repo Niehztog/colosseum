@@ -283,6 +283,8 @@ Every shipped config that takes bots already carries both lines the same way: `b
 
 Both are off by default, because a vote that can empty the server of opponents is a bigger lever than one that changes the fraglimit.
 
+**Telling bots from people.** Every bot's name is shown with a tag in front - `[BOT]Sarge` on the scoreboard, in the obituaries and in chat, under every ruleset, and in server browsers' player lists on the engine image in `server/`, whose status patch lists the bots by the name the game shows. `botnametag` sets the tag, and `set botnametag ""` turns it off. A change reaches the bots already in the game at once - under the four OSP rulesets a bot that joined in the last few seconds takes it when it next respawns. The game adds the tag itself: `bots.cfg` and the character files keep the bots' own names, and `sv removebot Sarge` and `sv removebot [BOT]Sarge` both work. A Quake II name holds fifteen characters, and the tag counts towards them, so a long bot name loses its end: "Shotgun Messiah" becomes `[BOT]Shotgun Me`. People cannot wear the tag: a player who joins as `[BOT]Nils`, or renames to it, plays as `Nils` - in the game, in `status` and in server browsers - and is told why on a rename.
+
 Then `~` again to close the console, and play.
 
 ### Running a dedicated server

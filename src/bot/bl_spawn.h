@@ -67,6 +67,20 @@ void AddBotToQueue(edict_t *ent, const struct botlib_s *botlib, const char *user
 int  BotSeatsFree(void);
 // true when a bot of that name is in the queue, not yet in the game
 bool BotNameQueued(const char *name);
+// The tag a bot's name is shown behind, `botnametag` (R-BOT-37); the name a
+// client is shown by, out of the one its userinfo asks for -- a bot's behind
+// the tag, a person's unchanged; a bot's own name, untagged, which the bot
+// list and `removebot` know it by; and the per-frame check that puts a changed
+// tag on the clients already in the game.
+cvar_t *BotNameTag(void);
+void BotShownName(const edict_t *ent, const char *name, char *out, size_t size);
+const char *BotOwnName(const edict_t *ent);
+void BotNameTagFrame(void);
+// ...and a PERSON may not wear the tag: off the front of a userinfo's name --
+// in place, so the engine's copy and tourney's player list lose it too -- and,
+// in ClientUserinfoChanged, the player told why
+bool BotUntagUserinfo(char *userinfo);
+void BotUntagPerson(edict_t *ent, char *userinfo);
 // spawn waiting bots
 void AddQueuedBots(void);
 //
