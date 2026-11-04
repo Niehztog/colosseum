@@ -16,7 +16,12 @@ Each subdirectory of `scenarios/` is one `main` package: it starts `q2proded` ag
 * **`NetMu`** guards the outgoing message and the sequence state. Three goroutines write them -- the receive loop, `Run`'s frame timer, and a scenario's `Cmd()` through `AddClientString` -- and unguarded, a string command could land in the middle of a usercmd.
 * **`ReadErr()`** says why the receive loop stopped. It used to return without a word on a read error or a packet it could not parse, while `Run` went on sending usercmds, so the client stayed connected and heard nothing. Every `playtest.Bot` wait now names that reason when it times out.
 
-`patches/libq2-v1.0.335-entities.patch` makes the frame's entity set honest, which `Bot.EntityModel` and `Bot.PlayerSkinHistory` depend on -- and so `ra2eyecam`, whose question is which entity a client is shown, and the battery's `slots/every bot is drawn as itself`, whose question is whose model and skin a bot is drawn with:
+`patches/libq2-v1.0.335-entities.patch` makes the frame's entity set honest. Five methods depend on it: `Bot.EntityModel`, `Bot.EntityOrigin`, `Bot.EntityFrame`, `Bot.EntitiesWithModel` and `Bot.PlayerSkinHistory`. So do these checks:
+- `ra2eyecam`, whose question is which entity a client is shown;
+- `xatrixtune`, which finds a thrown trap among the client's entities, aims at it, watches it leave, and reads from its frame when it first pulled;
+- the battery's `slots/every bot is drawn as itself`, whose question is whose model and skin a bot is drawn with.
+
+What the patch changes:
 
 * **A removed entity leaves the merged set.** `ParsePacketEntities` cloned every entity of the delta frame and then never deleted the one the server sent with the remove bit, so a player who left a client's view lingered there with whatever state it had when it left.
 * **An entity entering a frame starts from its baseline**, as the protocol codes it, not from nothing. q2pro builds each client's baselines AT CONNECT from the entities live then (`SV_CreateBaselines`), so a player's baseline already says modelindex 255, the server leaves the field out, and an entity coming back into view read as modelindex 0. The baselines are kept in the frame history under `message.BaselineFrame`, which the history's pruning skips.

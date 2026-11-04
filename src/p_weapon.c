@@ -2048,6 +2048,19 @@ void Weapon_BFG(edict_t *ent)
     RipperGun
 */
 
+// The Ion Ripper's damage per ion before Quad or Double Damage.  These are the
+// Reckoning's two numbers, and the `deathmatch` test is its own, kept in this
+// file.  weapon_ionripper_fire fires with this value, and ionripper_touch
+// compares a shot against it to tell a multiplied one apart (R-MP-28).
+int G_IonRipperDamage(void)
+{
+    if (deathmatch->value) {
+        // tone down for deathmatch
+        return 30;
+    }
+    return 50;
+}
+
 void weapon_ionripper_fire(edict_t *ent)
 {
     vec3_t  start;
@@ -2056,12 +2069,7 @@ void weapon_ionripper_fire(edict_t *ent)
     vec3_t  tempang;
     int     damage;
 
-    if (deathmatch->value) {
-        // tone down for deathmatch
-        damage = 30;
-    } else {
-        damage = 50;
-    }
+    damage = G_IonRipperDamage();
 
     // `damage_multiplier`, not the Reckoning's `* 4`: Ground Zero's
     // P_DamageModifier sets `is_quad` for Double Damage too and puts the real
@@ -2226,12 +2234,26 @@ static void weapon_trap_fire(edict_t *ent, bool held)
     vec3_t  offset;
     vec3_t  forward, right;
     vec3_t  start;
-    int     damage = 125;
+    int     damage;
     float   timer;
     int     speed;
     float   radius;
 
-    radius = damage + 40;
+    timer = (ent->client->grenade_framenum - level.framenum) * FRAMETIME;
+
+    // Which blast this trap carries.  A trap whose cook time has run out goes
+    // off in the hand, in fire_trap, for sv_trap_held_* (R-MP-26).  A trap
+    // that is thrown carries sv_trap_expl_*, for the blast it makes if it is
+    // shot to pieces (R-MP-27).  The Reckoning had a single pair, 125 and
+    // 125 + 40, which only the first case ever used.  The radius is not
+    // multiplied, as before.
+    if (timer <= 0) {
+        damage = sv_trap_held_damage->value;
+        radius = sv_trap_held_radius->value;
+    } else {
+        damage = sv_trap_expl_damage->value;
+        radius = sv_trap_expl_radius->value;
+    }
     // The factor, as weapon_ionripper_fire says.
     if (is_quad)
         damage *= damage_multiplier;
@@ -2240,7 +2262,6 @@ static void weapon_trap_fire(edict_t *ent, bool held)
     AngleVectors(ent->client->v_angle, forward, right, NULL);
     P_ProjectSource(ent->client, ent->s.origin, offset, forward, right, start);
 
-    timer = (ent->client->grenade_framenum - level.framenum) * FRAMETIME;
     speed = GRENADE_MINSPEED + (GRENADE_TIMER - timer) * ((GRENADE_MAXSPEED - GRENADE_MINSPEED) / GRENADE_TIMER);
     // fire_grenade2 (ent, start, forward, damage, speed, timer, radius, held);
     fire_trap(ent, start, forward, damage, speed, timer, radius, held);

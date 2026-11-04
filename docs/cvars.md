@@ -2,7 +2,7 @@
 
 The merged, deduplicated cvar inventory: every cvar Colosseum registers, its default, its flags, the donor that introduced it, and -- where section 7 rule 4 applied -- which ruleset owns the bare name and what the prefixed alias is. **Three sets are counted here and listed by the tool rather than transcribed**, because none of them carries a decision: baseq2's own 37; the loadout family, which is a matrix (`start_`/`max_`/`pack_`/`warmup_` x the ammo and armour rows) rather than a list; and the engine's own cvars the library only re-obtains to read (`basedir`, `gamedir`, `homedir`, `libdir`, `m_pitch`, `rcon_password`), which are registered by whoever asks first and are owned by nobody here -- `g_fs.c` holds the defaults for `basedir`, `gamedir` and `homedir` so that the order cannot decide them, and `libdir` has one reader, the botlib search. Everything else has a row.
 
-Generated from `tools/counts.py --list cvars` and annotated. **The counts accrue by layer**, in the order the donors were merged; `tools/counts.py` measures the finished tree, so what it prints today is the last of them: **332**. Regenerate rather than hand-edit the counts -- and the total is enforced: `counts.py --docs` compares the figure above, and `docs/commands.md`'s, with what the tree measures, and runs in `make check` with `--duplicates` and the extraction controls, so a total the tree has moved away from fails the build rather than sitting in a document. It said that before it was true -- `--duplicates` checks duplicates, not this page -- and this page said 326 while the tree had 327.
+Generated from `tools/counts.py --list cvars` and annotated. **The counts accrue by layer**, in the order the donors were merged; `tools/counts.py` measures the finished tree, so what it prints today is the last of them: **340**. Regenerate rather than hand-edit the counts -- and the total is enforced: `counts.py --docs` compares the figure above, and `docs/commands.md`'s, with what the tree measures, and runs in `make check` with `--duplicates` and the extraction controls, so a total the tree has moved away from fails the build rather than sitting in a document. It said that before it was true -- `--duplicates` checks duplicates, not this page -- and this page said 326 while the tree had 327.
 
 ## Inherited from baseq2
 
@@ -43,7 +43,25 @@ Every name is q2pro's own, with q2pro's default and flags, except where section 
 
 ## The mission packs
 
-*The Reckoning adds none.* Measured against `q2pro/src/xatrix`: every `gi.cvar` in it names a cvar baseq2 already registers, so Xatrix's content arrives with no switch of its own -- `max_magslug` and `max_trap` are the loadout family's (below), and the layer itself is the `xatrix` cvar in the next section.
+*The Reckoning adds none of its own.* Measured against `q2pro/src/xatrix`: every `gi.cvar` in it names a cvar that baseq2 already registers, so Xatrix's content arrives with no switch of its own. `max_magslug` and `max_trap` belong to the loadout family (below), and the layer itself is the `xatrix` cvar in the next section.
+
+**This tree adds eight for The Reckoning's trap and Ion Ripper** (`SPECS.md` R-MP-25 to R-MP-29):
+- **Where the names come from.** Seven are the openffa-xatrix game library's names, which that library took from tastyspleen's quake2plus-tsmod. A config written for it therefore means the same thing here. The last, `sv_trap_quad_pull`, switches on a change that library makes unconditionally, so it has no name for it and this one is this tree's. It plays as `sv_trap_quad_pull 4`.
+- **The `sv_` prefix.** It is that library's choice. q2pro registers none of these names, so nothing collides (section 7 rule 4).
+- **Defaults.** Each default is the Reckoning's own behaviour, so a config that sets none of them plays as before.
+- **Where they apply.** They are registered unconditionally in `g_main.c` and apply under every ruleset, whether or not the `xatrix` layer is on, because the trap and the Ion Ripper are shared code.
+- **When a change applies.** Each one is read where it acts, so a change applies to the next trap thrown or the next shot fired.
+
+| cvar | default | meaning |
+|---|---|---|
+| `sv_trap_duration` | `30` | Seconds a thrown trap lasts. Its clock is set again when it catches someone. 0 or less makes a trap disappear a second after it is thrown (R-MP-25) |
+| `sv_trap_held_damage` | `125` | Damage of a trap that goes off in the hand: held too long, or thrown at death with its time spent. Multiplied by Quad or Double Damage (R-MP-26) |
+| `sv_trap_held_radius` | `165` | Reach of that blast, in units (R-MP-26) |
+| `sv_trap_health` | `0` | Above 0, an armed trap can be shot, and breaks after this much damage. Its thrower can shoot it too. 0 is the Reckoning's trap, which nothing can hit. Read once per trap, as it arms (R-MP-27) |
+| `sv_trap_expl_damage` | `200` | Damage of the blast when a trap breaks, credited to its thrower ("was blown up by X's trap"). Multiplied by the Quad or Double Damage the trap was thrown with. Has no effect while `sv_trap_health` is 0 (R-MP-27) |
+| `sv_trap_expl_radius` | `300` | Reach of that blast, in units. Has no effect while `sv_trap_health` is 0 (R-MP-27) |
+| `ripper_self` | `0` | Above 0, a player's Ion Ripper shot can bounce back and hit them, for this much damage, or for the shot's full damage when Quad or Double Damage multiplied it. It counts as a suicide. Monsters' shots are unaffected. 0 is the Reckoning's: a shot never hits its shooter (R-MP-28) |
+| `sv_trap_quad_pull` | `1` | Above 1, a trap thrown with Quad Damage pulls players this many times as hard, for its whole life. Double Damage does not count, and monsters are steered in as before. 1 or less is the Reckoning's: Quad does not change the pull. Read as the trap is thrown (R-MP-29) |
 
 **Ground Zero adds nine.** Six are registered unconditionally in `g_main.c`, so that a config naming one is not rejected under a ruleset that ignores it. The other three -- `goallimit`, `dball_team1_skin` and `dball_team2_skin` -- are DeathBall's and are registered only by `DBall_GameInit`, which nothing installs: they are never registered, and a config that sets one creates a cvar nothing reads.
 

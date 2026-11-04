@@ -105,6 +105,7 @@ static int acc_column(int mod)
     case MOD_RIPPER:        return ACC_RIPPER;
     case MOD_PHALANX:       return ACC_PHALANX;
     case MOD_TRAP:          return ACC_TRAP;
+    case MOD_TRAP_SPLASH:   return ACC_TRAP;    // R-MP-27, the shootable trap's blast
 
     // Ground Zero.  The Disruptor's two MODs share one column the way the BFG's
     // three do: MOD_TRACKER is the beam, MOD_DISINTEGRATOR the finishing blow.

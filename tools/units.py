@@ -133,7 +133,9 @@ SELFTESTS = [
       'self->nextthink += FRAMETIME;'),
      'stepped by FRAMETIME'),
     ('mix', 'g_weapon.c',
-     ('trap->timestamp = level.framenum + 30 * BASE_FRAMERATE;',
+     # The trap's clock reads sv_trap_duration through trap_lifetime() since
+     # R-MP-25; the reversion is still the 1999 seconds-based spelling.
+     ('trap->timestamp = level.framenum + trap_lifetime();',
       'trap->timestamp = level.time + 30;'),
      'int field read against level.time'),
     ('lost scale', 'g_func.c',

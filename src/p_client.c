@@ -450,6 +450,12 @@ void ClientObituary(edict_t *self, edict_t *inflictor, edict_t *attacker)
             case MOD_TRAP:
                 message = "caught in trap by";
                 break;
+            // R-MP-27: a shootable trap shot to pieces, credited to its
+            // thrower.  openffa-xatrix's line.
+            case MOD_TRAP_SPLASH:
+                message = "was blown up by";
+                message2 = "'s trap";
+                break;
                 // END 14-APR-98
 
 //===============

@@ -6,6 +6,7 @@ import (
 	"log"
 	"math/rand"
 	"regexp"
+	"sort"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -458,6 +459,55 @@ func (p *Bot) EntityModel(n int) (int, bool) {
 	return int(e.GetModelIndex()), true
 }
 
+// EntityOrigin is entity n's origin in the last frame, in world units, and
+// whether the entity was in that frame at all.  The wire carries an origin in
+// eighths of a unit, as it does the player's own.  It is how a scenario aims at
+// something the game threw -- a trap, a grenade -- rather than at a spot
+// it guessed.
+func (p *Bot) EntityOrigin(n int) ([3]float64, bool) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	e, ok := p.ents[int32(n)]
+	if !ok {
+		return [3]float64{}, false
+	}
+	return [3]float64{
+		float64(e.GetOriginX()) * 0.125,
+		float64(e.GetOriginY()) * 0.125,
+		float64(e.GetOriginZ()) * 0.125,
+	}, true
+}
+
+// EntityFrame is entity n's animation frame in the last frame, and whether the
+// entity was in that frame at all.  A thinker that steps its own frame shows a
+// scenario WHEN it thought: the Reckoning's trap steps from 0 to 1 on the
+// think on which it first pulls.
+func (p *Bot) EntityFrame(n int) (int, bool) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	e, ok := p.ents[int32(n)]
+	if !ok {
+		return 0, false
+	}
+	return int(e.GetFrame()), true
+}
+
+// EntitiesWithModel is every entity the last frame drew with modelindex m, in
+// entity-number order.  This client only sees what is in its PVS, so an empty
+// answer means "not here", never "not anywhere".
+func (p *Bot) EntitiesWithModel(m int) []int {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	var out []int
+	for n, e := range p.ents {
+		if int(e.GetModelIndex()) == m {
+			out = append(out, int(n))
+		}
+	}
+	sort.Ints(out)
+	return out
+}
+
 // ModelIndexPlayer is the modelindex that means "the player model the skinnum
 // names" rather than a model of its own.
 const ModelIndexPlayer = 255
@@ -572,6 +622,23 @@ func (p *Bot) Press(buttons byte, hold time.Duration) {
 	p.b.Move.Buttons &^= buttons
 	p.b.MoveMu.Unlock()
 	time.Sleep(hold)
+}
+
+// Hold puts the given BUTTON_* bits down and returns at once; Release lifts
+// them.  Press's trailing wait suits a tap, but a weapon that acts on the
+// RELEASE -- a hand grenade or a trap, thrown when the button comes up -- needs
+// the scenario to know when that was, so it can time what follows from the
+// throw rather than from a wait that ended later.
+func (p *Bot) Hold(buttons byte) {
+	p.b.MoveMu.Lock()
+	p.b.Move.Buttons |= buttons
+	p.b.MoveMu.Unlock()
+}
+
+func (p *Bot) Release(buttons byte) {
+	p.b.MoveMu.Lock()
+	p.b.Move.Buttons &^= buttons
+	p.b.MoveMu.Unlock()
 }
 
 // Nudge holds upmove (jump when positive, crouch when negative) the same way.

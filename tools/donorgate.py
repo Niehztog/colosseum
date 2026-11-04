@@ -428,8 +428,8 @@ AI_REQUIREMENTS = (
 
 SAVE_FORMAT_REQUIREMENTS = (
     ('g_save.c', 'E(rogue_sight_client)'),
-    ('g_save.c', '#define SAVE_VERSION    0x102'),
-    ('g_save.c', '#define SAVE_VERSION    10'),
+    ('g_save.c', '#define SAVE_VERSION    0x103'),
+    ('g_save.c', '#define SAVE_VERSION    11'),
 )
 
 
@@ -1229,7 +1229,7 @@ SHARED_BEHAVIOR_SELFTESTS = [
     ('Rogue sight cache serialization', 'g_save.c',
      'E(rogue_sight_client)', 'E(sight_client)'),
     ('Rogue sight cache save version', 'g_save.c',
-     '#define SAVE_VERSION    0x102', '#define SAVE_VERSION    0x101'),
+     '#define SAVE_VERSION    0x103', '#define SAVE_VERSION    0x102'),
     ('base idle interval', 'g_ai.c',
      '(1 + random()) * 15', '(1 + random() * 15)'),
     ('base checkattack arm', 'g_ai.c',

@@ -242,6 +242,7 @@ static const save_field_t entityfields[] = {
     I(groundentity_linkcount),
     E(teamchain),
     E(teammaster),
+    E(obitowner),
 
     E(mynoise),
     E(mynoise2),
@@ -991,10 +992,12 @@ static void read_fields(gzFile f, const save_field_t *fields, void *base)
 // field twice (fourteen did: eight entity, five client, one level --
 // `tools/dsweep.py` checks it).  The record is positional: a layout change is
 // a version change, or an older savegame is misread instead of refused.
+// 0x103 and 11: the entity record carries `obitowner`, the thrower that a
+// trap's or an ion's damage is credited to (R-MP-27, R-MP-28).
 #if USE_NEW_GAME_API
-#define SAVE_VERSION    0x102
+#define SAVE_VERSION    0x103
 #else
-#define SAVE_VERSION    10
+#define SAVE_VERSION    11
 #endif
 
 static void check_gzip(int magic)

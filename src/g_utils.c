@@ -615,7 +615,10 @@ there, a device laid in one round kills in the next and credits its layer.  This
 takes them out of the world without a bang, with the trigger fields a prox and
 a tesla carry on `teamchain`, for every layer `mine` answers true for -- or
 every one at all when `mine` is NULL.  A layer is the device's `teammaster` for
-Ground Zero's three and its `owner` for The Reckoning's trap, and may be NULL.
+Ground Zero's three and its `obitowner` for The Reckoning's trap, and may be
+NULL.  The trap's is not its `owner`: a shootable trap gives that up so that
+its thrower can shoot it (R-MP-27), and `obitowner` names the thrower either
+way.
 
 Ground Zero's doppleganger and spheres are devices too.  A doppleganger lives
 30 seconds, names its layer in `teammaster` and its body on `teamchain`, and
@@ -642,7 +645,7 @@ void G_RemoveDeployables(bool (*mine)(edict_t *layer, void *arg), void *arg)
         if (tesla || prox || dopple || !strcmp(e->classname, "nuke"))
             layer = e->teammaster;
         else if (!strcmp(e->classname, "htrap"))
-            layer = e->owner;
+            layer = e->obitowner;
         else if (sphere)
             layer = (e->spawnflags & SPHERE_DOPPLEGANGER) ? e->teammaster : e->owner;
         else

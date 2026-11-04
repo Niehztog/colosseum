@@ -126,6 +126,17 @@ cvar_t  *strong_mines;
 cvar_t  *randomrespawn;
 //ROGUE
 
+// R-MP-25 to R-MP-29: the Reckoning's trap and Ion Ripper, as openffa-xatrix
+// tunes them.
+cvar_t  *ripper_self;
+cvar_t  *sv_trap_duration;
+cvar_t  *sv_trap_health;
+cvar_t  *sv_trap_expl_damage;
+cvar_t  *sv_trap_expl_radius;
+cvar_t  *sv_trap_held_damage;
+cvar_t  *sv_trap_held_radius;
+cvar_t  *sv_trap_quad_pull;
+
 cvar_t  *sv_features;
 
 static void G_RunFrame(void);
@@ -256,6 +267,26 @@ static void InitGame(void)
     strong_mines = gi.cvar("strong_mines", "0", 0);
     randomrespawn = gi.cvar("randomrespawn", "0", 0);
 //ROGUE
+
+    // R-MP-25 to R-MP-28.  These use openffa-xatrix's names and defaults, so a
+    // config written for that game library means the same thing here, and each
+    // default is the Reckoning's own number, so a config that sets none of them
+    // plays as before.  They are registered under every ruleset and whether or
+    // not the `xatrix` layer is on, because the trap and the Ion Ripper are
+    // shared code and a map can place either weapon in any game.  All seven
+    // are plain values, read where they act, so a change takes effect live.
+    ripper_self = gi.cvar("ripper_self", "0", 0);
+    sv_trap_duration = gi.cvar("sv_trap_duration", "30", 0);
+    sv_trap_health = gi.cvar("sv_trap_health", "0", 0);
+    sv_trap_expl_damage = gi.cvar("sv_trap_expl_damage", "200", 0);
+    sv_trap_expl_radius = gi.cvar("sv_trap_expl_radius", "300", 0);
+    sv_trap_held_damage = gi.cvar("sv_trap_held_damage", "125", 0);
+    sv_trap_held_radius = gi.cvar("sv_trap_held_radius", "165", 0);
+    // R-MP-29 is a trap change openffa-xatrix makes unconditionally, so it
+    // names no setting for it and this name is this tree's.  The default is
+    // the Reckoning's, like the seven above: Quad leaves the pull alone.
+    // openffa-xatrix plays as `sv_trap_quad_pull 4`.
+    sv_trap_quad_pull = gi.cvar("sv_trap_quad_pull", "1", 0);
 
     // noset vars
     dedicated = gi.cvar("dedicated", "0", CVAR_NOSET);

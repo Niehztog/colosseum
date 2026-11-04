@@ -1064,22 +1064,45 @@ void ionripper_sparks(edict_t *self)
 // RAFAEL
 void ionripper_touch(edict_t *self, edict_t *other, cplane_t *plane, csurface_t *surf)
 {
+    edict_t *shooter = self->obitowner;
+    int     damage = self->dmg;
+
     if (other == self->owner)
         return;
+
+    // R-MP-28: with `ripper_self` above 0, a player's ion stops naming its
+    // shooter as `owner` at its first touch, so that it can come back.  That
+    // touch is a wall it bounces off, or the point-blank call in
+    // fire_ionripper.  The engine never clips a move against the mover's own
+    // `owner`, and that was the only thing keeping an ion off its shooter.
+    // `obitowner` still names the shooter for every credit.  A monster's ion
+    // keeps its owner: the setting is about players, and openffa-xatrix, where
+    // it comes from, had no monsters.
+    if (ripper_self->value > 0 && shooter->client)
+        self->owner = self;
 
     if (surf && (surf->flags & SURF_SKY)) {
         G_FreeEdict(self);
         return;
     }
 
-    if (self->owner->client)
-        PlayerNoise(self->owner, self->s.origin, PNOISE_IMPACT);
+    if (shooter->client)
+        PlayerNoise(shooter, self->s.origin, PNOISE_IMPACT);
+
+    // R-MP-28: an ion that comes back deals its shooter `ripper_self`.  If
+    // Quad or Double Damage multiplied the shot, it deals the shot's full
+    // damage instead, which is openffa-xatrix's rule ("the full damage will
+    // occur no matter who you hit").  The damage is credited to the shooter,
+    // so the obituary reads a suicide, and the accuracy report does not count
+    // a hit, because it ignores damage a player does to themselves.
+    if (other == shooter && damage <= G_IonRipperDamage())
+        damage = ripper_self->value;
 
     // `plane` is NULL on fire_ionripper's point-blank path, which calls this
     // directly, and on any touch that comes from the other entity's move;
     // guarded the way rocket_touch and bfg_touch are.
     if (other->takedamage) {
-        T_Damage(other, self, self->owner, self->velocity, self->s.origin, plane ? plane->normal : NULL, self->dmg, 1, DAMAGE_ENERGY, MOD_RIPPER);
+        T_Damage(other, self, shooter, self->velocity, self->s.origin, plane ? plane->normal : NULL, damage, 1, DAMAGE_ENERGY, MOD_RIPPER);
 
     } else {
         return;
@@ -1120,6 +1143,9 @@ void fire_ionripper(edict_t *self, vec3_t start, vec3_t dir, int damage, int spe
     ion->s.modelindex = gi.modelindex("models/objects/boomrang/tris.md2");
     ion->s.sound = gi.soundindex("misc/lasfly.wav");
     ion->owner = self;
+    // The shooter, for every credit, even after ripper_self makes the ion
+    // stop naming them as `owner` (R-MP-28).
+    ion->obitowner = self;
     ion->touch = ionripper_touch;
     ion->nextthink = level.framenum + 3 * BASE_FRAMERATE;
     ion->think = ionripper_sparks;
@@ -1332,6 +1358,97 @@ void fire_plasma(edict_t *self, vec3_t start, vec3_t dir, int damage, int speed,
 
 }
 
+// R-MP-25: a trap's life in frames, from `sv_trap_duration` in seconds.  The
+// Reckoning wrote 30 at both places that read this.
+static int trap_lifetime(void)
+{
+    return sv_trap_duration->value * BASE_FRAMERATE;
+}
+
+// R-MP-27: the shell a shootable trap shows when it is hit.  These are all the
+// bits trap_pain sets, so a new hit clears the previous hit's colour.
+#define TRAP_SHELL_BITS (RF_SHELL_RED | RF_SHELL_GREEN | RF_SHELL_BLUE | \
+                         RF_SHELL_DOUBLE | RF_SHELL_HALF_DAM)
+
+/*
+=================
+Trap_Destroyed
+
+R-MP-27: a shootable trap that was shot to pieces explodes here, one frame
+after trap_die.  The delay is the one barrel_delay uses for a barrel, so that
+the blast is not set off from inside the T_Damage call that killed the trap.
+
+The blast is credited to the thrower, `obitowner`, and not to whoever shot the
+trap; that is openffa-xatrix's choice.  `dmg` and `dmg_radius` are the
+sv_trap_expl_* values from the moment the trap was thrown, with the thrower's
+Quad or Double Damage already applied (weapon_trap_fire).  trap_die cleared
+`takedamage`, so the blast does not hit the trap itself.  The two sounds are
+openffa-xatrix's and come from baseq2's pak0.
+=================
+*/
+void Trap_Destroyed(edict_t *ent)
+{
+    T_RadiusDamage(ent, ent->obitowner, ent->dmg, NULL, ent->dmg_radius, MOD_TRAP_SPLASH);
+    gi.sound(ent, CHAN_BODY, gi.soundindex("flyer/flydeth1.wav"), 1, ATTN_NORM, 0);
+    gi.sound(ent, CHAN_VOICE, gi.soundindex("world/fuseout.wav"), 1, ATTN_NORM, 0);
+    BecomeExplosion1(ent);
+}
+
+// R-MP-27: openffa-xatrix's damage shell, which tells everyone how close the
+// trap is to breaking.  It is white above two thirds of the trap's health,
+// double and red above a third, half-damage and red above a tenth, and red
+// below that.  It lasts half a second, and Trap_Think clears it.
+// `pain_debounce_framenum`, which a trap does not otherwise use, records when
+// the shell ends.
+void trap_pain(edict_t *self, edict_t *other, float kick, int damage)
+{
+    int full = self->max_health;
+
+    self->s.effects |= EF_COLOR_SHELL;
+    self->s.renderfx &= ~TRAP_SHELL_BITS;
+    if (self->health >= full * 2 / 3)
+        self->s.renderfx |= RF_SHELL_RED | RF_SHELL_GREEN | RF_SHELL_BLUE;
+    else if (self->health >= full / 3)
+        self->s.renderfx |= RF_SHELL_DOUBLE | RF_SHELL_RED;
+    else if (self->health >= full / 10)
+        self->s.renderfx |= RF_SHELL_HALF_DAM | RF_SHELL_RED;
+    else
+        self->s.renderfx |= RF_SHELL_RED;
+    self->pain_debounce_framenum = level.framenum + 0.5f * BASE_FRAMERATE;
+
+    if (self->health >= full / 10)
+        gi.sound(self, CHAN_BODY, gi.soundindex((Q_rand() & 1) ? "world/airhiss2.wav" : "weapons/railgr1a.wav"), 1, ATTN_NORM, 0);
+    else
+        gi.sound(self, CHAN_BODY, gi.soundindex("tank/pain.wav"), 1, ATTN_NORM, 0);
+}
+
+// R-MP-27: Killed() calls this.  The trap stops taking damage, so the blast
+// cannot hit it and a second hit cannot kill it again, and it hands its next
+// think to Trap_Destroyed.
+void trap_die(edict_t *self, edict_t *inflictor, edict_t *attacker, int damage, vec3_t point)
+{
+    self->takedamage = DAMAGE_NO;
+    self->nextthink = level.framenum + 1;
+    self->think = Trap_Destroyed;
+}
+
+// R-MP-27: Trap_Think calls this on the think on which a trap arms, when
+// `sv_trap_health` is above 0.  The trap takes damage, with the setting as its
+// health; `max_health` keeps that number for trap_pain's shell thresholds even
+// if the setting changes later.  The trap also stops naming its thrower as
+// `owner`.  The engine never clips a move against the mover's own `owner`, so
+// while `owner` names the thrower, the thrower's own shots pass straight
+// through.  `owner` now names the trap itself, as in openffa-xatrix, and
+// `obitowner` still names the thrower for every credit.
+static void trap_make_shootable(edict_t *ent)
+{
+    ent->takedamage = DAMAGE_YES;
+    ent->health = ent->max_health = sv_trap_health->value;
+    ent->pain = trap_pain;
+    ent->die = trap_die;
+    ent->owner = ent;
+}
+
 // RAFAEL
 // RAFAEL
 void Trap_Think(edict_t *ent)
@@ -1342,6 +1459,15 @@ void Trap_Think(edict_t *ent)
     int     len, i;
     int     oldlen = 8000;
     vec3_t  forward, right, up;
+    vec3_t  trap_origin;
+
+    // R-MP-27: a shootable trap's damage shell goes off half a second after
+    // the hit that lit it (trap_pain).
+    if (ent->pain_debounce_framenum && level.framenum >= ent->pain_debounce_framenum) {
+        ent->s.effects &= ~EF_COLOR_SHELL;
+        ent->s.renderfx &= ~TRAP_SHELL_BITS;
+        ent->pain_debounce_framenum = 0;
+    }
 
     if (ent->timestamp < level.framenum) {
         BecomeExplosion1(ent);
@@ -1447,9 +1573,18 @@ void Trap_Think(edict_t *ent)
     ent->s.effects &= ~EF_TRAP;
     if (ent->s.frame >= 4) {
         ent->s.effects |= EF_TRAP;
-        VectorClear(ent->mins);
-        VectorClear(ent->maxs);
-
+        // R-MP-27: `sv_trap_health` is read once per trap, on the think on
+        // which it arms.  That is the first think with frame 4, and the only
+        // one on which its box still has a height, because the Reckoning
+        // makes the trap a point here.  A shootable trap keeps its box,
+        // because a point cannot be hit.  A trap that armed as a point stays
+        // one, even if the setting is raised later.
+        if (!ent->takedamage && ent->maxs[2] && sv_trap_health->value > 0)
+            trap_make_shootable(ent);
+        if (!ent->takedamage) {
+            VectorClear(ent->mins);
+            VectorClear(ent->maxs);
+        }
     }
 
     if (ent->s.frame < 4)
@@ -1486,11 +1621,24 @@ void Trap_Think(edict_t *ent)
             best->s.origin[2] += 1;
             best->groundentity = NULL;
         }
-        VectorSubtract(ent->s.origin, best->s.origin, vec);
+        // R-MP-27: a shootable trap kept its box, so a player pulled onto it
+        // stands 8 units higher than on a point trap, and a 24-unit standing
+        // height plus those 8 is never under 32.  For a target above the
+        // trap, the distance is therefore measured from the top of the box,
+        // so a shootable trap catches at the same distance a point trap does.
+        // This is openffa-xatrix's correction.  A point trap has no box, and
+        // its distance is the Reckoning's.
+        VectorCopy(ent->s.origin, trap_origin);
+        if (ent->takedamage && best->s.origin[2] > trap_origin[2])
+            trap_origin[2] += ent->maxs[2];
+        VectorSubtract(trap_origin, best->s.origin, vec);
         len = VectorLength(vec);
         if (best->client) {
             VectorNormalize(vec);
-            VectorMA(best->velocity, 250, vec, best->velocity);
+            // R-MP-29: 250, or more for a trap thrown with Quad (fire_trap).
+            // A monster below is steered rather than pulled, at its own 256,
+            // and openffa-xatrix leaves that alone too.
+            VectorMA(best->velocity, ent->speed, vec, best->velocity);
         } else {
             best->ideal_yaw = vectoyaw(vec);
             M_ChangeYaw(best);
@@ -1502,11 +1650,13 @@ void Trap_Think(edict_t *ent)
 
         if (len < 32) {
             if (best->mass < 400) {
-                T_Damage(best, ent, ent->owner, vec3_origin, best->s.origin, vec3_origin, 100000, 1, 0, MOD_TRAP);
+                // The thrower, from `obitowner`, because a shootable trap no
+                // longer names them as `owner` (R-MP-27).
+                T_Damage(best, ent, ent->obitowner, vec3_origin, best->s.origin, vec3_origin, 100000, 1, 0, MOD_TRAP);
                 ent->enemy = best;
                 ent->wait = 64;
                 VectorCopy(ent->s.origin, ent->s.old_origin);
-                ent->timestamp = level.framenum + 30 * BASE_FRAMERATE;
+                ent->timestamp = level.framenum + trap_lifetime();   // R-MP-25
                 if (deathmatch->value)
                     ent->mass = best->mass / 4;
                 else
@@ -1555,8 +1705,24 @@ void fire_trap(edict_t *self, vec3_t start, vec3_t aimdir, int damage, int speed
     VectorSet(trap->maxs, 4, 4, 8);
     trap->s.modelindex = gi.modelindex("models/weapons/z_trap/tris.md2");
     trap->owner = self;
+    // The thrower, who every credit names, even after a shootable trap stops
+    // naming them as `owner` (R-MP-27).
+    trap->obitowner = self;
+    // R-MP-29: how hard this trap pulls a player, in units a second it adds to
+    // the player's velocity on every think.  It is fixed now, as the blast is:
+    // a trap thrown with Quad keeps its pull after the Quad runs out.  The
+    // Reckoning's is 250.  With Quad, and `sv_trap_quad_pull` above 1, it is
+    // that many times 250, as openffa-xatrix's is 4 times.  Double Damage does
+    // not count: openffa-xatrix has only Quad.  A trap has no other use for
+    // `speed`.
+    trap->speed = 250;
+    if (self->client && self->client->quad_framenum > level.framenum &&
+        sv_trap_quad_pull->value > 1)
+        trap->speed *= sv_trap_quad_pull->value;
     trap->nextthink = level.framenum + 1.0 * BASE_FRAMERATE;
     trap->think = Trap_Think;
+    // The blast if the trap goes off right now, or if it is later shot to
+    // pieces: weapon_trap_fire chose which pair (R-MP-26, R-MP-27).
     trap->dmg = damage;
     trap->dmg_radius = damage_radius;
     trap->classname = "htrap";
@@ -1578,6 +1744,6 @@ void fire_trap(edict_t *self, vec3_t start, vec3_t aimdir, int damage, int speed
         gi.linkentity(trap);
     }
 
-    trap->timestamp = level.framenum + 30 * BASE_FRAMERATE;
+    trap->timestamp = level.framenum + trap_lifetime();    // R-MP-25
 
 }

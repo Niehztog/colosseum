@@ -810,6 +810,11 @@ extern  int sm_meat_index;
 // meansOfDeath is game-internal and appears in no protocol or savegame, so the
 // collision is resolved by taking the next free value rather than by a prefix.
 #define MOD_GRAPPLE             56
+// A shootable trap's blast (R-MP-27), credited to the trap's thrower.  The
+// same reasoning as MOD_GRAPPLE's: the next free value, since the number
+// never leaves the library.  openffa-xatrix, where the setting comes from,
+// named it the same way.
+#define MOD_TRAP_SPLASH         57
 
 extern  int meansOfDeath;
 
@@ -896,6 +901,21 @@ extern  cvar_t  *gamerules;
 extern  cvar_t  *huntercam;
 extern  cvar_t  *strong_mines;
 extern  cvar_t  *randomrespawn;
+
+// The Reckoning's trap and Ion Ripper, tuned the way openffa-xatrix tunes
+// them (R-MP-25 to R-MP-29).  Every default is the Reckoning's own behaviour.
+extern  cvar_t  *ripper_self;
+extern  cvar_t  *sv_trap_duration;
+extern  cvar_t  *sv_trap_health;
+extern  cvar_t  *sv_trap_expl_damage;
+extern  cvar_t  *sv_trap_expl_radius;
+extern  cvar_t  *sv_trap_held_damage;
+extern  cvar_t  *sv_trap_held_radius;
+extern  cvar_t  *sv_trap_quad_pull;
+
+// The Ion Ripper's damage per ion before Quad or Double Damage, in p_weapon.c
+// (R-MP-28).
+int G_IonRipperDamage(void);
 
 // this is for the count of monsters
 #define ENT_SLOTS_LEFT      (ent->monsterinfo.monster_slots - ent->monsterinfo.monster_used)
@@ -2203,6 +2223,13 @@ struct edict_s {
     int         groundentity_linkcount;
     edict_t     *teamchain;
     edict_t     *teammaster;
+
+    // Who a trap's or an ion's damage is credited to.  It is kept apart from
+    // `owner` so that `owner` can be released: the engine never clips a move
+    // against the mover's own `owner`, so while `owner` names the thrower, the
+    // thrower can neither shoot their own trap nor be hit by their own
+    // bouncing ion.  fire_trap and fire_ionripper set it (R-MP-27, R-MP-28).
+    edict_t     *obitowner;
 
     edict_t     *mynoise;       // can go in client only
     edict_t     *mynoise2;

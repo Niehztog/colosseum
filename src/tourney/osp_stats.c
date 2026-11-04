@@ -782,6 +782,7 @@ static const char *means_of_death_name(int mod, bool *self_inflicted)
     case MOD_RIPPER:            return "Ionripper";
     case MOD_PHALANX:           return "Phalanx";
     case MOD_TRAP:              return "Trap";
+    case MOD_TRAP_SPLASH:       return "Trap";      // R-MP-27
     // Ground Zero
     case MOD_ETF_RIFLE:         return "ETF Rifle";
     case MOD_PROX:              return "Prox Launcher";

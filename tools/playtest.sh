@@ -175,6 +175,19 @@
 #                  single-page read reports it missing -- which it did, before
 #                  the scenario learned to scroll.
 #
+#     xatrixtune   R-MP-25 to R-MP-29, the eight settings this tree gives the
+#                  Reckoning's trap and Ion Ripper after openffa-xatrix.  Each
+#                  one is tested both ways, under `dm` and `ctf`:
+#                    - the held trap and the ion, by the thrower's STAT_HEALTH;
+#                    - a trap's lifetime, by the server's own `entcount`;
+#                    - a trap railed by its own thrower, by that trap leaving
+#                      the thrower's frame and by the obituary of a second
+#                      client killed by its blast;
+#                    - the Quad pull, by the speed each of its thinks gives a
+#                      thrower pulled into a trap thrown at its own feet.
+#                  `-phases quadpull` runs that phase alone.
+#                  It needs the Reckoning's pak, from $XATRIXDATA.
+#
 #     layeracc     the loadout cvars and the content layers, which need different
 #                  evidence and so are two phases.  SPAWN boots a Reckoning and
 #                  a Ground Zero map -- `xdm1` and `rdm1`, from the layers' own
@@ -752,6 +765,11 @@ if supports_flag ctf && ! has_option ctf "$@"; then
 fi
 if supports_flag gladdir && ! has_option gladdir "$@"; then
   set -- "$@" -gladdir "$GLAD"
+fi
+# The Reckoning's paks, for any scenario that declares `-xatrix`.  `layeracc`
+# is given its own above, along with Ground Zero's.
+if supports_flag xatrix && ! has_option xatrix "$@"; then
+  set -- "$@" -xatrix "$XATRIXDATA"
 fi
 if supports_flag glad && ! has_option glad "$@"; then
   set -- "$@" -glad "$GLADSO"

@@ -971,6 +971,9 @@ extern void train_next(edict_t *);
 extern void train_piece_wait(edict_t *);
 extern void train_use(edict_t *, edict_t *, edict_t *);
 extern void train_wait(edict_t *);
+extern void Trap_Destroyed(edict_t *);
+extern void trap_die(edict_t *, edict_t *, edict_t *, int, vec3_t);
+extern void trap_pain(edict_t *, edict_t *, float, int);
 extern void Trap_Think(edict_t *);
 extern void trigger_counter_use(edict_t *, edict_t *, edict_t *);
 extern void trigger_counting_use(edict_t *, edict_t *, edict_t *);
@@ -1172,6 +1175,7 @@ const save_ptr_t save_ptrs[] = {
 { P_think, tracker_fly },
 { P_think, tracker_pain_daemon_think },
 { P_think, train_next },
+{ P_think, Trap_Destroyed },
 { P_think, Trap_Think },
 { P_think, trigger_elevator_init },
 { P_think, trigger_log_reset },
@@ -1359,6 +1363,7 @@ const save_ptr_t save_ptrs[] = {
 { P_pain, stalker_pain },
 { P_pain, supertank_pain },
 { P_pain, tank_pain },
+{ P_pain, trap_pain },
 { P_pain, turret_pain },
 { P_pain, vengeance_pain },
 { P_pain, widow2_pain },
@@ -1410,6 +1415,7 @@ const save_ptr_t save_ptrs[] = {
 { P_die, supertank_die },
 { P_die, tank_die },
 { P_die, tesla_die },
+{ P_die, trap_die },
 { P_die, turret_die },
 { P_die, turret_driver_die },
 { P_die, widow2_die },

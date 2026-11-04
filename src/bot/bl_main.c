@@ -1051,6 +1051,7 @@ static int BotQ3MeansOfDeath(int mod)
         { MOD_BLASTOFF,         38 },
         { MOD_GEKK,             39 },
         { MOD_TRAP,             40 },
+        { MOD_TRAP_SPLASH,      40 },   // R-MP-27: the trap, to the botlib
         { MOD_CHAINFIST,        41 },
         { MOD_DISINTEGRATOR,    42 },
         { MOD_ETF_RIFLE,        43 },

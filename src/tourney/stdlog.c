@@ -253,6 +253,7 @@ void sl_WriteStdLogDeath(game_import_t *import, level_locals_t level,
                     weapon = "Phalanx";
                     break;
                 case MOD_TRAP:
+                case MOD_TRAP_SPLASH:     // R-MP-27
                     weapon = "Trap";
                     break;
                 // Ground Zero
